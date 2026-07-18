@@ -147,17 +147,29 @@ uint64_t EMKEAudioRoutesMicrophoneZeroFilledFrames(const EMKEAudioRoutes *routes
     );
 }
 
-void EMKEAudioRoutesReset(EMKEAudioRoutes *routes) {
+void EMKEAudioRoutesResetSpeaker(EMKEAudioRoutes *routes) {
     if (routes == NULL) {
         return;
     }
 
     EMKEAudioRingBufferReset(routes->speaker);
-    EMKEAudioRingBufferReset(routes->microphone);
     atomic_store_explicit(&routes->speakerDroppedFrames, 0, memory_order_relaxed);
+}
+
+void EMKEAudioRoutesResetMicrophone(EMKEAudioRoutes *routes) {
+    if (routes == NULL) {
+        return;
+    }
+
+    EMKEAudioRingBufferReset(routes->microphone);
     atomic_store_explicit(
         &routes->microphoneZeroFilledFrames,
         0,
         memory_order_relaxed
     );
+}
+
+void EMKEAudioRoutesReset(EMKEAudioRoutes *routes) {
+    EMKEAudioRoutesResetSpeaker(routes);
+    EMKEAudioRoutesResetMicrophone(routes);
 }

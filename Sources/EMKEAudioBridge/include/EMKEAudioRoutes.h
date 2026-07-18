@@ -42,6 +42,8 @@ uint32_t EMKEAudioRoutesReadMicrophone(
 
 uint64_t EMKEAudioRoutesSpeakerDroppedFrames(const EMKEAudioRoutes *routes);
 uint64_t EMKEAudioRoutesMicrophoneZeroFilledFrames(const EMKEAudioRoutes *routes);
+void EMKEAudioRoutesResetSpeaker(EMKEAudioRoutes *routes);
+void EMKEAudioRoutesResetMicrophone(EMKEAudioRoutes *routes);
 void EMKEAudioRoutesReset(EMKEAudioRoutes *routes);
 
 #ifdef __cplusplus

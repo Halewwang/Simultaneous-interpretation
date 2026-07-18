@@ -106,3 +106,58 @@ func resettingRoutesClearsAudioAndDiagnostics() throws {
         EMKEAudioRoutesReadSpeaker(routes, $0.baseAddress, 1)
     } == 0)
 }
+
+@Test
+func resettingMicrophoneDoesNotDiscardSpeakerAudio() throws {
+    let routes = try #require(EMKEAudioRoutesCreate(2, 1))
+    defer { EMKEAudioRoutesDestroy(routes) }
+
+    let speaker: [Float] = [1]
+    let microphone: [Float] = [2]
+    #expect(speaker.withUnsafeBufferPointer {
+        EMKEAudioRoutesWriteSpeaker(routes, $0.baseAddress, 1)
+    } == 1)
+    #expect(microphone.withUnsafeBufferPointer {
+        EMKEAudioRoutesWriteMicrophone(routes, $0.baseAddress, 1)
+    } == 1)
+
+    EMKEAudioRoutesResetMicrophone(routes)
+
+    var speakerOutput = [Float.zero]
+    #expect(speakerOutput.withUnsafeMutableBufferPointer {
+        EMKEAudioRoutesReadSpeaker(routes, $0.baseAddress, 1)
+    } == 1)
+    #expect(speakerOutput == speaker)
+    var microphoneOutput = [Float(9)]
+    #expect(microphoneOutput.withUnsafeMutableBufferPointer {
+        EMKEAudioRoutesReadMicrophone(routes, $0.baseAddress, 1)
+    } == 1)
+    #expect(microphoneOutput == [0])
+}
+
+@Test
+func resettingSpeakerDoesNotDiscardMicrophoneAudio() throws {
+    let routes = try #require(EMKEAudioRoutesCreate(2, 1))
+    defer { EMKEAudioRoutesDestroy(routes) }
+
+    let speaker: [Float] = [1]
+    let microphone: [Float] = [2]
+    #expect(speaker.withUnsafeBufferPointer {
+        EMKEAudioRoutesWriteSpeaker(routes, $0.baseAddress, 1)
+    } == 1)
+    #expect(microphone.withUnsafeBufferPointer {
+        EMKEAudioRoutesWriteMicrophone(routes, $0.baseAddress, 1)
+    } == 1)
+
+    EMKEAudioRoutesResetSpeaker(routes)
+
+    var speakerOutput = [Float.zero]
+    #expect(speakerOutput.withUnsafeMutableBufferPointer {
+        EMKEAudioRoutesReadSpeaker(routes, $0.baseAddress, 1)
+    } == 0)
+    var microphoneOutput = [Float.zero]
+    #expect(microphoneOutput.withUnsafeMutableBufferPointer {
+        EMKEAudioRoutesReadMicrophone(routes, $0.baseAddress, 1)
+    } == 1)
+    #expect(microphoneOutput == microphone)
+}
