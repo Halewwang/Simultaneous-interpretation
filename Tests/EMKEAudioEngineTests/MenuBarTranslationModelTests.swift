@@ -334,6 +334,7 @@ func modelConsumesLatestAudioLevelSnapshot() async {
         coordinator: coordinator
     )
     await configureAndStart(model)
+    await model.setWindowVisible(true)
 
     let levelsUpdated = Task { @MainActor in
         for await level in model.$outboundLevel.values {
@@ -350,6 +351,7 @@ func modelConsumesLatestAudioLevelSnapshot() async {
     #expect(model.inboundLevel == 0.25)
     #expect(model.outboundLevel == 0.75)
     #expect(model.combinedLevel == 0.75)
+    #expect(await coordinator.audioLevelUpdateFlags.last == true)
 }
 
 @Test @MainActor
@@ -377,6 +379,40 @@ func hidingWindowClearsLevelsWithoutStoppingTranslation() async {
     #expect(model.outboundLevel == 0)
     #expect(model.coordinatorState.isRunning)
     #expect(await coordinator.audioLevelUpdateFlags.last == false)
+}
+
+@Test @MainActor
+func lateAudioLevelAfterHidingWindowDoesNotRefillLevels() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setWindowVisible(true)
+    await model.setWindowVisible(false)
+
+    let stateUpdated = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if state.inbound == .connecting {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.6, outbound: 0.8)
+    ))
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .connecting,
+            outbound: .active
+        )
+    ))
+    await stateUpdated.value
+
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
 }
 
 @Test @MainActor

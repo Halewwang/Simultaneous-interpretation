@@ -459,8 +459,10 @@ final class MenuBarModel: ObservableObject {
                 case .stateChanged(let state):
                     coordinatorState = state
                 case .audioLevels(let levels):
-                    inboundLevel = levels.inbound
-                    outboundLevel = levels.outbound
+                    if isWindowVisible {
+                        inboundLevel = levels.inbound
+                        outboundLevel = levels.outbound
+                    }
                 case .audioBackpressure(let droppedFrames):
                     inventoryError = "音频输出繁忙，已丢弃 \(droppedFrames) 帧"
                 case .stopped:
