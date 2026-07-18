@@ -75,7 +75,7 @@ docs/translation-coordinator-contract.md
 - Consumes: `SupportedLanguage`, `APIConfiguration`, `TranslationSocket`, and the official Translation client/server event contract.
 - Produces: `TranslationSessionConfiguration`, `TranslationNoiseReduction`, typed `TranslationAudioDelta`/`TranslationTranscriptDelta`, and a `TranslationSession` with exactly one socket reader.
 
-- [ ] **Step 1: Write failing codec tests for source transcription and metadata**
+- [x] **Step 1: Write failing codec tests for source transcription and metadata**
 
 ```swift
 @Test func inboundSessionUpdateEnablesSourceTranscription() throws {
@@ -100,13 +100,13 @@ docs/translation-coordinator-contract.md
 }
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm RED**
+- [x] **Step 2: Run the focused tests and confirm RED**
 
 Run: `swift test --filter TranslationEventCodecTests`
 
 Expected: compilation fails because the configuration and typed delta interfaces do not exist.
 
-- [ ] **Step 3: Implement exact client/server event models**
+- [x] **Step 3: Implement exact client/server event models**
 
 ```swift
 public enum TranslationNoiseReduction: String, Codable, Sendable {
@@ -131,7 +131,7 @@ public struct TranslationAudioDelta: Equatable, Sendable {
 
 Encode `audio.output.language` for every session. Encode `audio.input.transcription.model` and `audio.input.noise_reduction.type` only when configured. Decode `session.created`, `session.updated`, `session.closed`, typed transcript/audio deltas, and server errors; reject invalid Base64 or non-24-kHz/mono/PCM16 audio instead of converting it to empty data.
 
-- [ ] **Step 4: Write failing lifecycle tests for handshake ordering and tail drain**
+- [x] **Step 4: Write failing lifecycle tests for handshake ordering and tail drain**
 
 ```swift
 @Test func connectWaitsForCreatedThenUpdatedBeforeReturning() async throws {
@@ -154,11 +154,11 @@ Encode `audio.output.language` for every session. Encode `audio.input.transcript
 }
 ```
 
-- [ ] **Step 5: Implement a single-reader `TranslationSession`**
+- [x] **Step 5: Implement a single-reader `TranslationSession`**
 
 `connect()` receives `session.created`, sends `session.update`, receives `session.updated`, then launches one read loop. The read loop alone calls `socket.receive()`, queues events for `nextEvent()`, fulfills close waiters on `session.closed`, and broadcasts terminal errors. `close()` sends `session.close`, prevents new audio appends, waits for the read loop to observe `session.closed`, and only then cancels the socket.
 
-- [ ] **Step 6: Run Realtime tests and commit**
+- [x] **Step 6: Run Realtime tests and commit**
 
 Run: `swift test --filter EMKERealtimeTests`
 

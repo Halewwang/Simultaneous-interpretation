@@ -2,22 +2,35 @@ import EMKECore
 import Foundation
 
 public enum TranslationClientEvent: Sendable {
-    case sessionUpdate(language: SupportedLanguage)
+    case sessionUpdate(configuration: TranslationSessionConfiguration)
     case appendAudio(Data)
     case close
 
     public func encoded() throws -> Data {
         let object: [String: Any]
         switch self {
-        case .sessionUpdate(let language):
+        case .sessionUpdate(let configuration):
+            var audio: [String: Any] = [
+                "output": [
+                    "language": configuration.targetLanguage.rawValue,
+                ],
+            ]
+            var input: [String: Any] = [:]
+            if let model = configuration.inputTranscriptionModel {
+                input["transcription"] = ["model": model]
+            }
+            if let noiseReduction = configuration.noiseReduction {
+                input["noise_reduction"] = [
+                    "type": noiseReduction.rawValue,
+                ]
+            }
+            if !input.isEmpty {
+                audio["input"] = input
+            }
             object = [
                 "type": "session.update",
                 "session": [
-                    "audio": [
-                        "output": [
-                            "language": language.rawValue,
-                        ],
-                    ],
+                    "audio": audio,
                 ],
             ]
         case .appendAudio(let data):
