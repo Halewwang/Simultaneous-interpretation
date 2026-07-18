@@ -617,3 +617,53 @@ func manualBypassControlsAreExplicitAndReversible() async throws {
     #expect(await harness.audio.lastRouting?.1 == .translated)
     await harness.coordinator.stop()
 }
+
+@Test
+func inboundManualBypassSurvivesRealFailureAndReconnect() async throws {
+    let recoveredInbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [recoveredInbound],
+        reconnectDelays: [.zero]
+    )
+    try await harness.coordinator.start(configuration: harness.configuration)
+    await harness.coordinator.setInboundBypass(true)
+    #expect(await harness.audio.lastRouting?.0 == .originalBypass)
+
+    await harness.inbound.emit(.failure(.disconnected))
+
+    #expect(
+        await eventually {
+            let requestCount = await harness.builder.requests.count
+            let inboundState = await harness.coordinator.state.inbound
+            return requestCount == 3 && inboundState == .active
+        }
+    )
+    #expect(await harness.audio.lastRouting?.0 == .originalBypass)
+    #expect(await harness.coordinator.state.inbound == .active)
+    await harness.coordinator.stop()
+}
+
+@Test
+func outboundManualBypassSurvivesRealFailureAndReconnect() async throws {
+    let recoveredOutbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [recoveredOutbound],
+        reconnectDelays: [.zero]
+    )
+    try await harness.coordinator.start(configuration: harness.configuration)
+    await harness.coordinator.setOutboundBypass(true)
+    #expect(await harness.audio.lastRouting?.1 == .originalBypass)
+
+    await harness.outbound.emit(.failure(.disconnected))
+
+    #expect(
+        await eventually {
+            let requestCount = await harness.builder.requests.count
+            let outboundState = await harness.coordinator.state.outbound
+            return requestCount == 3 && outboundState == .active
+        }
+    )
+    #expect(await harness.audio.lastRouting?.1 == .originalBypass)
+    #expect(await harness.coordinator.state.outbound == .active)
+    await harness.coordinator.stop()
+}

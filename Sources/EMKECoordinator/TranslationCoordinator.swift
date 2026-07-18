@@ -191,7 +191,7 @@ public actor TranslationCoordinator {
         let outbound: (any TranslationSessionControlling)?
         if usesOutboundBypass {
             outbound = nil
-            routing.handle(.outboundBypassEnabled)
+            routing.handle(.outboundAutomaticBypassEnabled)
         } else {
             let newOutbound = await sessionBuilder.makeSession(
                 configuration: configuration.apiConfiguration,
@@ -320,7 +320,7 @@ public actor TranslationCoordinator {
 
     public func setOutboundBypass(_ enabled: Bool) async {
         if usesAutomaticOutboundBypass {
-            routing.handle(.outboundBypassEnabled)
+            routing.handle(.outboundAutomaticBypassEnabled)
             state.outbound = .bypassed
             await applyRouting()
             publishState()

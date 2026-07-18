@@ -657,3 +657,64 @@ func sameLanguageOutboundDirectPathCannotOfferOrInvokeRestore() async {
     #expect(await coordinator.outboundBypassValues.isEmpty)
     #expect(model.coordinatorState.outbound == .bypassed)
 }
+
+@Test @MainActor
+func manualBypassPresentationStaysAlignedAcrossFailureAndRecovery() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setOutboundBypass(true)
+
+    let failed = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if case .failed = state.outbound { return }
+        }
+    }
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .failed(message: "offline")
+        )
+    ))
+    await failed.value
+    var value = model.dashboardPresentation(at: Date())
+    #expect(value.outbound.status == "已静音")
+    #expect(value.primaryStatus == "出站已静音")
+
+    let reconnecting = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if state.outbound == .reconnecting(attempt: 1) { return }
+        }
+    }
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .reconnecting(attempt: 1)
+        )
+    ))
+    await reconnecting.value
+
+    let recovered = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if state.outbound == .active { return }
+        }
+    }
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        )
+    ))
+    await recovered.value
+
+    value = model.dashboardPresentation(at: Date())
+    #expect(value.outbound.status == "原音旁路")
+    #expect(value.outbound.actionTitle == "恢复翻译")
+    #expect(model.outboundBypassEnabled)
+}
