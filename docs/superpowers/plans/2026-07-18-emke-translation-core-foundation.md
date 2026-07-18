@@ -85,7 +85,7 @@ Tests/
 - Produces: `SupportedLanguage`, `TranslationPreferences`, and `APIConfiguration`.
 - `SupportedLanguage` raw values are BCP-47 primary tags: `zh`, `en`, `de`.
 
-- [ ] **Step 1: Add the package manifest and failing language tests**
+- [x] **Step 1: Add the package manifest and failing language tests**
 
 ```swift
 // Package.swift
@@ -128,13 +128,13 @@ final class LanguageTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run: `swift test --filter LanguageTests`
 
 Expected: compilation fails because `SupportedLanguage`, `TranslationPreferences`, and `APIConfiguration` do not exist.
 
-- [ ] **Step 3: Implement the minimal domain values**
+- [x] **Step 3: Implement the minimal domain values**
 
 ```swift
 // Sources/EMKECore/Language.swift
@@ -183,13 +183,13 @@ public struct APIConfiguration: Codable, Equatable, Sendable {
 }
 ```
 
-- [ ] **Step 4: Run tests and verify GREEN**
+- [x] **Step 4: Run tests and verify GREEN**
 
 Run: `swift test --filter LanguageTests`
 
 Expected: `3 tests, 0 failures`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Sources/EMKECore Tests/EMKECoreTests
@@ -208,7 +208,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: add core l
 - Consumes: `APIConfiguration`.
 - Produces: `TranslationEndpoint.webSocketURL(configuration:) throws -> URL` and `TranslationEndpointError`.
 
-- [ ] **Step 1: Write endpoint tests**
+- [x] **Step 1: Write endpoint tests**
 
 ```swift
 import XCTest
@@ -245,13 +245,13 @@ final class TranslationEndpointTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the endpoint tests and verify RED**
+- [x] **Step 2: Run the endpoint tests and verify RED**
 
 Run: `swift test --filter TranslationEndpointTests`
 
 Expected: compilation fails because `TranslationEndpoint` is undefined.
 
-- [ ] **Step 3: Implement endpoint normalization**
+- [x] **Step 3: Implement endpoint normalization**
 
 ```swift
 import Foundation
@@ -285,13 +285,13 @@ public enum TranslationEndpoint {
 }
 ```
 
-- [ ] **Step 4: Run all core tests and verify GREEN**
+- [x] **Step 4: Run all core tests and verify GREEN**
 
 Run: `swift test --filter EMKECoreTests`
 
 Expected: `7 tests, 0 failures`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/EMKECore/TranslationEndpoint.swift Tests/EMKECoreTests/TranslationEndpointTests.swift
@@ -312,7 +312,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: validate r
 - Consumes: `SupportedLanguage`.
 - Produces: `TranslationClientEvent.encoded()`, `TranslationServerEvent.decode(_:)`, and typed server event cases.
 
-- [ ] **Step 1: Add the Realtime targets to the package manifest**
+- [x] **Step 1: Add the Realtime targets to the package manifest**
 
 Add the following product after the `EMKECore` product and the following targets after `EMKECoreTests`:
 
@@ -325,7 +325,7 @@ Add the following product after the `EMKECore` product and the following targets
 .testTarget(name: "EMKERealtimeTests", dependencies: ["EMKERealtime"]),
 ```
 
-- [ ] **Step 2: Write JSON codec tests**
+- [x] **Step 2: Write JSON codec tests**
 
 ```swift
 import XCTest
@@ -371,13 +371,13 @@ final class TranslationEventCodecTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Run codec tests and verify RED**
+- [x] **Step 3: Run codec tests and verify RED**
 
 Run: `swift test --filter TranslationEventCodecTests`
 
 Expected: compilation fails because both event enums are undefined.
 
-- [ ] **Step 4: Implement client event encoding**
+- [x] **Step 4: Implement client event encoding**
 
 ```swift
 // Sources/EMKERealtime/TranslationClientEvent.swift
@@ -404,7 +404,7 @@ public enum TranslationClientEvent: Sendable {
 }
 ```
 
-- [ ] **Step 5: Implement strict server event decoding**
+- [x] **Step 5: Implement strict server event decoding**
 
 ```swift
 // Sources/EMKERealtime/TranslationServerEvent.swift
@@ -441,13 +441,13 @@ public enum TranslationServerEvent: Equatable, Sendable {
 }
 ```
 
-- [ ] **Step 6: Run tests and verify GREEN**
+- [x] **Step 6: Run tests and verify GREEN**
 
 Run: `swift test --filter TranslationEventCodecTests`
 
 Expected: `4 tests, 0 failures`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Package.swift Sources/EMKERealtime Tests/EMKERealtimeTests/TranslationEventCodecTests.swift
@@ -468,7 +468,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: encode rea
 - Produces: `InboundRoute`, `LanguageHypotheses`, `InboundLanguageGate.observe(_:)`, `resolveDeadline(isSpeech:)`, and `reset()`.
 - Decision thresholds are fixed by the approved design: mother language `0.75`, another language `0.60`.
 
-- [ ] **Step 1: Add the Routing targets to the package manifest**
+- [x] **Step 1: Add the Routing targets to the package manifest**
 
 Add the following product after the `EMKERealtime` product and the following targets after `EMKERealtimeTests`:
 
@@ -481,7 +481,7 @@ Add the following product after the `EMKERealtime` product and the following tar
 .testTarget(name: "EMKERoutingTests", dependencies: ["EMKERouting"]),
 ```
 
-- [ ] **Step 2: Write gate reducer tests**
+- [x] **Step 2: Write gate reducer tests**
 
 ```swift
 import EMKECore
@@ -520,13 +520,13 @@ final class InboundLanguageGateTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Run gate tests and verify RED**
+- [x] **Step 3: Run gate tests and verify RED**
 
 Run: `swift test --filter InboundLanguageGateTests`
 
 Expected: compilation fails because `InboundLanguageGate` and related values are undefined.
 
-- [ ] **Step 4: Implement the pure reducer**
+- [x] **Step 4: Implement the pure reducer**
 
 ```swift
 // Sources/EMKERouting/InboundLanguageGate.swift
@@ -582,7 +582,7 @@ public struct InboundLanguageGate: Sendable {
 }
 ```
 
-- [ ] **Step 5: Add the macOS NaturalLanguage adapter**
+- [x] **Step 5: Add the macOS NaturalLanguage adapter**
 
 ```swift
 // Sources/EMKERouting/NaturalLanguageClassifier.swift
@@ -600,13 +600,13 @@ public struct NaturalLanguageClassifier: Sendable {
 }
 ```
 
-- [ ] **Step 6: Run routing tests and verify GREEN**
+- [x] **Step 6: Run routing tests and verify GREEN**
 
 Run: `swift test --filter InboundLanguageGateTests`
 
 Expected: `5 tests, 0 failures`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Package.swift Sources/EMKERouting Tests/EMKERoutingTests/InboundLanguageGateTests.swift
@@ -625,7 +625,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: add mother
 - Produces: `InboundOutputMode`, `OutboundOutputMode`, `RoutingEvent`, and `RoutingStateMachine.handle(_:)`.
 - Reconnection never switches inbound audio mid-utterance.
 
-- [ ] **Step 1: Write safety-state tests**
+- [x] **Step 1: Write safety-state tests**
 
 ```swift
 import XCTest
@@ -681,13 +681,13 @@ final class RoutingStateMachineTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run state tests and verify RED**
+- [x] **Step 2: Run state tests and verify RED**
 
 Run: `swift test --filter RoutingStateMachineTests`
 
 Expected: compilation fails because `RoutingStateMachine` is undefined.
 
-- [ ] **Step 3: Implement the reducer**
+- [x] **Step 3: Implement the reducer**
 
 ```swift
 // Sources/EMKERouting/RoutingStateMachine.swift
@@ -772,13 +772,13 @@ public struct RoutingStateMachine: Sendable {
 }
 ```
 
-- [ ] **Step 4: Run all routing tests and verify GREEN**
+- [x] **Step 4: Run all routing tests and verify GREEN**
 
 Run: `swift test --filter EMKERoutingTests`
 
 Expected: `11 tests, 0 failures`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/EMKERouting/RoutingStateMachine.swift Tests/EMKERoutingTests/RoutingStateMachineTests.swift
@@ -799,7 +799,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: enforce sa
 - Consumes: `TranslationEndpoint`, `TranslationClientEvent`, and `TranslationServerEvent`.
 - Produces: `TranslationSocket`, `TranslationSocketFactory`, and actor `TranslationSession` with `connect`, `appendAudio`, `events`, and `close`.
 
-- [ ] **Step 1: Write lifecycle tests with an in-memory socket**
+- [x] **Step 1: Write lifecycle tests with an in-memory socket**
 
 ```swift
 import EMKECore
@@ -846,13 +846,13 @@ final class TranslationSessionTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run session tests and verify RED**
+- [x] **Step 2: Run session tests and verify RED**
 
 Run: `swift test --filter TranslationSessionTests`
 
 Expected: compilation fails because the socket interfaces and session actor are undefined.
 
-- [ ] **Step 3: Add the injectable socket boundary**
+- [x] **Step 3: Add the injectable socket boundary**
 
 ```swift
 // Sources/EMKERealtime/TranslationSocket.swift
@@ -871,7 +871,7 @@ public protocol TranslationSocketFactory: Sendable {
 }
 ```
 
-- [ ] **Step 4: Implement the URLSession adapter**
+- [x] **Step 4: Implement the URLSession adapter**
 
 ```swift
 // Sources/EMKERealtime/URLSessionTranslationSocket.swift
@@ -910,7 +910,7 @@ public struct URLSessionTranslationSocketFactory: TranslationSocketFactory {
 }
 ```
 
-- [ ] **Step 5: Implement session sequencing**
+- [x] **Step 5: Implement session sequencing**
 
 ```swift
 // Sources/EMKERealtime/TranslationSession.swift
@@ -962,13 +962,13 @@ public actor TranslationSession {
 }
 ```
 
-- [ ] **Step 6: Run Realtime tests and verify GREEN**
+- [x] **Step 6: Run Realtime tests and verify GREEN**
 
 Run: `swift test --filter EMKERealtimeTests`
 
 Expected: `6 tests, 0 failures`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Sources/EMKERealtime Tests/EMKERealtimeTests/TranslationSessionTests.swift
@@ -989,7 +989,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: manage rea
 - Produces: `SecretStore`, `SecretStoreError`, and `KeychainSecretStore`.
 - Keychain service is fixed as `com.emke.translation`; account is fixed as `openai-api-key`.
 
-- [ ] **Step 1: Add the Security targets to the package manifest**
+- [x] **Step 1: Add the Security targets to the package manifest**
 
 Add the following product after the `EMKERouting` product and the following targets after `EMKERoutingTests`:
 
@@ -1002,7 +1002,7 @@ Add the following product after the `EMKERouting` product and the following targ
 .testTarget(name: "EMKESecurityTests", dependencies: ["EMKESecurity"]),
 ```
 
-- [ ] **Step 2: Write contract tests against an in-memory store**
+- [x] **Step 2: Write contract tests against an in-memory store**
 
 ```swift
 import XCTest
@@ -1028,13 +1028,13 @@ final class SecretStoreTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Run security tests and verify RED**
+- [x] **Step 3: Run security tests and verify RED**
 
 Run: `swift test --filter SecretStoreTests`
 
 Expected: compilation fails because `SecretStore` is undefined.
 
-- [ ] **Step 4: Define the secret contract**
+- [x] **Step 4: Define the secret contract**
 
 ```swift
 // Sources/EMKESecurity/SecretStore.swift
@@ -1050,7 +1050,7 @@ public enum SecretStoreError: Error, Equatable {
 }
 ```
 
-- [ ] **Step 5: Implement Keychain storage without logging secret material**
+- [x] **Step 5: Implement Keychain storage without logging secret material**
 
 ```swift
 // Sources/EMKESecurity/KeychainSecretStore.swift
@@ -1108,13 +1108,13 @@ public actor KeychainSecretStore: SecretStore {
 }
 ```
 
-- [ ] **Step 6: Run security tests and verify GREEN**
+- [x] **Step 6: Run security tests and verify GREEN**
 
 Run: `swift test --filter EMKESecurityTests`
 
 Expected: `1 test, 0 failures`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Package.swift Sources/EMKESecurity Tests/EMKESecurityTests
@@ -1132,31 +1132,31 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: store api 
 **Interfaces:**
 - Produces a clean, independently consumable Swift package for the driver and app integration plans.
 
-- [ ] **Step 1: Run the complete test suite**
+- [x] **Step 1: Run the complete test suite**
 
 Run: `swift test --parallel`
 
 Expected: all tests pass with `0 failures` and no Swift concurrency warnings.
 
-- [ ] **Step 2: Build release artifacts for the minimum platform contract**
+- [x] **Step 2: Build release artifacts for the minimum platform contract**
 
 Run: `swift build -c release`
 
 Expected: exit code `0`; the four libraries build for the current Apple Silicon host without warnings.
 
-- [ ] **Step 3: Check repository hygiene**
+- [x] **Step 3: Check repository hygiene**
 
 Run: `git diff --check && git status --short`
 
 Expected: no whitespace errors; only the plan checkbox update may remain uncommitted.
 
-- [ ] **Step 4: Confirm no secret or persisted media patterns entered the tree**
+- [x] **Step 4: Confirm no secret or persisted media patterns entered the tree**
 
 Run: `rg -n "sk-[A-Za-z0-9_-]{8,}|Authorization: Bearer sk-|write\(.*audio|transcript.*File" Sources Tests || true`
 
 Expected: no real API key, Authorization value, audio-file write, or transcript-file write appears.
 
-- [ ] **Step 5: Commit verification state**
+- [x] **Step 5: Commit verification state**
 
 ```bash
 git add docs/superpowers/plans/2026-07-18-emke-translation-core-foundation.md
