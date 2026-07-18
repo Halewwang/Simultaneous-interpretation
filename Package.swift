@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "EMKERealtime", targets: ["EMKERealtime"]),
         .library(name: "EMKERouting", targets: ["EMKERouting"]),
         .library(name: "EMKESecurity", targets: ["EMKESecurity"]),
+        .library(name: "EMKEAudioBridge", targets: ["EMKEAudioBridge"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.3"),
@@ -18,6 +19,11 @@ let package = Package(
         .target(name: "EMKERealtime", dependencies: ["EMKECore"]),
         .target(name: "EMKERouting", dependencies: ["EMKECore"]),
         .target(name: "EMKESecurity"),
+        .target(
+            name: "EMKEAudioBridge",
+            publicHeadersPath: "include",
+            cSettings: [.unsafeFlags(["-std=c11"])]
+        ),
         .testTarget(
             name: "EMKECoreTests",
             dependencies: [
@@ -45,6 +51,13 @@ let package = Package(
             name: "EMKESecurityTests",
             dependencies: [
                 "EMKESecurity",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
+            name: "EMKEAudioBridgeTests",
+            dependencies: [
+                "EMKEAudioBridge",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

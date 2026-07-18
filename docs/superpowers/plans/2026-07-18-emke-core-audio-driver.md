@@ -70,17 +70,17 @@ Driver/
 - Consumes: interleaved `Float32` frames with a fixed channel count.
 - Produces: `EMKEAudioRingBufferCreate`, `EMKEAudioRingBufferDestroy`, `EMKEAudioRingBufferWrite`, `EMKEAudioRingBufferRead`, `EMKEAudioRingBufferReset`, and readable/writable frame counters.
 
-- [ ] **Step 1: Add the C target and write failing wraparound tests**
+- [x] **Step 1: Add the C target and write failing wraparound tests**
 
 Add `.library(name: "EMKEAudioBridge", targets: ["EMKEAudioBridge"])`, a C target with `publicHeadersPath: "include"`, and an `EMKEAudioBridgeTests` target depending on `EMKEAudioBridge` plus Swift Testing. The tests create a four-frame, two-channel buffer, write frames `1...4`, read two frames, write frames `5...6`, and expect the remaining read order to be `3, 4, 5, 6` on both channels. Separate tests verify that a full buffer reports zero writable frames and reset restores the full capacity.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter AudioRingBufferTests`
 
 Expected: compilation fails because `EMKEAudioRingBufferCreate` and the other C symbols do not exist.
 
-- [ ] **Step 3: Implement the minimal bounded SPSC buffer**
+- [x] **Step 3: Implement the minimal bounded SPSC buffer**
 
 Define an opaque `EMKEAudioRingBuffer`. Allocate its interleaved `float` storage only in `Create`. Store monotonically increasing `_Atomic uint64_t` read and write positions, use acquire/release ordering between producer and consumer, copy at most the current free/readable frame count in at most two `memcpy` segments, and never overwrite unread frames.
 
@@ -100,13 +100,13 @@ uint32_t EMKEAudioRingBufferRead(
 
 Both functions return the number of frames actually transferred and return `0` for null arguments or a zero frame request.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter AudioRingBufferTests && swift test --parallel`
 
 Expected: all ring-buffer tests and the existing 27 tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Sources/EMKEAudioBridge Tests/EMKEAudioBridgeTests
