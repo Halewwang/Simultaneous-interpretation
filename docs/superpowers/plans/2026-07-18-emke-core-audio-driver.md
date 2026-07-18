@@ -305,15 +305,15 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "build: package v
 - Consumes: the exact device/stream model from Tasks 3–5.
 - Produces: the stream-selection contract required by the menu-bar audio engine plan.
 
-- [ ] **Step 1: Document the four stream roles and safety behavior**
+- [x] **Step 1: Document the four stream roles and safety behavior**
 
 Record that meetings write to the speaker output and read from the microphone input, while EMKE reads the speaker input and writes the microphone output. State that the opposite-direction companion streams are implementation transport endpoints, not user-selected meeting endpoints. Document fixed 48 kHz stereo Float32 format, buffer overflow/drop policy, microphone zero-fill policy, and the fact that no audio crosses XPC or disk.
 
-- [ ] **Step 2: Align the approved design’s driver paragraph**
+- [x] **Step 2: Align the approved design’s driver paragraph**
 
 Clarify that the shared ring buffers are internal to the HAL plug-in and the app accesses them through companion Core Audio streams. Do not change any product-facing device names or fail-open/fail-closed decisions.
 
-- [ ] **Step 3: Run the documentation contract scan**
+- [x] **Step 3: Run the documentation contract scan**
 
 Run:
 
@@ -324,7 +324,7 @@ rg -n "EMKE Virtual Speaker|EMKE Virtual Microphone|48 kHz|zero-fill|companion" 
 
 Expected: both device names and every safety/format term are present.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs

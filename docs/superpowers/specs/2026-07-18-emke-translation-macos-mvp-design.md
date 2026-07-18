@@ -1,7 +1,7 @@
 # EMKE Translation macOS 本地同声传译 MVP 设计
 
 - 日期：2026-07-18
-- 状态：等待用户书面复核
+- 状态：已确认，分阶段实现中
 - 目标平台：Apple Silicon、macOS 14 及以上
 
 ## 1. 产品定义
@@ -103,10 +103,12 @@ SwiftUI 负责设置、状态和字幕窗口；应用生命周期、音频控制
 
 ### 5.2 Core Audio 虚拟设备
 
-采用一个 Audio Server Driver Plug-in 发布两个命名清晰的设备：
+采用一个 Audio Server Driver Plug-in 发布两个命名清晰的双工传输设备：
 
-- `EMKE Virtual Speaker`：会议软件向它写入远端播放音频，EMKE 应用从共享环形缓冲区读取。
-- `EMKE Virtual Microphone`：EMKE 应用向共享环形缓冲区写入译文音频，会议软件把它当作麦克风读取。
+- `EMKE Virtual Speaker`：会议软件向输出流写入远端播放音频，EMKE 应用从配套输入流读取。
+- `EMKE Virtual Microphone`：EMKE 应用向配套输出流写入译文音频，会议软件从输入流读取。
+
+两条共享环形缓冲区完全位于 HAL 插件内部，EMKE 应用通过标准 Core Audio 配套流访问，不通过 XPC、磁盘或网络传递驱动层音频。会议设置仍只要求把扬声器选为 `EMKE Virtual Speaker`、麦克风选为 `EMKE Virtual Microphone`；应用自动打开相反方向的配套流。由于设备在 Core Audio 中是双工传输端点，部分会议软件可能在输入和输出列表中都显示两个名称，首次引导必须突出正确的设备组合。
 
 音频实时线程只进行无锁缓冲区读写、格式转换和计时，不执行网络请求、JSON 解析、磁盘 I/O 或 UI 更新。应用异常退出时，虚拟麦克风默认输出静音，虚拟扬声器不得产生反馈环路。
 
