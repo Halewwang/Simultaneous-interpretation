@@ -63,6 +63,7 @@ public struct TranslationCoordinatorState: Equatable, Sendable {
 
 public enum TranslationCoordinatorEvent: Equatable, Sendable {
     case stateChanged(TranslationCoordinatorState)
+    case audioLevels(AudioLevelSnapshot)
     case audioBackpressure(droppedFrames: Int)
     case stopped
 }

@@ -84,11 +84,13 @@ public struct TranslationCoordinatorConfiguration: Sendable {
 public actor TranslationCoordinator {
     private static let maximumQueuedEvents = 128
     private static let maximumSubtitleCharacters = 4_096
+    private static let minimumLevelPublishInterval: UInt64 = 33_333_334
 
     private let audioEngine: any TranslationAudioEngine
     private let sessionBuilder: any TranslationSessionBuilding
     private let languageClassifier: @Sendable (String) -> LanguageHypotheses
     private let reconnectDelays: [Duration]
+    private let levelTimeNanoseconds: @Sendable () -> UInt64
 
     private var configuration: TranslationCoordinatorConfiguration?
     private var inboundSession: (any TranslationSessionControlling)?
@@ -103,6 +105,11 @@ public actor TranslationCoordinator {
     private var inboundBatcher = PCMFrameBatcher()
     private var outboundBatcher = PCMFrameBatcher()
     private var inboundVAD = PCMVoiceActivityDetector()
+    private var inboundLevelMeter = PCMLevelMeter()
+    private var outboundLevelMeter = PCMLevelMeter()
+    private var audioLevels = AudioLevelSnapshot()
+    private var lastLevelPublishTime: UInt64?
+    private var audioLevelUpdatesEnabled = true
     private var inboundBuffer = InboundUtteranceBuffer(
         motherLanguage: .chinese
     )
@@ -130,12 +137,16 @@ public actor TranslationCoordinator {
             .seconds(1),
             .seconds(2),
             .seconds(5),
-        ]
+        ],
+        levelTimeNanoseconds: @escaping @Sendable () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        }
     ) {
         self.audioEngine = audioEngine
         self.sessionBuilder = sessionBuilder
         self.languageClassifier = languageClassifier
         self.reconnectDelays = reconnectDelays
+        self.levelTimeNanoseconds = levelTimeNanoseconds
     }
 
     public func start(
@@ -285,6 +296,18 @@ public actor TranslationCoordinator {
         state
     }
 
+    public func setAudioLevelUpdatesEnabled(_ enabled: Bool) {
+        audioLevelUpdatesEnabled = enabled
+        inboundLevelMeter.reset()
+        outboundLevelMeter.reset()
+        audioLevels = AudioLevelSnapshot()
+        lastLevelPublishTime = nil
+        events.removeAll { event in
+            if case .audioLevels = event { return true }
+            return false
+        }
+    }
+
     public func setInboundBypass(_ enabled: Bool) async {
         if enabled {
             routing.handle(.inboundBypassEnabled)
@@ -383,8 +406,10 @@ public actor TranslationCoordinator {
         guard !isStopping else { return false }
         switch event {
         case .inboundNetworkAudio(let pcm16):
+            observeAudioLevel(pcm16, channel: .inbound)
             await handleInboundAudio(pcm16)
         case .outboundNetworkAudio(let pcm16):
+            observeAudioLevel(pcm16, channel: .outbound)
             await handleOutboundAudio(pcm16)
         case .outputBackpressure(_, let droppedFrames):
             publish(.audioBackpressure(droppedFrames: droppedFrames))
@@ -392,6 +417,30 @@ public actor TranslationCoordinator {
             return false
         }
         return true
+    }
+
+    private func observeAudioLevel(_ pcm16: Data, channel: Channel) {
+        guard audioLevelUpdatesEnabled else { return }
+        do {
+            switch channel {
+            case .inbound:
+                audioLevels.inbound = try inboundLevelMeter.observe(pcm16)
+            case .outbound:
+                audioLevels.outbound = try outboundLevelMeter.observe(pcm16)
+            }
+            publishAudioLevelsIfDue(at: levelTimeNanoseconds())
+        } catch {
+            return
+        }
+    }
+
+    private func publishAudioLevelsIfDue(at now: UInt64) {
+        if let lastLevelPublishTime,
+           now - lastLevelPublishTime < Self.minimumLevelPublishInterval {
+            return
+        }
+        lastLevelPublishTime = now
+        publish(.audioLevels(audioLevels))
     }
 
     private func handleInboundAudio(_ pcm16: Data) async {
@@ -714,6 +763,10 @@ public actor TranslationCoordinator {
         inboundBatcher.reset()
         outboundBatcher.reset()
         inboundVAD.reset()
+        inboundLevelMeter.reset()
+        outboundLevelMeter.reset()
+        audioLevels = AudioLevelSnapshot()
+        lastLevelPublishTime = nil
         inboundBuffer = InboundUtteranceBuffer(
             motherLanguage: motherLanguage
         )
@@ -754,7 +807,18 @@ public actor TranslationCoordinator {
     private func publish(_ event: TranslationCoordinatorEvent) {
         if !eventWaiters.isEmpty {
             eventWaiters.removeFirst().resume(returning: event)
-        } else if events.count < Self.maximumQueuedEvents {
+            return
+        }
+        if case .audioLevels = event,
+           let index = events.lastIndex(where: { queued in
+               if case .audioLevels = queued { return true }
+               return false
+           }) {
+            events.remove(at: index)
+            events.append(event)
+            return
+        }
+        if events.count < Self.maximumQueuedEvents {
             events.append(event)
         } else {
             events.removeFirst()

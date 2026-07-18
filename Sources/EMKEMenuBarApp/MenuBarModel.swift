@@ -385,6 +385,8 @@ final class MenuBarModel: ObservableObject {
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
+                case .audioLevels:
+                    break
                 case .audioBackpressure(let droppedFrames):
                     inventoryError = "音频输出繁忙，已丢弃 \(droppedFrames) 帧"
                 case .stopped:

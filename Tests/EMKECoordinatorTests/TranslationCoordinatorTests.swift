@@ -133,6 +133,19 @@ private struct SessionBuildRequest: Equatable, Sendable {
     let configuration: TranslationSessionConfiguration
 }
 
+private final class CoordinatorLevelClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 1
+
+    func now() -> UInt64 {
+        lock.withLock { value }
+    }
+
+    func advance(milliseconds: UInt64) {
+        lock.withLock { value += milliseconds * 1_000_000 }
+    }
+}
+
 private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
     private var sessions: [CoordinatorSessionFake]
     private(set) var requests: [SessionBuildRequest] = []
@@ -155,6 +168,7 @@ private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
 
 private struct CoordinatorHarness {
     let audio = CoordinatorAudioEngineFake()
+    let levelClock: CoordinatorLevelClock
     let inbound: CoordinatorSessionFake
     let outbound: CoordinatorSessionFake
     let builder: CoordinatorSessionBuilderFake
@@ -174,6 +188,7 @@ private struct CoordinatorHarness {
             _ in LanguageHypotheses(["de": 0.9])
         }
     ) {
+        levelClock = CoordinatorLevelClock()
         inbound = CoordinatorSessionFake(connectError: inboundError)
         outbound = CoordinatorSessionFake(
             closeEvents: outboundCloseEvents
@@ -185,7 +200,8 @@ private struct CoordinatorHarness {
             audioEngine: audio,
             sessionBuilder: builder,
             languageClassifier: classifier,
-            reconnectDelays: reconnectDelays
+            reconnectDelays: reconnectDelays,
+            levelTimeNanoseconds: levelClock.now
         )
         configuration = TranslationCoordinatorConfiguration(
             apiConfiguration: .default,
@@ -195,6 +211,26 @@ private struct CoordinatorHarness {
             ),
             apiKey: "test-key"
         )
+    }
+
+    func start() async throws {
+        try await coordinator.start(configuration: configuration)
+    }
+
+    func drainStartupEvents() async {
+        _ = await coordinator.nextEvent()
+        _ = await coordinator.nextEvent()
+    }
+
+    func nextAudioLevelEvent() async -> AudioLevelSnapshot {
+        while true {
+            switch await coordinator.nextEvent() {
+            case .audioLevels(let snapshot):
+                return snapshot
+            case .stateChanged, .audioBackpressure, .stopped:
+                continue
+            }
+        }
     }
 }
 
@@ -262,11 +298,82 @@ private func transcriptDelta(_ text: String) -> TranslationTranscriptDelta {
 private func eventually(
     _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
-    for _ in 0..<200 {
+    for _ in 0..<2_000 {
         if await condition() { return true }
         await Task.yield()
     }
     return false
+}
+
+@Test
+func coordinatorPublishesSeparateInboundAndOutboundLevels() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(
+        levelMeterPCM16(amplitude: 14_000)
+    ))
+    let inbound = await harness.nextAudioLevelEvent()
+    #expect(inbound.inbound > 0)
+    #expect(inbound.outbound == 0)
+
+    harness.levelClock.advance(milliseconds: 34)
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000)
+    ))
+    let outbound = await harness.nextAudioLevelEvent()
+    #expect(outbound.inbound > 0)
+    #expect(outbound.outbound > 0)
+}
+
+@Test
+func audioLevelEventsAreThrottledAndQueuedSnapshotsAreCoalesced() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(
+        levelMeterPCM16(amplitude: 8_000, sampleCount: 4_800)
+    ))
+    harness.levelClock.advance(milliseconds: 34)
+    await harness.audio.emit(.inboundNetworkAudio(
+        levelMeterPCM16(amplitude: 12_000, sampleCount: 4_800)
+    ))
+    harness.levelClock.advance(milliseconds: 34)
+    await harness.audio.emit(.inboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.inbound.appended.count == 3
+        }
+    )
+
+    let latest = await harness.nextAudioLevelEvent()
+    #expect(latest.inbound > 0.2)
+}
+
+@Test
+func disablingAudioLevelUpdatesDropsQueuedSnapshots() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.drainStartupEvents()
+
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.outbound.appended.count == 1
+        }
+    )
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 3
+    ))
+
+    #expect(await harness.coordinator.nextEvent() ==
+        .audioBackpressure(droppedFrames: 3))
 }
 
 @Test
