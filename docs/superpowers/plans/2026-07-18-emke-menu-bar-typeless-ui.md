@@ -15,6 +15,7 @@
 - 不新增录音、音频历史、电平历史、字幕历史、遥测、账号、订阅或房间能力。
 - 音频电平完全在本机计算，不写盘、不记录、不进入 UserDefaults，也不出现在测试失败输出中。
 - UI 快照发布频率不超过 30 Hz；消费者落后时同类快照只保留最新值，不得反压实时音频线程。
+- 菜单栏窗口隐藏时必须关闭 coordinator 的 UI 电平发布并清空已排队快照；重新显示后从零恢复，不影响翻译和音频路由。
 - 音波不使用随机数。相同 PCM 输入与状态必须生成相同电平和柱形布局。
 - 主控制台在 420 × 620 pt 内完整显示，不使用主页面滚动；设置页可以在同尺寸内滚动。
 - 所有代码修改遵循 RED → GREEN → REFACTOR；每个任务完成后运行对应定向测试并单独提交。
@@ -293,6 +294,24 @@ func audioLevelEventsAreThrottledAndQueuedSnapshotsAreCoalesced() async throws {
     let latest = await harness.nextAudioLevelEvent()
     #expect(latest.inbound > 0.2)
 }
+
+@Test
+func disablingAudioLevelUpdatesDropsQueuedSnapshots() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.drainStartupEvents()
+
+    await harness.audio.emit(.inboundNetworkAudio(pcm16(amplitude: 18_000)))
+    await Task.yield()
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 3
+    ))
+
+    #expect(await harness.coordinator.nextEvent() ==
+        .audioBackpressure(droppedFrames: 3))
+}
 ```
 
 `pcm16` 使用 Task 1 测试文件中同一测试 target 内的 internal helper。`nextAudioLevelEvent()` 必须跳过启动阶段的 `.stateChanged`，并在 `.audioLevels` 时返回。上面的阈值验证队列返回的是第三个较大振幅产生的最新快照，而不是第一个旧快照；测试不得用真实 sleep 证明限频。
@@ -304,6 +323,7 @@ Run:
 ```bash
 swift test --filter coordinatorPublishesSeparateInboundAndOutboundLevels
 swift test --filter audioLevelEventsAreThrottledAndQueuedSnapshotsAreCoalesced
+swift test --filter disablingAudioLevelUpdatesDropsQueuedSnapshots
 ```
 
 Expected: FAIL，`.audioLevels` 事件和 coordinator 的时钟注入尚不存在。
@@ -331,6 +351,7 @@ private var inboundLevelMeter = PCMLevelMeter()
 private var outboundLevelMeter = PCMLevelMeter()
 private var audioLevels = AudioLevelSnapshot()
 private var lastLevelPublishTime: UInt64?
+private var audioLevelUpdatesEnabled = true
 
 public init(
     audioEngine: any TranslationAudioEngine = LocalAudioEngine(),
@@ -359,6 +380,22 @@ public init(
 }
 ```
 
+添加窗口可见性门控；关闭时清空 meter 和已排队电平事件，但不停止 coordinator 或音频引擎：
+
+```swift
+public func setAudioLevelUpdatesEnabled(_ enabled: Bool) {
+    audioLevelUpdatesEnabled = enabled
+    inboundLevelMeter.reset()
+    outboundLevelMeter.reset()
+    audioLevels = AudioLevelSnapshot()
+    lastLevelPublishTime = nil
+    events.removeAll { event in
+        if case .audioLevels = event { return true }
+        return false
+    }
+}
+```
+
 - [ ] **Step 4: 在现有音频事件路径计算、限频并发布**
 
 在 `handleAudioEvent` 调用既有翻译逻辑前观察对应数据；电平计算失败只丢弃该次 UI 快照，不得触发翻译通道失败：
@@ -376,6 +413,7 @@ case .outboundNetworkAudio(let pcm16):
 
 ```swift
 private func observeAudioLevel(_ pcm16: Data, channel: Channel) {
+    guard audioLevelUpdatesEnabled else { return }
     do {
         switch channel {
         case .inbound:
@@ -456,6 +494,7 @@ git commit -m "feat: publish coalesced translation audio levels"
 
 ```swift
 private var queuedEvents: [TranslationCoordinatorEvent] = []
+private(set) var audioLevelUpdateFlags: [Bool] = []
 
 func nextEvent() async -> TranslationCoordinatorEvent {
     if !queuedEvents.isEmpty {
@@ -472,6 +511,10 @@ func emit(_ event: TranslationCoordinatorEvent) {
     } else {
         eventWaiters.removeFirst().resume(returning: event)
     }
+}
+
+func setAudioLevelUpdatesEnabled(_ enabled: Bool) async {
+    audioLevelUpdateFlags.append(enabled)
 }
 ```
 
@@ -543,6 +586,22 @@ func stoppingClearsLevelsAndRunStartDate() async {
     #expect(model.outboundLevel == 0)
     #expect(model.translationStartedAt == nil)
 }
+
+@Test @MainActor
+func hidingWindowClearsLevelsWithoutStoppingTranslation() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setWindowVisible(false)
+
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+    #expect(model.coordinatorState.isRunning)
+    #expect(await coordinator.audioLevelUpdateFlags.last == false)
+}
 ```
 
 - [ ] **Step 2: 运行定向测试，确认 RED**
@@ -553,6 +612,7 @@ Run:
 swift test --filter settingsNavigationDoesNotRecreateCoordinator
 swift test --filter modelConsumesLatestAudioLevelSnapshot
 swift test --filter stoppingClearsLevelsAndRunStartDate
+swift test --filter hidingWindowClearsLevelsWithoutStoppingTranslation
 ```
 
 Expected: FAIL，页面和电平展示状态尚不存在，event switch 也未覆盖 `.audioLevels`。
@@ -560,6 +620,12 @@ Expected: FAIL，页面和电平展示状态尚不存在，event switch 也未�
 - [ ] **Step 3: 添加页面与运行展示状态**
 
 在 `MenuBarModel.swift` 添加：
+
+先把可见性调用加入现有 coordinator 抽象：
+
+```swift
+func setAudioLevelUpdatesEnabled(_ enabled: Bool) async
+```
 
 ```swift
 enum MenuBarScreen: Equatable {
@@ -572,6 +638,7 @@ enum MenuBarScreen: Equatable {
 @Published private(set) var outboundLevel = 0.0
 @Published private(set) var translationStartedAt: Date?
 @Published private(set) var isStopping = false
+@Published private(set) var isWindowVisible = false
 
 var combinedLevel: Double {
     max(inboundLevel, outboundLevel)
@@ -603,6 +670,15 @@ func elapsedText(at now: Date) -> String {
 
 var apiKeyStatusText: String {
     hasStoredAPIKey ? "已存入 Keychain" : "尚未保存"
+}
+
+func setWindowVisible(_ visible: Bool) async {
+    isWindowVisible = visible
+    await coordinator.setAudioLevelUpdatesEnabled(visible)
+    if !visible {
+        inboundLevel = 0
+        outboundLevel = 0
+    }
 }
 ```
 
@@ -1220,8 +1296,14 @@ struct MenuBarRootView: View {
         )
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            Task { await model.loadConfiguration() }
+            Task {
+                await model.setWindowVisible(true)
+                await model.loadConfiguration()
+            }
             model.reloadDevices()
+        }
+        .onDisappear {
+            Task { await model.setWindowVisible(false) }
         }
     }
 }
@@ -1359,7 +1441,7 @@ EMKE_CAPTURE_UI=1 swift test --filter captureRunningDashboardForVisualReview
 - coordinator 音频事件队列不会随窗口隐藏持续增长；
 - 音波绘制路径不执行网络、JSON、文件 I/O 或音频数据复制。
 
-若发现隐藏窗口仍有 1 秒 `TimelineView` 唤醒，将 timeline 限定在运行且窗口可见时创建，并在 `MenuBarRootView.onDisappear` 关闭 UI 时间刷新；不得停止后台翻译会话。
+若发现隐藏窗口仍有电平快照或 1 秒时长刷新，检查 `MenuBarRootView.onDisappear` 是否调用 `setWindowVisible(false)`、coordinator 是否清除已排队 `.audioLevels`，以及 SwiftUI `.task` 是否取消；不得停止后台翻译会话。
 
 - [ ] **Step 4: 更新用户文档和设计规格状态**
 
