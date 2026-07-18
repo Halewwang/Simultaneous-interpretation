@@ -1,10 +1,13 @@
 # EMKE Translation 菜单栏 UI 重设计
 
 - 日期：2026-07-18
-- 状态：视觉方向已确认，等待规格审阅
+- 状态：已实现并完成视觉验收
 - 目标平台：Apple Silicon、macOS 14+
 - 参考方向：[Typeless](https://www.typeless.com/) 的克制排版、黑白灰层级、充足留白与单一主动作
 - 已确认视觉稿：方案二“双通道工作台”的实时音波修订版
+- 视觉验收日期：2026-07-18
+- 最终运行态截图：`.superpowers/artifacts/task-7/running-final.png`（本地验收产物，不纳入 Git）
+- 最终并排比较：`.superpowers/artifacts/task-7/comparison-final.png`（本地验收产物，不纳入 Git）
 
 ## 1. 设计目标
 
@@ -34,7 +37,8 @@
 | --- | --- |
 | 水平边距 | 24 pt |
 | 基础间距 | 8 pt；组合间距使用 16、24、32 pt |
-| 主标题 | 28–32 pt，semibold |
+| 顶栏标题 | 15 pt，semibold |
+| 语言值 | 22 pt，semibold |
 | 通道标题 | 18 pt，semibold |
 | 正文 | 14–15 pt，regular/medium |
 | 辅助文字 | 12–13 pt，secondary |
@@ -196,6 +200,8 @@
 - 视觉改造不得改变入站 fail-open、出站 fail-closed、Keychain、双会话隔离和优雅关闭合同。
 
 ## 10. 验收标准
+
+2026-07-18 已完成源码合同、原生交互、运行态渲染和并排视觉验收；最终结论记录于项目根目录 `design-qa.md`。当前 Command Line Tools 环境缺少 `xctrace`，因此 Instruments SwiftUI/Time Profiler trace 仍是明确的实测缺口，不把自动化性能合同写成 Instruments 通过。
 
 - 420 × 620 pt 下主控制台无需滚动，所有关键动作可见。
 - 未配置、就绪、连接中、翻译中、入站失败、出站失败、两种旁路和停止中状态均有确定性展示测试。

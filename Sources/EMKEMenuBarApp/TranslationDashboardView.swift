@@ -81,11 +81,14 @@ struct TranslationDashboardContent: View {
                     .padding(.top, 4)
             }
             Spacer(minLength: 18)
+            Divider().opacity(EMKEVisualStyle.dividerOpacity)
             languageDirection
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             channelRows
             Spacer(minLength: 16)
             primaryActionButton
+            Divider().opacity(EMKEVisualStyle.dividerOpacity)
+                .padding(.top, 16)
             privacyFooter
         }
         .padding(.horizontal, EMKEVisualStyle.horizontalPadding)
@@ -100,11 +103,11 @@ struct TranslationDashboardContent: View {
     private var header: some View {
         HStack {
             Text("EMKE Translation")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
             Spacer()
             Button(action: settingsAction) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 20))
+                    .font(.system(size: 18))
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
@@ -139,18 +142,42 @@ struct TranslationDashboardContent: View {
             Text(title)
                 .font(.system(size: 12))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
-            Picker(title, selection: selection) {
-                ForEach(SupportedLanguage.allCases, id: \.self) { language in
-                    Text(language.displayName).tag(language)
+            if languagesLocked {
+                lockedLanguageValue(
+                    title: title,
+                    language: selection.wrappedValue
+                )
+            } else {
+                Picker(title, selection: selection) {
+                    ForEach(SupportedLanguage.allCases, id: \.self) { language in
+                        Text(language.displayName).tag(language)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .font(.system(size: 22, weight: .semibold))
+                .accessibilityLabel(title)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .font(.system(size: 22, weight: .semibold))
-            .disabled(languagesLocked)
-            .accessibilityLabel(title)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func lockedLanguageValue(
+        title: String,
+        language: SupportedLanguage
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(language.displayName)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .accessibilityHidden(true)
+        }
+        .font(.system(size: 22, weight: .semibold))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(language.displayName)
+        .accessibilityHint("翻译运行期间不可修改")
     }
 
     private var channelRows: some View {
@@ -193,6 +220,7 @@ struct TranslationDashboardContent: View {
             .font(.system(size: 12))
             .foregroundStyle(EMKEVisualStyle.secondaryText)
             .frame(maxWidth: .infinity)
-            .padding(.top, 16)
+            .padding(.top, 12)
+            .accessibilityLabel(value.privacyText)
     }
 }

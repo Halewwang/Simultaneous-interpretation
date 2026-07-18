@@ -2,10 +2,10 @@ import SwiftUI
 
 enum WaveformBarLayout {
     private static let weights: [Double] = [
-        0.28, 0.42, 0.58, 0.36, 0.72, 0.50,
-        0.84, 0.62, 0.94, 0.70, 1.00, 0.78,
-        0.88, 0.66, 0.96, 0.74, 0.82, 0.56,
-        0.76, 0.48, 0.64, 0.38, 0.52, 0.30,
+        0.12, 0.22, 0.18, 0.58, 0.96, 0.52,
+        0.25, 0.10, 0.46, 0.32, 0.20, 0.58,
+        0.94, 0.60, 0.28, 0.52, 0.34, 0.22,
+        0.16, 0.12, 0.09, 0.18, 0.12, 0.10,
     ]
 
     static func heights(
@@ -32,7 +32,21 @@ struct LiveWaveformView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(alignment: .center, spacing: compact ? 2 : 4) {
+        Group {
+            if reduceMotion {
+                waveformBars
+            } else {
+                waveformBars.animation(
+                    .easeOut(duration: 0.08),
+                    value: level
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var waveformBars: some View {
+        HStack(alignment: .center, spacing: compact ? 2 : 8) {
             ForEach(
                 Array(
                     WaveformBarLayout.heights(
@@ -51,16 +65,11 @@ struct LiveWaveformView: View {
                             )
                     )
                     .frame(
-                        width: compact ? 3 : 6,
+                        width: compact ? 1.5 : 4,
                         height: CGFloat(height)
                     )
             }
         }
         .frame(maxWidth: .infinity, minHeight: maximumHeight)
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: 0.08),
-            value: level
-        )
-        .accessibilityHidden(true)
     }
 }

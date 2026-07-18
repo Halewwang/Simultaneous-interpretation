@@ -128,35 +128,49 @@ struct TranslationChannelRow: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: EMKEVisualStyle.groupSpacing) {
+        HStack(spacing: 12) {
             Image(systemName: presentation.symbol)
+                .font(.system(size: 30, weight: .light))
+                .frame(width: 48)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
                 Text(direction)
                     .font(.system(size: 13))
-                Label(
-                    presentation.status,
-                    systemImage: presentation.statusSymbol
-                )
-                .font(.system(size: 12))
-                .foregroundStyle(presentation.statusColor)
             }
-            Spacer(minLength: 8)
-            LiveWaveformView(
-                level: level,
-                maximumHeight: 24,
-                compact: true
-            )
-            .frame(width: 66)
+            .frame(width: 112, alignment: .leading)
+            channelStatus
+            Spacer(minLength: 0)
             Button(presentation.actionTitle, action: action)
                 .buttonStyle(.plain)
+                .lineLimit(1)
+                .frame(width: 64, alignment: .trailing)
                 .disabled(!presentation.actionEnabled)
                 .accessibilityLabel(
                     presentation.actionAccessibilityLabel
                 )
         }
         .padding(.vertical, 14)
+    }
+
+    private var channelStatus: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                presentation.status,
+                systemImage: presentation.statusSymbol
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(presentation.statusColor)
+            .accessibilityLabel(
+                "\(title)状态：\(presentation.status)"
+            )
+            LiveWaveformView(
+                level: level,
+                maximumHeight: 24,
+                compact: true
+            )
+        }
+        .frame(width: 90)
     }
 }

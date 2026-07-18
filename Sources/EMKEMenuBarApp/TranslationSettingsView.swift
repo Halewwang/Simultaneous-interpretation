@@ -11,6 +11,11 @@ struct TranslationSettingsView: View {
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    if model.selectionsLocked {
+                        Label("翻译运行期间设置已锁定", systemImage: "lock.fill")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(EMKEVisualStyle.secondaryText)
+                    }
                     providerSection
                     Divider().opacity(EMKEVisualStyle.dividerOpacity)
                     audioSection
