@@ -56,6 +56,7 @@ let package = Package(
             name: "EMKEMenuBarApp",
             dependencies: [
                 "EMKEAudioEngine",
+                "EMKECoordinator",
                 "EMKECore",
                 "EMKESecurity",
             ]
@@ -102,6 +103,7 @@ let package = Package(
             dependencies: [
                 "EMKEAudioHAL",
                 "EMKEAudioEngine",
+                "EMKECoordinator",
                 "EMKERouting",
                 "EMKEMenuBarApp",
                 .product(name: "Testing", package: "swift-testing"),

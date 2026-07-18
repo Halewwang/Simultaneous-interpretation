@@ -418,3 +418,20 @@ func stopDrainsTailTranslationAudioBeforeStoppingTheEngine() async throws {
 
     #expect(await harness.audio.outboundPlayback == [tail])
 }
+
+@Test
+func manualBypassControlsAreExplicitAndReversible() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.coordinator.setInboundBypass(true)
+    await harness.coordinator.setOutboundBypass(true)
+    #expect(await harness.audio.lastRouting?.0 == .originalBypass)
+    #expect(await harness.audio.lastRouting?.1 == .originalBypass)
+
+    await harness.coordinator.setInboundBypass(false)
+    await harness.coordinator.setOutboundBypass(false)
+    #expect(await harness.audio.lastRouting?.0 == .translated)
+    #expect(await harness.audio.lastRouting?.1 == .translated)
+    await harness.coordinator.stop()
+}

@@ -281,6 +281,30 @@ public actor TranslationCoordinator {
         }
     }
 
+    public func currentState() -> TranslationCoordinatorState {
+        state
+    }
+
+    public func setInboundBypass(_ enabled: Bool) async {
+        if enabled {
+            routing.handle(.inboundBypassEnabled)
+        } else {
+            routing.handle(.inboundBypassDisabled)
+        }
+        await applyRouting()
+        publishState()
+    }
+
+    public func setOutboundBypass(_ enabled: Bool) async {
+        if enabled {
+            routing.handle(.outboundBypassEnabled)
+        } else {
+            routing.handle(.outboundBypassDisabled)
+        }
+        await applyRouting()
+        publishState()
+    }
+
     private enum Channel {
         case inbound
         case outbound

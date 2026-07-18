@@ -460,7 +460,7 @@ Commit: `feat: probe translation gateway capabilities`
 - Consumes: `KeychainSecretStore`, public settings persistence, `TranslationCoordinator`, and `TranslationConnectionProbe`.
 - Produces: user-editable API Key/Base URL/Model ID, mother/meeting languages, explicit channel statuses, bypass controls, connection-test report, and transient subtitle text.
 
-- [ ] **Step 1: Write failing persistence and readiness tests**
+- [x] **Step 1: Write failing persistence and readiness tests**
 
 ```swift
 @Test @MainActor func apiReadinessRequiresKeyBaseURLModelAndDevices() async {
@@ -481,27 +481,27 @@ Commit: `feat: probe translation gateway capabilities`
 }
 ```
 
-- [ ] **Step 2: Run menu tests and confirm RED**
+- [x] **Step 2: Run menu tests and confirm RED**
 
 Run: `swift test --filter MenuBarModelTests`
 
 Expected: compilation fails because settings/API readiness interfaces do not exist.
 
-- [ ] **Step 3: Implement non-secret settings and Keychain-backed start**
+- [x] **Step 3: Implement non-secret settings and Keychain-backed start**
 
 Persist Base URL, model ID, languages, and device UIDs in `UserDefaults`. `apiKeyDraft` is transient and masked; saving writes it to `SecretStore`, then clears the draft. Starting loads the key from Keychain, validates HTTPS/Base URL/model, resolves devices, and passes a complete `TranslationCoordinatorConfiguration` to the coordinator.
 
-- [ ] **Step 4: Replace local-audio-only controls with translation controls**
+- [x] **Step 4: Replace local-audio-only controls with translation controls**
 
 Add editable `SecureField("API Key")`, Base URL, Model ID, mother-language and meeting-language pickers, Test Connection, Start/Stop Translation, inbound original bypass, outbound explicit original bypass, channel state labels, and current source/translated subtitle text. Remove the statement that the model is not connected. Never display, log, or restore the plaintext key into a visible text field.
 
-- [ ] **Step 5: Run UI model tests and build the app**
+- [x] **Step 5: Run UI model tests and build the app**
 
 Run: `swift test --filter MenuBarModelTests && swift build --product EMKEMenuBarApp`
 
 Expected: tests pass and the executable builds without warnings.
 
-- [ ] **Step 6: Commit the menu integration**
+- [x] **Step 6: Commit the menu integration**
 
 Commit: `feat: configure translation from the menu bar`
 
