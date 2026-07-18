@@ -1,5 +1,19 @@
 import Foundation
 
+public struct AudioLevelSnapshot: Equatable, Sendable {
+    public var inbound: Double
+    public var outbound: Double
+
+    public init(inbound: Double = 0, outbound: Double = 0) {
+        self.inbound = min(max(inbound, 0), 1)
+        self.outbound = min(max(outbound, 0), 1)
+    }
+
+    public var combined: Double {
+        max(inbound, outbound)
+    }
+}
+
 public enum TranslationChannelState: Equatable, Sendable {
     case stopped
     case connecting
