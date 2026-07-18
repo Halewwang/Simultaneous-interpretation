@@ -273,7 +273,7 @@ Commit: `feat: buffer inbound translation utterances`
 - Consumes: selected 24 kHz mono PCM16, regardless of whether it originated from meeting audio or model audio.
 - Produces: `enqueueInboundOutput(_:)` while preserving the old translated-mode safety boundary.
 
-- [ ] **Step 1: Write a failing audio-engine test**
+- [x] **Step 1: Write a failing audio-engine test**
 
 ```swift
 @Test func selectedInboundPCMCanBeOriginalOrTranslated() async throws {
@@ -286,17 +286,17 @@ Commit: `feat: buffer inbound translation utterances`
 }
 ```
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 Run: `swift test --filter selectedInboundPCMCanBeOriginalOrTranslated`
 
 Expected: compilation fails because `enqueueInboundOutput` does not exist.
 
-- [ ] **Step 3: Implement the generic entry and preserve compatibility**
+- [x] **Step 3: Implement the generic entry and preserve compatibility**
 
 Move the current decoder/write body to `enqueueInboundOutput(_:)`; keep `enqueueInboundTranslation(_:)` as a forwarding compatibility method until all coordinator call sites migrate.
 
-- [ ] **Step 4: Run audio-engine tests and commit**
+- [x] **Step 4: Run audio-engine tests and commit**
 
 Run: `swift test --filter EMKEAudioEngineTests`
 

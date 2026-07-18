@@ -227,7 +227,7 @@ public actor LocalAudioEngine {
         }
     }
 
-    public func enqueueInboundTranslation(_ pcm16: Data) async throws {
+    public func enqueueInboundOutput(_ pcm16: Data) async throws {
         guard state == .running else {
             throw AudioEngineFailure.notRunning
         }
@@ -238,6 +238,10 @@ public actor LocalAudioEngine {
             to: endpoints.physicalOutput,
             role: .physicalOutput
         )
+    }
+
+    public func enqueueInboundTranslation(_ pcm16: Data) async throws {
+        try await enqueueInboundOutput(pcm16)
     }
 
     public func enqueueOutboundTranslation(_ pcm16: Data) async throws {

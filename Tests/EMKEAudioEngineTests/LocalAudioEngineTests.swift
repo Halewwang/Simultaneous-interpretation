@@ -246,6 +246,22 @@ func start(_ harness: EngineHarness) async throws {
     await harness.engine.stop()
 }
 
+@Test func selectedInboundPCMCanBeOriginalOrTranslated() async throws {
+    let harness = makeHarness()
+    try await start(harness)
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .mutedFailClosed
+    )
+
+    try await harness.engine.enqueueInboundOutput(
+        Data([0xff, 0x7f])
+    )
+
+    #expect(harness.factory.physicalOutput.writes == [[1, 1, 1, 1]])
+    await harness.engine.stop()
+}
+
 @Test func outboundFailClosedNeverWritesCapturedMicrophoneFrames() async throws {
     let harness = makeHarness()
     try await start(harness)
