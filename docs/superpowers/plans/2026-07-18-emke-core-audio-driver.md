@@ -126,7 +126,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: add realti
 - Consumes: Task 1 ring buffers.
 - Produces: opaque `EMKEAudioRoutes`, speaker capture write/read functions, microphone translation write/read functions, reset, and dropped/underrun frame counters.
 
-- [ ] **Step 1: Write failing route-isolation and fail-safe tests**
+- [x] **Step 1: Write failing route-isolation and fail-safe tests**
 
 Create tests that prove:
 
@@ -136,23 +136,23 @@ Create tests that prove:
 - an empty microphone route returns the requested frame count as silence;
 - a full speaker route drops newest frames and increments its dropped-frame counter.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter AudioRoutesTests`
 
 Expected: compilation fails because `EMKEAudioRoutesCreate` and the route functions do not exist.
 
-- [ ] **Step 3: Implement two independent real-time routes**
+- [x] **Step 3: Implement two independent real-time routes**
 
 Use two Task 1 buffers inside `EMKEAudioRoutes`. `EMKEAudioRoutesReadMicrophone` always returns the requested frame count after zero-filling any unread tail. Maintain `_Atomic uint64_t` counters for speaker frames dropped and microphone frames zero-filled. `Reset` clears both buffers and all counters outside the HAL real-time callback.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter AudioRoutesTests && swift test --parallel`
 
 Expected: all route tests and existing tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/EMKEAudioBridge Tests/EMKEAudioBridgeTests/AudioRoutesTests.swift
