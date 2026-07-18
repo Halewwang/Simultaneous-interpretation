@@ -318,7 +318,7 @@ Commit: `feat: play coordinator-selected inbound audio`
 - Consumes: `AudioEngineConfiguration`, `APIConfiguration`, `TranslationPreferences`, API key, `TranslationAudioEngine`, `TranslationSessionBuilding`, `NaturalLanguageClassifier`, and Task-based timing.
 - Produces: `TranslationCoordinator`, `TranslationCoordinatorConfiguration`, `TranslationCoordinatorState`, `TranslationChannelState`, `SubtitleSnapshot`, and bounded `TranslationCoordinatorEvent` delivery.
 
-- [ ] **Step 1: Write failing configuration and channel-isolation tests**
+- [x] **Step 1: Write failing configuration and channel-isolation tests**
 
 ```swift
 @Test func startCreatesIndependentInboundAndOutboundSessions() async throws {
@@ -346,17 +346,17 @@ Commit: `feat: play coordinator-selected inbound audio`
 }
 ```
 
-- [ ] **Step 2: Run coordinator tests and confirm RED**
+- [x] **Step 2: Run coordinator tests and confirm RED**
 
 Run: `swift test --filter TranslationCoordinatorTests`
 
 Expected: compilation fails because coordinator interfaces do not exist.
 
-- [ ] **Step 3: Implement startup, independent session loops, and safe routing**
+- [x] **Step 3: Implement startup, independent session loops, and safe routing**
 
 Start the local engine first. Create inbound and outbound sessions independently. A failed inbound connect sends `.inboundConnectionFailed`; a failed outbound connect sends `.outboundConnectionFailed`; one failure never cancels the other. Matching languages select `.originalBypass` outbound and skip that network session.
 
-- [ ] **Step 4: Write failing dataflow and utterance tests**
+- [x] **Step 4: Write failing dataflow and utterance tests**
 
 ```swift
 @Test func audioEventsAreBatchedAndSentToTheirOwnSessions() async throws {
@@ -380,15 +380,15 @@ Start the local engine first. Create inbound and outbound sessions independently
 }
 ```
 
-- [ ] **Step 5: Implement dataflow, transcript classification, deadlines, and subtitles**
+- [x] **Step 5: Implement dataflow, transcript classification, deadlines, and subtitles**
 
 Feed every complete inbound frame to the inbound session and every complete outbound frame to the outbound session. Feed inbound source transcript deltas to `NaturalLanguageClassifier`; route selected chunks from `InboundUtteranceBuffer` into `enqueueInboundOutput`. Start the 250 ms decision deadline on the first translated-audio delta. Keep only the current source/translation text for each direction, cap each text field at 4,096 characters, emit subtitle snapshots in memory, and clear them on stop.
 
-- [ ] **Step 6: Implement bounded reconnect and graceful stop**
+- [x] **Step 6: Implement bounded reconnect and graceful stop**
 
 On a terminal channel error, switch routing immediately, recreate only that session with delays of 250 ms, 500 ms, 1 s, 2 s, and a 5 s cap. Inbound recovery changes from fail-open to translated only after the next `.utteranceEnded`; outbound recovery can leave muted fail-closed immediately. Stop audio appends, call `session.close()` while receive loops continue draining tail events, then stop the local engine and clear all buffers/tasks.
 
-- [ ] **Step 7: Run coordinator and full tests, then commit**
+- [x] **Step 7: Run coordinator and full tests, then commit**
 
 Run: `swift test --filter EMKECoordinatorTests && swift test --parallel`
 

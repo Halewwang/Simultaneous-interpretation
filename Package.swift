@@ -45,7 +45,12 @@ let package = Package(
         ),
         .target(
             name: "EMKECoordinator",
-            dependencies: ["EMKECore", "EMKERouting"]
+            dependencies: [
+                "EMKEAudioEngine",
+                "EMKECore",
+                "EMKERealtime",
+                "EMKERouting",
+            ]
         ),
         .executableTarget(
             name: "EMKEMenuBarApp",
