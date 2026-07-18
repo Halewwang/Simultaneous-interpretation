@@ -297,6 +297,34 @@ func installedDriverAppearsInCoreAudio() throws {
 private let expectedDriverState =
     ProcessInfo.processInfo.environment["EMKE_EXPECT_DRIVER_STATE"]
 
+private func driverStateMatchesExpectedState(
+    _ uids: Set<String>,
+    expectedState: String?
+) -> Bool {
+    let hasSpeaker = uids.contains(AudioDevice.virtualSpeakerUID)
+    let hasMicrophone = uids.contains(AudioDevice.virtualMicrophoneUID)
+
+    switch expectedState {
+    case "installed":
+        return hasSpeaker && hasMicrophone
+    case "absent":
+        return !hasSpeaker && !hasMicrophone
+    default:
+        return false
+    }
+}
+
+@Test func absentDriverStateRejectsEitherPartialDriverPresence() {
+    #expect(!driverStateMatchesExpectedState(
+        [AudioDevice.virtualSpeakerUID],
+        expectedState: "absent"
+    ))
+    #expect(!driverStateMatchesExpectedState(
+        [AudioDevice.virtualMicrophoneUID],
+        expectedState: "absent"
+    ))
+}
+
 @Test(
     .enabled(
         if: expectedDriverState == "installed" || expectedDriverState == "absent",
@@ -306,7 +334,8 @@ private let expectedDriverState =
 func installedDriverMatchesExpectedState() throws {
     let devices = try CoreAudioDeviceProvider().devices()
     let uids = Set(devices.map(\.uid))
-    let isInstalled = uids.contains(AudioDevice.virtualSpeakerUID)
-        && uids.contains(AudioDevice.virtualMicrophoneUID)
-    #expect(isInstalled == (expectedDriverState == "installed"))
+    #expect(driverStateMatchesExpectedState(
+        uids,
+        expectedState: expectedDriverState
+    ))
 }
