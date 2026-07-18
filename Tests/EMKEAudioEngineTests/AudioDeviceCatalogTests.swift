@@ -293,3 +293,20 @@ func installedDriverAppearsInCoreAudio() throws {
         #expect(device.outputChannelCount > 0)
     }
 }
+
+private let expectedDriverState =
+    ProcessInfo.processInfo.environment["EMKE_EXPECT_DRIVER_STATE"]
+
+@Test(
+    .enabled(
+        if: expectedDriverState == "installed" || expectedDriverState == "absent",
+        "Set EMKE_EXPECT_DRIVER_STATE=installed or absent"
+    )
+)
+func installedDriverMatchesExpectedState() throws {
+    let devices = try CoreAudioDeviceProvider().devices()
+    let uids = Set(devices.map(\.uid))
+    let isInstalled = uids.contains(AudioDevice.virtualSpeakerUID)
+        && uids.contains(AudioDevice.virtualMicrophoneUID)
+    #expect(isInstalled == (expectedDriverState == "installed"))
+}

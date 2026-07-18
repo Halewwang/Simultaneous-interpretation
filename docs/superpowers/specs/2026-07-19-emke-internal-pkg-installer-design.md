@@ -12,6 +12,17 @@ Package the existing EMKE Translation menu-bar executable and virtual Core Audio
 
 This milestone does not claim public distribution readiness. It also does not prove live provider compatibility, translation latency, or Feishu/DingTalk/Teams end-to-end behavior; those remain separate interactive acceptance gates after installation is stable.
 
+## 1.1 Internal Operator Boundary
+
+`Packaging/README.md` is the operator entry point for this package. It applies
+only to the current development Mac: the arm64 app and driver payloads are
+ad-hoc signed, while the `.pkg` is unsigned and not notarized. Before either
+installation or uninstallation, the operator must quit EMKE and active audio
+applications because Core Audio restarts. Default uninstall preserves
+UserDefaults and Keychain data; `--purge-user-data` is the explicit destructive
+path. Public release remains blocked on Developer ID signing, notarization,
+stapling, clean-Mac acceptance, and the separate icon rights/originality review.
+
 ## 2. Locked Product Decisions
 
 - The deliverable is one joint package named `EMKE-Translation-0.1.0-internal.pkg`.

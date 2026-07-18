@@ -18,3 +18,8 @@ swift run EMKEMenuBarApp
 ```
 
 SwiftPM 可执行文件只用于开发验证，不是已签名或可分发的 macOS 安装包。不要把真实 API Key、Authorization 头、录音或截图凭据加入仓库。
+
+如需在当前开发 Mac 上构建、验证、安装或卸载内部 `.pkg`，请阅读
+[`Packaging/README.md`](Packaging/README.md)。该包仅供内部使用：payload 为
+ad-hoc 签名，`.pkg` 为 unsigned、not notarized 且仅支持 arm64；安装或卸载会
+重启 Core Audio。它不是可公开发布的安装包。
