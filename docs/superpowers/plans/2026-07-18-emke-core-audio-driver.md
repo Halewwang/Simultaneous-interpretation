@@ -257,13 +257,14 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: implement 
 - Create: `Driver/EMKEAudioDriver/Info.plist`
 - Create: `Driver/Makefile`
 - Create: `Driver/verify-bundle.sh`
+- Create: `Driver/verify-bundle.c`
 - Modify: `.gitignore`
 
 **Interfaces:**
 - Consumes: Task 4 C sources.
 - Produces: `.build/driver/EMKEAudioDriver.driver` with executable `Contents/MacOS/EMKEAudioDriver`.
 
-- [ ] **Step 1: Write the bundle verifier and verify RED**
+- [x] **Step 1: Write the bundle verifier and verify RED**
 
 The verifier must fail unless the bundle has package type `BNDL`, identifier `com.emke.translation.audio-driver`, the expected CFPlugIn type/factory UUID mapping, an arm64 Mach-O executable, linked CoreAudio/CoreFoundation frameworks, and exported symbol `_EMKEAudioDriver_Create`.
 
@@ -271,21 +272,21 @@ Run: `bash Driver/verify-bundle.sh .build/driver/EMKEAudioDriver.driver`
 
 Expected: nonzero exit because the bundle does not exist.
 
-- [ ] **Step 2: Add the plist and Makefile build**
+- [x] **Step 2: Add the plist and Makefile build**
 
 The Makefile creates the bundle directory, compiles the three C sources with `-std=c11 -arch arm64 -mmacosx-version-min=14.0 -fPIC -Wall -Wextra -Werror`, links a bundle with CoreAudio/CoreFoundation, and copies the static plist and license into `Contents`.
 
-- [ ] **Step 3: Build and verify GREEN**
+- [x] **Step 3: Build and verify GREEN**
 
 Run: `make -C Driver clean all && bash Driver/verify-bundle.sh .build/driver/EMKEAudioDriver.driver`
 
 Expected: bundle verification prints the identifier, architecture, exported factory, and `PASS`.
 
-- [ ] **Step 4: Verify the bundle factory is loadable outside coreaudiod**
+- [x] **Step 4: Verify the bundle factory is loadable outside coreaudiod**
 
 Use `/usr/bin/codesign --sign - --force` for an ad-hoc local test signature, then run a small `CFBundleLoadExecutable` smoke command from the verifier that resolves `EMKEAudioDriver_Create` and requests the `kAudioServerPlugInTypeUUID` interface. Expected: non-null driver reference and exit `0`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .gitignore Driver
