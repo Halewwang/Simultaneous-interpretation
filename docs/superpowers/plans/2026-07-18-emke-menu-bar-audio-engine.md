@@ -451,11 +451,11 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: add EMKE m
 - Consumes: all prior tasks plus the locally installed driver.
 - Produces: repeatable system integration evidence and the exact boundary for the Translation coordinator plan.
 
-- [ ] **Step 1: Document ownership, formats, and safety states**
+- [x] **Step 1: Document ownership, formats, and safety states**
 
 Document the four device roles, exact UIDs, 48 kHz stereo app transport, 24 kHz mono PCM16 network boundary, buffer limits, stop order, fail-open/fail-closed behavior, and the rule that the engine never changes system defaults.
 
-- [ ] **Step 2: Run an installed-device start/stop smoke test**
+- [x] **Step 2: Run an installed-device start/stop smoke test**
 
 Add an opt-in test gated by `EMKE_RUN_LIVE_AUDIO_TESTS=1`. It resolves both EMKE UIDs, opens their companion directions, starts them for 250 ms, stops them, and verifies no Core Audio error. It must not select a physical device or mutate defaults.
 
@@ -463,7 +463,7 @@ Run: `EMKE_RUN_LIVE_AUDIO_TESTS=1 swift test --filter liveVirtualEndpointsStartA
 
 Expected: both installed virtual endpoints start and stop successfully.
 
-- [ ] **Step 3: Run final automated verification**
+- [x] **Step 3: Run final automated verification**
 
 Run:
 
@@ -478,7 +478,7 @@ rg -n "malloc|calloc|realloc|pthread_mutex|dispatch_|NSLog|printf|open\(|write\(
 
 Expected: all tests/builds pass; allocation appears only in endpoint create/destroy paths; no lock, logging, file, network, or Swift call appears in AUHAL callbacks.
 
-- [ ] **Step 4: Mark the plan complete and commit**
+- [x] **Step 4: Mark the plan complete and commit**
 
 ```bash
 git add docs

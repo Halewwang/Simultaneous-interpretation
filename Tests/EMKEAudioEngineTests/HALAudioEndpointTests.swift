@@ -1,6 +1,7 @@
 import CoreAudio
 import EMKEAudioHAL
 @testable import EMKEAudioEngine
+import Foundation
 import Testing
 
 @Test func invalidAudioObjectIDsAreRejected() {
@@ -77,3 +78,39 @@ private let installedVirtualDevicesAreAvailable: Bool = {
     return uids.contains(AudioDevice.virtualSpeakerUID)
         && uids.contains(AudioDevice.virtualMicrophoneUID)
 }()
+
+private let liveAudioTestsEnabled =
+    ProcessInfo.processInfo.environment["EMKE_RUN_LIVE_AUDIO_TESTS"] == "1"
+
+@Test(
+    .enabled(
+        if: liveAudioTestsEnabled && installedVirtualDevicesAreAvailable,
+        "Set EMKE_RUN_LIVE_AUDIO_TESTS=1 with the driver installed"
+    )
+)
+func liveVirtualEndpointsStartAndStop() async throws {
+    let devices = try CoreAudioDeviceProvider().devices()
+    let virtualSpeaker = try #require(
+        devices.first { $0.uid == AudioDevice.virtualSpeakerUID }
+    )
+    let virtualMicrophone = try #require(
+        devices.first { $0.uid == AudioDevice.virtualMicrophoneUID }
+    )
+    let input = try HALAudioInputEndpoint(
+        deviceID: virtualSpeaker.id,
+        capacityFrames: 4_800
+    )
+    let output = try HALAudioOutputEndpoint(
+        deviceID: virtualMicrophone.id,
+        capacityFrames: 4_800
+    )
+
+    try output.start()
+    try input.start()
+    try await Task.sleep(for: .milliseconds(250))
+
+    input.stop()
+    output.stop()
+    #expect(!input.isStarted)
+    #expect(!output.isStarted)
+}

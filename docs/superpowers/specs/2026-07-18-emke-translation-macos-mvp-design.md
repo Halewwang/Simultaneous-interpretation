@@ -120,6 +120,8 @@ Apple 当前文档将 Audio Server Driver Plug-in 作为构建纯虚拟音频设
 
 设备切换、蓝牙采样率变化、睡眠唤醒和会议软件重新打开设备都由音频引擎重新协商，不能要求用户重启应用。
 
+当前本地音频子系统以固定 48 kHz 双声道 Float32 作为 App 与 AUHAL 的传输格式，通过四个按 UID 解析的端点分别连接虚拟扬声器、真实麦克风、真实耳机和虚拟麦克风。精确的端点所有权、实时线程限制、启停顺序、队列上限与旁路安全合同见 [`docs/local-audio-engine-contract.md`](../../local-audio-engine-contract.md)。该子系统不修改 macOS 默认音频设备；模型会话编排在后续阶段接入。
+
 ### 5.4 Translation Client
 
 `TranslationClient` 只实现 OpenAI Realtime Translation 协议，不实现 Chat Completions、Responses、普通 Realtime voice-agent 协议或其他服务商私有协议。入站和出站客户端相互隔离，任何一条连接失败都不应终止另一条。
