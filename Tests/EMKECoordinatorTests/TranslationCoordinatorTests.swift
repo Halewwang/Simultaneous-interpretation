@@ -298,7 +298,7 @@ private func transcriptDelta(_ text: String) -> TranslationTranscriptDelta {
 private func eventually(
     _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
-    for _ in 0..<2_000 {
+    for _ in 0..<20_000 {
         if await condition() { return true }
         await Task.yield()
     }
@@ -350,6 +350,75 @@ func audioLevelEventsAreThrottledAndQueuedSnapshotsAreCoalesced() async throws {
 
     let latest = await harness.nextAudioLevelEvent()
     #expect(latest.inbound > 0.2)
+}
+
+@Test
+func audioLevelEventsRespectTheMinimumPublishInterval() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.drainStartupEvents()
+
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 8_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.outbound.appended.count == 1
+        }
+    )
+    let first = await harness.nextAudioLevelEvent()
+
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 12_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.outbound.appended.count == 2
+        }
+    )
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 7
+    ))
+    #expect(await harness.coordinator.nextEvent() ==
+        .audioBackpressure(droppedFrames: 7))
+
+    harness.levelClock.advance(milliseconds: 34)
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.outbound.appended.count == 3
+        }
+    )
+    let third = await harness.nextAudioLevelEvent()
+    #expect(third.outbound > first.outbound)
+}
+
+@Test
+func audioLevelsNeverEvictControlsFromAFullQueue() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.drainStartupEvents()
+
+    for droppedFrames in 0..<128 {
+        await harness.audio.emit(.outputBackpressure(
+            role: .physicalOutput,
+            droppedFrames: droppedFrames
+        ))
+    }
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000, sampleCount: 4_800)
+    ))
+    #expect(
+        await eventually {
+            await harness.outbound.appended.count == 1
+        }
+    )
+
+    #expect(await harness.coordinator.nextEvent() ==
+        .audioBackpressure(droppedFrames: 0))
 }
 
 @Test

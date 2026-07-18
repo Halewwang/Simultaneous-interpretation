@@ -818,6 +818,10 @@ public actor TranslationCoordinator {
             events.append(event)
             return
         }
+        if case .audioLevels = event,
+           events.count >= Self.maximumQueuedEvents {
+            return
+        }
         if events.count < Self.maximumQueuedEvents {
             events.append(event)
         } else {
