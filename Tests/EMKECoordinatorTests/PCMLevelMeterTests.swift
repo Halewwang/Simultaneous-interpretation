@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import EMKECoordinator
 
-private func levelMeterPCM16(
+func levelMeterPCM16(
     amplitude: Int16,
     sampleCount: Int = 240
 ) -> Data {
