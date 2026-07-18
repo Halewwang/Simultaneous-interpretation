@@ -19,6 +19,7 @@ bash "$ROOT/Packaging/Scripts/build-app-icon.sh" \
 /usr/bin/ditto "$ICON_OUTPUT/AppIcon.icns" \
   "$APP/Contents/Resources/AppIcon.icns"
 /bin/chmod 755 "$APP/Contents/MacOS/EMKEMenuBarApp"
+/usr/bin/xattr -cr "$APP"
 /usr/bin/plutil -lint "$APP/Contents/Info.plist"
 /usr/bin/codesign --force --sign - --options runtime --timestamp=none "$APP"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"

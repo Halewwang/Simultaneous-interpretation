@@ -93,14 +93,21 @@ It performs these steps in order:
 2. Run `swift build -c release --product EMKEMenuBarApp`.
 3. Run `make -C Driver clean verify` to rebuild and verify the driver bundle.
 4. Generate `AppIcon.icns` from the approved master.
-5. Assemble the app and driver under an isolated staging root inside `.build/distribution`.
+5. Assemble the app and driver under an isolated durable staging root inside `.build/distribution`.
 6. Apply exact ownership and modes: directories/executables `0755`, metadata/resources `0644`.
 7. Ad-hoc sign the driver and app, then verify both with strict code-signing checks.
 8. Add the uninstaller under `/Library/Application Support/EMKE Translation`.
-9. Build the unsigned internal component package with `pkgbuild`.
-10. Run the package verifier before reporting the artifact path.
+9. Copy that staging root with resource forks, Finder metadata, quarantine, and
+   source xattrs disabled into a guarded, transient directory under canonical
+   `${TMPDIR:-/tmp}`. This mirror exists only to cross the macOS 26 FileProvider
+   boundary; it must contain no physical AppleDouble files and no xattr other
+   than the unavoidable `com.apple.provenance` transport marker.
+10. Strictly verify both bundles again from the sanitized mirror, build the
+    unsigned internal component package with `pkgbuild`, and trap-delete the
+    mirror without touching any system install path.
+11. Run the package verifier before reporting the artifact path.
 
-All generated files remain under `.build/distribution`; no build step writes to `/Applications` or `/Library`. Scripts use `set -euo pipefail`, remove only their owned staging directory, and stop on the first invalid artifact.
+All durable generated files remain under `.build/distribution`; only the guarded sanitized mirror is ephemeral under canonical `${TMPDIR:-/tmp}`. No build step writes to `/Applications` or `/Library`. Scripts use `set -euo pipefail`, remove only their owned staging directories, and stop on the first invalid artifact.
 
 ## 7. Installation and Post-install Behavior
 
@@ -150,6 +157,13 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
 - driver bundle factory smoke test and exact virtual device UIDs;
 - absence of credential values, private keys, transcripts, and audio files; protocol literals such as the `Authorization` field name are allowed because the app must construct authenticated requests at runtime;
 - no unexpected writable or world-writable payload paths.
+
+On macOS 26, `pkgbuild` may expose unavoidable `com.apple.provenance` as
+AppleDouble transport records in `pkgutil --payload-files`. The verifier may
+decode exactly one `._name` component only when the decoded target is also
+present and already accepted by the unchanged payload allowlist. It rejects
+orphan or ambiguous transport records, every physical `._*` file after full
+expansion, and every expanded payload xattr other than `com.apple.provenance`.
 
 An unsigned package is expected for this milestone. `pkgutil --check-signature` and Gatekeeper assessment results must be reported truthfully as unsigned/not notarized, not treated as production passes.
 

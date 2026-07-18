@@ -660,10 +660,26 @@ git commit -m "feat: add reversible installer lifecycle"
 - Create: `Packaging/Tests/run-all.sh`
 - Create: `Packaging/build-internal-pkg.sh`
 - Create: `Packaging/verify-internal-pkg.sh`
+- Modify: `Packaging/Scripts/build-app-bundle.sh`
+- Modify: `docs/superpowers/specs/2026-07-19-emke-internal-pkg-installer-design.md`
+- Modify: `docs/superpowers/plans/2026-07-19-emke-internal-pkg-installer.md`
 
 **Interfaces:**
 - Consumes: Task 2 app builder, Task 3 lifecycle scripts, `make -C Driver clean verify`.
 - Produces: `.build/distribution/EMKE-Translation-0.1.0-internal.pkg` and a verifier that exits zero only for the expected unsigned internal artifact.
+
+**macOS 26 FileProvider amendment:** `.build/distribution/staging-root` remains
+the durable, owned staging tree. Before `pkgbuild`, copy it with
+`COPYFILE_DISABLE=1` and `ditto --norsrc --noextattr --noqtn` into a guarded
+`mktemp` directory that is a verified descendant of canonical
+`${TMPDIR:-/tmp}`. Reject physical AppleDouble files and every xattr other than
+the unavoidable `com.apple.provenance`, re-run strict bundle verification from
+that mirror, use the mirror as `pkgbuild --root`, and trap-delete it. No install
+path is touched and every durable artifact remains under `.build/distribution`.
+The verifier canonicalizes a single AppleDouble transport component only when
+its decoded target is present and accepted by the unchanged payload allowlist;
+orphan or ambiguous metadata, physical `._*` files, and non-provenance payload
+xattrs fail verification.
 
 - [ ] **Step 1: Write the failing package-pipeline test**
 
