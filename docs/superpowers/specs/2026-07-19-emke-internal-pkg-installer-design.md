@@ -148,7 +148,7 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
 - valid `.icns` plus all required source icon sizes;
 - strict ad-hoc signature verification for app and driver;
 - driver bundle factory smoke test and exact virtual device UIDs;
-- absence of API Keys, Authorization headers, private keys, transcripts, and audio files;
+- absence of credential values, private keys, transcripts, and audio files; protocol literals such as the `Authorization` field name are allowed because the app must construct authenticated requests at runtime;
 - no unexpected writable or world-writable payload paths.
 
 An unsigned package is expected for this milestone. `pkgutil --check-signature` and Gatekeeper assessment results must be reported truthfully as unsigned/not notarized, not treated as production passes.
