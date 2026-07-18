@@ -100,7 +100,7 @@ bash Packaging/build-internal-pkg.sh
 
 It performs these steps in order:
 
-1. Validate macOS, Apple Silicon, required command-line tools, and a clean output location.
+1. Validate macOS, Apple Silicon, required command-line tools, and a clean output location. Before any destructive cleanup, require the repository root to be the physical canonical Git worktree root; reject `.build`, `.build/distribution`, or an owned cleanup child when it is a symlink, resolves through a symlink ancestor, or escapes that root. Cleanup is limited to the exact `staging-root`, `components`, and package-file descendants.
 2. Run `swift build -c release --product EMKEMenuBarApp`.
 3. Run `make -C Driver clean verify` to rebuild and verify the driver bundle.
 4. Generate `AppIcon.icns` from the approved master.
@@ -118,7 +118,7 @@ It performs these steps in order:
     mirror without touching any system install path.
 11. Run the package verifier before reporting the artifact path.
 
-All durable generated files remain under `.build/distribution`; only the guarded sanitized mirror is ephemeral under canonical `${TMPDIR:-/tmp}`. No build step writes to `/Applications` or `/Library`. Scripts use `set -euo pipefail`, remove only their owned staging directories, and stop on the first invalid artifact.
+Generated scratch remains under `.build/distribution`; only the guarded sanitized mirror is ephemeral under canonical `${TMPDIR:-/tmp}`. In particular, `.build/distribution/components` is a non-delivery intermediate that FileProvider may later decorate with xattrs, so it is not a durable handoff or a source of long-term signature evidence. The only handoff artifact is the `.pkg` after `verify-internal-pkg.sh` passes. The builder still verifies the freshly assembled app and driver before packaging, the sanitized package root immediately before `pkgbuild`, and the extracted payload after packaging. No build step writes to `/Applications` or `/Library`. Scripts use `set -euo pipefail`, remove only their exact owned descendants, and stop on the first invalid artifact.
 
 ## 7. Installation and Post-install Behavior
 
@@ -154,6 +154,8 @@ It then refreshes Core Audio. It preserves:
 
 The explicit `--purge-user-data` option first deletes that Keychain item and UserDefaults domain as the logged-in user, then performs the normal system uninstall. The script must reject unknown options, verify every deletion target against a fixed allowlist, and never use a wildcard path.
 
+Lifecycle contract tests use an explicit validation-only mode that is accepted only together with the isolated test root. It runs the same canonical root and target checks as removal, then exits before purge, receipt, Core Audio, or deletion operations. Default and purge removal behavior remain tested only under the canonical temporary `SAFE_ROOT`.
+
 ## 9. Verification Gates
 
 ### Deterministic package verification
@@ -165,6 +167,9 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
   `postinstall` script;
 - exact package identifier, version, install location `/`, and required raw
   app, driver, and uninstaller entries;
+- exact root `PackageInfo` authorization `auth="root"`, plus every BOM payload
+  record owned by numeric UID `0` and GID `0` (`root:wheel` in macOS package
+  semantics);
 - raw payload paths with no traversal, absolute path, empty/dot/control
   component, prefix ambiguity, duplicate business path, orphan/ambiguous
   AppleDouble record, or multiple metadata records for one target;
@@ -220,6 +225,7 @@ The install/uninstall/reinstall test is successful only when all owned artifacts
 ## 10. Failure Handling
 
 - Build or verification failure produces no reported package artifact.
+- A non-canonical repository root, symlinked `.build`/distribution/owned cleanup child, non-root package authorization, or non-root BOM entry fails before the corresponding destructive cleanup or artifact handoff.
 - A missing tool, unsupported architecture, malformed icon, invalid signature, unexpected package path, or failed driver verifier stops the pipeline before installation.
 - Post-install Core Audio refresh failure returns a non-zero installer status and instructs the tester to reboot; it is not silently ignored.
 - Uninstall refuses to continue if an expected target resolves outside its fixed installed path.

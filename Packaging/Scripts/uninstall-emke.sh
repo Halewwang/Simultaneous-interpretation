@@ -19,12 +19,21 @@ fi
 
 TEST_MODE="${EMKE_TEST_MODE:-0}"
 TEST_ROOT="${EMKE_TEST_ROOT:-}"
+VALIDATE_ONLY="${EMKE_VALIDATE_ONLY:-0}"
 PREFIX=""
 
 test_root_error() {
   echo "$1" >&2
   exit 65
 }
+
+case "$VALIDATE_ONLY" in
+  0|1) ;;
+  *) test_root_error "EMKE_VALIDATE_ONLY must be 0 or 1" ;;
+esac
+if [[ "$VALIDATE_ONLY" == "1" && "$TEST_MODE" != "1" ]]; then
+  test_root_error "EMKE_VALIDATE_ONLY=1 requires EMKE_TEST_MODE=1"
+fi
 
 if [[ "$TEST_MODE" == "1" ]]; then
   [[ -n "$TEST_ROOT" ]] || test_root_error "EMKE_TEST_MODE=1 requires EMKE_TEST_ROOT"
@@ -142,6 +151,11 @@ if [[ "$TEST_MODE" == "1" ]]; then
   validate_test_target "$APP"
   validate_test_target "$DRIVER"
   validate_test_target "$SUPPORT"
+fi
+
+if [[ "$VALIDATE_ONLY" == "1" ]]; then
+  echo "EMKE uninstall targets validated."
+  exit 0
 fi
 
 if [[ "$PURGE" == "1" ]]; then

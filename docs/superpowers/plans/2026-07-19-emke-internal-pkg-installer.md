@@ -20,7 +20,7 @@
 - Default uninstall preserves Keychain service `com.emke.translation`, account `openai-api-key`, and UserDefaults domain `com.emke.translation.app`.
 - `--purge-user-data` is the only path that removes those user values.
 - Installing and uninstalling refresh Core Audio and must not run during a meeting, recording, or other active audio session.
-- Every generated artifact remains under `.build/distribution` until the separate explicit install step.
+- Generated scratch remains under `.build/distribution`, but `components` and `staging-root` are non-delivery intermediates that may later acquire FileProvider xattrs. The sole handoff is the `.pkg` after its verifier passes.
 
 ## File Map
 
@@ -31,6 +31,7 @@
 | `Packaging/Scripts/prepare-icon-master.swift` | Normalize the raster master and remove only the border-connected white background. |
 | `Packaging/Scripts/build-app-icon.sh` | Produce the ten-file iconset and compile `AppIcon.icns`. |
 | `Packaging/Scripts/build-app-bundle.sh` | Build the release executable, assemble the `.app`, ad-hoc sign, and verify it. |
+| `Packaging/Scripts/validate-build-cleanup.sh` | Non-mutating canonical/symlink/containment guard for exact distribution cleanup descendants. |
 | `Packaging/InstallerScripts/postinstall` | Refresh Core Audio after package payload installation. |
 | `Packaging/Scripts/uninstall-emke.sh` | Safely remove fixed owned paths, optionally purge user data, forget the receipt, and refresh Core Audio. |
 | `Packaging/build-internal-pkg.sh` | Orchestrate app, driver, staging root, lifecycle script, package creation, and final verification. |
@@ -291,7 +292,8 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" \
   = "14.0"
 test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"
-/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp" | /usr/bin/grep -q arm64
+FILE_OUTPUT="$(/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp")"
+/usr/bin/grep -q arm64 <<< "$FILE_OUTPUT"
 echo "PASS: app bundle"
 ```
 
@@ -392,7 +394,7 @@ git commit -m "feat: assemble signed menu bar app bundle"
 **Interfaces:**
 - Consumes: fixed install paths and package receipt from the design spec.
 - Produces: a `postinstall` package hook and `uninstall-emke.sh [--purge-user-data]` with a test-only isolated root guarded by `EMKE_TEST_MODE=1`.
-- Safety invariant: test mode requires a non-empty, existing root whose canonical path is a strict descendant of the canonical temporary directory. Root and target containment are validated before purge or deletion, and real-mode deletion remains fixed to the three owned paths.
+- Safety invariant: test mode requires a non-empty, existing root whose canonical path is a strict descendant of the canonical temporary directory. Root and target containment are validated before purge or deletion, and real-mode deletion remains fixed to the three owned paths. `EMKE_VALIDATE_ONLY=1` is accepted only in test mode, shares those checks, and exits before every mutation; negative-root tests use it, while default/purge removal tests remain under `SAFE_ROOT`.
 
 - [ ] **Step 1: Write lifecycle safety tests before scripts**
 
@@ -675,14 +677,17 @@ git commit -m "feat: add reversible installer lifecycle"
 - Consumes: Task 2 app builder, Task 3 lifecycle scripts, `make -C Driver clean verify`.
 - Produces: `.build/distribution/EMKE-Translation-0.1.0-internal.pkg` and a verifier that exits zero only for the expected unsigned internal artifact.
 
-**macOS 26 FileProvider amendment:** `.build/distribution/staging-root` remains
-the durable, owned staging tree. Before `pkgbuild`, copy it with
+**macOS 26 FileProvider amendment:** `.build/distribution/staging-root` and
+`components` are owned, non-delivery scratch trees. Before `pkgbuild`, copy the
+staging tree with
 `COPYFILE_DISABLE=1` and `ditto --norsrc --noextattr --noqtn` into a guarded
 `mktemp` directory that is a verified descendant of canonical
 `${TMPDIR:-/tmp}`. Reject physical AppleDouble files and every xattr other than
 the unavoidable `com.apple.provenance`, re-run strict bundle verification from
 that mirror, use the mirror as `pkgbuild --root`, and trap-delete it. No install
-path is touched and every durable artifact remains under `.build/distribution`.
+path is touched. FileProvider may decorate those scratch trees after their
+generation-time checks; they are not durable signature evidence. The only
+handoff is the verified `.pkg` under `.build/distribution`.
 The verifier canonicalizes a single AppleDouble transport component only when
 its decoded target is present and accepted by the unchanged payload allowlist;
 orphan or ambiguous metadata, physical `._*` files, and non-provenance payload
@@ -691,7 +696,9 @@ xattrs fail verification.
 **Security-hardening amendment:** the expanded package is anchored only at
 `$EXPANDED/PackageInfo`, `$EXPANDED/Payload`, and `$EXPANDED/Scripts`; top-level
 decoys and duplicate named anchors fail. `xmllint` extracts the exact component
-identifier, version, and `/` install location. A dedicated parser validates the
+identifier, version, `/` install location, and exact `auth="root"`. Every BOM
+payload record must have numeric UID/GID `0:0` (`root:wheel`). A dedicated
+parser validates the
 single captured raw payload listing and rejects absolute/traversal/control/dot
 paths, empty components, prefix ambiguity, duplicate business paths, and
 orphan/ambiguous/duplicate-target AppleDouble metadata before checking required
@@ -710,6 +717,15 @@ Unsigned status requires exact `Status: no signature`; not-notarized status is
 reported only with Gatekeeper's exact `source=no usable signature` rejection.
 All `find` and `xattr` scans propagate failures, and cleanup traps are installed
 immediately after temporary roots are created.
+
+**Final-review cleanup amendment:** before any distribution `rm`, a pure helper
+confirms the physical canonical repository path is the Git worktree root,
+rejects symlinked `.build`, distribution, staging, components, or package
+children, and proves all cleanup arguments are the exact owned descendants.
+The non-destructive regression test uses temporary Git repositories and
+external sentinels. Fresh app/driver, sanitized-root, and extracted-package
+signature verification remain mandatory even though intermediate component
+trees are not delivery artifacts.
 
 The code blocks below are the original TDD seed. Where they differ from this
 security amendment, the amendment and the checked-in scripts are normative.
@@ -768,6 +784,9 @@ COMPONENTS="$DIST/components"
 APP="$COMPONENTS/EMKE Translation.app"
 PKG="$DIST/EMKE-Translation-0.1.0-internal.pkg"
 
+bash "$ROOT/Packaging/Scripts/validate-build-cleanup.sh" \
+  "$ROOT" "$STAGE" "$COMPONENTS" "$PKG"
+
 require_tool() { command -v "$1" >/dev/null 2>&1 || {
   echo "missing required tool: $1" >&2; exit 69; }; }
 test "$(uname -s)" = Darwin
@@ -776,7 +795,8 @@ for tool in swift make iconutil sips codesign pkgbuild pkgutil; do
   require_tool "$tool"
 done
 
-rm -rf "$STAGE" "$COMPONENTS" "$PKG"
+/bin/rm -rf -- "$STAGE" "$COMPONENTS"
+/bin/rm -f -- "$PKG"
 mkdir -p "$STAGE/Applications" \
   "$STAGE/Library/Audio/Plug-Ins/HAL" \
   "$STAGE/Library/Application Support/EMKE Translation" \
@@ -1161,6 +1181,11 @@ git diff --check
 
 Expected: every command exits zero; report exact Swift counts and any intentionally disabled test separately.
 
+Final-review hardening observation on 2026-07-19: `swift test --parallel`
+reported `189 tests` passed, with exactly two opt-in tests skipped in the log:
+`liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState`.
+The generic run did not enable either installed-machine boundary.
+
 - [ ] **Step 2: Verify final artifact metadata and repository state**
 
 ```bash
@@ -1169,13 +1194,11 @@ pkgutil --check-signature \
   .build/distribution/EMKE-Translation-0.1.0-internal.pkg || true
 spctl --assess --type install --verbose=4 \
   .build/distribution/EMKE-Translation-0.1.0-internal.pkg || true
-spctl --assess --type execute --verbose=4 \
-  ".build/distribution/components/EMKE Translation.app" || true
 git status --short --branch
 git log --oneline --decorate -8
 ```
 
-Expected: package hash is recorded; signature output says unsigned/no signature; Gatekeeper rejects the internal package/app because they are not Developer ID signed or notarized; worktree is clean; branch contains the planned focused commits.
+Expected: package hash is recorded; signature output says unsigned/no signature; Gatekeeper rejects the internal package because it is not Developer ID signed or notarized; worktree is clean; branch contains the planned focused commits. Do not use the non-delivery `components` app as long-term handoff or signature evidence.
 
 - [ ] **Step 3: Run completion review before branch integration**
 

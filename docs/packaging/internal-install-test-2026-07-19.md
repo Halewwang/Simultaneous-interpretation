@@ -194,8 +194,8 @@ distribution remains blocked on:
 **BLOCKED — automated non-installing checks pass; privileged lifecycle
 acceptance was not run.**
 
-The artifact hash and verifier are reproducible in this run, and the existing
-Core Audio driver state probe passed. Installation, installed-app launch, live
-endpoint operation, default uninstall, user-data preservation after uninstall,
+The artifact hash was recorded and the verifier passed for that artifact in
+this run; the existing Core Audio driver state probe also passed. Installation,
+installed-app launch, live endpoint operation, default uninstall, user-data preservation after uninstall,
 reinstallation, and manual meeting-app checks remain **NOT RUN / NOT
 VERIFIED**. No lifecycle phase may be reported as `PASS` from this evidence.

@@ -15,5 +15,6 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" \
   = "14.0"
 test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"
-/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp" | /usr/bin/grep -q arm64
+FILE_OUTPUT="$(/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp")"
+/usr/bin/grep -q arm64 <<< "$FILE_OUTPUT"
 echo "PASS: app bundle"

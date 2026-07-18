@@ -7,6 +7,9 @@ COMPONENTS="$DIST/components"
 APP="$COMPONENTS/EMKE Translation.app"
 PKG="$DIST/EMKE-Translation-0.1.0-internal.pkg"
 
+bash "$ROOT/Packaging/Scripts/validate-build-cleanup.sh" \
+  "$ROOT" "$STAGE" "$COMPONENTS" "$PKG"
+
 require_tool() { command -v "$1" >/dev/null 2>&1 || {
   echo "missing required tool: $1" >&2; exit 69; }; }
 validate_sanitized_root() {
@@ -47,7 +50,8 @@ for tool in swift make iconutil sips codesign pkgbuild pkgutil; do
   require_tool "$tool"
 done
 
-rm -rf "$STAGE" "$COMPONENTS" "$PKG"
+/bin/rm -rf -- "$STAGE" "$COMPONENTS"
+/bin/rm -f -- "$PKG"
 mkdir -p "$STAGE/Applications" \
   "$STAGE/Library/Audio/Plug-Ins/HAL" \
   "$STAGE/Library/Application Support/EMKE Translation" \
@@ -109,4 +113,4 @@ validate_sanitized_root "$SANITIZED" "$SCAN_LIST"
   --scripts "$ROOT/Packaging/InstallerScripts" \
   "$PKG"
 bash "$ROOT/Packaging/verify-internal-pkg.sh" "$PKG"
-echo "$PKG"
+echo "VERIFIED_DELIVERY_PKG=$PKG"

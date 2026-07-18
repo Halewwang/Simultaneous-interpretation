@@ -58,36 +58,42 @@ prepare_owned_paths "$SAFE_ROOT"
 # Argument validation must happen before purge or deletion. This is intentionally
 # first so the pre-fix implementation fails safely inside the temporary root.
 expect_rejected_before_mutation extra-args 64 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$SAFE_ROOT" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$SAFE_ROOT" \
     EMKE_TEST_LOG="$TEMP/validation-log" \
     bash "$UNINSTALL" --purge-user-data --extra
 expect_rejected_before_mutation unknown-option 64 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$SAFE_ROOT" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$SAFE_ROOT" \
     EMKE_TEST_LOG="$TEMP/validation-log" \
     bash "$UNINSTALL" --unknown
 
-# Test mode must reject every root that is missing, non-existent, canonical `/`,
-# or resolves outside the canonical temporary directory, before mutation.
+# Validation-only mode shares the production target checks but exits before any
+# purge or removal. Negative roots can therefore never reach a remover.
 expect_rejected_before_mutation missing-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_LOG="$TEMP/validation-log" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_LOG="$TEMP/validation-log" \
     bash "$UNINSTALL"
 expect_rejected_before_mutation nonexistent-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP/does-not-exist" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$TEMP/does-not-exist" \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
 expect_rejected_before_mutation slash-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT=/ \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 EMKE_TEST_ROOT=/ \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
 expect_rejected_before_mutation outside-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$ROOT" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 EMKE_TEST_ROOT="$ROOT" \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
 
 ln -s / "$TEMP/slash-link"
 ln -s "$ROOT" "$TEMP/outside-link"
 expect_rejected_before_mutation slash-symlink-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP/slash-link" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$TEMP/slash-link" \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
 expect_rejected_before_mutation outside-symlink-root 65 "$SAFE_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP/outside-link" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$TEMP/outside-link" \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
 
 # A symlinked target parent must not escape an otherwise valid isolated root.
@@ -101,8 +107,20 @@ mkdir -p "$LINK_ROOT/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver" \
   "$ESCAPE_ROOT/Applications/Unrelated.app"
 ln -s "$ESCAPE_ROOT/Applications" "$LINK_ROOT/Applications"
 expect_rejected_before_mutation target-parent-symlink 67 "$LINK_ROOT" \
-  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$LINK_ROOT" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+    EMKE_TEST_ROOT="$LINK_ROOT" \
     EMKE_TEST_LOG="$TEMP/validation-log" bash "$UNINSTALL"
+
+# A valid isolated root also proves validation-only mode is an explicit no-op.
+VALIDATION_ONLY_ROOT="$TEMP/validation-only-root"
+prepare_owned_paths "$VALIDATION_ONLY_ROOT"
+: > "$TEMP/validation-only-log"
+EMKE_TEST_MODE=1 EMKE_VALIDATE_ONLY=1 \
+  EMKE_TEST_ROOT="$VALIDATION_ONLY_ROOT" \
+  EMKE_TEST_LOG="$TEMP/validation-only-log" bash "$UNINSTALL"
+assert_owned_paths_exist "$VALIDATION_ONLY_ROOT"
+assert_unrelated_paths_exist "$VALIDATION_ONLY_ROOT"
+test ! -s "$TEMP/validation-only-log" || fail "validation-only mode mutated state"
 
 # Default uninstall removes all owned system payloads while preserving user data
 # and unrelated siblings. The log is compared exactly to forbid purge markers.

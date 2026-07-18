@@ -135,6 +135,24 @@ require_payload_modes() {
     echo "unexpected payload object type" >&2; exit 1
   fi
 }
+require_root_bom_ownership() {
+  local listing="$TEMP/bom-ownership"
+  local uid
+  local gid
+  local extra
+  if ! /usr/bin/lsbom -p ug "$BOM" > "$listing"; then
+    echo "package BOM ownership discovery failed" >&2; exit 1
+  fi
+  if ! test -s "$listing"; then
+    echo "package BOM contains no payload entries" >&2; exit 1
+  fi
+  while IFS=$'\t' read -r uid gid extra; do
+    if test "$uid" != 0 || test "$gid" != 0 || test -n "$extra"; then
+      echo "non-root package BOM ownership: uid=$uid gid=$gid" >&2
+      exit 1
+    fi
+  done < "$listing"
+}
 scan_credential_like_values() {
   local item
   local index=0
@@ -184,12 +202,14 @@ require_plist_value() {
 require test -s "$PKG"
 /usr/sbin/pkgutil --expand-full "$PKG" "$EXPANDED"
 PACKAGE_INFO="$EXPANDED/PackageInfo"
+BOM="$EXPANDED/Bom"
 PAYLOAD_ROOT="$EXPANDED/Payload"
 SCRIPTS_ROOT="$EXPANDED/Scripts"
 APP="$PAYLOAD_ROOT/Applications/EMKE Translation.app"
 DRIVER="$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
 UNINSTALLER="$PAYLOAD_ROOT/Library/Application Support/EMKE Translation/uninstall-emke.sh"
 require_exact_expanded_layout
+require test -f "$BOM"
 require_no_control_character_paths
 require_no_world_writable_paths
 require_exact_scripts
@@ -208,6 +228,8 @@ PACKAGE_VERSION="$(/usr/bin/xmllint --xpath \
   'string(/pkg-info/@version)' "$PACKAGE_INFO")"
 INSTALL_LOCATION="$(/usr/bin/xmllint --xpath \
   'string(/pkg-info/@install-location)' "$PACKAGE_INFO")"
+PACKAGE_AUTH="$(/usr/bin/xmllint --xpath \
+  'string(/pkg-info/@auth)' "$PACKAGE_INFO")"
 if test "$PACKAGE_IDENTIFIER" != com.emke.translation.internal; then
   echo "unexpected package identifier" >&2; exit 1
 fi
@@ -217,6 +239,10 @@ fi
 if test "$INSTALL_LOCATION" != /; then
   echo "unexpected package install-location" >&2; exit 1
 fi
+if test "$PACKAGE_AUTH" != root; then
+  echo "unexpected package auth; expected root" >&2; exit 1
+fi
+require_root_bom_ownership
 if ! PHYSICAL_APPLEDOUBLE="$(/usr/bin/find "$PAYLOAD_ROOT" "$SCRIPTS_ROOT" \
   -name '._*' -print -quit)"; then
   echo "physical AppleDouble discovery failed" >&2; exit 1

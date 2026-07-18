@@ -82,6 +82,28 @@ LOCATION_EXPANDED="$TEMP/location-expanded"
 expect_rejected wrong-install-location "$TEMP/location.pkg" \
   'unexpected package install-location'
 
+AUTH_EXPANDED="$TEMP/auth-expanded"
+/usr/sbin/pkgutil --expand "$PKG" "$AUTH_EXPANDED"
+/usr/bin/sed -i '' 's#auth="root"#auth="admin"#' \
+  "$AUTH_EXPANDED/PackageInfo"
+test "$(/usr/bin/xmllint --xpath 'string(/pkg-info/@auth)' \
+  "$AUTH_EXPANDED/PackageInfo")" = admin
+/usr/sbin/pkgutil --flatten "$AUTH_EXPANDED" "$TEMP/auth.pkg"
+expect_rejected wrong-package-auth "$TEMP/auth.pkg" \
+  'unexpected package auth; expected root'
+
+BOM_EXPANDED="$TEMP/bom-expanded"
+/usr/sbin/pkgutil --expand "$PKG" "$BOM_EXPANDED"
+/usr/bin/printf '.\t40755\t501/20\n' > "$TEMP/non-root-bom-listing"
+/usr/bin/mkbom -i "$TEMP/non-root-bom-listing" "$BOM_EXPANDED/Bom"
+/usr/bin/lsbom -p ug "$BOM_EXPANDED/Bom" > "$TEMP/bom-ownership"
+if ! /usr/bin/grep -Fqx $'501\t20' "$TEMP/bom-ownership"; then
+  echo "failed to create non-root BOM fixture" >&2; exit 1
+fi
+/usr/sbin/pkgutil --flatten "$BOM_EXPANDED" "$TEMP/non-root-bom.pkg"
+expect_rejected non-root-bom "$TEMP/non-root-bom.pkg" \
+  'non-root package BOM ownership'
+
 CONTROL_EXPANDED="$TEMP/control-expanded"
 /usr/sbin/pkgutil --expand-full "$PKG" "$CONTROL_EXPANDED"
 CONTROL_APP="$CONTROL_EXPANDED/Payload/Applications/EMKE Translation.app"
