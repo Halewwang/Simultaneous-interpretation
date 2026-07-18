@@ -183,7 +183,7 @@ Commit: `feat: harden realtime translation sessions`
 - Consumes: arbitrary even-byte PCM16 chunks and `InboundLanguageGate` decisions.
 - Produces: exact 9,600-byte network frames, speech boundary events, and selected playback chunks that can never mix original and translated candidates in one utterance.
 
-- [ ] **Step 1: Write failing 200 ms batching tests**
+- [x] **Step 1: Write failing 200 ms batching tests**
 
 ```swift
 @Test func emitsOnlyExactTwoHundredMillisecondFrames() throws {
@@ -201,17 +201,17 @@ Commit: `feat: harden realtime translation sessions`
 }
 ```
 
-- [ ] **Step 2: Run batcher tests and confirm RED**
+- [x] **Step 2: Run batcher tests and confirm RED**
 
 Run: `swift test --filter PCMFrameBatcherTests`
 
 Expected: compilation fails because `PCMFrameBatcher` does not exist.
 
-- [ ] **Step 3: Implement the bounded batcher and make tests GREEN**
+- [x] **Step 3: Implement the bounded batcher and make tests GREEN**
 
 Use `frameByteCount = 24_000 / 5 * 2 = 9_600`. Retain only the incomplete tail, emit all complete frames in order, and reject odd byte counts. Run the focused tests until green.
 
-- [ ] **Step 4: Write failing deterministic VAD tests**
+- [x] **Step 4: Write failing deterministic VAD tests**
 
 ```swift
 @Test func speechStartsOnVoicedPCMAndEndsAfterConfiguredSilence() throws {
@@ -223,11 +223,11 @@ Use `frameByteCount = 24_000 / 5 * 2 = 9_600`. Retain only the incomplete tail, 
 }
 ```
 
-- [ ] **Step 5: Implement bounded energy VAD and make tests GREEN**
+- [x] **Step 5: Implement bounded energy VAD and make tests GREEN**
 
 Compute normalized RMS directly from little-endian PCM16 without allocating a sample array. Default speech threshold is `0.015`; emit one start edge, wait 300 ms of silence (30 engine chunks) for the end edge, and expose `isSpeaking` for deadline decisions.
 
-- [ ] **Step 6: Write failing two-candidate utterance tests**
+- [x] **Step 6: Write failing two-candidate utterance tests**
 
 ```swift
 @Test func motherLanguageFlushesOnlyBufferedOriginalAndLocksRoute() {
@@ -249,11 +249,11 @@ Compute normalized RMS directly from little-endian PCM16 without allocating a sa
 }
 ```
 
-- [ ] **Step 7: Implement selection, bounds, reset, and make tests GREEN**
+- [x] **Step 7: Implement selection, bounds, reset, and make tests GREEN**
 
 Before selection, hold both candidates. After `.original`, stream only original; after `.translated`, stream only translated. `resolveDeadline(isSpeech:)` delegates to `InboundLanguageGate`. If undecided original audio reaches 5 seconds, fail open to original. `finish()` flushes the selected tail, clears transcript/audio, resets the gate, and never carries bytes into the next utterance.
 
-- [ ] **Step 8: Run coordinator primitive tests and commit**
+- [x] **Step 8: Run coordinator primitive tests and commit**
 
 Run: `swift test --filter EMKECoordinatorTests`
 
