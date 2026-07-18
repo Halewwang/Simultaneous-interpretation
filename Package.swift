@@ -28,7 +28,7 @@ let package = Package(
         ),
         .target(
             name: "EMKEAudioEngine",
-            dependencies: ["EMKEAudioHAL"],
+            dependencies: ["EMKEAudioHAL", "EMKERouting"],
             linkerSettings: [.linkedFramework("CoreAudio")]
         ),
         .target(
@@ -83,6 +83,7 @@ let package = Package(
             dependencies: [
                 "EMKEAudioHAL",
                 "EMKEAudioEngine",
+                "EMKERouting",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),

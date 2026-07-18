@@ -351,7 +351,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: own HAL au
 - Consumes: `AudioDeviceSelection`, four endpoint protocols, `RoutingStateMachine`, `NetworkPCMEncoder`, and `NetworkPCMDecoder`.
 - Produces: `LocalAudioEngine`, `AudioEngineConfiguration`, `AudioEngineState`, and `AudioEngineEvent`.
 
-- [ ] **Step 1: Write failing safety-routing tests**
+- [x] **Step 1: Write failing safety-routing tests**
 
 With in-memory endpoints, prove:
 
@@ -363,13 +363,13 @@ With in-memory endpoints, prove:
 - inbound fail-open mode routes original frames;
 - stop clears queued input/output and returns `.stopped` even when one endpoint stop reports an error.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter LocalAudioEngineTests`
 
 Expected: compilation fails because `LocalAudioEngine` is absent.
 
-- [ ] **Step 3: Implement a serial worker-owned engine**
+- [x] **Step 3: Implement a serial worker-owned engine**
 
 Use this app-facing boundary:
 
@@ -386,11 +386,11 @@ public actor LocalAudioEngine {
 
 The actor owns a single bounded worker loop. Each cycle polls capture endpoints into preallocated 10 ms chunks, emits network PCM events from both capture sources, and routes only the audio selected by the current modes. Event delivery uses a bounded continuation queue; audio overload increments counters instead of allowing unbounded memory growth. Stopping cancels the worker, stops outputs before inputs, clears converters and buffered events, and publishes `.stopped`.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter LocalAudioEngineTests && swift test --filter AudioEngineStateTests && swift test --parallel`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Sources/EMKEAudioEngine Tests/EMKEAudioEngineTests
