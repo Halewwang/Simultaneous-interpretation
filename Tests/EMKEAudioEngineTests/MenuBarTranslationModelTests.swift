@@ -320,6 +320,27 @@ func settingsNavigationDoesNotRecreateCoordinator() async {
 }
 
 @Test @MainActor
+func runningSettingsRemainViewableButLocked() async {
+    let model = makeTranslationMenuModel(secret: "test-key")
+    await configureAndStart(model)
+    model.showSettings()
+
+    #expect(model.screen == .settings)
+    #expect(model.selectionsLocked)
+    #expect(!model.canTestConnection)
+}
+
+@Test @MainActor
+func returningFromSettingsPreservesRunningState() async {
+    let model = makeTranslationMenuModel(secret: "test-key")
+    await configureAndStart(model)
+    model.showSettings()
+    model.showDashboard()
+
+    #expect(model.coordinatorState.isRunning)
+}
+
+@Test @MainActor
 func elapsedFormatterUsesMinuteSecondContract() {
     #expect(MenuBarModel.formatElapsed(seconds: 0) == "00:00")
     #expect(MenuBarModel.formatElapsed(seconds: 65) == "01:05")
