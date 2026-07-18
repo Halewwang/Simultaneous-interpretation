@@ -56,7 +56,9 @@ Stop cancels the worker, stops outputs before inputs, resets both PCM encoders/d
 
 ## Current Product Boundary
 
-`EMKEMenuBarApp` can enumerate devices and start or stop the four local endpoints. Its UI explicitly states that the Translation model is not connected yet. API credentials, language preferences, dual WebSocket sessions, utterance-level mother-language gating, subtitles, and reconnect behavior belong to the next coordinator plan.
+`EMKEMenuBarApp` now connects the four local endpoints to two independently managed Translation sessions. API credentials, public settings, language preferences, utterance-level mother-language gating, subtitles, manual bypass, capability probing, graceful close, and bounded reconnect behavior are defined in [`docs/translation-coordinator-contract.md`](translation-coordinator-contract.md).
+
+The remaining boundary is real provider and meeting-app interoperability, performance acceptance, output speed/voice controls, and signed/notarized packaging. The development executable must not be represented as a distributable `.app`.
 
 For local development:
 

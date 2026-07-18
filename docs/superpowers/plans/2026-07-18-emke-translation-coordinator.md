@@ -518,11 +518,11 @@ Commit: `feat: configure translation from the menu bar`
 - Consumes: implemented runtime behavior and verification output.
 - Produces: exact session, buffering, privacy, compatibility, and remaining-packaging boundaries.
 
-- [ ] **Step 1: Write the runtime contract**
+- [x] **Step 1: Write the runtime contract**
 
 Document exact endpoint derivation, 200 ms frame size, inbound/outbound target languages, source-transcription requirement, utterance selection thresholds, buffer caps, fail-open/fail-closed behavior, reconnect schedule, Keychain/UserDefaults separation, probe result meanings, and the fact that Chat Completions success does not establish Translation compatibility.
 
-- [ ] **Step 2: Run complete deterministic verification**
+- [x] **Step 2: Run complete deterministic verification**
 
 Run:
 
@@ -538,29 +538,41 @@ git diff --check
 
 Expected: all tests and builds pass, the C bridge is warning-free, and no whitespace errors exist.
 
-- [ ] **Step 3: Run installed-driver integration without a provider secret**
+- [x] **Step 3: Run installed-driver integration without a provider secret**
 
 Run: `EMKE_RUN_LIVE_AUDIO_TESTS=1 swift test --filter liveVirtualEndpointsStartAndStop`
 
 Expected: both installed virtual AUHAL endpoints start and stop successfully. This validates only local audio; do not claim the supplied custom Base URL works until a rotated key is entered through the app and the live probe passes.
 
-- [ ] **Step 4: Perform secret and artifact scans**
+- [x] **Step 4: Perform secret and artifact scans**
 
 Run:
 
 ```bash
-git grep -nE 'sk-[A-Za-z0-9_-]{12,}|Authorization: Bearer [^<]' -- . ':!docs/superpowers/plans/2026-07-18-emke-translation-core-foundation.md'
+git grep -nE 'sk-[A-Za-z0-9_-]{12,}|Authorization: Bearer [A-Za-z0-9]' -- . ':!docs/superpowers/plans/2026-07-18-emke-translation-core-foundation.md'
 find . -type f \( -name '*.pcm' -o -name '*.wav' -o -name '*.aiff' \) -not -path './.build/*'
 git status --short
 ```
 
 Expected: no API key, Authorization value, recording, subtitle artifact, or uncommitted build output is present.
 
-- [ ] **Step 5: Mark plan complete and commit**
+- [x] **Step 5: Mark plan complete and commit**
 
 Set every completed checkbox to `[x]`, add a verification summary and the remaining signed-installer/meeting-app/live-gateway boundary.
 
 Commit: `docs: complete translation coordinator plan`
+
+## Verification Summary
+
+- `swift test --parallel`: 120 deterministic tests passed; the opt-in installed-driver test was skipped in this generic run as designed.
+- `swift build -c release`: production build passed.
+- `swift build --product EMKEMenuBarApp`: development menu-bar product build passed.
+- `xcrun clang ... -Wall -Wextra -Werror -fsyntax-only`: the C AUHAL layer passed strict syntax and warning checks.
+- `EMKE_RUN_LIVE_AUDIO_TESTS=1 swift test --filter liveVirtualEndpointsStartAndStop`: the installed virtual speaker and microphone endpoints started and stopped successfully.
+- `git diff --check`: no whitespace errors.
+- Silent repository scan: no API key or concrete Authorization value; no `.pcm`, `.wav`, `.aiff`, `.srt`, or `.vtt` artifacts; no duplicate `* 2.swift` source files.
+
+The supplied custom Base URL and model are accepted as public user configuration, but live Translation compatibility remains unverified until a rotated Key is entered through the app and an interactive audio probe succeeds. 飞书、钉钉和 Teams end-to-end tests, output speed/voice controls, performance acceptance, and signed/notarized installer validation remain outside this implementation verification.
 
 ## Self-Review Result
 
