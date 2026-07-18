@@ -342,19 +342,19 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "docs: define vir
 - Consumes: all prior tasks.
 - Produces: a reviewable driver branch ready for explicit install/meeting integration approval.
 
-- [ ] **Step 1: Run all Swift tests**
+- [x] **Step 1: Run all Swift tests**
 
 Run: `swift test --parallel`
 
 Expected: all existing 27 tests plus every new audio bridge/object-model test pass.
 
-- [ ] **Step 2: Build release libraries and driver bundle**
+- [x] **Step 2: Build release libraries and driver bundle**
 
 Run: `swift build -c release && make -C Driver clean all`
 
 Expected: both commands exit `0` with no warnings.
 
-- [ ] **Step 3: Verify bundle and source hygiene**
+- [x] **Step 3: Verify bundle and source hygiene**
 
 Run:
 
@@ -367,7 +367,7 @@ rg -n "malloc|calloc|realloc|free|pthread_mutex|dispatch_|NSLog|printf|open\(|wr
 
 Expected: verifier passes; diff check is empty; any allocation matches appear only in create/destroy paths and no lock, logging, file, or dispatch calls appear in HAL I/O callbacks.
 
-- [ ] **Step 4: Mark every completed checkbox and commit the plan state**
+- [x] **Step 4: Mark every completed checkbox and commit the plan state**
 
 ```bash
 git add docs/superpowers/plans/2026-07-18-emke-core-audio-driver.md
