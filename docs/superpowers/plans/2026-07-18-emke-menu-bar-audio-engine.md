@@ -411,27 +411,27 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: route loca
 - Consumes: `AudioDeviceCatalog`, `AudioEngineState`, `TranslationPreferences`, and the existing Keychain/configuration modules.
 - Produces: a runnable `EMKEMenuBarApp` executable with device readiness and safe start/stop controls.
 
-- [ ] **Step 1: Write failing model-state tests**
+- [x] **Step 1: Write failing model-state tests**
 
 Test that an absent driver disables Start with a repair message, missing physical selections disable Start, ready selections enable Start, active translation makes selected devices immutable, and stopped/error states never display “Translating”.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `swift test --filter MenuBarModelTests`
 
 Expected: compilation fails because `MenuBarModel` is absent.
 
-- [ ] **Step 3: Implement the main-actor model and SwiftUI shell**
+- [x] **Step 3: Implement the main-actor model and SwiftUI shell**
 
 Add an executable target depending on `EMKECore`, `EMKESecurity`, and `EMKEAudioEngine`. `MenuBarExtra("EMKE Translation", systemImage: model.systemImage)` shows engine status, real microphone and output selectors, Start/Stop, and Quit. This plan intentionally keeps API credentials, languages, subtitles, and model-session controls out of the shell until the coordinator plan.
 
-- [ ] **Step 4: Build and verify GREEN**
+- [x] **Step 4: Build and verify GREEN**
 
 Run: `swift test --filter MenuBarModelTests && swift build --product EMKEMenuBarApp && swift test --parallel`
 
 Expected: model tests pass and the executable links against AppKit/SwiftUI without warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Sources/EMKEMenuBarApp Tests/EMKEAudioEngineTests/MenuBarModelTests.swift
