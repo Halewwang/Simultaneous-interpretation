@@ -3,25 +3,29 @@
 ## 比较目标与证据
 
 - source visual truth: `/Users/hale/.codex/generated_images/019f7317-d192-73e2-93f7-ab12bdc4c5e3/exec-e64a9f1b-cec0-4e0a-aa39-ad89127eddbb.png`
-- implementation screenshot: `.superpowers/artifacts/task-7/running-review-fix.png`
-- full-view comparison: `.superpowers/artifacts/task-7/comparison-pass-4.png`
+- implementation screenshot: `.superpowers/artifacts/task-7/running-pass-5-final-surface.png`
+- full-view comparison: `.superpowers/artifacts/task-7/comparison-pass-5-final.png`
+- inspection preview: `.superpowers/artifacts/task-7/comparison-pass-5-final-preview.png`（仅为查看器降采样；canonical 证据仍为上面的 1680 × 1240 px 原图）
 - prior focused channel comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
 - native dashboard capture: `.superpowers/artifacts/task-7/native-dashboard-window.png`
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
-- viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。原生窗口截图另含系统 32 pt 窗口栏。
-- state: 浅色运行态 fixture（中文母语、Deutsch 会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；当前机器深色未配置控制台与设置页用于原生交互验收。
+- viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 5 验收包装器在完全相同的 840 × 1240 px 画布内模拟 MenuBarExtra 圆角表面、边界和阴影，不改变生产视图。原生窗口截图另含系统 32 pt 窗口栏。
+- state: 浅色运行态 fixture（中文母语、德语会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；当前机器深色未配置控制台与设置页用于原生交互验收。
 
 ## Findings
 
-没有剩余的可执行 P0、P1 或 P2。
+没有剩余的可执行 P0、P1 或 P2。Pass 4 的证据仍判定无效；最终结论只基于 Pass 5 的同状态、同裁切、同 viewport 比较。
 
-- [P3] 确认稿使用“德语”和“德语 → 中文”，实现使用产品既有语言合同 `Deutsch` 与“其他语言 → 中文”。这是为表达入站可接受多种非母语、并保持 `SupportedLanguage.displayName` 一致而保留的产品差异，不属于本轮回归。
-- [P3] 原生 Computer Use 证据遵循当前系统深色外观；确认稿和最终 ImageRenderer 比较使用浅色主基准。两种外观都使用系统语义颜色，未发现裁切、低对比状态或仅靠蓝色表达状态的问题。
+- Pass 5 使用批准稿相同的浅色运行态、420 × 620 pt content 和相同裁切，并加入只用于验收的 MenuBarExtra 风格圆角表面、边界和阴影；没有在生产视图内增加重复大卡片。字体层级、主音波动态、语言区、通道列、动作、CTA、底部边界与表面均完成并排复核。
+
+- [P3] 确认稿入站示例写“德语 → 中文”；实现保留真实的未知入站语种语义“其他语言 → 中文”，不伪造服务商尚未识别出的具体语言。其他可见语言名已本地化为“中文／英语／德语”，底层存储值仍为 `zh/en/de`。
+- [P3] 实现比确认稿多出极小的全局状态、通道状态和隐私锁 SF Symbols。它们是已确认的文字 + 语义符号可访问性冗余，尺寸和颜色均从属于正文，没有形成第二视觉焦点。
+- [P3] canonical Pass 5 的系统表面是本地验收包装器，不是真实 MenuBarExtra 截屏；它只模拟容器、边界与阴影，raw content 仍由真实生产 `TranslationDashboardContent` 渲染。直接捕获尚未打开的 MenuBarExtra 仍受当前 Computer Use 可寻址能力限制。
 
 ## 必查表面
 
 - 字体与排版：使用系统 SF 字体；最终标题、状态、通道标题、方向和按钮层级与确认稿一致，无异常换行或截断。
-- 间距与布局：420 × 620 pt 内六区完整；24 pt 水平边距、52 pt 主按钮、分隔线、通道列和底部隐私区稳定，无滚动、溢出或动作重叠。
+- 间距与布局：420 × 620 pt 内六区完整；按确认稿微调后的 22/24 pt 左右边距、45 pt 主按钮、分隔线、通道列和底部隐私区稳定，无滚动、溢出或动作重叠。
 - 颜色与令牌：黑白灰为主，蓝色仅用于装饰性活动端点；稳定、旁路、失败和锁定状态同时有文字与 SF Symbol。深浅外观均采用系统语义色。
 - 图标：齿轮、返回、耳机、麦克风、锁和状态图标均使用 SF Symbols；装饰图标隐藏于辅助功能，交互图标有文字标签。
 - 图片与资产：视觉稿没有需要导入的品牌或栅格资产；实现没有用自绘 SVG、emoji 或占位图替代目标资产。
@@ -60,11 +64,19 @@ Evidence: `.superpowers/artifacts/task-7/comparison-final.png` and `.superpowers
 
 Fixes: 先用真实 `DashboardFixture` 添加会失败的 immutable presentation 映射测试，并添加视图源码验收；再加入确定性状态符号字段，以小尺寸、同色、非动画的 `Label` 呈现，同时保留明确且稳定的“翻译状态：…”辅助功能标签。
 
-### Pass 4 — passed
+### Pass 4 — invalidated / blocked
 
 Evidence: `.superpowers/artifacts/task-7/running-review-fix.png` and `.superpowers/artifacts/task-7/comparison-pass-4.png`
 
-使用与前轮完全相同的 420 × 620 pt running fixture 重渲染并打开并排图。全局状态新增 `waveform.circle` 后仍以文字为主，图标没有形成第二视觉焦点；状态组合保持居中，主音波、语言区、通道列、动作与隐私区没有位移、重叠、裁切或对齐回归。fixture 测试同时覆盖未配置 `exclamationmark.circle`、准备 `checkmark.circle`、连接 `arrow.triangle.2.circlepath`、翻译 `waveform.circle`、失败 `exclamationmark.triangle`、停止 `stop.circle`。复查后无可执行 P0/P1/P2。
+该轮验证了状态符号修复本身，但不能作为最终视觉 fidelity 结论。批准稿包含浅色 MenuBarExtra 风格圆角浮层/阴影；实现图是无系统容器的 raw content；原生图又是深色未配置标准 Window。由于呈现上下文和状态不一致，本轮结论作废，等待 Pass 5+ 同态复核。
+
+### Pass 5 — passed / canonical
+
+Evidence: `.superpowers/artifacts/task-7/running-pass-5-final-raw.png`, `.superpowers/artifacts/task-7/running-pass-5-final-surface.png`, and `.superpowers/artifacts/task-7/comparison-pass-5-final.png`
+
+先用同一确定性 running fixture 建立新基线，再以失败的本地化和测量合同约束可见修复。实现将可见语言名本地化为中文；按批准稿收紧顶栏与 CTA；重建主音波高度、黑灰权重与通道小音波宽度；调整语言值、图标、方向、状态、动作、分隔线和底部隐私区的尺寸及位置。最终 raw content 是真实生产视图的 420 × 620 pt / 2× 渲染；验收包装器仅添加系统表面，不进入生产代码。
+
+批准稿和最终实现以完全相同状态、裁切和 viewport 合成到 1680 × 1240 px 图中并打开复核。主任务 reviewer 也独立打开最终 Pass 5 比较，结论为 materially aligned；没有裁切、滚动、重叠、错误层级或 P0–P2 fidelity 差异。仅保留上方三个有意且真实的 P3。
 
 ## 验证缺口
 

@@ -63,18 +63,25 @@ struct TranslationDashboardContent: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Spacer(minLength: 18)
+            Spacer(minLength: 48)
             LiveWaveformView(
                 level: value.primaryLevel,
-                maximumHeight: 72
+                maximumHeight: 95
             )
-            Label(value.primaryStatus, systemImage: value.primaryStatusSymbol)
-                .font(.system(size: 14, weight: .medium))
-                .imageScale(.small)
-                .foregroundStyle(EMKEVisualStyle.secondaryText)
-                .padding(.top, 12)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("翻译状态：\(value.primaryStatus)")
+            .offset(y: 5)
+            HStack(spacing: 5) {
+                Image(systemName: value.primaryStatusSymbol)
+                    .font(.system(size: 10, weight: .medium))
+                    .accessibilityHidden(true)
+                Text(value.primaryStatus)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundStyle(EMKEVisualStyle.secondaryText)
+            .padding(.top, 4)
+            .offset(x: -5)
+            .offset(y: 5)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("翻译状态：\(value.primaryStatus)")
             if let errorText = value.errorText {
                 Text(errorText)
                     .font(.system(size: 11))
@@ -82,7 +89,7 @@ struct TranslationDashboardContent: View {
                     .lineLimit(1)
                     .padding(.top, 4)
             }
-            Spacer(minLength: 18)
+            Spacer(minLength: 28)
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             languageDirection
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
@@ -90,11 +97,13 @@ struct TranslationDashboardContent: View {
             Spacer(minLength: 16)
             primaryActionButton
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
-                .padding(.top, 16)
+                .padding(.top, 20)
             privacyFooter
         }
-        .padding(.horizontal, EMKEVisualStyle.horizontalPadding)
-        .padding(.vertical, 20)
+        .padding(.leading, 22)
+        .padding(.trailing, 24)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
         .frame(
             width: EMKEVisualStyle.panelWidth,
             height: EMKEVisualStyle.panelHeight
@@ -105,40 +114,45 @@ struct TranslationDashboardContent: View {
     private var header: some View {
         HStack {
             Text("EMKE Translation")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
             Spacer()
             Button(action: settingsAction) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 18))
+                    .font(.system(size: 19, weight: .light))
                     .frame(width: 32, height: 32)
+                    .offset(x: 6)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("打开设置")
         }
+        .offset(y: 4)
     }
 
     private var languageDirection: some View {
         HStack(alignment: .bottom, spacing: 12) {
             languagePicker(
                 title: "我的母语",
-                selection: $motherLanguage
+                selection: $motherLanguage,
+                leadingInset: 52
             )
             Image(systemName: "arrow.right")
-                .font(.system(size: 22, weight: .light))
+                .font(.system(size: 17, weight: .light))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .padding(.bottom, 8)
                 .accessibilityHidden(true)
             languagePicker(
                 title: "会议输出",
-                selection: $meetingOutputLanguage
+                selection: $meetingOutputLanguage,
+                leadingInset: 45
             )
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 17.5)
     }
 
     private func languagePicker(
         title: String,
-        selection: Binding<SupportedLanguage>
+        selection: Binding<SupportedLanguage>,
+        leadingInset: CGFloat
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -162,6 +176,7 @@ struct TranslationDashboardContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, leadingInset)
     }
 
     private func lockedLanguageValue(
@@ -205,7 +220,7 @@ struct TranslationDashboardContent: View {
     private var primaryActionButton: some View {
         Button(value.primaryActionTitle, action: primaryAction)
             .buttonStyle(.plain)
-            .font(.system(size: 17, weight: .semibold))
+            .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
             .frame(maxWidth: .infinity)
             .frame(height: EMKEVisualStyle.primaryButtonHeight)
@@ -218,11 +233,18 @@ struct TranslationDashboardContent: View {
     }
 
     private var privacyFooter: some View {
-        Label(value.privacyText, systemImage: "lock")
-            .font(.system(size: 12))
-            .foregroundStyle(EMKEVisualStyle.secondaryText)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 12)
-            .accessibilityLabel(value.privacyText)
+        HStack(spacing: 5) {
+            Image(systemName: "lock")
+                .font(.system(size: 9, weight: .medium))
+                .accessibilityHidden(true)
+            Text(value.privacyText)
+                .font(.system(size: 13))
+        }
+        .foregroundStyle(EMKEVisualStyle.secondaryText)
+        .frame(maxWidth: .infinity)
+        .offset(x: -5)
+        .padding(.top, 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(value.privacyText)
     }
 }

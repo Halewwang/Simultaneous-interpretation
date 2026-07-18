@@ -8,7 +8,7 @@ enum EMKEVisualStyle {
     static let primarySpacing: CGFloat = 24
     static let groupSpacing: CGFloat = 16
     static let compactSpacing: CGFloat = 8
-    static let primaryButtonHeight: CGFloat = 52
+    static let primaryButtonHeight: CGFloat = 45
     static let dividerOpacity = 0.14
 
     static let primaryText = Color.primary

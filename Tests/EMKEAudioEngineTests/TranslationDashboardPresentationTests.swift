@@ -205,7 +205,17 @@ func outboundFailureNeverPresentsOutputActivity() {
 func dashboardDirectionsUseProductLanguageContract() {
     let value = DashboardFixture.ready.makePresentation()
     #expect(value.inboundDirection == "其他语言 → 中文")
-    #expect(value.outboundDirection == "中文 → Deutsch")
+    #expect(value.outboundDirection == "中文 → 德语")
     #expect(value.inputLanguageName == "中文")
-    #expect(value.outputLanguageName == "Deutsch")
+    #expect(value.outputLanguageName == "德语")
+}
+
+@Test
+func languageDisplayNamesAreLocalizedWithoutChangingStorageCodes() {
+    #expect(SupportedLanguage.chinese.displayName == "中文")
+    #expect(SupportedLanguage.english.displayName == "英语")
+    #expect(SupportedLanguage.german.displayName == "德语")
+    #expect(SupportedLanguage.chinese.rawValue == "zh")
+    #expect(SupportedLanguage.english.rawValue == "en")
+    #expect(SupportedLanguage.german.rawValue == "de")
 }

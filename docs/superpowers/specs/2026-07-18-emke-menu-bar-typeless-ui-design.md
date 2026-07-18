@@ -6,9 +6,9 @@
 - 参考方向：[Typeless](https://www.typeless.com/) 的克制排版、黑白灰层级、充足留白与单一主动作
 - 已确认视觉稿：方案二“双通道工作台”的实时音波修订版
 - 视觉验收日期：2026-07-18
-- canonical 视觉验收：Pass 4（Pass 3 因全局状态缺少文字 + 语义图标冗余而失效）
-- 最终运行态截图：`.superpowers/artifacts/task-7/running-review-fix.png`（本地验收产物，不纳入 Git）
-- 最终并排比较：`.superpowers/artifacts/task-7/comparison-pass-4.png`（本地验收产物，不纳入 Git）
+- canonical 视觉验收：Pass 5（Pass 4 因混用 raw content、深色标准 Window 与浅色 MenuBarExtra 参考而失效）
+- 最终运行态截图：`.superpowers/artifacts/task-7/running-pass-5-final-surface.png`（本地验收产物，不纳入 Git）
+- 最终并排比较：`.superpowers/artifacts/task-7/comparison-pass-5-final.png`（本地验收产物，不纳入 Git）
 
 ## 1. 设计目标
 
@@ -36,14 +36,14 @@
 
 | 令牌 | 合同 |
 | --- | --- |
-| 水平边距 | 24 pt |
+| 水平边距 | 左 22 pt、右 24 pt，以匹配已确认视觉稿 |
 | 基础间距 | 8 pt；组合间距使用 16、24、32 pt |
-| 顶栏标题 | 15 pt，semibold |
+| 顶栏标题 | 13 pt，semibold |
 | 语言值 | 22 pt，semibold |
-| 通道标题 | 18 pt，semibold |
+| 通道标题 | 17 pt，semibold |
 | 正文 | 14–15 pt，regular/medium |
 | 辅助文字 | 12–13 pt，secondary |
-| 主按钮 | 高 52 pt，胶囊形状，primary 文本与反相背景 |
+| 主按钮 | 高 45 pt，胶囊形状，primary 文本与反相背景 |
 | 分隔线 | 1 physical pixel，低对比语义色 |
 | 面板圆角 | 由 `MenuBarExtra(.window)` 系统容器提供，不在内容中重复造大卡片 |
 | 动效帧率 | 最高 30 fps |
@@ -88,6 +88,7 @@
 ### 4.3 语言方向
 
 - 左侧为“我的母语”，右侧为“会议输出”，中间使用右箭头。
+- 可见语言名使用本地化中文“中文／英语／德语”；持久化与协议 raw value 继续使用 `zh/en/de`。
 - 就绪状态可直接选择语言；运行期间显示当前语言并锁定选择器。
 - 该区域只表达用户配置方向，不替代两个通道的真实流向标签。
 
@@ -102,6 +103,7 @@
 - 状态：稳定、连接中、播放原音、重连中或失败。
 - 右侧动作：正常时为“播放原音”；旁路后为“恢复翻译”。
 - 小音波只反映入站会议音频活动。
+- 在服务商尚未给出可验证的入站语种时显示“其他语言 → 中文”，不得为匹配示意稿而伪造为具体语种。
 
 **对方听到**
 
@@ -203,6 +205,8 @@
 ## 10. 验收标准
 
 2026-07-18 已完成源码合同、原生交互、运行态渲染和并排视觉验收；最终结论记录于项目根目录 `design-qa.md`。当前 Command Line Tools 环境缺少 `xctrace`，因此 Instruments SwiftUI/Time Profiler trace 仍是明确的实测缺口，不把自动化性能合同写成 Instruments 通过。
+
+Pass 5 的 canonical 证据使用浅色运行态、420 × 620 pt content、相同裁切与相同 viewport；本地验收包装器只模拟 MenuBarExtra 圆角表面、边界和阴影，不修改生产视图，也不在内容中重复增加大卡片。Pass 4 的异态证据保留为历史记录，不再支持最终结论。
 
 - 420 × 620 pt 下主控制台无需滚动，所有关键动作可见。
 - 未配置、就绪、连接中、翻译中、入站失败、出站失败、两种旁路和停止中状态均有确定性展示测试。

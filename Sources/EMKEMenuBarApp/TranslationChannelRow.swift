@@ -130,47 +130,58 @@ struct TranslationChannelRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: presentation.symbol)
-                .font(.system(size: 30, weight: .light))
+                .font(.system(size: 35, weight: .light))
                 .frame(width: 48)
+                .offset(x: -5)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                 Text(direction)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
+                    .foregroundStyle(EMKEVisualStyle.secondaryText)
             }
             .frame(width: 112, alignment: .leading)
             channelStatus
             Spacer(minLength: 0)
             Button(presentation.actionTitle, action: action)
                 .buttonStyle(.plain)
+                .font(.system(size: 12.5))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .lineLimit(1)
                 .frame(width: 64, alignment: .trailing)
+                .offset(y: 14)
                 .disabled(!presentation.actionEnabled)
                 .accessibilityLabel(
                     presentation.actionAccessibilityLabel
                 )
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 23.5)
     }
 
     private var channelStatus: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(
-                presentation.status,
-                systemImage: presentation.statusSymbol
-            )
-            .font(.system(size: 12))
+            HStack(spacing: 4) {
+                Image(systemName: presentation.statusSymbol)
+                    .font(.system(size: 9, weight: .medium))
+                    .accessibilityHidden(true)
+                Text(presentation.status)
+                    .font(.system(size: 12))
+            }
             .foregroundStyle(presentation.statusColor)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(
                 "\(title)状态：\(presentation.status)"
             )
+            .offset(x: -18)
             LiveWaveformView(
                 level: level,
                 maximumHeight: 24,
                 compact: true
             )
+            .offset(x: -10)
         }
-        .frame(width: 90)
+        .frame(width: 105)
+        .offset(y: 6)
     }
 }

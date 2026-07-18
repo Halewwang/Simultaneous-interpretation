@@ -7,6 +7,12 @@ enum WaveformBarLayout {
         0.94, 0.60, 0.28, 0.52, 0.34, 0.22,
         0.16, 0.12, 0.09, 0.18, 0.12, 0.10,
     ]
+    private static let opacities: [Double] = [
+        0.96, 0.46, 0.42, 0.94, 1.00, 0.46,
+        0.40, 0.96, 0.92, 0.88, 0.42, 0.92,
+        1.00, 0.50, 0.44, 0.96, 0.90, 0.88,
+        0.84, 0.80, 0.72, 0.74, 0.72, 0.68,
+    ]
 
     static func heights(
         level: Double,
@@ -21,6 +27,11 @@ enum WaveformBarLayout {
                 maximum
             )
         }
+    }
+
+    static func opacity(at index: Int, compact: Bool) -> Double {
+        let value = opacities[index]
+        return compact ? min(max(value, 0.42), 0.72) : value
     }
 }
 
@@ -46,7 +57,7 @@ struct LiveWaveformView: View {
     }
 
     private var waveformBars: some View {
-        HStack(alignment: .center, spacing: compact ? 2 : 8) {
+        HStack(alignment: .center, spacing: compact ? 2.75 : 8) {
             ForEach(
                 Array(
                     WaveformBarLayout.heights(
@@ -61,7 +72,10 @@ struct LiveWaveformView: View {
                         index == 23 && level > 0.08
                             ? EMKEVisualStyle.activityBlue
                             : EMKEVisualStyle.primaryText.opacity(
-                                compact ? 0.64 : 0.82
+                                WaveformBarLayout.opacity(
+                                    at: index,
+                                    compact: compact
+                                )
                             )
                     )
                     .frame(

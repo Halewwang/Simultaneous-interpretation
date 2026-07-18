@@ -6,8 +6,8 @@ public enum SupportedLanguage: String, CaseIterable, Codable, Sendable {
     public var displayName: String {
         switch self {
         case .chinese: "中文"
-        case .english: "English"
-        case .german: "Deutsch"
+        case .english: "英语"
+        case .german: "德语"
         }
     }
 }
