@@ -229,17 +229,17 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: convert re
 - Consumes: `EMKEAudioRingBuffer` and a Core Audio `AudioObjectID` with the required input or output scope.
 - Produces: opaque `EMKEHALInput`/`EMKEHALOutput` instances and create/start/stop/read/write/diagnostic functions.
 
-- [ ] **Step 1: Add the C target and write failing validation tests**
+- [x] **Step 1: Add the C target and write failing validation tests**
 
 Add `EMKEAudioHAL` as a C target depending on `EMKEAudioBridge`, linked to `CoreAudio` and `AudioUnit`; make `EMKEAudioEngine` depend on it. Write tests that invalid object ID `0` is rejected, zero capacity is rejected, null handles return safe zero/error values, and stopped outputs expose zero queued frames.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter HALAudioEndpointTests`
 
 Expected: compilation fails because `EMKEAudioHAL.h` and its functions do not exist.
 
-- [ ] **Step 3: Implement opaque AUHAL input/output endpoints**
+- [x] **Step 3: Implement opaque AUHAL input/output endpoints**
 
 Expose this C contract:
 
@@ -251,18 +251,20 @@ OSStatus EMKEHALInputCreate(AudioObjectID deviceID, uint32_t capacityFrames, EMK
 OSStatus EMKEHALInputStart(EMKEHALInput *input);
 OSStatus EMKEHALInputStop(EMKEHALInput *input);
 uint32_t EMKEHALInputRead(EMKEHALInput *input, float *frames, uint32_t frameCount);
+uint32_t EMKEHALInputReadableFrames(const EMKEHALInput *input);
 void EMKEHALInputDestroy(EMKEHALInput *input);
 
 OSStatus EMKEHALOutputCreate(AudioObjectID deviceID, uint32_t capacityFrames, EMKEHALOutput **outOutput);
 OSStatus EMKEHALOutputStart(EMKEHALOutput *output);
 OSStatus EMKEHALOutputStop(EMKEHALOutput *output);
 uint32_t EMKEHALOutputWrite(EMKEHALOutput *output, const float *frames, uint32_t frameCount);
+uint32_t EMKEHALOutputQueuedFrames(const EMKEHALOutput *output);
 void EMKEHALOutputDestroy(EMKEHALOutput *output);
 ```
 
 Each unit uses `kAudioUnitSubType_HALOutput`, selects only its supplied device with `kAudioOutputUnitProperty_CurrentDevice`, exposes 48 kHz stereo interleaved Float32 on the app side, and preallocates its scratch/ring storage in `Create`. Input callbacks call `AudioUnitRender` then bounded-write the ring. Output callbacks bounded-read and zero-fill every underrun. Start/stop are idempotent and reset buffers outside the real-time callback.
 
-- [ ] **Step 4: Compile C with warnings as errors and verify GREEN**
+- [x] **Step 4: Compile C with warnings as errors and verify GREEN**
 
 Run:
 
@@ -275,7 +277,7 @@ xcrun clang -std=c11 -arch arm64 -mmacosx-version-min=14.0 -Wall -Wextra -Werror
 
 Expected: tests pass and C compilation emits no warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Sources/EMKEAudioHAL Tests/EMKEAudioEngineTests/HALAudioEndpointTests.swift
