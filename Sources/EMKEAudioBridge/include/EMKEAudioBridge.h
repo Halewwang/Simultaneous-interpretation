@@ -3,5 +3,6 @@
 
 #include "EMKEAudioRingBuffer.h"
 #include "EMKEAudioRoutes.h"
+#include "EMKEAudioDriverObjects.h"
 
 #endif

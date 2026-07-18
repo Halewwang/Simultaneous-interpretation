@@ -42,6 +42,8 @@ Sources/
     EMKEAudioRingBuffer.c           # bounded lock-free SPSC frame storage
     include/EMKEAudioRoutes.h       # speaker/microphone route API
     EMKEAudioRoutes.c               # two route buffers and fail-safe read behavior
+    include/EMKEAudioDriverObjects.h # shared device and stream object contract
+    EMKEAudioDriverObjects.c        # immutable descriptor table and lookup
 Tests/
   EMKEAudioBridgeTests/
     AudioRingBufferTests.swift      # wraparound, capacity, reset, partial I/O
@@ -49,7 +51,6 @@ Tests/
 Driver/
   EMKEAudioDriver/
     EMKEAudioDriver.c               # AudioServerPlugIn interface and object properties
-    EMKEAudioDriverObjects.h        # stable object IDs and fixed format constants
     Info.plist                      # CFPlugIn factory and bundle metadata
     LICENSE-Apple-Sample.txt        # required upstream license notice
   Makefile                          # deterministic arm64 driver bundle build
@@ -164,38 +165,39 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: enforce vi
 ### Task 3: Stable HAL Object Model
 
 **Files:**
-- Create: `Driver/EMKEAudioDriver/EMKEAudioDriverObjects.h`
+- Create: `Sources/EMKEAudioBridge/include/EMKEAudioDriverObjects.h`
+- Create: `Sources/EMKEAudioBridge/EMKEAudioDriverObjects.c`
 - Create: `Tests/EMKEAudioBridgeTests/AudioDriverObjectTests.swift`
-- Modify: `Package.swift`
+- Modify: `Sources/EMKEAudioBridge/include/EMKEAudioBridge.h`
 
 **Interfaces:**
 - Consumes: fixed device names and 48 kHz stereo Float32 format.
 - Produces: C constants/functions describing plug-in object `1`, speaker device `2`, speaker input/output streams `3/4`, microphone device `5`, and microphone input/output streams `6/7`.
 
-- [ ] **Step 1: Expose object descriptors through the C target and write failing tests**
+- [x] **Step 1: Expose object descriptors through the C target and write failing tests**
 
 Tests must assert unique nonzero IDs, exact device UIDs `com.emke.translation.virtual-speaker` and `com.emke.translation.virtual-microphone`, exact visible names, 48,000 Hz, two channels, and distinct stream directions. The speaker output is meeting-facing and speaker input is app-facing; microphone output is app-facing and microphone input is meeting-facing.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `swift test --filter AudioDriverObjectTests`
 
 Expected: compilation fails because the object descriptor API is absent.
 
-- [ ] **Step 3: Implement immutable object descriptors**
+- [x] **Step 3: Implement immutable object descriptors**
 
 Add a plain C `EMKEAudioObjectDescriptor` table and lookup functions. Keep this header CoreAudio-independent so Swift tests can validate the driver contract without loading a plug-in into `coreaudiod`.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter AudioDriverObjectTests && swift test --parallel`
 
 Expected: all object model tests and existing tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add Package.swift Driver/EMKEAudioDriver/EMKEAudioDriverObjects.h Tests/EMKEAudioBridgeTests/AudioDriverObjectTests.swift
+git add Sources/EMKEAudioBridge Tests/EMKEAudioBridgeTests/AudioDriverObjectTests.swift
 git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: define virtual audio device model"
 ```
 
