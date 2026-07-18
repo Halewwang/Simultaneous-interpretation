@@ -79,8 +79,10 @@ static EMKEAudioRoutes *gEMKERoutes = NULL;
 static _Atomic UInt32 gEMKEReferenceCount = 1;
 static _Atomic UInt32 gEMKESpeakerRunningClients = 0;
 static _Atomic UInt32 gEMKEMicrophoneRunningClients = 0;
-static _Atomic UInt64 gEMKEClockSeed = 1;
-static UInt64 gEMKEAnchorHostTime = 0;
+static _Atomic UInt64 gEMKESpeakerClockSeed = 1;
+static _Atomic UInt64 gEMKEMicrophoneClockSeed = 1;
+static _Atomic UInt64 gEMKESpeakerAnchorHostTime = 0;
+static _Atomic UInt64 gEMKEMicrophoneAnchorHostTime = 0;
 
 static Boolean EMKEIsDriver(AudioServerPlugInDriverRef inDriver) {
     return inDriver == gEMKEDriverRef;
@@ -312,7 +314,17 @@ static OSStatus EMKEInitialize(
         }
     }
     gEMKEHost = inHost;
-    gEMKEAnchorHostTime = AudioGetCurrentHostTime();
+    const UInt64 anchorHostTime = AudioGetCurrentHostTime();
+    atomic_store_explicit(
+        &gEMKESpeakerAnchorHostTime,
+        anchorHostTime,
+        memory_order_relaxed
+    );
+    atomic_store_explicit(
+        &gEMKEMicrophoneAnchorHostTime,
+        anchorHostTime,
+        memory_order_relaxed
+    );
     return noErr;
 }
 
@@ -838,6 +850,12 @@ static OSStatus EMKEStartIO(
     _Atomic UInt32 *counter = inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice
         ? &gEMKESpeakerRunningClients
         : &gEMKEMicrophoneRunningClients;
+    _Atomic UInt64 *clockSeed = inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice
+        ? &gEMKESpeakerClockSeed
+        : &gEMKEMicrophoneClockSeed;
+    _Atomic UInt64 *anchorHostTime = inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice
+        ? &gEMKESpeakerAnchorHostTime
+        : &gEMKEMicrophoneAnchorHostTime;
     const UInt32 previous = atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
     if (previous == 0) {
         if (inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice) {
@@ -845,8 +863,12 @@ static OSStatus EMKEStartIO(
         } else {
             EMKEAudioRoutesResetMicrophone(gEMKERoutes);
         }
-        atomic_fetch_add_explicit(&gEMKEClockSeed, 1, memory_order_relaxed);
-        gEMKEAnchorHostTime = AudioGetCurrentHostTime();
+        atomic_fetch_add_explicit(clockSeed, 1, memory_order_relaxed);
+        atomic_store_explicit(
+            anchorHostTime,
+            AudioGetCurrentHostTime(),
+            memory_order_relaxed
+        );
     }
     return noErr;
 }
@@ -899,16 +921,23 @@ static OSStatus EMKEGetZeroTimeStamp(
         return kAudioHardwareIllegalOperationError;
     }
 
+    const _Atomic UInt64 *clockSeed = inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice
+        ? &gEMKESpeakerClockSeed
+        : &gEMKEMicrophoneClockSeed;
+    const _Atomic UInt64 *anchor = inDeviceObjectID == EMKEAudioObjectIDSpeakerDevice
+        ? &gEMKESpeakerAnchorHostTime
+        : &gEMKEMicrophoneAnchorHostTime;
+    const UInt64 anchorHostTime = atomic_load_explicit(anchor, memory_order_relaxed);
     const UInt64 now = AudioGetCurrentHostTime();
-    const UInt64 elapsedNanos = AudioConvertHostTimeToNanos(now - gEMKEAnchorHostTime);
+    const UInt64 elapsedNanos = AudioConvertHostTimeToNanos(now - anchorHostTime);
     const UInt64 elapsedFrames = (elapsedNanos * 48) / 1000000;
     const UInt64 periodCount = elapsedFrames / kEMKEZeroTimeStampPeriod;
     const UInt64 sampleTime = periodCount * kEMKEZeroTimeStampPeriod;
     const UInt64 sampleNanos = (sampleTime * 1000000000ULL) / 48000ULL;
 
     *outSampleTime = (Float64)sampleTime;
-    *outHostTime = gEMKEAnchorHostTime + AudioConvertNanosToHostTime(sampleNanos);
-    *outSeed = atomic_load_explicit(&gEMKEClockSeed, memory_order_relaxed);
+    *outHostTime = anchorHostTime + AudioConvertNanosToHostTime(sampleNanos);
+    *outSeed = atomic_load_explicit(clockSeed, memory_order_relaxed);
     return noErr;
 }
 

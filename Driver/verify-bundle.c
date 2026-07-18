@@ -114,6 +114,9 @@ int main(int argc, char **argv) {
     const UInt32 samples = frames * 2;
     const Float32 speakerInput[4] = {0.1f, -0.1f, 0.2f, -0.2f};
     Float32 speakerOutput[4] = {0};
+    Float64 speakerSampleTime = 0;
+    UInt64 speakerHostTime = 0;
+    UInt64 speakerSeedBeforeMicrophone = 0;
     if ((*driver)->StartIO(driver, 2, 10) != noErr ||
         (*driver)->DoIOOperation(driver, 2, 4, 10,
             kAudioServerPlugInIOOperationWriteMix, frames, &cycle,
@@ -122,7 +125,9 @@ int main(int argc, char **argv) {
             kAudioServerPlugInIOOperationReadInput, frames, &cycle,
             speakerOutput, NULL) != noErr ||
         !EMKEBuffersEqual(speakerInput, speakerOutput, samples) ||
-        (*driver)->StopIO(driver, 2, 10) != noErr) {
+        (*driver)->GetZeroTimeStamp(driver, 2, 10,
+            &speakerSampleTime, &speakerHostTime,
+            &speakerSeedBeforeMicrophone) != noErr) {
         CFRelease(bundle);
         return 9;
     }
@@ -131,7 +136,12 @@ int main(int argc, char **argv) {
     const Float32 silence[4] = {0, 0, 0, 0};
     const Float32 microphoneInput[4] = {0.3f, -0.3f, 0.4f, -0.4f};
     Float32 microphoneOutput[4] = {0};
+    UInt64 speakerSeedAfterMicrophone = 0;
     if ((*driver)->StartIO(driver, 5, 20) != noErr ||
+        (*driver)->GetZeroTimeStamp(driver, 2, 10,
+            &speakerSampleTime, &speakerHostTime,
+            &speakerSeedAfterMicrophone) != noErr ||
+        speakerSeedAfterMicrophone != speakerSeedBeforeMicrophone ||
         (*driver)->DoIOOperation(driver, 5, 6, 20,
             kAudioServerPlugInIOOperationReadInput, frames, &cycle,
             microphoneSilence, NULL) != noErr ||
@@ -143,7 +153,8 @@ int main(int argc, char **argv) {
             kAudioServerPlugInIOOperationReadInput, frames, &cycle,
             microphoneOutput, NULL) != noErr ||
         !EMKEBuffersEqual(microphoneInput, microphoneOutput, samples) ||
-        (*driver)->StopIO(driver, 5, 20) != noErr) {
+        (*driver)->StopIO(driver, 5, 20) != noErr ||
+        (*driver)->StopIO(driver, 2, 10) != noErr) {
         CFRelease(bundle);
         return 10;
     }
