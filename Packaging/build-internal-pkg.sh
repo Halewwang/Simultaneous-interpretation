@@ -10,15 +10,28 @@ PKG="$DIST/EMKE-Translation-0.1.0-internal.pkg"
 require_tool() { command -v "$1" >/dev/null 2>&1 || {
   echo "missing required tool: $1" >&2; exit 69; }; }
 validate_sanitized_root() {
+  local listing="$2"
+  local physical_appledouble
   local item
   local attrs
   local attr
-  if /usr/bin/find "$1" -name '._*' -print -quit | /usr/bin/grep -q .; then
+  if ! physical_appledouble="$(/usr/bin/find "$1" -name '._*' -print -quit)"; then
+    echo "sanitized package-root AppleDouble discovery failed" >&2
+    exit 1
+  fi
+  if test -n "$physical_appledouble"; then
     echo "physical AppleDouble file found in sanitized package root" >&2
     exit 1
   fi
+  if ! /usr/bin/find "$1" -print0 > "$listing"; then
+    echo "sanitized package-root path discovery failed" >&2
+    exit 1
+  fi
   while IFS= read -r -d '' item; do
-    attrs="$(/usr/bin/xattr "$item")"
+    if ! attrs="$(/usr/bin/xattr "$item")"; then
+      echo "sanitized package-root xattr scan failed" >&2
+      exit 1
+    fi
     while IFS= read -r attr; do
       test -z "$attr" && continue
       if test "$attr" != com.apple.provenance; then
@@ -26,7 +39,7 @@ validate_sanitized_root() {
         exit 1
       fi
     done <<< "$attrs"
-  done < <(/usr/bin/find "$1" -print0)
+  done < "$listing"
 }
 test "$(uname -s)" = Darwin
 test "$(uname -m)" = arm64
@@ -56,24 +69,33 @@ make -C "$ROOT/Driver" clean verify
   "$STAGE/Library/Application Support/EMKE Translation/uninstall-emke.sh"
 TEMP_BASE="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
 test "$TEMP_BASE" != /
-SANITIZED_RAW="$(/usr/bin/mktemp -d "$TEMP_BASE/emke-pkg-stage.XXXXXX")"
-SANITIZED="$(cd "$SANITIZED_RAW" && pwd -P)"
+SANITIZED=""
+SCAN_LIST=""
+cleanup_sanitized_root() {
+  case "$SANITIZED" in
+    "$TEMP_BASE"/emke-pkg-stage.*) /bin/rm -rf -- "$SANITIZED" ;;
+    "") ;;
+    *) echo "refusing unsafe package-root cleanup: $SANITIZED" >&2 ;;
+  esac
+  case "$SCAN_LIST" in
+    "$TEMP_BASE"/emke-pkg-scan.*) /bin/rm -f -- "$SCAN_LIST" ;;
+    "") ;;
+    *) echo "refusing unsafe scan-list cleanup: $SCAN_LIST" >&2 ;;
+  esac
+}
+SANITIZED="$(/usr/bin/mktemp -d "$TEMP_BASE/emke-pkg-stage.XXXXXX")"
+trap cleanup_sanitized_root EXIT
+SANITIZED="$(cd "$SANITIZED" && pwd -P)"
 case "$SANITIZED" in
   "$TEMP_BASE"/emke-pkg-stage.*) ;;
   *) echo "unsafe sanitized package root: $SANITIZED" >&2; exit 1 ;;
 esac
-cleanup_sanitized_root() {
-  case "$SANITIZED" in
-    "$TEMP_BASE"/emke-pkg-stage.*) /bin/rm -rf -- "$SANITIZED" ;;
-    *) echo "refusing unsafe package-root cleanup: $SANITIZED" >&2 ;;
-  esac
-}
-trap cleanup_sanitized_root EXIT
+SCAN_LIST="$(/usr/bin/mktemp "$TEMP_BASE/emke-pkg-scan.XXXXXX")"
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn \
   "$STAGE" "$SANITIZED"
 /bin/chmod 755 "$SANITIZED"
 /usr/bin/xattr -cr "$SANITIZED" 2>/dev/null || true
-validate_sanitized_root "$SANITIZED"
+validate_sanitized_root "$SANITIZED" "$SCAN_LIST"
 /usr/bin/codesign --verify --strict \
   "$SANITIZED/Applications/EMKE Translation.app"
 /usr/bin/codesign --verify --strict \

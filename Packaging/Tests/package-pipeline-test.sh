@@ -15,10 +15,13 @@ TEMP="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/emke-pkg-test.XXXXXX")"
 trap '/usr/bin/find "$TEMP" -depth -delete 2>/dev/null || true' EXIT
 /usr/sbin/pkgutil --expand-full "$PKG" "$TEMP/expanded"
 test "$(/usr/bin/stat -f '%Lp' "$TEMP/expanded/Payload")" = 755
-/usr/sbin/pkgutil --payload-files "$PKG" | \
-  /usr/bin/grep -q 'Applications/EMKE Translation.app/Contents/Info.plist'
-/usr/sbin/pkgutil --payload-files "$PKG" | \
-  /usr/bin/grep -q 'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/Contents/Info.plist'
-/usr/sbin/pkgutil --payload-files "$PKG" | \
-  /usr/bin/grep -q 'Library/Application Support/EMKE Translation/uninstall-emke.sh'
+/usr/sbin/pkgutil --payload-files "$PKG" > "$TEMP/payload-files"
+/usr/bin/grep -q 'Applications/EMKE Translation.app/Contents/Info.plist' \
+  "$TEMP/payload-files"
+/usr/bin/grep -q \
+  'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/Contents/Info.plist' \
+  "$TEMP/payload-files"
+/usr/bin/grep -q \
+  'Library/Application Support/EMKE Translation/uninstall-emke.sh' \
+  "$TEMP/payload-files"
 echo "PASS: package pipeline"

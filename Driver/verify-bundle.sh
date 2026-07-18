@@ -1,8 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+READ_ONLY=0
+if [[ "${1:-}" == "--read-only" ]]; then
+    READ_ONLY=1
+    shift
+fi
 BUNDLE_PATH="${1:-}"
-if [[ -z "$BUNDLE_PATH" || ! -d "$BUNDLE_PATH" ]]; then
+if [[ "$#" -ne 1 || -z "$BUNDLE_PATH" || ! -d "$BUNDLE_PATH" ]]; then
     echo "driver bundle not found: ${BUNDLE_PATH:-<missing>}" >&2
     exit 1
 fi
@@ -21,10 +26,13 @@ otool -L "$EXECUTABLE_PATH" | grep -q 'CoreAudio.framework'
 otool -L "$EXECUTABLE_PATH" | grep -q 'CoreFoundation.framework'
 nm -gU "$EXECUTABLE_PATH" | grep -q '_EMKEAudioDriver_Create'
 
-# File Provider workspaces can quarantine newly generated bundles. Clear only
-# generated build artifacts before applying the local ad-hoc test signature.
-xattr -cr "$BUNDLE_PATH"
-/usr/bin/codesign --sign - --force "$BUNDLE_PATH"
+# File Provider workspaces can quarantine newly generated bundles. Mutating
+# build verification clears and signs only generated artifacts. Read-only
+# package verification must preserve the expanded payload byte-for-byte.
+if [[ "$READ_ONLY" == "0" ]]; then
+    xattr -cr "$BUNDLE_PATH"
+    /usr/bin/codesign --sign - --force "$BUNDLE_PATH"
+fi
 /usr/bin/codesign --verify --strict "$BUNDLE_PATH"
 
 xcrun clang -std=c11 -arch arm64 -mmacosx-version-min=14.0 \

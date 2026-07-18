@@ -658,9 +658,16 @@ git commit -m "feat: add reversible installer lifecycle"
 **Files:**
 - Create: `Packaging/Tests/package-pipeline-test.sh`
 - Create: `Packaging/Tests/run-all.sh`
+- Create: `Packaging/Tests/payload-parser-test.sh`
+- Create: `Packaging/Tests/driver-read-only-test.sh`
+- Create: `Packaging/Tests/verifier-negative-test.sh`
 - Create: `Packaging/build-internal-pkg.sh`
 - Create: `Packaging/verify-internal-pkg.sh`
+- Create: `Packaging/Scripts/verify-payload-list.sh`
+- Create: `Packaging/Scripts/verify-codesign-metadata.sh`
+- Modify: `Driver/verify-bundle.sh`
 - Modify: `Packaging/Scripts/build-app-bundle.sh`
+- Modify: `docs/audio-driver-contract.md`
 - Modify: `docs/superpowers/specs/2026-07-19-emke-internal-pkg-installer-design.md`
 - Modify: `docs/superpowers/plans/2026-07-19-emke-internal-pkg-installer.md`
 
@@ -680,6 +687,26 @@ The verifier canonicalizes a single AppleDouble transport component only when
 its decoded target is present and accepted by the unchanged payload allowlist;
 orphan or ambiguous metadata, physical `._*` files, and non-provenance payload
 xattrs fail verification.
+
+**Security-hardening amendment:** the expanded package is anchored only at
+`$EXPANDED/PackageInfo`, `$EXPANDED/Payload`, and `$EXPANDED/Scripts`; top-level
+decoys and duplicate named anchors fail. `xmllint` extracts the exact component
+identifier, version, and `/` install location. A dedicated parser validates the
+single captured raw payload listing and rejects absolute/traversal/control/dot
+paths, empty components, prefix ambiguity, duplicate business paths, and
+orphan/ambiguous/duplicate-target AppleDouble metadata before checking required
+entries. Every regular Payload and Scripts file is scanned from captured
+`strings` output. App and driver metadata must say exactly `Signature=adhoc`
+with no authority/team, both executables must be thin `arm64`, and every app
+plist contract field is checked. Packaged driver verification uses
+`Driver/verify-bundle.sh --read-only` with executable/signature hash stability.
+Unsigned status requires exact `Status: no signature`; not-notarized status is
+reported only with Gatekeeper's exact `source=no usable signature` rejection.
+All `find` and `xattr` scans propagate failures, and cleanup traps are installed
+immediately after temporary roots are created.
+
+The code blocks below are the original TDD seed. Where they differ from this
+security amendment, the amendment and the checked-in scripts are normative.
 
 - [ ] **Step 1: Write the failing package-pipeline test**
 
@@ -793,30 +820,19 @@ require() { "$@" || { echo "verification failed: $*" >&2; exit 1; }; }
 
 require test -s "$PKG"
 /usr/sbin/pkgutil --expand-full "$PKG" "$EXPANDED"
-PACKAGE_INFO="$(find "$EXPANDED" -name PackageInfo -type f -print -quit)"
-APP="$(find "$EXPANDED" -path '*/Applications/EMKE Translation.app' -type d -print -quit)"
-DRIVER="$(find "$EXPANDED" -path '*/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver' -type d -print -quit)"
-UNINSTALLER="$(find "$EXPANDED" -path '*/Library/Application Support/EMKE Translation/uninstall-emke.sh' -type f -print -quit)"
-require test -n "$PACKAGE_INFO"; require test -n "$APP"
-require test -n "$DRIVER"; require test -n "$UNINSTALLER"
-require /usr/bin/grep -q 'identifier="com.emke.translation.internal"' "$PACKAGE_INFO"
-require /usr/bin/grep -q 'version="0.1.0"' "$PACKAGE_INFO"
+PACKAGE_INFO="$EXPANDED/PackageInfo"
+PAYLOAD_ROOT="$EXPANDED/Payload"
+SCRIPTS_ROOT="$EXPANDED/Scripts"
+APP="$PAYLOAD_ROOT/Applications/EMKE Translation.app"
+DRIVER="$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
+UNINSTALLER="$PAYLOAD_ROOT/Library/Application Support/EMKE Translation/uninstall-emke.sh"
+# Enforce the exact/unique expanded layout and extract identifier, version,
+# and install-location with xmllint before inspecting payload contents.
 
 /usr/sbin/pkgutil --payload-files "$PKG" > "$TEMP/payload-files"
-while IFS= read -r path; do
-  case "$path" in
-    Applications|Applications/EMKE\ Translation.app|\
-    Applications/EMKE\ Translation.app/*|\
-    Library|Library/Audio|Library/Audio/Plug-Ins|\
-    Library/Audio/Plug-Ins/HAL|\
-    Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver|\
-    Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/*|\
-    Library/Application\ Support|Library/Application\ Support/EMKE\ Translation|\
-    Library/Application\ Support/EMKE\ Translation/uninstall-emke.sh) ;;
-    "") ;;
-    *) echo "unexpected payload path: $path" >&2; exit 1 ;;
-  esac
-done < "$TEMP/payload-files"
+bash "$ROOT/Packaging/Scripts/verify-payload-list.sh" \
+  "$TEMP/payload-files" > "$TEMP/business-payload-paths"
+# Require every locked app, driver, and uninstaller business path exactly once.
 
 PLIST="$APP/Contents/Info.plist"
 require test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = com.emke.translation.app
@@ -827,10 +843,8 @@ require test "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription'
   'EMKE 需要访问麦克风，以便在本机翻译并将译音发送到会议应用。'
 require /usr/bin/codesign --verify --strict --verbose=2 "$APP"
 require /usr/bin/codesign --verify --strict --verbose=2 "$DRIVER"
-require /usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp"
-require /usr/bin/file "$DRIVER/Contents/MacOS/EMKEAudioDriver"
-/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp" | require /usr/bin/grep -q arm64
-/usr/bin/file "$DRIVER/Contents/MacOS/EMKEAudioDriver" | require /usr/bin/grep -q arm64
+require test "$(/usr/bin/lipo -archs "$APP/Contents/MacOS/EMKEMenuBarApp")" = arm64
+require test "$(/usr/bin/lipo -archs "$DRIVER/Contents/MacOS/EMKEAudioDriver")" = arm64
 require test -s "$APP/Contents/Resources/AppIcon.icns"
 DECODED_ICONSET="$TEMP/decoded.iconset"
 /usr/bin/iconutil -c iconset "$APP/Contents/Resources/AppIcon.icns" \
@@ -845,10 +859,9 @@ require test "$(/usr/bin/stat -f '%Lp' "$APP/Contents/Info.plist")" = 644
 /usr/bin/strings "$DRIVER/Contents/MacOS/EMKEAudioDriver" > "$TEMP/driver-strings"
 require /usr/bin/grep -qx com.emke.translation.virtual-speaker "$TEMP/driver-strings"
 require /usr/bin/grep -qx com.emke.translation.virtual-microphone "$TEMP/driver-strings"
-if /usr/bin/strings "$APP/Contents/MacOS/EMKEMenuBarApp" | \
-  /usr/bin/grep -E 'sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY'; then
-  echo "credential-like value found" >&2; exit 1
-fi
+# Discover every regular Payload/Scripts file with a checked find command.
+# Capture strings output per file, then grep the captured file without a live
+# strings|grep pipeline or logging any matched value.
 if find "$EXPANDED" -type f \( -name '*.wav' -o -name '*.aiff' \
   -o -name '*.m4a' -o -name '*.mp3' \) -print -quit | /usr/bin/grep -q .; then
   echo "audio file found in payload" >&2; exit 1
@@ -862,11 +875,11 @@ if find "$EXPANDED" -perm -0002 -print -quit | /usr/bin/grep -q .; then
   echo "world-writable payload path found" >&2; exit 1
 fi
 
-bash "$ROOT/Driver/verify-bundle.sh" "$DRIVER"
+bash "$ROOT/Driver/verify-bundle.sh" --read-only "$DRIVER"
 /usr/sbin/pkgutil --check-signature "$PKG" > "$TEMP/pkg-signature" 2>&1 || true
-if ! /usr/bin/grep -Eiq 'unsigned|no signature' "$TEMP/pkg-signature"; then
-  echo "expected unsigned internal package status" >&2; exit 1
-fi
+require test "$(/usr/bin/grep -Fxc '   Status: no signature' \
+  "$TEMP/pkg-signature")" = 1
+# Also require spctl rejection with the exact source=no usable signature line.
 echo "PASS: internal pkg verified (unsigned, not notarized)"
 ```
 

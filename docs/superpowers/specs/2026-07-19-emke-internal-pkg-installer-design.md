@@ -149,13 +149,30 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
 
 `Packaging/verify-internal-pkg.sh` must extract the package into a temporary directory without installing it and verify:
 
-- expected package identifier, version, and arm64 architecture;
-- exact app, driver, and uninstaller paths;
-- app `Info.plist` values, executable name, minimum OS, menu-bar mode, microphone description, and icon declaration;
+- exactly one top-level `PackageInfo`, `Payload`, and `Scripts` at their fixed
+  expanded paths, no decoy top-level entries, and exactly the source-controlled
+  `postinstall` script;
+- exact package identifier, version, install location `/`, and required raw
+  app, driver, and uninstaller entries;
+- raw payload paths with no traversal, absolute path, empty/dot/control
+  component, prefix ambiguity, duplicate business path, orphan/ambiguous
+  AppleDouble record, or multiple metadata records for one target;
+- every app `Info.plist` value in the App Bundle Contract, including executable
+  name, versions, package type, minimum OS, menu-bar mode, microphone
+  description, principal class, high-resolution capability, and icon declaration;
 - valid `.icns` plus all required source icon sizes;
-- strict ad-hoc signature verification for app and driver;
+- strict ad-hoc signature identity for app and driver, with no Developer ID
+  authority or team identity, and exact thin `arm64` executables from `lipo`;
 - driver bundle factory smoke test and exact virtual device UIDs;
-- absence of credential values, private keys, transcripts, and audio files; protocol literals such as the `Authorization` field name are allowed because the app must construct authenticated requests at runtime;
+- read-only packaged-driver verification: the packaged executable and signature
+  bytes must not change while the separate smoke executable may be rebuilt and
+  locally signed;
+- absence of credential values and private keys across every regular file in
+  exact `Payload` and `Scripts`; `strings` output is captured per file before
+  scanning so an early match cannot be hidden by pipeline SIGPIPE;
+- absence of transcripts and audio files; protocol literals such as the
+  `Authorization` field name are allowed because the app must construct
+  authenticated requests at runtime;
 - no unexpected writable or world-writable payload paths.
 
 On macOS 26, `pkgbuild` may expose unavoidable `com.apple.provenance` as
@@ -165,7 +182,11 @@ present and already accepted by the unchanged payload allowlist. It rejects
 orphan or ambiguous transport records, every physical `._*` file after full
 expansion, and every expanded payload xattr other than `com.apple.provenance`.
 
-An unsigned package is expected for this milestone. `pkgutil --check-signature` and Gatekeeper assessment results must be reported truthfully as unsigned/not notarized, not treated as production passes.
+An unsigned package is expected for this milestone. The verifier requires the
+exact `pkgutil --check-signature` line `Status: no signature` and the exact
+Gatekeeper rejection `source=no usable signature`; arbitrary occurrences of
+“unsigned” are not accepted as evidence. This establishes the internal package
+as unsigned and therefore not notarized, not as a production pass.
 
 ### Local installation acceptance
 

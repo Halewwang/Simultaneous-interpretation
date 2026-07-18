@@ -71,4 +71,14 @@ bash Driver/verify-bundle.sh .build/driver/EMKEAudioDriver.driver
 
 The verifier checks plist metadata, CFPlugIn UUID registration, arm64 architecture, framework links, the exported factory, local ad-hoc signing, dynamic Bundle loading, both device names, speaker loopback, microphone zero-fill, and microphone loopback.
 
+For an already signed package payload, use the read-only mode:
+
+```bash
+bash Driver/verify-bundle.sh --read-only /path/to/EMKEAudioDriver.driver
+```
+
+Read-only mode verifies the packaged bundle signature without clearing xattrs
+or re-signing packaged bytes. It may still rebuild and locally sign the separate
+`.build/driver/verify-bundle` smoke executable.
+
 Automated verification does not copy the driver into `/Library/Audio/Plug-Ins/HAL`, restart `coreaudiod`, or change system audio settings. Those actions require explicit approval because they interrupt active audio clients and need administrator authorization.
