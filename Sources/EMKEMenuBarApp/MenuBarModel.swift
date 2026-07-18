@@ -14,6 +14,7 @@ protocol TranslationCoordinatorControlling: Sendable {
     func currentState() async -> TranslationCoordinatorState
     func setInboundBypass(_ enabled: Bool) async
     func setOutboundBypass(_ enabled: Bool) async
+    func setAudioLevelUpdatesEnabled(_ enabled: Bool) async
 }
 
 extension TranslationCoordinator: TranslationCoordinatorControlling {}
@@ -37,6 +38,16 @@ enum MenuBarReadiness: Equatable {
     case ready
     case active
     case error
+}
+
+enum MenuBarScreen: Equatable {
+    case dashboard
+    case settings
+}
+
+enum MenuBarChannel {
+    case inbound
+    case outbound
 }
 
 @MainActor
@@ -63,8 +74,14 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var configurationError: String?
     @Published private(set) var isTestingConnection = false
     @Published private(set) var isStarting = false
+    @Published private(set) var isStopping = false
     @Published private(set) var inboundBypassEnabled = false
     @Published private(set) var outboundBypassEnabled = false
+    @Published private(set) var screen: MenuBarScreen = .dashboard
+    @Published private(set) var inboundLevel = 0.0
+    @Published private(set) var outboundLevel = 0.0
+    @Published private(set) var translationStartedAt: Date?
+    @Published private(set) var isWindowVisible = false
 
     private var driverAvailable = false
     private var hasStoredAPIKey = false
@@ -128,6 +145,14 @@ final class MenuBarModel: ObservableObject {
         coordinatorState.isRunning || isStarting
     }
 
+    var combinedLevel: Double {
+        max(inboundLevel, outboundLevel)
+    }
+
+    var apiKeyStatusText: String {
+        hasStoredAPIKey ? "已存入 Keychain" : "尚未保存"
+    }
+
     var repairMessage: String? {
         readiness == .driverUnavailable
             ? "未检测到 EMKE 虚拟音频驱动"
@@ -167,11 +192,52 @@ final class MenuBarModel: ObservableObject {
     }
 
     var inboundStatusText: String {
-        Self.text(for: coordinatorState.inbound)
+        Self.text(for: coordinatorState.inbound, channel: .inbound)
     }
 
     var outboundStatusText: String {
-        Self.text(for: coordinatorState.outbound)
+        Self.text(for: coordinatorState.outbound, channel: .outbound)
+    }
+
+    func showSettings() {
+        screen = .settings
+    }
+
+    func showDashboard() {
+        screen = .dashboard
+    }
+
+    static func formatElapsed(seconds: TimeInterval) -> String {
+        let wholeSeconds = max(Int(seconds.rounded(.down)), 0)
+        return String(
+            format: "%02d:%02d",
+            wholeSeconds / 60,
+            wholeSeconds % 60
+        )
+    }
+
+    func elapsedText(at now: Date) -> String {
+        guard let translationStartedAt else { return "00:00" }
+        return Self.formatElapsed(
+            seconds: now.timeIntervalSince(translationStartedAt)
+        )
+    }
+
+    func dashboardStatusText(at now: Date) -> String {
+        if isStarting { return "正在连接" }
+        if coordinatorState.isRunning {
+            return "翻译中 · \(elapsedText(at: now))"
+        }
+        return readiness == .ready ? "准备开始" : statusText
+    }
+
+    func setWindowVisible(_ visible: Bool) async {
+        isWindowVisible = visible
+        await coordinator.setAudioLevelUpdatesEnabled(visible)
+        if !visible {
+            inboundLevel = 0
+            outboundLevel = 0
+        }
     }
 
     func loadConfiguration() async {
@@ -218,6 +284,7 @@ final class MenuBarModel: ObservableObject {
               let selectedInputUID,
               let selectedOutputUID else { return }
         isStarting = true
+        defer { isStarting = false }
         configurationError = nil
         do {
             try await persistDraftKeyIfNeeded()
@@ -242,21 +309,27 @@ final class MenuBarModel: ObservableObject {
                 )
             )
             coordinatorState = await coordinator.currentState()
+            if coordinatorState.isRunning {
+                translationStartedAt = Date()
+            } else {
+                resetRuntimePresentation()
+            }
             startObservingCoordinator()
         } catch {
             configurationError = String(describing: error)
             coordinatorState = TranslationCoordinatorState()
+            resetRuntimePresentation()
         }
-        isStarting = false
     }
 
     func stop() async {
+        isStopping = true
+        defer { isStopping = false }
         await coordinator.stop()
         eventTask?.cancel()
         eventTask = nil
         coordinatorState = TranslationCoordinatorState()
-        inboundBypassEnabled = false
-        outboundBypassEnabled = false
+        resetRuntimePresentation()
     }
 
     func testConnection() async {
@@ -385,18 +458,27 @@ final class MenuBarModel: ObservableObject {
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
-                case .audioLevels:
-                    break
+                case .audioLevels(let levels):
+                    inboundLevel = levels.inbound
+                    outboundLevel = levels.outbound
                 case .audioBackpressure(let droppedFrames):
                     inventoryError = "音频输出繁忙，已丢弃 \(droppedFrames) 帧"
                 case .stopped:
                     coordinatorState = TranslationCoordinatorState()
-                    inboundBypassEnabled = false
-                    outboundBypassEnabled = false
+                    resetRuntimePresentation()
                     return
                 }
             }
         }
+    }
+
+    private func resetRuntimePresentation() {
+        inboundLevel = 0
+        outboundLevel = 0
+        translationStartedAt = nil
+        inboundBypassEnabled = false
+        outboundBypassEnabled = false
+        isStopping = false
     }
 
     private static func message(
@@ -425,14 +507,18 @@ final class MenuBarModel: ObservableObject {
         return "Translation 协议不兼容"
     }
 
-    private static func text(for state: TranslationChannelState) -> String {
+    static func text(
+        for state: TranslationChannelState,
+        channel: MenuBarChannel
+    ) -> String {
         switch state {
         case .stopped: "已停止"
         case .connecting: "连接中"
         case .active: "翻译中"
         case .bypassed: "原音旁路"
         case .reconnecting(let attempt): "重连中（第 \(attempt) 次）"
-        case .failed: "连接失败"
+        case .failed:
+            channel == .inbound ? "播放原音" : "已静音"
         }
     }
 }

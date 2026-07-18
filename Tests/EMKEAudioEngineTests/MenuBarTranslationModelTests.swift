@@ -1,3 +1,4 @@
+import Combine
 import EMKEAudioEngine
 import EMKECoordinator
 import EMKECore
@@ -64,6 +65,8 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private var eventWaiters: [
         CheckedContinuation<TranslationCoordinatorEvent, Never>
     ] = []
+    private var queuedEvents: [TranslationCoordinatorEvent] = []
+    private(set) var audioLevelUpdateFlags: [Bool] = []
 
     func start(
         configuration: TranslationCoordinatorConfiguration
@@ -86,8 +89,19 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     }
 
     func nextEvent() async -> TranslationCoordinatorEvent {
-        await withCheckedContinuation { continuation in
+        if !queuedEvents.isEmpty {
+            return queuedEvents.removeFirst()
+        }
+        return await withCheckedContinuation { continuation in
             eventWaiters.append(continuation)
+        }
+    }
+
+    func emit(_ event: TranslationCoordinatorEvent) {
+        if eventWaiters.isEmpty {
+            queuedEvents.append(event)
+        } else {
+            eventWaiters.removeFirst().resume(returning: event)
         }
     }
 
@@ -97,6 +111,9 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
 
     func setInboundBypass(_ enabled: Bool) async {}
     func setOutboundBypass(_ enabled: Bool) async {}
+    func setAudioLevelUpdatesEnabled(_ enabled: Bool) async {
+        audioLevelUpdateFlags.append(enabled)
+    }
 }
 
 private struct TranslationProbeStub: TranslationConnectionProbing {
@@ -175,6 +192,16 @@ private func makeTranslationMenuModel(
         secretStore: TranslationSecretStoreStub(value: secret),
         settingsStore: settings
     )
+}
+
+@MainActor
+private func configureAndStart(_ model: MenuBarModel) async {
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://gateway.example/v1"
+    model.modelID = "translation-model"
+    await model.start()
 }
 
 @Test @MainActor
@@ -275,4 +302,131 @@ func connectionTestPreservesPartialCompatibilityResult() async {
 
     #expect(model.compatibilityReport == protocolOnlyReport)
     #expect(model.connectionTestMessage.contains("需要音频测试"))
+}
+
+@Test @MainActor
+func settingsNavigationDoesNotRecreateCoordinator() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+
+    model.showSettings()
+    #expect(model.screen == .settings)
+    model.showDashboard()
+    #expect(model.screen == .dashboard)
+    #expect(await coordinator.configurations.isEmpty)
+}
+
+@Test @MainActor
+func elapsedFormatterUsesMinuteSecondContract() {
+    #expect(MenuBarModel.formatElapsed(seconds: 0) == "00:00")
+    #expect(MenuBarModel.formatElapsed(seconds: 65) == "01:05")
+    #expect(MenuBarModel.formatElapsed(seconds: 3_725) == "62:05")
+}
+
+@Test @MainActor
+func modelConsumesLatestAudioLevelSnapshot() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+
+    let levelsUpdated = Task { @MainActor in
+        for await level in model.$outboundLevel.values {
+            if level == 0.75 {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.25, outbound: 0.75)
+    ))
+    await levelsUpdated.value
+
+    #expect(model.inboundLevel == 0.25)
+    #expect(model.outboundLevel == 0.75)
+    #expect(model.combinedLevel == 0.75)
+}
+
+@Test @MainActor
+func stoppingClearsLevelsAndRunStartDate() async {
+    let model = makeTranslationMenuModel(secret: "test-key")
+    await configureAndStart(model)
+    await model.stop()
+
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+    #expect(model.translationStartedAt == nil)
+}
+
+@Test @MainActor
+func hidingWindowClearsLevelsWithoutStoppingTranslation() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setWindowVisible(false)
+
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+    #expect(model.coordinatorState.isRunning)
+    #expect(await coordinator.audioLevelUpdateFlags.last == false)
+}
+
+@Test @MainActor
+func outboundFailureIsPresentedAsMuted() {
+    #expect(
+        MenuBarModel.text(
+            for: .failed(message: "offline"),
+            channel: .outbound
+        ) == "已静音"
+    )
+}
+
+@Test @MainActor
+func inboundFailureIsPresentedAsOriginalAudio() {
+    #expect(
+        MenuBarModel.text(
+            for: .failed(message: "offline"),
+            channel: .inbound
+        ) == "播放原音"
+    )
+}
+
+@Test @MainActor
+func dashboardStatusUsesReadinessAndElapsedRuntime() async throws {
+    let model = makeTranslationMenuModel(secret: "test-key")
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://gateway.example/v1"
+    model.modelID = "translation-model"
+
+    #expect(model.dashboardStatusText(at: Date()) == "准备开始")
+
+    await model.start()
+    let startedAt = try #require(model.translationStartedAt)
+    #expect(
+        model.dashboardStatusText(
+            at: startedAt.addingTimeInterval(65)
+        ) == "翻译中 · 01:05"
+    )
+    await model.stop()
+}
+
+@Test @MainActor
+func apiKeyStatusReflectsKeychainAvailability() async {
+    let missingKey = makeTranslationMenuModel()
+    await missingKey.loadConfiguration()
+    #expect(missingKey.apiKeyStatusText == "尚未保存")
+
+    let storedKey = makeTranslationMenuModel(secret: "test-key")
+    await storedKey.loadConfiguration()
+    #expect(storedKey.apiKeyStatusText == "已存入 Keychain")
 }
