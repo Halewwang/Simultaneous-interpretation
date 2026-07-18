@@ -1,6 +1,14 @@
 import SwiftUI
 
 enum WaveformBarLayout {
+    static let barCount = 24
+    static let compactBarWidth: CGFloat = 1.5
+    static let compactSpacing: CGFloat = 2.75
+    static var compactRequiredWidth: CGFloat {
+        (CGFloat(barCount) * compactBarWidth)
+            + (CGFloat(barCount - 1) * compactSpacing)
+    }
+
     private static let weights: [Double] = [
         0.12, 0.22, 0.18, 0.58, 0.96, 0.52,
         0.25, 0.10, 0.46, 0.32, 0.20, 0.58,
@@ -57,7 +65,10 @@ struct LiveWaveformView: View {
     }
 
     private var waveformBars: some View {
-        HStack(alignment: .center, spacing: compact ? 2.75 : 8) {
+        HStack(
+            alignment: .center,
+            spacing: compact ? WaveformBarLayout.compactSpacing : 8
+        ) {
             ForEach(
                 Array(
                     WaveformBarLayout.heights(
@@ -79,7 +90,7 @@ struct LiveWaveformView: View {
                             )
                     )
                     .frame(
-                        width: compact ? 1.5 : 4,
+                        width: compact ? WaveformBarLayout.compactBarWidth : 4,
                         height: CGFloat(height)
                     )
             }

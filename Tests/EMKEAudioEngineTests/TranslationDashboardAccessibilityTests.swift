@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import EMKEMenuBarApp
@@ -15,18 +16,7 @@ func runningWaveformRetainsTargetDynamicRange() {
 
 @Test
 func compactWaveformFitsItsChannelColumn() throws {
-    let source = try sourceFile(named: "LiveWaveformView.swift")
-    let spacing = try compactMetric(
-        matching: #"spacing:\s*compact\s*\?\s*([0-9.]+)\s*:\s*[0-9.]+"#,
-        in: source
-    )
-    let width = try compactMetric(
-        matching: #"width:\s*compact\s*\?\s*([0-9.]+)\s*:\s*[0-9.]+"#,
-        in: source
-    )
-
-    let requiredWidth = (24 * width) + (23 * spacing)
-    #expect(requiredWidth <= 105)
+    #expect(WaveformBarLayout.compactRequiredWidth <= EMKEChannelMetrics.statusWidth)
 }
 
 @Test
@@ -74,13 +64,33 @@ func settingsShowsVisibleLockedState() throws {
 }
 
 @Test
-func dashboardKeepsAllSixVisualZonesSeparated() throws {
+func dashboardUsesSemanticPhysicalPixelSeparators() throws {
     let source = try sourceFile(named: "TranslationDashboardView.swift")
-    let dividerCount = source.components(
-        separatedBy: "Divider().opacity(EMKEVisualStyle.dividerOpacity)"
+    let separatorCount = source.components(
+        separatedBy: "EMKEDashboardSeparator()"
     ).count - 1
 
-    #expect(dividerCount == 4)
+    #expect(separatorCount == 4)
+    #expect(EMKEVisualStyle.separatorThickness == 0.5)
+    #expect(!source.contains("Divider().opacity(EMKEVisualStyle.dividerOpacity)"))
+}
+
+@Test
+func dashboardSeparatorRemainsVisibleAndSubtleInBothAppearances() throws {
+    for appearanceName in [NSAppearance.Name.aqua, .darkAqua] {
+        let appearance = try #require(NSAppearance(named: appearanceName))
+        var resolvedContrast: Double?
+        appearance.performAsCurrentDrawingAppearance {
+            guard
+                let separator = NSColor.separatorColor.usingColorSpace(.sRGB),
+                let background = NSColor.windowBackgroundColor.usingColorSpace(.sRGB)
+            else { return }
+            resolvedContrast = compositedContrast(separator, over: background)
+        }
+        let contrast = try #require(resolvedContrast)
+        #expect(contrast >= 1.15)
+        #expect(contrast <= 1.5)
+    }
 }
 
 @Test
@@ -93,91 +103,59 @@ func lockedLanguagesRemainLegibleWithoutAnEnabledControlStyle() throws {
 }
 
 @Test
-func channelRowsReserveVisualColumnsForIconAndStatus() throws {
-    let source = try sourceFile(named: "TranslationChannelRow.swift")
-
-    #expect(source.contains(".frame(width: 48)"))
-    #expect(source.contains("private var channelStatus"))
-    #expect(source.contains(".frame(width: 105)"))
-    #expect(source.contains(".padding(.vertical, 23.5)"))
-    #expect(source.contains(".font(.system(size: 35, weight: .light))"))
-    #expect(source.contains(".font(.system(size: 9, weight: .medium))"))
-    #expect(source.contains(".offset(y: 14)"))
+func channelRowsReserveVisualColumnsForIconAndStatus() {
+    #expect(EMKEChannelMetrics.iconWidth == 48)
+    #expect(EMKEChannelMetrics.statusWidth == 105)
+    #expect(EMKEChannelMetrics.verticalPadding == 23.5)
+    #expect(EMKEChannelMetrics.iconSize == 35)
+    #expect(EMKEChannelMetrics.statusIconSize == 9)
+    #expect(EMKEChannelMetrics.actionOffsetY == 14)
 }
 
 @Test
-func compactWaveformMatchesConfirmedReferenceScale() throws {
-    let source = try sourceFile(named: "LiveWaveformView.swift")
-    let spacing = try compactMetric(
-        matching: #"spacing:\s*compact\s*\?\s*([0-9.]+)\s*:\s*[0-9.]+"#,
-        in: source
-    )
-    let width = try compactMetric(
-        matching: #"width:\s*compact\s*\?\s*([0-9.]+)\s*:\s*[0-9.]+"#,
-        in: source
-    )
-
-    let requiredWidth = (24 * width) + (23 * spacing)
-    #expect(requiredWidth >= 98)
-    #expect(requiredWidth <= 101)
+func compactWaveformMatchesConfirmedReferenceScale() {
+    #expect(WaveformBarLayout.compactRequiredWidth >= 98)
+    #expect(WaveformBarLayout.compactRequiredWidth <= 101)
 }
 
 @Test
-func dashboardHeaderMatchesConfirmedReferenceScale() throws {
-    let source = try sourceFile(named: "TranslationDashboardView.swift")
-
-    #expect(source.contains(".font(.system(size: 13, weight: .semibold))"))
-    #expect(source.contains(".font(.system(size: 19, weight: .light))"))
-    #expect(source.contains(".offset(x: 6)"))
-    #expect(source.contains(".offset(y: 4)"))
+func dashboardHeaderMatchesConfirmedReferenceScale() {
+    #expect(EMKEDashboardMetrics.headerTitleSize == 13)
+    #expect(EMKEDashboardMetrics.gearSize == 19)
+    #expect(EMKEDashboardMetrics.gearOffsetX == 6)
+    #expect(EMKEDashboardMetrics.headerOffsetY == 4)
 }
 
 @Test
-func dashboardMatchesMeasuredPassFiveSlots() throws {
-    let dashboard = try sourceFile(named: "TranslationDashboardView.swift")
-    let channel = try sourceFile(named: "TranslationChannelRow.swift")
-    let waveform = try sourceFile(named: "LiveWaveformView.swift")
-    let style = try sourceFile(named: "EMKEVisualStyle.swift")
-
-    #expect(dashboard.contains("Spacer(minLength: 48)"))
-    #expect(dashboard.contains("Spacer(minLength: 28)"))
-    #expect(dashboard.contains("maximumHeight: 95"))
-    #expect(dashboard.contains(".offset(y: 5)"))
-    #expect(dashboard.contains("leadingInset: 52"))
-    #expect(dashboard.contains("leadingInset: 45"))
-    #expect(dashboard.contains(".font(.system(size: 17, weight: .light))"))
-    #expect(dashboard.contains(".padding(.vertical, 17.5)"))
-    #expect(dashboard.contains(".padding(.top, 4)"))
-    #expect(dashboard.contains(".padding(.top, 18)"))
-    #expect(dashboard.contains(".padding(.leading, 22)"))
-    #expect(dashboard.contains(".padding(.trailing, 24)"))
-    #expect(channel.contains(".font(.system(size: 17, weight: .semibold))"))
-    #expect(channel.contains(".font(.system(size: 14))"))
-    #expect(
-        channel.contains(
-            ".buttonStyle(.plain)\n                .font(.system(size: 12.5))"
-        )
-    )
-    #expect(channel.contains(".offset(x: -5)"))
-    #expect(channel.contains(".offset(y: 6)"))
-    #expect(waveform.contains("WaveformBarLayout.opacity"))
-    #expect(style.contains("static let primaryButtonHeight: CGFloat = 45"))
-    #expect(style.contains("static let horizontalPadding: CGFloat = 24"))
+func dashboardMatchesMeasuredPassSixSlots() {
+    #expect(EMKEDashboardMetrics.topSpacer == 48)
+    #expect(EMKEDashboardMetrics.lowerSpacer == 28)
+    #expect(EMKEDashboardMetrics.waveformMaximumHeight == 95)
+    #expect(EMKEDashboardMetrics.waveformOffsetY == 5)
+    #expect(EMKEDashboardMetrics.inputLanguageInset == 52)
+    #expect(EMKEDashboardMetrics.outputLanguageInset == 45)
+    #expect(EMKEDashboardMetrics.directionArrowSize == 17)
+    #expect(EMKEDashboardMetrics.languageVerticalPadding == 17.5)
+    #expect(EMKEDashboardMetrics.statusTopPadding == 4)
+    #expect(EMKEDashboardMetrics.topPadding == 18)
+    #expect(EMKEDashboardMetrics.leadingPadding == 22)
+    #expect(EMKEDashboardMetrics.trailingPadding == 24)
+    #expect(EMKEChannelMetrics.titleSize == 17)
+    #expect(EMKEChannelMetrics.directionSize == 14)
+    #expect(EMKEChannelMetrics.actionSize == 12.5)
+    #expect(EMKEVisualStyle.primaryButtonHeight == 45)
 }
 
 @Test
 func privacyFooterHasItsOwnVisualBoundary() throws {
     let source = try sourceFile(named: "TranslationDashboardView.swift")
 
-    #expect(
-        source.contains(
-            "primaryActionButton\n            Divider().opacity"
-        )
-    )
+    #expect(source.contains("primaryActionButton"))
+    #expect(source.contains("EMKEDashboardSeparator()"))
     #expect(source.contains("Image(systemName: \"lock\")"))
-    #expect(source.contains(".offset(x: -5)"))
-    #expect(source.contains(".padding(.top, 20)"))
-    #expect(source.contains(".padding(.top, 12)"))
+    #expect(EMKEDashboardMetrics.privacyOffsetX == -5)
+    #expect(EMKEDashboardMetrics.footerDividerTopPadding == 20)
+    #expect(EMKEDashboardMetrics.privacyTopPadding == 12)
 }
 
 private func sourceFile(named name: String) throws -> String {
@@ -191,13 +169,29 @@ private func sourceFile(named name: String) throws -> String {
     return try String(contentsOf: url, encoding: .utf8)
 }
 
-private func compactMetric(
-    matching pattern: String,
-    in source: String
-) throws -> Double {
-    let expression = try NSRegularExpression(pattern: pattern)
-    let range = NSRange(source.startIndex..., in: source)
-    let match = try #require(expression.firstMatch(in: source, range: range))
-    let valueRange = try #require(Range(match.range(at: 1), in: source))
-    return try #require(Double(source[valueRange]))
+private func compositedContrast(_ foreground: NSColor, over background: NSColor) -> Double {
+    let alpha = foreground.alphaComponent
+    let red = (foreground.redComponent * alpha) + (background.redComponent * (1 - alpha))
+    let green = (foreground.greenComponent * alpha) + (background.greenComponent * (1 - alpha))
+    let blue = (foreground.blueComponent * alpha) + (background.blueComponent * (1 - alpha))
+    let foregroundLuminance = relativeLuminance(red: red, green: green, blue: blue)
+    let backgroundLuminance = relativeLuminance(
+        red: background.redComponent,
+        green: background.greenComponent,
+        blue: background.blueComponent
+    )
+    let lighter = max(foregroundLuminance, backgroundLuminance)
+    let darker = min(foregroundLuminance, backgroundLuminance)
+    return (lighter + 0.05) / (darker + 0.05)
+}
+
+private func relativeLuminance(red: Double, green: Double, blue: Double) -> Double {
+    func linearize(_ component: Double) -> Double {
+        component <= 0.04045
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
+    }
+    return (0.2126 * linearize(red))
+        + (0.7152 * linearize(green))
+        + (0.0722 * linearize(blue))
 }

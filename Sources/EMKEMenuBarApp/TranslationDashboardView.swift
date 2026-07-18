@@ -63,12 +63,12 @@ struct TranslationDashboardContent: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Spacer(minLength: 48)
+            Spacer(minLength: EMKEDashboardMetrics.topSpacer)
             LiveWaveformView(
                 level: value.primaryLevel,
-                maximumHeight: 95
+                maximumHeight: EMKEDashboardMetrics.waveformMaximumHeight
             )
-            .offset(y: 5)
+            .offset(y: EMKEDashboardMetrics.waveformOffsetY)
             HStack(spacing: 5) {
                 Image(systemName: value.primaryStatusSymbol)
                     .font(.system(size: 10, weight: .medium))
@@ -77,9 +77,9 @@ struct TranslationDashboardContent: View {
                     .font(.system(size: 14, weight: .medium))
             }
             .foregroundStyle(EMKEVisualStyle.secondaryText)
-            .padding(.top, 4)
+            .padding(.top, EMKEDashboardMetrics.statusTopPadding)
             .offset(x: -5)
-            .offset(y: 5)
+            .offset(y: EMKEDashboardMetrics.statusOffsetY)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("翻译状态：\(value.primaryStatus)")
             if let errorText = value.errorText {
@@ -89,21 +89,21 @@ struct TranslationDashboardContent: View {
                     .lineLimit(1)
                     .padding(.top, 4)
             }
-            Spacer(minLength: 28)
-            Divider().opacity(EMKEVisualStyle.dividerOpacity)
+            Spacer(minLength: EMKEDashboardMetrics.lowerSpacer)
+            EMKEDashboardSeparator()
             languageDirection
-            Divider().opacity(EMKEVisualStyle.dividerOpacity)
+            EMKEDashboardSeparator()
             channelRows
             Spacer(minLength: 16)
             primaryActionButton
-            Divider().opacity(EMKEVisualStyle.dividerOpacity)
-                .padding(.top, 20)
+            EMKEDashboardSeparator()
+                .padding(.top, EMKEDashboardMetrics.footerDividerTopPadding)
             privacyFooter
         }
-        .padding(.leading, 22)
-        .padding(.trailing, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 20)
+        .padding(.leading, EMKEDashboardMetrics.leadingPadding)
+        .padding(.trailing, EMKEDashboardMetrics.trailingPadding)
+        .padding(.top, EMKEDashboardMetrics.topPadding)
+        .padding(.bottom, EMKEDashboardMetrics.bottomPadding)
         .frame(
             width: EMKEVisualStyle.panelWidth,
             height: EMKEVisualStyle.panelHeight
@@ -114,18 +114,28 @@ struct TranslationDashboardContent: View {
     private var header: some View {
         HStack {
             Text("EMKE Translation")
-                .font(.system(size: 13, weight: .semibold))
+                .font(
+                    .system(
+                        size: EMKEDashboardMetrics.headerTitleSize,
+                        weight: .semibold
+                    )
+                )
             Spacer()
             Button(action: settingsAction) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 19, weight: .light))
+                    .font(
+                        .system(
+                            size: EMKEDashboardMetrics.gearSize,
+                            weight: .light
+                        )
+                    )
                     .frame(width: 32, height: 32)
-                    .offset(x: 6)
+                    .offset(x: EMKEDashboardMetrics.gearOffsetX)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("打开设置")
         }
-        .offset(y: 4)
+        .offset(y: EMKEDashboardMetrics.headerOffsetY)
     }
 
     private var languageDirection: some View {
@@ -133,20 +143,25 @@ struct TranslationDashboardContent: View {
             languagePicker(
                 title: "我的母语",
                 selection: $motherLanguage,
-                leadingInset: 52
+                leadingInset: EMKEDashboardMetrics.inputLanguageInset
             )
             Image(systemName: "arrow.right")
-                .font(.system(size: 17, weight: .light))
+                .font(
+                    .system(
+                        size: EMKEDashboardMetrics.directionArrowSize,
+                        weight: .light
+                    )
+                )
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .padding(.bottom, 8)
                 .accessibilityHidden(true)
             languagePicker(
                 title: "会议输出",
                 selection: $meetingOutputLanguage,
-                leadingInset: 45
+                leadingInset: EMKEDashboardMetrics.outputLanguageInset
             )
         }
-        .padding(.vertical, 17.5)
+        .padding(.vertical, EMKEDashboardMetrics.languageVerticalPadding)
     }
 
     private func languagePicker(
@@ -206,7 +221,7 @@ struct TranslationDashboardContent: View {
                 presentation: value.inbound,
                 action: inboundAction
             )
-            Divider().opacity(EMKEVisualStyle.dividerOpacity)
+            EMKEDashboardSeparator()
             TranslationChannelRow(
                 title: "对方听到",
                 direction: value.outboundDirection,
@@ -220,7 +235,12 @@ struct TranslationDashboardContent: View {
     private var primaryActionButton: some View {
         Button(value.primaryActionTitle, action: primaryAction)
             .buttonStyle(.plain)
-            .font(.system(size: 16, weight: .semibold))
+            .font(
+                .system(
+                    size: EMKEDashboardMetrics.primaryActionSize,
+                    weight: .semibold
+                )
+            )
             .foregroundStyle(Color(nsColor: .windowBackgroundColor))
             .frame(maxWidth: .infinity)
             .frame(height: EMKEVisualStyle.primaryButtonHeight)
@@ -235,15 +255,20 @@ struct TranslationDashboardContent: View {
     private var privacyFooter: some View {
         HStack(spacing: 5) {
             Image(systemName: "lock")
-                .font(.system(size: 9, weight: .medium))
+                .font(
+                    .system(
+                        size: EMKEDashboardMetrics.privacyIconSize,
+                        weight: .medium
+                    )
+                )
                 .accessibilityHidden(true)
             Text(value.privacyText)
-                .font(.system(size: 13))
+                .font(.system(size: EMKEDashboardMetrics.privacyTextSize))
         }
         .foregroundStyle(EMKEVisualStyle.secondaryText)
         .frame(maxWidth: .infinity)
-        .offset(x: -5)
-        .padding(.top, 12)
+        .offset(x: EMKEDashboardMetrics.privacyOffsetX)
+        .padding(.top, EMKEDashboardMetrics.privacyTopPadding)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(value.privacyText)
     }

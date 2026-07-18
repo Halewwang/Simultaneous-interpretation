@@ -1,0 +1,25 @@
+{
+  "contentHeight" : 1240,
+  "contentWidth" : 840,
+  "implementationScaleX" : 1,
+  "implementationScaleY" : 1,
+  "panelHeight" : 1288,
+  "panelWidth" : 888,
+  "sourceDrawRect" : [
+    0,
+    -7.8658536585365937,
+    840,
+    1255.7317073170732
+  ],
+  "sourceNormalization" : "surface-crop-uniform-aspect-fill-center-crop",
+  "sourceOriginalHeight" : 1523,
+  "sourceOriginalWidth" : 1033,
+  "sourceSurfaceCrop" : [
+    24,
+    22,
+    984,
+    1471
+  ],
+  "sourceUniformScale" : 0.85365853658536583,
+  "surfaceInset" : 24
+}

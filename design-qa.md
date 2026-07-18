@@ -3,24 +3,26 @@
 ## 比较目标与证据
 
 - source visual truth: `/Users/hale/.codex/generated_images/019f7317-d192-73e2-93f7-ab12bdc4c5e3/exec-e64a9f1b-cec0-4e0a-aa39-ad89127eddbb.png`
-- implementation screenshot: `.superpowers/artifacts/task-7/running-pass-5-final-surface.png`
-- full-view comparison: `.superpowers/artifacts/task-7/comparison-pass-5-final.png`
-- inspection preview: `.superpowers/artifacts/task-7/comparison-pass-5-final-preview.png`（仅为查看器降采样；canonical 证据仍为上面的 1680 × 1240 px 原图）
+- implementation screenshot: `docs/visual-qa/pass-6/artifacts/implementation-surface.png`
+- exact content comparison: `docs/visual-qa/pass-6/artifacts/comparison-content.png`
+- full-view comparison: `docs/visual-qa/pass-6/artifacts/comparison-surface.png`
+- reproducibility geometry: `docs/visual-qa/pass-6/artifacts/geometry.json`
+- tracked renderer and verifier: `docs/visual-qa/pass-6/render-pass-6.swift` and `docs/visual-qa/pass-6/verify-pass-6.swift`
 - prior focused channel comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
 - native dashboard capture: `.superpowers/artifacts/task-7/native-dashboard-window.png`
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
-- viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 5 验收包装器在完全相同的 840 × 1240 px 画布内模拟 MenuBarExtra 圆角表面、边界和阴影，不改变生产视图。原生窗口截图另含系统 32 pt 窗口栏。
+- viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 6 将批准稿表面以单一等比缩放 + 居中裁切规范化为 840 × 1240 px；实现 raw 保持 840 × 1240 px 原样。两者分别以 1:1 嵌入 888 × 1288 px 验收面板，再组成 1776 × 1288 px surface comparison。原生窗口截图另含系统 32 pt 窗口栏。
 - state: 浅色运行态 fixture（中文母语、德语会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；当前机器深色未配置控制台与设置页用于原生交互验收。
 
 ## Findings
 
-没有剩余的可执行 P0、P1 或 P2。Pass 4 的证据仍判定无效；最终结论只基于 Pass 5 的同状态、同裁切、同 viewport 比较。
+没有剩余的可执行 P0、P1 或 P2。最终结论只基于 Pass 6 的 tracked、1:1 像素证据；Pass 5 仍保持失效。
 
-- Pass 5 使用批准稿相同的浅色运行态、420 × 620 pt content 和相同裁切，并加入只用于验收的 MenuBarExtra 风格圆角表面、边界和阴影；没有在生产视图内增加重复大卡片。字体层级、主音波动态、语言区、通道列、动作、CTA、底部边界与表面均完成并排复核。
+- Pass 6 修复了两项 P2：验收包装器不再缩放实现内容；语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间四个边界改用 `NSColor.separatorColor` 和 0.5 pt 厚度，在 2× 捕获中稳定为 1 physical pixel。深浅系统外观的合成对比度均由测试约束在 1.15–1.5，保持可见且克制。
 
 - [P3] 确认稿入站示例写“德语 → 中文”；实现保留真实的未知入站语种语义“其他语言 → 中文”，不伪造服务商尚未识别出的具体语言。其他可见语言名已本地化为“中文／英语／德语”，底层存储值仍为 `zh/en/de`。
 - [P3] 实现比确认稿多出极小的全局状态、通道状态和隐私锁 SF Symbols。它们是已确认的文字 + 语义符号可访问性冗余，尺寸和颜色均从属于正文，没有形成第二视觉焦点。
-- [P3] canonical Pass 5 的系统表面是本地验收包装器，不是真实 MenuBarExtra 截屏；它只模拟容器、边界与阴影，raw content 仍由真实生产 `TranslationDashboardContent` 渲染。直接捕获尚未打开的 MenuBarExtra 仍受当前 Computer Use 可寻址能力限制。
+- [P3] canonical Pass 6 的系统表面是 tracked 验收包装器，不是真实 MenuBarExtra 截屏；它只模拟容器、边界与阴影，raw content 仍由真实生产 `TranslationDashboardContent` 渲染并以 1:1 像素嵌入。直接捕获尚未打开的 MenuBarExtra 仍受当前 Computer Use 可寻址能力限制。
 
 ## 必查表面
 
@@ -70,13 +72,25 @@ Evidence: `.superpowers/artifacts/task-7/running-review-fix.png` and `.superpowe
 
 该轮验证了状态符号修复本身，但不能作为最终视觉 fidelity 结论。批准稿包含浅色 MenuBarExtra 风格圆角浮层/阴影；实现图是无系统容器的 raw content；原生图又是深色未配置标准 Window。由于呈现上下文和状态不一致，本轮结论作废，等待 Pass 5+ 同态复核。
 
-### Pass 5 — passed / canonical
+### Pass 5 — invalidated / blocked
 
 Evidence: `.superpowers/artifacts/task-7/running-pass-5-final-raw.png`, `.superpowers/artifacts/task-7/running-pass-5-final-surface.png`, and `.superpowers/artifacts/task-7/comparison-pass-5-final.png`
 
 先用同一确定性 running fixture 建立新基线，再以失败的本地化和测量合同约束可见修复。实现将可见语言名本地化为中文；按批准稿收紧顶栏与 CTA；重建主音波高度、黑灰权重与通道小音波宽度；调整语言值、图标、方向、状态、动作、分隔线和底部隐私区的尺寸及位置。最终 raw content 是真实生产视图的 420 × 620 pt / 2× 渲染；验收包装器仅添加系统表面，不进入生产代码。
 
-批准稿和最终实现以完全相同状态、裁切和 viewport 合成到 1680 × 1240 px 图中并打开复核。主任务 reviewer 也独立打开最终 Pass 5 比较，结论为 materially aligned；没有裁切、滚动、重叠、错误层级或 P0–P2 fidelity 差异。仅保留上方三个有意且真实的 P3。
+该轮一度被肉眼判断为 materially aligned，但后续 reviewer 通过脚本尺寸审计发现包装器将 840 × 1240 px raw content 绘制到 800 × 1192 px，造成约 0.93% 非等比失真。由于 source 和 implementation 不是严格相同像素内容区，本轮结论作废，等待 Pass 6 的可追踪 1:1 证据。
+
+该轮还漏掉了用户直接指出的 P2：四条信息分隔横线在浅色对照中近乎不可见。`Divider().opacity(0.14)` 虽有节点，但不能稳定形成所需信息边界。
+
+### Pass 6 — passed / canonical
+
+Evidence: `docs/visual-qa/pass-6/artifacts/comparison-content.png`, `docs/visual-qa/pass-6/artifacts/comparison-surface.png`, and `docs/visual-qa/pass-6/artifacts/geometry.json`
+
+先添加会失败的语义 separator、共享几何和 capture-scale 合同，再以最小实现完成 GREEN。关键字号、间距、通道列和紧凑音波宽度不再主要依赖源码格式字符串，而是由 `EMKEDashboardMetrics`、`EMKEChannelMetrics` 和 `WaveformBarLayout` 共享确定性常量约束；真实 ImageRenderer 同时断言 840 × 1240 px。
+
+tracked renderer 对批准稿的已测 MenuBarExtra 表面做单一等比缩放和居中裁切，得到 840 × 1240 px source；implementation raw 保持 840 × 1240 px。验收表面把 raw 绘制到 `(24, 24, 840, 1240)`，`implementationScaleX = implementationScaleY = 1`。verifier 对尺寸、组合图注册和内嵌像素取样进行复核，implementation embedding mean RGB difference 为 `0.0`。最终 content comparison 是 1680 × 1240 px，surface comparison 是 1776 × 1288 px。
+
+实现者与主任务 reviewer 均以 original detail 打开两张 tracked 对照图。四条分隔线现在清晰、克制；字体、波形、语言、通道、CTA、footer 与系统表面没有可执行 P0–P2。canonical surface comparison SHA-256 为 `d699fca2d7d1a6324a5f8e3194a06392682bb86cd4464919ee46158fd08ab2f7`。
 
 ## 验证缺口
 

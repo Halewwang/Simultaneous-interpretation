@@ -130,15 +130,15 @@ struct TranslationChannelRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: presentation.symbol)
-                .font(.system(size: 35, weight: .light))
-                .frame(width: 48)
-                .offset(x: -5)
+                .font(.system(size: EMKEChannelMetrics.iconSize, weight: .light))
+                .frame(width: EMKEChannelMetrics.iconWidth)
+                .offset(x: EMKEChannelMetrics.iconOffsetX)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: EMKEChannelMetrics.titleSize, weight: .semibold))
                 Text(direction)
-                    .font(.system(size: 14))
+                    .font(.system(size: EMKEChannelMetrics.directionSize))
                     .foregroundStyle(EMKEVisualStyle.secondaryText)
             }
             .frame(width: 112, alignment: .leading)
@@ -146,24 +146,24 @@ struct TranslationChannelRow: View {
             Spacer(minLength: 0)
             Button(presentation.actionTitle, action: action)
                 .buttonStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(.system(size: EMKEChannelMetrics.actionSize))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .lineLimit(1)
                 .frame(width: 64, alignment: .trailing)
-                .offset(y: 14)
+                .offset(y: EMKEChannelMetrics.actionOffsetY)
                 .disabled(!presentation.actionEnabled)
                 .accessibilityLabel(
                     presentation.actionAccessibilityLabel
                 )
         }
-        .padding(.vertical, 23.5)
+        .padding(.vertical, EMKEChannelMetrics.verticalPadding)
     }
 
     private var channelStatus: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Image(systemName: presentation.statusSymbol)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: EMKEChannelMetrics.statusIconSize, weight: .medium))
                     .accessibilityHidden(true)
                 Text(presentation.status)
                     .font(.system(size: 12))
@@ -173,15 +173,15 @@ struct TranslationChannelRow: View {
             .accessibilityLabel(
                 "\(title)状态：\(presentation.status)"
             )
-            .offset(x: -18)
+            .offset(x: EMKEChannelMetrics.statusOffsetX)
             LiveWaveformView(
                 level: level,
                 maximumHeight: 24,
                 compact: true
             )
-            .offset(x: -10)
+            .offset(x: EMKEChannelMetrics.meterOffsetX)
         }
-        .frame(width: 105)
-        .offset(y: 6)
+        .frame(width: EMKEChannelMetrics.statusWidth)
+        .offset(y: EMKEChannelMetrics.statusOffsetY)
     }
 }

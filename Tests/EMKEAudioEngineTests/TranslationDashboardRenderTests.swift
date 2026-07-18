@@ -6,9 +6,21 @@ import Testing
 
 @Test @MainActor
 func captureRunningDashboardForVisualReview() throws {
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
-        return
-    }
+    let bitmap = try runningDashboardBitmap()
+
+    #expect(bitmap.pixelsWide == 840)
+    #expect(bitmap.pixelsHigh == 1240)
+
+    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else { return }
+
+    let data = try #require(bitmap.tiffRepresentation)
+    try data.write(
+        to: URL(fileURLWithPath: "/tmp/emke-running-dashboard.tiff")
+    )
+}
+
+@MainActor
+private func runningDashboardBitmap() throws -> NSBitmapImageRep {
 
     let value = DashboardFixture.running.makePresentation(
         inboundLevel: 0.42,
@@ -31,9 +43,7 @@ func captureRunningDashboardForVisualReview() throws {
     .background(Color(nsColor: .windowBackgroundColor))
 
     let renderer = ImageRenderer(content: view)
-    renderer.scale = 2
-    let bitmap = try #require(renderer.nsImage?.tiffRepresentation)
-    try bitmap.write(
-        to: URL(fileURLWithPath: "/tmp/emke-running-dashboard.tiff")
-    )
+    renderer.scale = EMKEVisualStyle.captureScale
+    let data = try #require(renderer.nsImage?.tiffRepresentation)
+    return try #require(NSBitmapImageRep(data: data))
 }

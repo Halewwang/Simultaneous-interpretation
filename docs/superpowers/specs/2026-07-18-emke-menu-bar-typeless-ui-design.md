@@ -6,9 +6,10 @@
 - 参考方向：[Typeless](https://www.typeless.com/) 的克制排版、黑白灰层级、充足留白与单一主动作
 - 已确认视觉稿：方案二“双通道工作台”的实时音波修订版
 - 视觉验收日期：2026-07-18
-- canonical 视觉验收：Pass 5（Pass 4 因混用 raw content、深色标准 Window 与浅色 MenuBarExtra 参考而失效）
-- 最终运行态截图：`.superpowers/artifacts/task-7/running-pass-5-final-surface.png`（本地验收产物，不纳入 Git）
-- 最终并排比较：`.superpowers/artifacts/task-7/comparison-pass-5-final.png`（本地验收产物，不纳入 Git）
+- canonical 视觉验收：Pass 6（Pass 5 因包装器非等比缩放和分隔线近乎不可见而失效）
+- 最终运行态截图：`docs/visual-qa/pass-6/artifacts/implementation-surface.png`（tracked）
+- 最终并排比较：`docs/visual-qa/pass-6/artifacts/comparison-surface.png`（tracked）
+- 1:1 几何合同：`docs/visual-qa/pass-6/artifacts/geometry.json`（tracked）
 
 ## 1. 设计目标
 
@@ -44,7 +45,7 @@
 | 正文 | 14–15 pt，regular/medium |
 | 辅助文字 | 12–13 pt，secondary |
 | 主按钮 | 高 45 pt，胶囊形状，primary 文本与反相背景 |
-| 分隔线 | 1 physical pixel，低对比语义色 |
+| 分隔线 | `NSColor.separatorColor`，0.5 pt；2× 下为 1 physical pixel |
 | 面板圆角 | 由 `MenuBarExtra(.window)` 系统容器提供，不在内容中重复造大卡片 |
 | 动效帧率 | 最高 30 fps |
 
@@ -95,6 +96,8 @@
 ### 4.4 双通道
 
 两个通道使用行式布局，以细分隔线区分，不放入独立卡片。
+
+语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间必须各有一条可见分隔线。分隔线直接使用系统语义 separator color，不再对系统 `Divider` 叠加 0.14 的超低 opacity；浅色与深色均保持克制对比。
 
 **我听到**
 
@@ -206,7 +209,7 @@
 
 2026-07-18 已完成源码合同、原生交互、运行态渲染和并排视觉验收；最终结论记录于项目根目录 `design-qa.md`。当前 Command Line Tools 环境缺少 `xctrace`，因此 Instruments SwiftUI/Time Profiler trace 仍是明确的实测缺口，不把自动化性能合同写成 Instruments 通过。
 
-Pass 5 的 canonical 证据使用浅色运行态、420 × 620 pt content、相同裁切与相同 viewport；本地验收包装器只模拟 MenuBarExtra 圆角表面、边界和阴影，不修改生产视图，也不在内容中重复增加大卡片。Pass 4 的异态证据保留为历史记录，不再支持最终结论。
+Pass 6 的 canonical 证据使用浅色运行态和 420 × 620 pt / 2× content。批准稿的已测系统表面通过单一等比缩放 + 居中裁切规范化为 840 × 1240 px；实现 raw 也是 840 × 1240 px，并以 1:1 像素嵌入验收表面。tracked verifier 检查所有尺寸、组合图注册和实现内嵌像素。Pass 4/5 证据仅保留为失效历史，不再支持最终结论。
 
 - 420 × 620 pt 下主控制台无需滚动，所有关键动作可见。
 - 未配置、就绪、连接中、翻译中、入站失败、出站失败、两种旁路和停止中状态均有确定性展示测试。
@@ -216,6 +219,7 @@ Pass 5 的 canonical 证据使用浅色运行态、420 × 620 pt content、相�
 - API Key 不进入 UserDefaults、日志、截图夹具或测试失败输出。
 - Swift 测试、Release 构建、菜单栏产品构建和严格 C 编译检查继续通过。
 - 使用真实运行态截图与已确认视觉稿进行同尺寸比较，修复层级、间距、裁切、按钮尺寸和状态表达的 P0–P2 偏差。
+- canonical renderer、verifier、geometry manifest 和最终比较图必须纳入 Git，不能只依赖忽略文件。
 
 ## 11. 非目标
 
