@@ -77,7 +77,7 @@ docs/
 - Consumes: Core Audio system device list and exact virtual-device UIDs from `docs/audio-driver-contract.md`.
 - Produces: `AudioDevice`, `AudioDeviceProviding`, `CoreAudioDeviceProvider`, `AudioDeviceCatalog`, `AudioDeviceSelection`, and `AudioDeviceCatalogError`.
 
-- [ ] **Step 1: Add the target and write failing catalog tests**
+- [x] **Step 1: Add the target and write failing catalog tests**
 
 Add an `EMKEAudioEngine` library/target linked with `CoreAudio`, plus `EMKEAudioEngineTests`. Test with an in-memory `AudioDeviceProviding` implementation and these exact cases:
 
@@ -106,13 +106,13 @@ Add an `EMKEAudioEngine` library/target linked with `CoreAudio`, plus `EMKEAudio
 
 Add separate tests for a missing driver, a missing saved physical UID, and a saved input/output that has zero channels in the requested direction.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter AudioDeviceCatalogTests`
 
 Expected: compilation fails because `EMKEAudioEngine`, `AudioDevice`, and `AudioDeviceCatalog` do not exist.
 
-- [ ] **Step 3: Implement the device model and injectable catalog**
+- [x] **Step 3: Implement the device model and injectable catalog**
 
 Use these public contracts:
 
@@ -142,13 +142,13 @@ public struct AudioDeviceSelection: Equatable, Sendable {
 
 `AudioDeviceCatalog` excludes both EMKE UIDs from physical choices, sorts choices by localized name then UID, and resolves saved selections strictly by UID. `CoreAudioDeviceProvider` reads the system list, UID, name, nominal rate, and input/output channel totals through `AudioObjectGetPropertyData`; it must not mutate any Core Audio property.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter AudioDeviceCatalogTests && swift test --parallel`
 
 Expected: all catalog tests and the existing 43 tests pass.
 
-- [ ] **Step 5: Add a live read-only enumeration assertion**
+- [x] **Step 5: Add a live read-only enumeration assertion**
 
 Run:
 
@@ -158,7 +158,7 @@ swift test --filter installedDriverAppearsInCoreAudio
 
 The test is skipped when the driver is absent. On the development Mac it must find both exact UIDs, report 48,000 Hz, and confirm at least one input and output channel on each virtual device.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Package.swift Sources/EMKEAudioEngine Tests/EMKEAudioEngineTests
