@@ -6,7 +6,11 @@
 
 **Architecture:** A Swift Package separates pure domain rules (`EMKECore`), OpenAI-compatible Translation protocol code (`EMKERealtime`), routing reducers (`EMKERouting`), and Keychain-backed secrets (`EMKESecurity`). Every platform-dependent boundary is injected behind a small protocol so the core can be tested without a meeting app, a real WebSocket, or a real audio driver.
 
-**Tech Stack:** Swift 6.2, Swift Package Manager, Foundation, FoundationNetworking-compatible URLSession APIs, NaturalLanguage, Security, XCTest; deployment target macOS 14.
+**Tech Stack:** Swift 6.2, Swift Package Manager, Foundation, FoundationNetworking-compatible URLSession APIs, NaturalLanguage, Security, Swift Testing; deployment target macOS 14.
+
+## Execution Environment Adjustment
+
+The installed Swift 6.2.3 Command Line Tools do not ship `XCTest` or the toolchain-integrated `Testing` module. The package therefore pins the official `swift-testing` package at `6.2.3` as a test-only dependency. During execution, every `XCTest` assertion shown below is translated directly to its Swift Testing equivalent (`@Test`, `#expect`, and `#require`); runtime library products receive no additional dependency.
 
 ## Global Constraints
 
