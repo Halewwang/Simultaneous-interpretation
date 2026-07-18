@@ -213,7 +213,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: define vir
 - Consumes: Tasks 2 and 3 plus Apple’s `AudioServerPlugInDriverInterface` contract.
 - Produces: exported `EMKEAudioDriver_Create` CFPlugIn factory and a complete static `AudioServerPlugInDriverInterface`.
 
-- [ ] **Step 1: Add a compile-only driver test command and verify RED**
+- [x] **Step 1: Add a compile-only driver test command and verify RED**
 
 Run:
 
@@ -226,23 +226,23 @@ xcrun clang -std=c11 -arch arm64 -mmacosx-version-min=14.0 -fPIC -Wall -Wextra -
 
 Expected: compilation fails because `EMKEAudioDriver.c` does not exist.
 
-- [ ] **Step 2: Implement the CFPlugIn factory and object properties**
+- [x] **Step 2: Implement the CFPlugIn factory and object properties**
 
 Implement all `AudioServerPlugInDriverInterface` callbacks. The plug-in object publishes both devices. Each device publishes its two streams, fixed nominal/available sample rate, latency, safety offset, zero-time timestamp period, preferred channel layout, and alive/running state. Each stream publishes direction, starting channel, terminal type, virtual/physical formats, and available virtual/physical formats. Reject unsupported property mutations with the correct Core Audio error instead of silently accepting them.
 
 Use Apple’s `Creating an Audio Server Driver Plug-in` sample as the behavioral reference and include its MIT-style license notice in `LICENSE-Apple-Sample.txt` and the derived source header.
 
-- [ ] **Step 3: Wire I/O callbacks to the route buffers**
+- [x] **Step 3: Wire I/O callbacks to the route buffers**
 
 `kAudioServerPlugInIOOperationWriteMix` on the speaker output writes to the speaker route. `ReadInput` on the speaker input reads captured meeting audio and zero-fills an underrun tail. `WriteMix` on the microphone output writes translated audio to the microphone route. `ReadInput` on the microphone input uses the fail-safe read that always zero-fills missing frames. `StartIO` lazily creates/reset buffers before the first client starts; `StopIO` resets the microphone route after the final client stops.
 
-- [ ] **Step 4: Compile with warnings as errors and verify GREEN**
+- [x] **Step 4: Compile with warnings as errors and verify GREEN**
 
 Run the Step 1 command plus compilation of `EMKEAudioRingBuffer.c` and `EMKEAudioRoutes.c`.
 
 Expected: all three sources compile for arm64 with no warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Driver/EMKEAudioDriver
