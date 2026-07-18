@@ -392,41 +392,57 @@ git commit -m "feat: assemble signed menu bar app bundle"
 **Interfaces:**
 - Consumes: fixed install paths and package receipt from the design spec.
 - Produces: a `postinstall` package hook and `uninstall-emke.sh [--purge-user-data]` with a test-only isolated root guarded by `EMKE_TEST_MODE=1`.
+- Safety invariant: test mode requires a non-empty, existing root whose canonical path is a strict descendant of the canonical temporary directory. Root and target containment are validated before purge or deletion, and real-mode deletion remains fixed to the three owned paths.
 
 - [ ] **Step 1: Write lifecycle safety tests before scripts**
 
-Create `Packaging/Tests/lifecycle-scripts-test.sh` that:
+Create `Packaging/Tests/lifecycle-scripts-test.sh`. The full runnable test must
+define the fixture/assertion helpers and execute every validation case listed
+below; this excerpt captures the security-critical ordering and exact logs:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+UNINSTALL="$ROOT/Packaging/Scripts/uninstall-emke.sh"
 TEMP="$(mktemp -d "${TMPDIR:-/tmp}/emke-life-test.XXXXXX")"
 trap 'rm -rf "$TEMP"' EXIT
-mkdir -p "$TEMP/Applications/EMKE Translation.app" \
-  "$TEMP/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver" \
-  "$TEMP/Library/Application Support/EMKE Translation"
 
-EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP" EMKE_TEST_LOG="$TEMP/log" \
-  bash "$ROOT/Packaging/Scripts/uninstall-emke.sh"
-test ! -e "$TEMP/Applications/EMKE Translation.app"
-test ! -e "$TEMP/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
-/usr/bin/grep -q '^preserve-user-data$' "$TEMP/log"
+# Define prepare_owned_paths, assert_owned_paths_exist,
+# assert_unrelated_paths_exist, and expect_rejected_before_mutation here.
+prepare_owned_paths "$TEMP/safe-root"
 
-if EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP" \
-  bash "$ROOT/Packaging/Scripts/uninstall-emke.sh" --unknown; then
-  echo "unknown option unexpectedly succeeded" >&2; exit 1
-fi
+# Run this first so the pre-fix implementation fails safely inside TEMP.
+expect_rejected_before_mutation extra-args 64 "$TEMP/safe-root" \
+  /usr/bin/env EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP/safe-root" \
+    EMKE_TEST_LOG="$TEMP/validation-log" \
+    bash "$UNINSTALL" --purge-user-data --extra
 
-: > "$TEMP/log"
-EMKE_TEST_MODE=1 EMKE_TEST_ROOT="$TEMP" EMKE_TEST_LOG="$TEMP/log" \
-  bash "$ROOT/Packaging/Scripts/uninstall-emke.sh" --purge-user-data
-/usr/bin/grep -q '^purge-keychain:com.emke.translation:openai-api-key$' "$TEMP/log"
-/usr/bin/grep -q '^purge-defaults:com.emke.translation.app$' "$TEMP/log"
+# Also reject one unknown option, a missing/non-existent root, `/`, an outside
+# root, roots symlinked to `/` or outside the canonical temp directory, and a
+# target parent symlink escaping the isolated root. Every rejection asserts that
+# owned paths, unrelated siblings, and the mutation log remain unchanged.
+
+# Default uninstall must remove app, driver, and support, preserve unrelated
+# siblings, and match this exact log (which proves no purge markers were emitted):
+printf '%s\n' \
+  'preserve-user-data' \
+  'forget-receipt:com.emke.translation.internal' \
+  'refresh-core-audio' > "$TEMP/preserve-expected"
+/usr/bin/cmp -s "$TEMP/preserve-expected" "$TEMP/preserve-log"
+
+# Explicit purge must match this exact log:
+printf '%s\n' \
+  'purge-keychain:com.emke.translation:openai-api-key' \
+  'purge-defaults:com.emke.translation.app' \
+  'forget-receipt:com.emke.translation.internal' \
+  'refresh-core-audio' > "$TEMP/purge-expected"
+/usr/bin/cmp -s "$TEMP/purge-expected" "$TEMP/purge-log"
 
 EMKE_TEST_MODE=1 EMKE_TEST_LOG="$TEMP/postinstall-log" \
   bash "$ROOT/Packaging/InstallerScripts/postinstall"
-/usr/bin/grep -q '^refresh-core-audio$' "$TEMP/postinstall-log"
+printf '%s\n' 'refresh-core-audio' > "$TEMP/postinstall-expected"
+/usr/bin/cmp -s "$TEMP/postinstall-expected" "$TEMP/postinstall-log"
 echo "PASS: lifecycle scripts"
 ```
 
@@ -434,7 +450,9 @@ echo "PASS: lifecycle scripts"
 
 Run `bash Packaging/Tests/lifecycle-scripts-test.sh`.
 
-Expected: FAIL because the lifecycle scripts do not exist.
+Expected: FAIL because the lifecycle scripts do not exist. When correcting an
+existing unsafe implementation, the first safe RED is the extra-argument check:
+`FAIL: extra-args returned 0, expected 64`.
 
 - [ ] **Step 3: Implement the Core Audio post-install hook**
 
@@ -453,46 +471,148 @@ exit 0
 
 - [ ] **Step 4: Implement allowlisted uninstall and explicit purge**
 
-Create `Packaging/Scripts/uninstall-emke.sh` with these exact branches:
+Create `Packaging/Scripts/uninstall-emke.sh` with validation before target
+construction or mutation, fixed owned-path removal, and narrow absent-item
+handling:
 
 ```bash
 #!/bin/bash
 set -euo pipefail
+
+usage() {
+  echo "usage: uninstall-emke.sh [--purge-user-data]" >&2
+  exit 64
+}
+
 PURGE=0
-case "${1:-}" in
-  "") ;;
-  --purge-user-data) PURGE=1 ;;
-  *) echo "usage: uninstall-emke.sh [--purge-user-data]" >&2; exit 64 ;;
-esac
+if [[ "$#" -gt 1 ]]; then usage; fi
+if [[ "$#" -eq 1 ]]; then
+  case "$1" in
+    --purge-user-data) PURGE=1 ;;
+    *) usage ;;
+  esac
+fi
 
 TEST_MODE="${EMKE_TEST_MODE:-0}"
 TEST_ROOT="${EMKE_TEST_ROOT:-}"
-if [[ -n "$TEST_ROOT" && "$TEST_MODE" != "1" ]]; then
-  echo "EMKE_TEST_ROOT requires EMKE_TEST_MODE=1" >&2; exit 65
+PREFIX=""
+
+test_root_error() { echo "$1" >&2; exit 65; }
+
+if [[ "$TEST_MODE" == "1" ]]; then
+  [[ -n "$TEST_ROOT" ]] || test_root_error "EMKE_TEST_MODE=1 requires EMKE_TEST_ROOT"
+  [[ -d "$TEST_ROOT" ]] || test_root_error "EMKE_TEST_ROOT must be an existing directory"
+  TEMP_BASE="${TMPDIR:-/tmp}"
+  [[ -d "$TEMP_BASE" ]] || test_root_error "temporary directory is unavailable"
+  CANON_TEMP="$(cd "$TEMP_BASE" 2>/dev/null && pwd -P)" || \
+    test_root_error "cannot canonicalize temporary directory"
+  CANON_ROOT="$(cd "$TEST_ROOT" 2>/dev/null && pwd -P)" || \
+    test_root_error "cannot canonicalize EMKE_TEST_ROOT"
+  [[ "$CANON_TEMP" != "/" ]] || test_root_error "temporary directory cannot be /"
+  [[ "$CANON_ROOT" != "/" ]] || test_root_error "EMKE_TEST_ROOT cannot resolve to /"
+  case "$CANON_ROOT" in
+    "$CANON_TEMP"/*) ;;
+    *) test_root_error "EMKE_TEST_ROOT must resolve inside the canonical temporary directory" ;;
+  esac
+  PREFIX="$CANON_ROOT"
+elif [[ -n "$TEST_ROOT" ]]; then
+  test_root_error "EMKE_TEST_ROOT requires EMKE_TEST_MODE=1"
 fi
-PREFIX="$TEST_ROOT"
+
+# Targets are constructed only after test-root validation has completed.
 APP="$PREFIX/Applications/EMKE Translation.app"
 DRIVER="$PREFIX/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
 SUPPORT="$PREFIX/Library/Application Support/EMKE Translation"
 RECEIPT="com.emke.translation.internal"
 
-remove_owned_path() {
-  case "$1" in "$APP"|"$DRIVER"|"$SUPPORT") ;; *) exit 66;; esac
-  if [[ "$TEST_MODE" == "1" ]]; then /bin/rm -rf -- "$1"
-  else /usr/bin/sudo /bin/rm -rf -- "$1"; fi
+require_owned_path() {
+  case "$1" in
+    "$APP"|"$DRIVER"|"$SUPPORT") ;;
+    *) echo "refusing non-owned path: $1" >&2; exit 66 ;;
+  esac
 }
+
+validate_test_target() {
+  local target="$1" cursor canonical_cursor
+  require_owned_path "$target"
+  cursor="$(/usr/bin/dirname "$target")"
+  while [[ ! -e "$cursor" && ! -L "$cursor" ]]; do
+    [[ "$cursor" != "$PREFIX" && "$cursor" != "/" ]] || break
+    cursor="$(/usr/bin/dirname "$cursor")"
+  done
+  canonical_cursor="$(cd "$cursor" 2>/dev/null && pwd -P)" || {
+    echo "refusing unresolvable test target parent: $cursor" >&2; exit 67;
+  }
+  case "$canonical_cursor" in
+    "$PREFIX"|"$PREFIX"/*) ;;
+    *) echo "refusing test target outside isolated root: $target" >&2; exit 67 ;;
+  esac
+}
+
+remove_owned_path() {
+  require_owned_path "$1"
+  if [[ "$TEST_MODE" == "1" ]]; then
+    /bin/rm -rf -- "$1"
+  else
+    /usr/bin/sudo /bin/rm -rf -- "$1"
+  fi
+}
+
+delete_keychain_item() {
+  local output status
+  set +e
+  output="$(/usr/bin/security delete-generic-password \
+    -s com.emke.translation -a openai-api-key 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 0 || "$status" -eq 44 ]] && return 0
+  [[ -z "$output" ]] || echo "$output" >&2
+  return "$status"
+}
+
+delete_defaults_domain() {
+  local output status
+  set +e
+  output="$(/usr/bin/defaults delete com.emke.translation.app 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 0 ]] && return 0
+  [[ "$output" == *"Domain (com.emke.translation.app) not found."* ]] && return 0
+  [[ -z "$output" ]] || echo "$output" >&2
+  return "$status"
+}
+
+forget_receipt() {
+  local output status
+  set +e
+  output="$(/usr/bin/sudo /usr/sbin/pkgutil --forget "$RECEIPT" 2>&1)"
+  status=$?
+  set -e
+  [[ "$status" -eq 0 ]] && return 0
+  case "$output" in
+    *"No receipt for '$RECEIPT' found at '/'."*|*"No receipt for '$RECEIPT' found."*) return 0 ;;
+  esac
+  [[ -z "$output" ]] || echo "$output" >&2
+  return "$status"
+}
+
+if [[ "$TEST_MODE" == "1" ]]; then
+  # Preflight all containment checks before purge or removal.
+  validate_test_target "$APP"
+  validate_test_target "$DRIVER"
+  validate_test_target "$SUPPORT"
+fi
 
 if [[ "$PURGE" == "1" ]]; then
   if [[ "$TEST_MODE" == "1" ]]; then
-    echo "purge-keychain:com.emke.translation:openai-api-key" >> "$EMKE_TEST_LOG"
+    echo "purge-keychain:com.emke.translation:openai-api-key" >> "${EMKE_TEST_LOG:?missing test log}"
     echo "purge-defaults:com.emke.translation.app" >> "$EMKE_TEST_LOG"
   else
-    /usr/bin/security delete-generic-password \
-      -s com.emke.translation -a openai-api-key >/dev/null 2>&1 || true
-    /usr/bin/defaults delete com.emke.translation.app >/dev/null 2>&1 || true
+    delete_keychain_item
+    delete_defaults_domain
   fi
 elif [[ "$TEST_MODE" == "1" ]]; then
-  echo "preserve-user-data" >> "$EMKE_TEST_LOG"
+  echo "preserve-user-data" >> "${EMKE_TEST_LOG:?missing test log}"
 fi
 
 remove_owned_path "$APP"
@@ -501,9 +621,11 @@ if [[ "$TEST_MODE" == "1" ]]; then
   echo "forget-receipt:$RECEIPT" >> "$EMKE_TEST_LOG"
   echo "refresh-core-audio" >> "$EMKE_TEST_LOG"
 else
-  /usr/bin/sudo /usr/sbin/pkgutil --forget "$RECEIPT" >/dev/null || true
+  forget_receipt
   /usr/bin/sudo /usr/bin/killall coreaudiod
 fi
+# Support removal remains last so the installed uninstaller stays available
+# until purge, payload removal, receipt handling, and Core Audio refresh finish.
 remove_owned_path "$SUPPORT"
 echo "EMKE Translation uninstalled."
 ```
