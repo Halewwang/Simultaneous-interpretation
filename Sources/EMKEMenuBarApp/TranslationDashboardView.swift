@@ -68,10 +68,12 @@ struct TranslationDashboardContent: View {
                 level: value.primaryLevel,
                 maximumHeight: 72
             )
-            Text(value.primaryStatus)
+            Label(value.primaryStatus, systemImage: value.primaryStatusSymbol)
                 .font(.system(size: 14, weight: .medium))
+                .imageScale(.small)
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .padding(.top, 12)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("翻译状态：\(value.primaryStatus)")
             if let errorText = value.errorText {
                 Text(errorText)

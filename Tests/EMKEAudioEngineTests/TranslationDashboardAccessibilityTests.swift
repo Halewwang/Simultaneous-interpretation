@@ -44,6 +44,16 @@ func dashboardIconsAndStatusExposeAccessibleCopy() throws {
 
     #expect(dashboard.contains(".accessibilityLabel(\"打开设置\")"))
     #expect(dashboard.contains(".accessibilityLabel(value.privacyText)"))
+    #expect(
+        dashboard.contains(
+            "Label(value.primaryStatus, systemImage: value.primaryStatusSymbol)"
+        )
+    )
+    #expect(
+        dashboard.contains(
+            #".accessibilityLabel("翻译状态：\(value.primaryStatus)")"#
+        )
+    )
     #expect(channel.contains(".accessibilityHidden(true)"))
     #expect(
         channel.contains(#""\(title)状态：\(presentation.status)""#)

@@ -155,6 +155,24 @@ func dashboardPresentationIsDeterministic(
 }
 
 @Test
+func dashboardPrimaryStatusUsesSemanticSymbolForEveryGlobalState() {
+    let cases: [(fixture: DashboardFixture, symbol: String)] = [
+        (.unconfigured, "exclamationmark.circle"),
+        (.ready, "checkmark.circle"),
+        (.connecting, "arrow.triangle.2.circlepath"),
+        (.running, "waveform.circle"),
+        (.inboundFailed, "exclamationmark.triangle"),
+        (.outboundFailed, "exclamationmark.triangle"),
+        (.stopping, "stop.circle"),
+    ]
+
+    for item in cases {
+        let value = item.fixture.makePresentation()
+        #expect(value.primaryStatusSymbol == item.symbol)
+    }
+}
+
+@Test
 func runningDashboardUsesCombinedAudioLevel() {
     let value = DashboardFixture.running.makePresentation(
         inboundLevel: 0.35,
@@ -191,4 +209,3 @@ func dashboardDirectionsUseProductLanguageContract() {
     #expect(value.inputLanguageName == "中文")
     #expect(value.outputLanguageName == "Deutsch")
 }
-

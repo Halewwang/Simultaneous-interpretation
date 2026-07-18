@@ -3,9 +3,9 @@
 ## 比较目标与证据
 
 - source visual truth: `/Users/hale/.codex/generated_images/019f7317-d192-73e2-93f7-ab12bdc4c5e3/exec-e64a9f1b-cec0-4e0a-aa39-ad89127eddbb.png`
-- implementation screenshot: `.superpowers/artifacts/task-7/running-final.png`
-- full-view comparison: `.superpowers/artifacts/task-7/comparison-final.png`
-- focused comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
+- implementation screenshot: `.superpowers/artifacts/task-7/running-review-fix.png`
+- full-view comparison: `.superpowers/artifacts/task-7/comparison-pass-4.png`
+- prior focused channel comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
 - native dashboard capture: `.superpowers/artifacts/task-7/native-dashboard-window.png`
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
 - viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。原生窗口截图另含系统 32 pt 窗口栏。
@@ -50,11 +50,21 @@ Evidence: `.superpowers/artifacts/task-7/comparison-pass-2.png`
 
 Fixes: 将小音波可视宽度调整至约 82 pt 并放入 90 pt 状态列；收紧顶栏字号和齿轮；在主动作与隐私区之间加入低对比分隔线。
 
-### Pass 3 — passed
+### Pass 3 — blocked
 
 Evidence: `.superpowers/artifacts/task-7/comparison-final.png` and `.superpowers/artifacts/task-7/channels-focus-final.png`
 
-复查字体、间距、颜色、图标、文案、状态、可访问性及资产 fidelity 后，无可执行 P0/P1/P2。通道动作有独立留白，24 根主/小音波比例正确，主按钮和底部隐私区完整可见。
+当时的视觉复查没有发现布局缺陷，但后续 reviewer 指出一项漏检：
+
+- [P2] 全局主状态只有文字，没有和未配置、准备、连接、翻译、失败、停止状态对应的语义 SF Symbol；通道状态已经具备文字 + 图标冗余，因此全局状态没有满足同一可访问性/规格合同。
+
+Fixes: 先用真实 `DashboardFixture` 添加会失败的 immutable presentation 映射测试，并添加视图源码验收；再加入确定性状态符号字段，以小尺寸、同色、非动画的 `Label` 呈现，同时保留明确且稳定的“翻译状态：…”辅助功能标签。
+
+### Pass 4 — passed
+
+Evidence: `.superpowers/artifacts/task-7/running-review-fix.png` and `.superpowers/artifacts/task-7/comparison-pass-4.png`
+
+使用与前轮完全相同的 420 × 620 pt running fixture 重渲染并打开并排图。全局状态新增 `waveform.circle` 后仍以文字为主，图标没有形成第二视觉焦点；状态组合保持居中，主音波、语言区、通道列、动作与隐私区没有位移、重叠、裁切或对齐回归。fixture 测试同时覆盖未配置 `exclamationmark.circle`、准备 `checkmark.circle`、连接 `arrow.triangle.2.circlepath`、翻译 `waveform.circle`、失败 `exclamationmark.triangle`、停止 `stop.circle`。复查后无可执行 P0/P1/P2。
 
 ## 验证缺口
 

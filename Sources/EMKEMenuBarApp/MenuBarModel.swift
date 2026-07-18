@@ -52,6 +52,7 @@ enum MenuBarChannel {
 
 struct TranslationDashboardPresentation: Equatable {
     let primaryStatus: String
+    let primaryStatusSymbol: String
     let primaryLevel: Double
     let inboundLevel: Double
     let outboundLevel: Double
@@ -96,6 +97,14 @@ struct TranslationDashboardPresentation: Equatable {
             state: effectiveOutboundState,
             bypassEnabled: outboundBypassEnabled
         )
+        let hasChannelFailure: Bool
+        if case .failed = effectiveInboundState {
+            hasChannelFailure = true
+        } else if case .failed = effectiveOutboundState {
+            hasChannelFailure = true
+        } else {
+            hasChannelFailure = false
+        }
         let safeInboundLevel = min(max(inboundLevel, 0), 1)
         let safeOutboundLevel: Double
         if case .failed = effectiveOutboundState {
@@ -122,6 +131,13 @@ struct TranslationDashboardPresentation: Equatable {
                 isRunning: running,
                 translationStartedAt: translationStartedAt,
                 now: now
+            ),
+            primaryStatusSymbol: primaryStatusSymbol(
+                readiness: readiness,
+                isStarting: isStarting,
+                isStopping: isStopping,
+                isRunning: running,
+                hasFailure: hasChannelFailure || errorText != nil
             ),
             primaryLevel: max(safeInboundLevel, safeOutboundLevel),
             inboundLevel: safeInboundLevel,
@@ -170,6 +186,23 @@ struct TranslationDashboardPresentation: Equatable {
         case .active: "翻译中 · 00:00"
         case .error: "配置或连接不可用"
         }
+    }
+
+    private static func primaryStatusSymbol(
+        readiness: MenuBarReadiness,
+        isStarting: Bool,
+        isStopping: Bool,
+        isRunning: Bool,
+        hasFailure: Bool
+    ) -> String {
+        if isStopping { return "stop.circle" }
+        if isStarting { return "arrow.triangle.2.circlepath" }
+        if hasFailure || readiness == .error {
+            return "exclamationmark.triangle"
+        }
+        if isRunning || readiness == .active { return "waveform.circle" }
+        if readiness == .ready { return "checkmark.circle" }
+        return "exclamationmark.circle"
     }
 }
 
