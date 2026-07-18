@@ -6,8 +6,9 @@
 - 参考方向：[Typeless](https://www.typeless.com/) 的克制排版、黑白灰层级、充足留白与单一主动作
 - 已确认视觉稿：方案二“双通道工作台”的实时音波修订版
 - 视觉验收日期：2026-07-18
-- 最终运行态截图：`.superpowers/artifacts/task-7/running-final.png`（本地验收产物，不纳入 Git）
-- 最终并排比较：`.superpowers/artifacts/task-7/comparison-final.png`（本地验收产物，不纳入 Git）
+- canonical 视觉验收：Pass 4（Pass 3 因全局状态缺少文字 + 语义图标冗余而失效）
+- 最终运行态截图：`.superpowers/artifacts/task-7/running-review-fix.png`（本地验收产物，不纳入 Git）
+- 最终并排比较：`.superpowers/artifacts/task-7/comparison-pass-4.png`（本地验收产物，不纳入 Git）
 
 ## 1. 设计目标
 
