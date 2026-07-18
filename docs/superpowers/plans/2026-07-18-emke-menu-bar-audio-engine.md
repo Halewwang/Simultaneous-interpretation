@@ -296,17 +296,17 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: add local 
 - Consumes: Task 3 C endpoint handles.
 - Produces: `AudioInputEndpoint`, `AudioOutputEndpoint`, `HALAudioInputEndpoint`, `HALAudioOutputEndpoint`, and `AudioEndpointError`.
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Use protocol-backed fakes to prove start/stop idempotence, start failure leaves the endpoint stopped, destroying a running endpoint stops it first, reads never exceed caller capacity, and partial writes report backpressure rather than discarding silently.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `swift test --filter HALAudioEndpointOwnershipTests`
 
 Expected: compilation fails because the Swift endpoint contracts are absent.
 
-- [ ] **Step 3: Implement the wrappers**
+- [x] **Step 3: Implement the wrappers**
 
 Use synchronous, non-`async` endpoint protocols because all network/UI work is above this boundary:
 
@@ -326,11 +326,11 @@ public protocol AudioOutputEndpoint: AnyObject {
 
 The concrete wrappers own and destroy exactly one C handle and translate nonzero `OSStatus` into `AudioEndpointError.coreAudio(OSStatus)`.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter HALAudioEndpointOwnershipTests && swift test --parallel`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/EMKEAudioEngine/HALAudioEndpoint.swift Tests/EMKEAudioEngineTests/HALAudioEndpointOwnershipTests.swift
