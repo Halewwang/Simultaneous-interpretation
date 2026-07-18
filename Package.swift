@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "EMKECore", targets: ["EMKECore"]),
         .library(name: "EMKERealtime", targets: ["EMKERealtime"]),
+        .library(name: "EMKERouting", targets: ["EMKERouting"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.3"),
@@ -14,6 +15,7 @@ let package = Package(
     targets: [
         .target(name: "EMKECore"),
         .target(name: "EMKERealtime", dependencies: ["EMKECore"]),
+        .target(name: "EMKERouting", dependencies: ["EMKECore"]),
         .testTarget(
             name: "EMKECoreTests",
             dependencies: [
@@ -26,6 +28,14 @@ let package = Package(
             dependencies: [
                 "EMKECore",
                 "EMKERealtime",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
+        .testTarget(
+            name: "EMKERoutingTests",
+            dependencies: [
+                "EMKECore",
+                "EMKERouting",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),
