@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+if [[ "${EMKE_TEST_MODE:-0}" == "1" ]]; then
+  echo "refresh-core-audio" >> "${EMKE_TEST_LOG:?missing test log}"
+  exit 0
+fi
+/usr/bin/killall coreaudiod
+exit 0
