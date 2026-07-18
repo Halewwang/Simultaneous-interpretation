@@ -177,7 +177,7 @@ git -c user.name='Codex' -c user.email='codex@local' commit -m "feat: discover l
 - Consumes: fixed 48 kHz stereo interleaved Float32 transport frames and 24 kHz mono PCM16 network bytes.
 - Produces: stateful `NetworkPCMEncoder` and `NetworkPCMDecoder` with chunk-boundary continuity.
 
-- [ ] **Step 1: Write failing conversion tests**
+- [x] **Step 1: Write failing conversion tests**
 
 Tests must prove silence remains silence, stereo downmix uses `(left + right) / 2`, Float32 values clamp to `[-1, 1]`, encoded bytes are little-endian signed PCM16, every two 48 kHz frames produce one 24 kHz sample, every 24 kHz sample produces two stereo 48 kHz frames, and splitting input across odd-sized chunks produces the same bytes/samples as one contiguous call.
 
@@ -185,30 +185,30 @@ Use the exact API:
 
 ```swift
 var encoder = NetworkPCMEncoder()
-let first = encoder.append48kStereo([1, -1, 0.5, 0.5, 0.25, 0.25])
-let second = encoder.append48kStereo([0, 0])
+let first = try encoder.append48kStereo([1, -1, 0.5, 0.5, 0.25, 0.25])
+let second = try encoder.append48kStereo([0, 0])
 
 var decoder = NetworkPCMDecoder()
-let frames = decoder.append24kMonoPCM16(Data([0x00, 0x40]))
+let frames = try decoder.append24kMonoPCM16(Data([0x00, 0x40]))
 ```
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run: `swift test --filter NetworkPCMConverterTests`
 
 Expected: compilation fails because the encoder and decoder are absent.
 
-- [ ] **Step 3: Implement deterministic bounded conversion**
+- [x] **Step 3: Implement deterministic bounded conversion**
 
-The encoder retains at most one pending stereo frame between calls, averages adjacent 48 kHz mono frames for a two-tap low-pass/downsample step, clamps, rounds to `Int16`, and emits little-endian bytes. The decoder rejects an odd byte count with `NetworkPCMError.misalignedPCM16`, converts each signed sample to Float32, duplicates it into two 48 kHz frames and two channels, and never accesses audio hardware.
+The encoder rejects an odd Float count with `NetworkPCMError.misalignedStereoSamples`, retains at most one pending stereo frame between calls, averages adjacent 48 kHz mono frames for a two-tap low-pass/downsample step, clamps, rounds to `Int16`, and emits little-endian bytes. The decoder rejects an odd byte count with `NetworkPCMError.misalignedPCM16`, converts each signed sample to Float32, duplicates it into two 48 kHz frames and two channels, and never accesses audio hardware.
 
-- [ ] **Step 4: Run focused and full tests and verify GREEN**
+- [x] **Step 4: Run focused and full tests and verify GREEN**
 
 Run: `swift test --filter NetworkPCMConverterTests && swift test --parallel`
 
 Expected: all conversion and existing tests pass without warnings.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/EMKEAudioEngine/NetworkPCMConverter.swift Tests/EMKEAudioEngineTests/NetworkPCMConverterTests.swift
