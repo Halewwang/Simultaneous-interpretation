@@ -408,7 +408,7 @@ Commit: `feat: coordinate dual translation sessions`
 - Consumes: the same session factory/configuration as runtime plus an optional 24 kHz PCM16 speech sample supplied by an interactive audio test.
 - Produces: `TranslationCompatibilityReport` with independent handshake, target-language, source-transcript, audio-output, dual-session, and graceful-close results.
 
-- [ ] **Step 1: Write failing structured-result tests**
+- [x] **Step 1: Write failing structured-result tests**
 
 ```swift
 @Test func chatOnlyGatewayIsReportedAsTranslationHandshakeFailure() async {
@@ -427,17 +427,17 @@ Commit: `feat: coordinate dual translation sessions`
 }
 ```
 
-- [ ] **Step 2: Run probe tests and confirm RED**
+- [x] **Step 2: Run probe tests and confirm RED**
 
 Run: `swift test --filter TranslationConnectionProbeTests`
 
 Expected: compilation fails because probe/report types do not exist.
 
-- [ ] **Step 3: Implement capability-by-capability probing**
+- [x] **Step 3: Implement capability-by-capability probing**
 
 Classify endpoint/handshake, authorization, session update, two concurrent sessions, optional sample audio output, optional source transcript, and graceful close separately. Without a speech sample, mark audio/transcript as `.requiresInteractiveAudio`; never mark the entire gateway fully compatible. Redact error messages by stripping authorization values and never include the API key in the report.
 
-- [ ] **Step 4: Run probe tests and commit**
+- [x] **Step 4: Run probe tests and commit**
 
 Run: `swift test --filter TranslationConnectionProbeTests`
 
