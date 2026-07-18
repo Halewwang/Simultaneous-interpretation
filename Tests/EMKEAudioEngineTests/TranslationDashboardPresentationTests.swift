@@ -202,6 +202,36 @@ func outboundFailureNeverPresentsOutputActivity() {
 }
 
 @Test
+func runningInboundFailurePromotesFailOpenStatusBeforeElapsedTime() {
+    let value = DashboardFixture.inboundFailed.makePresentation()
+    #expect(value.primaryStatus == "入站播放原音")
+    #expect(value.primaryStatusSymbol == "exclamationmark.triangle")
+}
+
+@Test
+func runningOutboundFailurePromotesFailClosedStatusBeforeElapsedTime() {
+    let value = DashboardFixture.outboundFailed.makePresentation()
+    #expect(value.primaryStatus == "出站已静音")
+    #expect(value.primaryStatusSymbol == "exclamationmark.triangle")
+}
+
+@Test
+func simultaneousFailuresPrioritizeOutboundFailClosedDanger() {
+    let value = DashboardFixture(
+        readiness: .active,
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .failed(message: "inbound offline"),
+            outbound: .failed(message: "outbound offline")
+        ),
+        startedAt: DashboardFixture.now.addingTimeInterval(-65),
+        errorText: "offline"
+    ).makePresentation()
+    #expect(value.primaryStatus == "出站已静音")
+    #expect(value.primaryStatusSymbol == "exclamationmark.triangle")
+}
+
+@Test
 func dashboardDirectionsUseProductLanguageContract() {
     let value = DashboardFixture.ready.makePresentation()
     #expect(value.inboundDirection == "其他语言 → 中文")

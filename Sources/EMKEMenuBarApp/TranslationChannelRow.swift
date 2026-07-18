@@ -14,7 +14,8 @@ struct TranslationChannelPresentation: Equatable {
     static func make(
         channel: MenuBarChannel,
         state: TranslationChannelState,
-        bypassEnabled: Bool
+        bypassEnabled: Bool,
+        automaticBypass: Bool = false
     ) -> TranslationChannelPresentation {
         let channelSymbol = channel == .inbound ? "headphones" : "mic"
         let actionTitle: String
@@ -54,6 +55,17 @@ struct TranslationChannelPresentation: Equatable {
                 actionEnabled: false
             )
         case .active:
+            if bypassEnabled {
+                return makeValue(
+                    status: "原音旁路",
+                    statusSymbol: "speaker.wave.2",
+                    statusColor: EMKEVisualStyle.secondaryText,
+                    symbol: channelSymbol,
+                    actionTitle: actionTitle,
+                    actionAccessibilityLabel: actionAccessibilityLabel,
+                    actionEnabled: true
+                )
+            }
             return makeValue(
                 status: "稳定",
                 statusSymbol: "checkmark.circle",
@@ -64,6 +76,17 @@ struct TranslationChannelPresentation: Equatable {
                 actionEnabled: true
             )
         case .bypassed:
+            if automaticBypass {
+                return makeValue(
+                    status: "同语言直通",
+                    statusSymbol: "arrow.left.arrow.right",
+                    statusColor: EMKEVisualStyle.secondaryText,
+                    symbol: channelSymbol,
+                    actionTitle: "无需翻译",
+                    actionAccessibilityLabel: "出站同语言无需翻译",
+                    actionEnabled: false
+                )
+            }
             return makeValue(
                 status: "原音旁路",
                 statusSymbol: "speaker.wave.2",

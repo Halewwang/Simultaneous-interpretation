@@ -2,13 +2,15 @@ import EMKECore
 import Foundation
 
 struct AppSettings: Equatable, Sendable {
-    var apiConfiguration: APIConfiguration
+    var baseURLString: String
+    var modelID: String
     var preferences: TranslationPreferences
     var selectedInputUID: String?
     var selectedOutputUID: String?
 
     static let `default` = AppSettings(
-        apiConfiguration: .default,
+        baseURLString: APIConfiguration.default.baseURL.absoluteString,
+        modelID: APIConfiguration.default.modelID,
         preferences: TranslationPreferences(
             motherLanguage: .chinese,
             meetingOutputLanguage: .german
@@ -16,6 +18,21 @@ struct AppSettings: Equatable, Sendable {
         selectedInputUID: nil,
         selectedOutputUID: nil
     )
+
+    init(
+        baseURLString: String,
+        modelID: String,
+        preferences: TranslationPreferences,
+        selectedInputUID: String?,
+        selectedOutputUID: String?
+    ) {
+        self.baseURLString = baseURLString
+        self.modelID = modelID
+        self.preferences = preferences
+        self.selectedInputUID = selectedInputUID
+        self.selectedOutputUID = selectedOutputUID
+    }
+
 }
 
 @MainActor
@@ -43,11 +60,10 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
 
     func load() -> AppSettings {
         let fallback = AppSettings.default
-        let baseURL = defaults.string(forKey: Key.baseURL)
-            .flatMap(URL.init(string:))
-            ?? fallback.apiConfiguration.baseURL
+        let baseURLString = defaults.string(forKey: Key.baseURL)
+            ?? fallback.baseURLString
         let modelID = defaults.string(forKey: Key.modelID)
-            ?? fallback.apiConfiguration.modelID
+            ?? fallback.modelID
         let motherLanguage = defaults.string(forKey: Key.motherLanguage)
             .flatMap(SupportedLanguage.init(rawValue:))
             ?? fallback.preferences.motherLanguage
@@ -58,10 +74,8 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
             ?? fallback.preferences.meetingOutputLanguage
 
         return AppSettings(
-            apiConfiguration: APIConfiguration(
-                baseURL: baseURL,
-                modelID: modelID
-            ),
+            baseURLString: baseURLString,
+            modelID: modelID,
             preferences: TranslationPreferences(
                 motherLanguage: motherLanguage,
                 meetingOutputLanguage: meetingOutputLanguage
@@ -77,11 +91,11 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
 
     func save(_ settings: AppSettings) {
         defaults.set(
-            settings.apiConfiguration.baseURL.absoluteString,
+            settings.baseURLString,
             forKey: Key.baseURL
         )
         defaults.set(
-            settings.apiConfiguration.modelID,
+            settings.modelID,
             forKey: Key.modelID
         )
         defaults.set(

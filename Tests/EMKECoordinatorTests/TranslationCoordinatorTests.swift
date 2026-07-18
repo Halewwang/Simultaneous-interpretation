@@ -474,6 +474,12 @@ func matchingLanguagesUseLocalOutboundBypassWithoutSecondSession() async throws 
 
     #expect(await harness.builder.requests.count == 1)
     #expect(await harness.audio.lastRouting?.1 == .originalBypass)
+
+    await harness.coordinator.setOutboundBypass(false)
+
+    #expect(await harness.coordinator.state.outbound == .bypassed)
+    #expect(await harness.audio.lastRouting?.1 == .originalBypass)
+    #expect(await harness.builder.requests.count == 1)
     await harness.coordinator.stop()
 }
 

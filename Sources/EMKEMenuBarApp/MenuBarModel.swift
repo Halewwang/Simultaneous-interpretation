@@ -92,10 +92,14 @@ struct TranslationDashboardPresentation: Equatable {
             state: effectiveInboundState,
             bypassEnabled: inboundBypassEnabled
         )
+        let usesAutomaticOutboundBypass = running
+            && motherLanguage == meetingOutputLanguage
+            && effectiveOutboundState == .bypassed
         let outbound = TranslationChannelPresentation.make(
             channel: .outbound,
             state: effectiveOutboundState,
-            bypassEnabled: outboundBypassEnabled
+            bypassEnabled: outboundBypassEnabled,
+            automaticBypass: usesAutomaticOutboundBypass
         )
         let hasChannelFailure: Bool
         if case .failed = effectiveInboundState {
@@ -129,6 +133,8 @@ struct TranslationDashboardPresentation: Equatable {
                 isStarting: isStarting,
                 isStopping: isStopping,
                 isRunning: running,
+                inboundState: effectiveInboundState,
+                outboundState: effectiveOutboundState,
                 translationStartedAt: translationStartedAt,
                 now: now
             ),
@@ -162,12 +168,16 @@ struct TranslationDashboardPresentation: Equatable {
         isStarting: Bool,
         isStopping: Bool,
         isRunning: Bool,
+        inboundState: TranslationChannelState,
+        outboundState: TranslationChannelState,
         translationStartedAt: Date?,
         now: Date
     ) -> String {
         if isStopping { return "正在停止" }
         if isStarting { return "正在连接" }
         if isRunning {
+            if case .failed = outboundState { return "出站已静音" }
+            if case .failed = inboundState { return "入站播放原音" }
             let elapsed = translationStartedAt.map {
                 MenuBarModel.formatElapsed(
                     seconds: now.timeIntervalSince($0)
@@ -216,12 +226,24 @@ final class MenuBarModel: ObservableObject {
 
     @Published var physicalInputs: [AudioDevice] = []
     @Published var physicalOutputs: [AudioDevice] = []
-    @Published var selectedInputUID: String?
-    @Published var selectedOutputUID: String?
-    @Published var baseURLString = APIConfiguration.default.baseURL.absoluteString
-    @Published var modelID = APIConfiguration.default.modelID
-    @Published var motherLanguage: SupportedLanguage = .chinese
-    @Published var meetingOutputLanguage: SupportedLanguage = .german
+    @Published var selectedInputUID: String? {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published var selectedOutputUID: String? {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published var baseURLString = APIConfiguration.default.baseURL.absoluteString {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published var modelID = APIConfiguration.default.modelID {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published var motherLanguage: SupportedLanguage = .chinese {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published var meetingOutputLanguage: SupportedLanguage = .german {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
     @Published var apiKeyDraft = ""
     @Published private(set) var coordinatorState = TranslationCoordinatorState()
     @Published private(set) var compatibilityReport: TranslationCompatibilityReport?
@@ -242,6 +264,8 @@ final class MenuBarModel: ObservableObject {
     private var driverAvailable = false
     private var hasStoredAPIKey = false
     private var eventTask: Task<Void, Never>?
+    private var isApplyingSettings = false
+    private var lastPersistedPublicSettings: AppSettings?
 
     init(
         provider: any AudioDeviceProviding = CoreAudioDeviceProvider(),
@@ -473,7 +497,6 @@ final class MenuBarModel: ObservableObject {
                 physicalInputUID: selectedInputUID,
                 physicalOutputUID: selectedOutputUID
             )
-            savePublicSettings(apiConfiguration: apiConfiguration)
             try await coordinator.start(
                 configuration: TranslationCoordinatorConfiguration(
                     apiConfiguration: apiConfiguration,
@@ -523,7 +546,6 @@ final class MenuBarModel: ObservableObject {
                 throw MenuBarConfigurationError.apiKeyRequired
             }
             let apiConfiguration = try makeAPIConfiguration()
-            savePublicSettings(apiConfiguration: apiConfiguration)
             let report = await connectionProbe.run(
                 configuration: TranslationConnectionProbeConfiguration(
                     apiConfiguration: apiConfiguration,
@@ -548,6 +570,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func setOutboundBypass(_ enabled: Bool) async {
+        guard !usesAutomaticOutboundBypass else { return }
         await coordinator.setOutboundBypass(enabled)
         outboundBypassEnabled = enabled
         coordinatorState = await coordinator.currentState()
@@ -604,20 +627,38 @@ final class MenuBarModel: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func savePublicSettings(apiConfiguration: APIConfiguration) {
-        settingsStore.save(
-            AppSettings(
-                apiConfiguration: apiConfiguration,
-                preferences: currentPreferences,
-                selectedInputUID: selectedInputUID,
-                selectedOutputUID: selectedOutputUID
-            )
+    private var usesAutomaticOutboundBypass: Bool {
+        coordinatorState.isRunning
+            && motherLanguage == meetingOutputLanguage
+            && coordinatorState.outbound == .bypassed
+    }
+
+    private var currentPublicSettings: AppSettings {
+        AppSettings(
+            baseURLString: baseURLString,
+            modelID: modelID,
+            preferences: currentPreferences,
+            selectedInputUID: selectedInputUID,
+            selectedOutputUID: selectedOutputUID
         )
     }
 
+    private func persistPublicSettingsIfNeeded() {
+        guard !isApplyingSettings else { return }
+        let settings = currentPublicSettings
+        guard settings != lastPersistedPublicSettings else { return }
+        settingsStore.save(settings)
+        lastPersistedPublicSettings = settings
+    }
+
     private func apply(_ settings: AppSettings) {
-        baseURLString = settings.apiConfiguration.baseURL.absoluteString
-        modelID = settings.apiConfiguration.modelID
+        isApplyingSettings = true
+        defer {
+            lastPersistedPublicSettings = settings
+            isApplyingSettings = false
+        }
+        baseURLString = settings.baseURLString
+        modelID = settings.modelID
         motherLanguage = settings.preferences.motherLanguage
         meetingOutputLanguage = settings.preferences.meetingOutputLanguage
         selectedInputUID = settings.selectedInputUID

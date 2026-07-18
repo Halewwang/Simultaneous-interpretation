@@ -67,6 +67,8 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     ] = []
     private var queuedEvents: [TranslationCoordinatorEvent] = []
     private(set) var audioLevelUpdateFlags: [Bool] = []
+    private(set) var inboundBypassValues: [Bool] = []
+    private(set) var outboundBypassValues: [Bool] = []
 
     func start(
         configuration: TranslationCoordinatorConfiguration
@@ -75,7 +77,10 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         current = TranslationCoordinatorState(
             isRunning: true,
             inbound: .active,
-            outbound: .active
+            outbound: configuration.preferences.motherLanguage
+                == configuration.preferences.meetingOutputLanguage
+                ? .bypassed
+                : .active
         )
     }
 
@@ -109,8 +114,13 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         current
     }
 
-    func setInboundBypass(_ enabled: Bool) async {}
-    func setOutboundBypass(_ enabled: Bool) async {}
+    func setInboundBypass(_ enabled: Bool) async {
+        inboundBypassValues.append(enabled)
+    }
+
+    func setOutboundBypass(_ enabled: Bool) async {
+        outboundBypassValues.append(enabled)
+    }
     func setAudioLevelUpdatesEnabled(_ enabled: Bool) async {
         audioLevelUpdateFlags.append(enabled)
     }
@@ -248,15 +258,111 @@ func publicSettingsNeverPersistAPIKey() {
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = UserDefaultsAppSettingsStore(defaults: defaults)
     var value = AppSettings.default
-    value.apiConfiguration = APIConfiguration(
-        baseURL: URL(string: "https://gateway.example/v1")!,
-        modelID: "translate-model"
-    )
+    value.baseURLString = "https://gateway.example/v1"
+    value.modelID = "translate-model"
 
     store.save(value)
 
     #expect(store.load() == value)
     #expect(defaults.object(forKey: "apiKey") == nil)
+    #expect(
+        defaults.dictionaryRepresentation().keys
+            .allSatisfy { !$0.lowercased().contains("apikey") }
+    )
+}
+
+@Test @MainActor
+func publicSettingsAutosaveEveryEditableFieldAndSurviveReopen() async {
+    let settings = TranslationSettingsStoreStub()
+    var model: MenuBarModel? = makeTranslationMenuModel(
+        secret: "keychain-only",
+        settings: settings
+    )
+    await model?.loadConfiguration()
+    #expect(settings.saved.isEmpty)
+
+    model?.baseURLString = "https://gateway.example/v2"
+    model?.modelID = "translation-v2"
+    model?.motherLanguage = .english
+    model?.meetingOutputLanguage = .chinese
+    model?.selectedInputUID = "physical.input"
+    model?.selectedOutputUID = "physical.output"
+    model?.apiKeyDraft = "must-not-enter-public-settings"
+
+    #expect(settings.saved.count == 6)
+    model = nil
+
+    let reopened = makeTranslationMenuModel(settings: settings)
+    await reopened.loadConfiguration()
+
+    #expect(reopened.baseURLString == "https://gateway.example/v2")
+    #expect(reopened.modelID == "translation-v2")
+    #expect(reopened.motherLanguage == .english)
+    #expect(reopened.meetingOutputLanguage == .chinese)
+    #expect(reopened.selectedInputUID == "physical.input")
+    #expect(reopened.selectedOutputUID == "physical.output")
+    #expect(reopened.apiKeyDraft.isEmpty)
+    #expect(settings.saved.count == 6)
+}
+
+@Test @MainActor
+func invalidBaseURLDraftIsPersistedFaithfullyWithoutLossyFallback() async {
+    let settings = TranslationSettingsStoreStub()
+    var model: MenuBarModel? = makeTranslationMenuModel(settings: settings)
+    await model?.loadConfiguration()
+
+    model?.baseURLString = "https://"
+    #expect(settings.saved.count == 1)
+    model = nil
+
+    let reopened = makeTranslationMenuModel(settings: settings)
+    await reopened.loadConfiguration()
+
+    #expect(reopened.baseURLString == "https://")
+    #expect(reopened.readiness == .selectPhysicalInput)
+    #expect(settings.saved.count == 1)
+}
+
+@Test @MainActor
+func userDefaultsRoundTripsPublicDraftButNeverAPIKey() async {
+    let suite = "EMKETranslationTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = UserDefaultsAppSettingsStore(defaults: defaults)
+    var model: MenuBarModel? = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(),
+        settingsStore: settings
+    )
+    await model?.loadConfiguration()
+
+    model?.baseURLString = "https://"
+    model?.modelID = "draft-model"
+    model?.motherLanguage = .german
+    model?.meetingOutputLanguage = .english
+    model?.selectedInputUID = "physical.input"
+    model?.selectedOutputUID = "physical.output"
+    model?.apiKeyDraft = "keychain-only"
+    model = nil
+
+    let reopened = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(),
+        settingsStore: settings
+    )
+    await reopened.loadConfiguration()
+
+    #expect(reopened.baseURLString == "https://")
+    #expect(reopened.modelID == "draft-model")
+    #expect(reopened.motherLanguage == .german)
+    #expect(reopened.meetingOutputLanguage == .english)
+    #expect(reopened.selectedInputUID == "physical.input")
+    #expect(reopened.selectedOutputUID == "physical.output")
+    #expect(reopened.apiKeyDraft.isEmpty)
     #expect(
         defaults.dictionaryRepresentation().keys
             .allSatisfy { !$0.lowercased().contains("apikey") }
@@ -486,4 +592,68 @@ func apiKeyStatusReflectsKeychainAvailability() async {
     let storedKey = makeTranslationMenuModel(secret: "test-key")
     await storedKey.loadConfiguration()
     #expect(storedKey.apiKeyStatusText == "已存入 Keychain")
+}
+
+@Test @MainActor
+func activeManualBypassPresentationTracksModelActionAndRestore() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+
+    await model.setInboundBypass(true)
+    var value = model.dashboardPresentation(at: Date())
+    #expect(await coordinator.inboundBypassValues == [true])
+    #expect(model.coordinatorState.inbound == .active)
+    #expect(value.inbound.status == "原音旁路")
+    #expect(value.inbound.statusSymbol == "speaker.wave.2")
+    #expect(value.inbound.actionTitle == "恢复翻译")
+
+    await model.setInboundBypass(false)
+    value = model.dashboardPresentation(at: Date())
+    #expect(await coordinator.inboundBypassValues == [true, false])
+    #expect(value.inbound.status == "稳定")
+    #expect(value.inbound.actionTitle == "播放原音")
+
+    await model.setOutboundBypass(true)
+    value = model.dashboardPresentation(at: Date())
+    #expect(await coordinator.outboundBypassValues == [true])
+    #expect(model.coordinatorState.outbound == .active)
+    #expect(value.outbound.status == "原音旁路")
+    #expect(value.outbound.actionTitle == "恢复翻译")
+
+    await model.setOutboundBypass(false)
+    value = model.dashboardPresentation(at: Date())
+    #expect(await coordinator.outboundBypassValues == [true, false])
+    #expect(value.outbound.status == "稳定")
+    #expect(value.outbound.actionTitle == "发送原音")
+}
+
+@Test @MainActor
+func sameLanguageOutboundDirectPathCannotOfferOrInvokeRestore() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://gateway.example/v1"
+    model.modelID = "translation-model"
+    model.motherLanguage = .english
+    model.meetingOutputLanguage = .english
+    await model.start()
+
+    let value = model.dashboardPresentation(at: Date())
+    #expect(model.coordinatorState.outbound == .bypassed)
+    #expect(value.outbound.status == "同语言直通")
+    #expect(value.outbound.actionTitle == "无需翻译")
+    #expect(!value.outbound.actionEnabled)
+
+    await model.setOutboundBypass(false)
+    #expect(await coordinator.outboundBypassValues.isEmpty)
+    #expect(model.coordinatorState.outbound == .bypassed)
 }

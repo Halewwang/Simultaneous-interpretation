@@ -319,6 +319,13 @@ public actor TranslationCoordinator {
     }
 
     public func setOutboundBypass(_ enabled: Bool) async {
+        if usesAutomaticOutboundBypass {
+            routing.handle(.outboundBypassEnabled)
+            state.outbound = .bypassed
+            await applyRouting()
+            publishState()
+            return
+        }
         if enabled {
             routing.handle(.outboundBypassEnabled)
         } else {
@@ -326,6 +333,13 @@ public actor TranslationCoordinator {
         }
         await applyRouting()
         publishState()
+    }
+
+    private var usesAutomaticOutboundBypass: Bool {
+        guard let configuration else { return false }
+        return configuration.preferences.motherLanguage
+            == configuration.preferences.meetingOutputLanguage
+            && outboundSession == nil
     }
 
     private enum Channel {
