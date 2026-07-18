@@ -7,7 +7,7 @@
 - 已确认视觉稿：方案二“双通道工作台”的实时音波修订版
 - 视觉验收日期：2026-07-18
 - canonical 视觉验收：Pass 6（Pass 5 因包装器非等比缩放和分隔线近乎不可见而失效）
-- 最终运行态截图：`docs/visual-qa/pass-6/artifacts/implementation-surface.png`（tracked）
+- 确定性渲染证据：`docs/visual-qa/pass-6/artifacts/implementation-surface.png`（tracked）
 - 最终并排比较：`docs/visual-qa/pass-6/artifacts/comparison-surface.png`（tracked）
 - 1:1 几何合同：`docs/visual-qa/pass-6/artifacts/geometry.json`（tracked）
 
