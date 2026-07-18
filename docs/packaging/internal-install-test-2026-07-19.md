@@ -196,6 +196,7 @@ acceptance was not run.**
 
 The artifact hash was recorded and the verifier passed for that artifact in
 this run; the existing Core Audio driver state probe also passed. Installation,
-installed-app launch, live endpoint operation, default uninstall, user-data preservation after uninstall,
-reinstallation, and manual meeting-app checks remain **NOT RUN / NOT
-VERIFIED**. No lifecycle phase may be reported as `PASS` from this evidence.
+installed-app launch, live endpoint operation, default uninstall, user-data
+preservation after uninstall, reinstallation, and manual meeting-app checks
+remain **NOT RUN / NOT VERIFIED**. No lifecycle phase may be reported as
+`PASS` from this evidence.

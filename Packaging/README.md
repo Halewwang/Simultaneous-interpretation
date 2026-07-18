@@ -30,7 +30,11 @@ symlink target.
 
 ## Install
 
-`sudo installer -pkg .build/distribution/EMKE-Translation-0.1.0-internal.pkg -target /`
+```bash
+sudo installer \
+  -pkg .build/distribution/EMKE-Translation-0.1.0-internal.pkg \
+  -target /
+```
 
 ## Uninstall while preserving settings and Keychain
 
