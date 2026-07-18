@@ -50,6 +50,129 @@ enum MenuBarChannel {
     case outbound
 }
 
+struct TranslationDashboardPresentation: Equatable {
+    let primaryStatus: String
+    let primaryLevel: Double
+    let inboundLevel: Double
+    let outboundLevel: Double
+    let primaryActionTitle: String
+    let primaryActionEnabled: Bool
+    let inputLanguageName: String
+    let outputLanguageName: String
+    let inboundDirection: String
+    let outboundDirection: String
+    let inbound: TranslationChannelPresentation
+    let outbound: TranslationChannelPresentation
+    let privacyText: String
+    let errorText: String?
+
+    static func make(
+        readiness: MenuBarReadiness,
+        coordinatorState: TranslationCoordinatorState,
+        isStarting: Bool,
+        isStopping: Bool,
+        inboundBypassEnabled: Bool,
+        outboundBypassEnabled: Bool,
+        inboundLevel: Double,
+        outboundLevel: Double,
+        translationStartedAt: Date?,
+        motherLanguage: SupportedLanguage,
+        meetingOutputLanguage: SupportedLanguage,
+        now: Date,
+        errorText: String?
+    ) -> TranslationDashboardPresentation {
+        let running = coordinatorState.isRunning
+        let effectiveInboundState: TranslationChannelState =
+            isStarting && !running ? .connecting : coordinatorState.inbound
+        let effectiveOutboundState: TranslationChannelState =
+            isStarting && !running ? .connecting : coordinatorState.outbound
+        let inbound = TranslationChannelPresentation.make(
+            channel: .inbound,
+            state: effectiveInboundState,
+            bypassEnabled: inboundBypassEnabled
+        )
+        let outbound = TranslationChannelPresentation.make(
+            channel: .outbound,
+            state: effectiveOutboundState,
+            bypassEnabled: outboundBypassEnabled
+        )
+        let safeInboundLevel = min(max(inboundLevel, 0), 1)
+        let safeOutboundLevel: Double
+        if case .failed = effectiveOutboundState {
+            safeOutboundLevel = 0
+        } else {
+            safeOutboundLevel = min(max(outboundLevel, 0), 1)
+        }
+        let action: (title: String, enabled: Bool)
+        if isStopping {
+            action = ("正在停止…", false)
+        } else if running {
+            action = ("停止翻译", true)
+        } else if isStarting {
+            action = ("正在连接…", false)
+        } else {
+            action = ("开始翻译", readiness == .ready)
+        }
+
+        return TranslationDashboardPresentation(
+            primaryStatus: primaryStatus(
+                readiness: readiness,
+                isStarting: isStarting,
+                isStopping: isStopping,
+                isRunning: running,
+                translationStartedAt: translationStartedAt,
+                now: now
+            ),
+            primaryLevel: max(safeInboundLevel, safeOutboundLevel),
+            inboundLevel: safeInboundLevel,
+            outboundLevel: safeOutboundLevel,
+            primaryActionTitle: action.title,
+            primaryActionEnabled: action.enabled,
+            inputLanguageName: motherLanguage.displayName,
+            outputLanguageName: meetingOutputLanguage.displayName,
+            inboundDirection: "其他语言 → \(motherLanguage.displayName)",
+            outboundDirection:
+                "\(motherLanguage.displayName) → "
+                + meetingOutputLanguage.displayName,
+            inbound: inbound,
+            outbound: outbound,
+            privacyText: "音频直连你的服务商",
+            errorText: errorText
+        )
+    }
+
+    private static func primaryStatus(
+        readiness: MenuBarReadiness,
+        isStarting: Bool,
+        isStopping: Bool,
+        isRunning: Bool,
+        translationStartedAt: Date?,
+        now: Date
+    ) -> String {
+        if isStopping { return "正在停止" }
+        if isStarting { return "正在连接" }
+        if isRunning {
+            let elapsed = translationStartedAt.map {
+                MenuBarModel.formatElapsed(
+                    seconds: now.timeIntervalSince($0)
+                )
+            } ?? "00:00"
+            return "翻译中 · \(elapsed)"
+        }
+        return switch readiness {
+        case .driverUnavailable: "未检测到 EMKE 虚拟音频驱动"
+        case .selectPhysicalInput: "请选择真实麦克风"
+        case .selectPhysicalOutput: "请选择真实耳机或扬声器"
+        case .invalidBaseURL: "请输入安全有效的 Base URL"
+        case .modelRequired: "请输入模型名称"
+        case .apiKeyRequired: "请输入 API Key"
+        case .ready: "准备开始"
+        case .active: "翻译中 · 00:00"
+        case .error: "配置或连接不可用"
+        }
+    }
+}
+
 @MainActor
 final class MenuBarModel: ObservableObject {
     private let provider: any AudioDeviceProviding
@@ -207,7 +330,7 @@ final class MenuBarModel: ObservableObject {
         screen = .dashboard
     }
 
-    static func formatElapsed(seconds: TimeInterval) -> String {
+    nonisolated static func formatElapsed(seconds: TimeInterval) -> String {
         let wholeSeconds = max(Int(seconds.rounded(.down)), 0)
         return String(
             format: "%02d:%02d",
@@ -229,6 +352,26 @@ final class MenuBarModel: ObservableObject {
             return "翻译中 · \(elapsedText(at: now))"
         }
         return readiness == .ready ? "准备开始" : statusText
+    }
+
+    func dashboardPresentation(
+        at now: Date
+    ) -> TranslationDashboardPresentation {
+        TranslationDashboardPresentation.make(
+            readiness: readiness,
+            coordinatorState: coordinatorState,
+            isStarting: isStarting,
+            isStopping: isStopping,
+            inboundBypassEnabled: inboundBypassEnabled,
+            outboundBypassEnabled: outboundBypassEnabled,
+            inboundLevel: inboundLevel,
+            outboundLevel: outboundLevel,
+            translationStartedAt: translationStartedAt,
+            motherLanguage: motherLanguage,
+            meetingOutputLanguage: meetingOutputLanguage,
+            now: now,
+            errorText: configurationError ?? inventoryError
+        )
     }
 
     func setWindowVisible(_ visible: Bool) async {

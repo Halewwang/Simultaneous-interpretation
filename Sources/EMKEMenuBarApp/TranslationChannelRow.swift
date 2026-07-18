@@ -1,7 +1,7 @@
 import EMKECoordinator
 import SwiftUI
 
-struct TranslationChannelPresentation {
+struct TranslationChannelPresentation: Equatable {
     let status: String
     let statusSymbol: String
     let statusColor: Color
