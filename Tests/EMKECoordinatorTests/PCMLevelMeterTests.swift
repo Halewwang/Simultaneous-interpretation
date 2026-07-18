@@ -65,6 +65,14 @@ func oddByteCountIsRejected() {
     }
 }
 
+@Test(arguments: [0, -24_000])
+func nonPositiveSampleRateIsRejected(sampleRate: Double) {
+    var meter = PCMLevelMeter()
+    #expect(throws: PCMLevelMeterError.invalidSampleRate) {
+        try meter.observe(levelMeterPCM16(amplitude: 1), sampleRate: sampleRate)
+    }
+}
+
 @Test
 func combinedSnapshotUsesTheLouderChannel() {
     let snapshot = AudioLevelSnapshot(inbound: 0.3, outbound: 0.7)
