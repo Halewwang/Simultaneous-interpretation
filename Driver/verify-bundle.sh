@@ -19,12 +19,21 @@ SMOKE_EXECUTABLE="$ROOT_DIR/.build/driver/verify-bundle"
 
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$PLIST_PATH")" == "BNDL" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST_PATH")" == "com.emke.translation.audio-driver" ]]
-/usr/libexec/PlistBuddy -c 'Print :CFPlugInFactories:E4A04A37-A2C4-4C65-B6F6-0E9F5A59B8D1' "$PLIST_PATH" | grep -qx 'EMKEAudioDriver_Create'
-/usr/libexec/PlistBuddy -c 'Print :CFPlugInTypes:443ABAB8-E7B3-491A-B985-BEB9187030DB' "$PLIST_PATH" | grep -q 'E4A04A37-A2C4-4C65-B6F6-0E9F5A59B8D1'
-file "$EXECUTABLE_PATH" | grep -q 'arm64'
-otool -L "$EXECUTABLE_PATH" | grep -q 'CoreAudio.framework'
-otool -L "$EXECUTABLE_PATH" | grep -q 'CoreFoundation.framework'
-nm -gU "$EXECUTABLE_PATH" | grep -q '_EMKEAudioDriver_Create'
+FACTORY="$(/usr/libexec/PlistBuddy -c \
+    'Print :CFPlugInFactories:E4A04A37-A2C4-4C65-B6F6-0E9F5A59B8D1' \
+    "$PLIST_PATH")"
+PLUGIN_TYPES="$(/usr/libexec/PlistBuddy -c \
+    'Print :CFPlugInTypes:443ABAB8-E7B3-491A-B985-BEB9187030DB' \
+    "$PLIST_PATH")"
+FILE_INFO="$(file "$EXECUTABLE_PATH")"
+LINKED_FRAMEWORKS="$(otool -L "$EXECUTABLE_PATH")"
+GLOBAL_SYMBOLS="$(nm -gU "$EXECUTABLE_PATH")"
+[[ "$FACTORY" == "EMKEAudioDriver_Create" ]]
+[[ "$PLUGIN_TYPES" == *"E4A04A37-A2C4-4C65-B6F6-0E9F5A59B8D1"* ]]
+[[ "$FILE_INFO" == *"arm64"* ]]
+[[ "$LINKED_FRAMEWORKS" == *"CoreAudio.framework"* ]]
+[[ "$LINKED_FRAMEWORKS" == *"CoreFoundation.framework"* ]]
+[[ "$GLOBAL_SYMBOLS" == *"_EMKEAudioDriver_Create"* ]]
 
 # File Provider workspaces can quarantine newly generated bundles. Mutating
 # build verification clears and signs only generated artifacts. Read-only

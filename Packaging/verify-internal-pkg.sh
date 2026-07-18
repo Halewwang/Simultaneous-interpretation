@@ -42,6 +42,31 @@ require_exact_expanded_layout() {
   require_unique_expanded_path Payload "$PAYLOAD_ROOT"
   require_unique_expanded_path Scripts "$SCRIPTS_ROOT"
 }
+require_no_control_character_paths() {
+  local LC_ALL=C
+  local listing="$TEMP/package-paths"
+  local item
+  if ! /usr/bin/find "$PAYLOAD_ROOT" "$SCRIPTS_ROOT" -print0 > "$listing"; then
+    echo "package path discovery failed" >&2; exit 1
+  fi
+  while IFS= read -r -d '' item; do
+    case "$item" in
+      *[$'\001'-$'\037'$'\177']*)
+        echo "control character found in package path" >&2; exit 1 ;;
+    esac
+  done < "$listing"
+}
+require_no_world_writable_paths() {
+  local listing="$TEMP/world-writable-paths"
+  local item
+  if ! /usr/bin/find "$PAYLOAD_ROOT" "$SCRIPTS_ROOT" \
+    -perm -0002 -print0 > "$listing"; then
+    echo "world-writable path discovery failed" >&2; exit 1
+  fi
+  if IFS= read -r -d '' item < "$listing"; then
+    echo "world-writable package path found" >&2; exit 1
+  fi
+}
 require_exact_scripts() {
   local listing="$TEMP/scripts-entries"
   local item
@@ -165,6 +190,8 @@ APP="$PAYLOAD_ROOT/Applications/EMKE Translation.app"
 DRIVER="$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
 UNINSTALLER="$PAYLOAD_ROOT/Library/Application Support/EMKE Translation/uninstall-emke.sh"
 require_exact_expanded_layout
+require_no_control_character_paths
+require_no_world_writable_paths
 require_exact_scripts
 if ! test -d "$APP"; then
   echo "missing required payload entry: Applications/EMKE Translation.app" >&2; exit 1
@@ -271,13 +298,6 @@ fi
 if test -n "$TRANSCRIPT_ARTIFACT"; then
   echo "transcript or recording artifact found in payload" >&2; exit 1
 fi
-if ! WORLD_WRITABLE="$(/usr/bin/find "$PAYLOAD_ROOT" -perm -0002 -print -quit)"; then
-  echo "world-writable path discovery failed" >&2; exit 1
-fi
-if test -n "$WORLD_WRITABLE"; then
-  echo "world-writable payload path found" >&2; exit 1
-fi
-
 bash "$ROOT/Driver/verify-bundle.sh" --read-only "$DRIVER"
 set +e
 /usr/sbin/pkgutil --check-signature "$PKG" > "$TEMP/pkg-signature" 2>&1

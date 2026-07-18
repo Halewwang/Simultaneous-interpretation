@@ -157,6 +157,9 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
 - raw payload paths with no traversal, absolute path, empty/dot/control
   component, prefix ambiguity, duplicate business path, orphan/ambiguous
   AppleDouble record, or multiple metadata records for one target;
+- every expanded `Payload` and `Scripts` path is enumerated with NUL delimiters
+  and rejects ASCII control characters before the newline-delimited raw payload
+  listing is consulted;
 - every app `Info.plist` value in the App Bundle Contract, including executable
   name, versions, package type, minimum OS, menu-bar mode, microphone
   description, principal class, high-resolution capability, and icon declaration;
@@ -164,16 +167,17 @@ The explicit `--purge-user-data` option first deletes that Keychain item and Use
 - strict ad-hoc signature identity for app and driver, with no Developer ID
   authority or team identity, and exact thin `arm64` executables from `lipo`;
 - driver bundle factory smoke test and exact virtual device UIDs;
-- read-only packaged-driver verification: the packaged executable and signature
-  bytes must not change while the separate smoke executable may be rebuilt and
-  locally signed;
+- read-only packaged-driver verification: the complete bundle contents, modes,
+  xattrs, and code-signing metadata must not change while the separate smoke
+  executable may be rebuilt and locally signed;
 - absence of credential values and private keys across every regular file in
   exact `Payload` and `Scripts`; `strings` output is captured per file before
   scanning so an early match cannot be hidden by pipeline SIGPIPE;
 - absence of transcripts and audio files; protocol literals such as the
   `Authorization` field name are allowed because the app must construct
   authenticated requests at runtime;
-- no unexpected writable or world-writable payload paths.
+- no world-writable path of any object type anywhere in the exact expanded
+  `Payload` and `Scripts` trees, including both roots.
 
 On macOS 26, `pkgbuild` may expose unavoidable `com.apple.provenance` as
 AppleDouble transport records in `pkgutil --payload-files`. The verifier may

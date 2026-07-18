@@ -81,4 +81,32 @@ LOCATION_EXPANDED="$TEMP/location-expanded"
 /usr/sbin/pkgutil --flatten "$LOCATION_EXPANDED" "$TEMP/location.pkg"
 expect_rejected wrong-install-location "$TEMP/location.pkg" \
   'unexpected package install-location'
+
+CONTROL_EXPANDED="$TEMP/control-expanded"
+/usr/sbin/pkgutil --expand-full "$PKG" "$CONTROL_EXPANDED"
+CONTROL_APP="$CONTROL_EXPANDED/Payload/Applications/EMKE Translation.app"
+CONTROL_FILE="$CONTROL_APP/Contents/Resources/control"$'\n'"name.dat"
+/usr/bin/printf '%s\n' 'safe fixture' > "$CONTROL_FILE"
+/bin/chmod 0644 "$CONTROL_FILE"
+/usr/bin/xattr -cr "$CONTROL_APP" 2>/dev/null || true
+/usr/bin/codesign --force --sign - --options runtime --timestamp=none \
+  "$CONTROL_APP"
+/usr/bin/pkgbuild --root "$CONTROL_EXPANDED/Payload" \
+  --scripts "$CONTROL_EXPANDED/Scripts" \
+  --identifier com.emke.translation.internal --version 0.1.0 \
+  --install-location / "$TEMP/control.pkg"
+expect_rejected control-character-path "$TEMP/control.pkg" \
+  'control character found in package path'
+
+WORLD_WRITABLE_EXPANDED="$TEMP/world-writable-expanded"
+/usr/sbin/pkgutil --expand "$PKG" "$WORLD_WRITABLE_EXPANDED"
+/bin/chmod 0777 "$WORLD_WRITABLE_EXPANDED/Scripts/postinstall"
+/usr/sbin/pkgutil --flatten "$WORLD_WRITABLE_EXPANDED" \
+  "$TEMP/world-writable.pkg"
+/usr/sbin/pkgutil --expand-full "$TEMP/world-writable.pkg" \
+  "$TEMP/world-writable-audit"
+test "$(/usr/bin/stat -f '%Lp' \
+  "$TEMP/world-writable-audit/Scripts/postinstall")" = 777
+expect_rejected world-writable-postinstall "$TEMP/world-writable.pkg" \
+  'world-writable package path found'
 echo "PASS: verifier rejects hardened negative fixtures"

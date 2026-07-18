@@ -699,7 +699,13 @@ entries. Every regular Payload and Scripts file is scanned from captured
 `strings` output. App and driver metadata must say exactly `Signature=adhoc`
 with no authority/team, both executables must be thin `arm64`, and every app
 plist contract field is checked. Packaged driver verification uses
-`Driver/verify-bundle.sh --read-only` with executable/signature hash stability.
+`Driver/verify-bundle.sh --read-only` with a full contents/modes/xattrs/codesign
+metadata snapshot. Its command producers are captured before matching rather
+than piped into early-exiting `grep -q`. NUL-delimited expanded-tree discovery
+rejects ASCII control characters across exact Payload and Scripts before the
+newline-delimited raw listing is parsed. A checked, NUL-delimited permission
+scan rejects world-writable files, directories, links, and roots across both
+trees.
 Unsigned status requires exact `Status: no signature`; not-notarized status is
 reported only with Gatekeeper's exact `source=no usable signature` rejection.
 All `find` and `xattr` scans propagate failures, and cleanup traps are installed
