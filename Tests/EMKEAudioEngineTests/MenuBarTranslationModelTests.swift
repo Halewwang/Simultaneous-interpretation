@@ -63,17 +63,41 @@ private final class MutableTranslationMenuDeviceProvider:
 {
     private let lock = NSLock()
     private var inventory: [AudioDevice]
+    private var defaultInputUID: String?
+    private var defaultOutputUID: String?
 
-    init(inventory: [AudioDevice]) {
+    init(
+        inventory: [AudioDevice],
+        defaultInputUID: String? = nil,
+        defaultOutputUID: String? = nil
+    ) {
         self.inventory = inventory
+        self.defaultInputUID = defaultInputUID
+        self.defaultOutputUID = defaultOutputUID
     }
 
     func devices() throws -> [AudioDevice] {
         lock.withLock { inventory }
     }
 
-    func replaceInventory(_ inventory: [AudioDevice]) {
-        lock.withLock { self.inventory = inventory }
+    func defaultInputDeviceUID() throws -> String? {
+        lock.withLock { defaultInputUID }
+    }
+
+    func defaultOutputDeviceUID() throws -> String? {
+        lock.withLock { defaultOutputUID }
+    }
+
+    func replaceInventory(
+        _ inventory: [AudioDevice],
+        defaultInputUID: String? = nil,
+        defaultOutputUID: String? = nil
+    ) {
+        lock.withLock {
+            self.inventory = inventory
+            self.defaultInputUID = defaultInputUID
+            self.defaultOutputUID = defaultOutputUID
+        }
     }
 }
 
@@ -281,6 +305,65 @@ func startRevalidatesAudioDevicesBeforeStartingCoordinator() async throws {
     #expect(model.selectedInputUID == nil)
     #expect(model.readiness == .selectPhysicalInput)
     #expect(await coordinator.configurations.isEmpty)
+}
+
+@Test @MainActor
+func startFallsBackToCurrentDefaultsWhenSavedDevicesDisappear() async throws {
+    let initialInventory = try TranslationMenuDeviceProvider().devices()
+    let provider = MutableTranslationMenuDeviceProvider(
+        inventory: initialInventory
+    )
+    let coordinator = TranslationCoordinatorStub()
+    let model = MenuBarModel(
+        provider: provider,
+        coordinator: coordinator,
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub()
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://api.openai.com/v1"
+    model.modelID = "gpt-realtime-translate"
+
+    let replacementInput = AudioDevice(
+        id: 30,
+        uid: "default.input",
+        name: "Default Input",
+        inputChannelCount: 1,
+        outputChannelCount: 0,
+        nominalSampleRate: 48_000
+    )
+    let replacementOutput = AudioDevice(
+        id: 31,
+        uid: "default.output",
+        name: "Default Output",
+        inputChannelCount: 0,
+        outputChannelCount: 2,
+        nominalSampleRate: 48_000
+    )
+    provider.replaceInventory(
+        initialInventory.filter {
+            $0.uid != "physical.input" && $0.uid != "physical.output"
+        } + [replacementInput, replacementOutput],
+        defaultInputUID: replacementInput.uid,
+        defaultOutputUID: replacementOutput.uid
+    )
+
+    await model.start()
+
+    #expect(model.selectedInputUID == replacementInput.uid)
+    #expect(model.selectedOutputUID == replacementOutput.uid)
+    let configuration = await coordinator.configurations.first
+    #expect(
+        configuration?.audioConfiguration.selection.physicalInput.uid
+            == replacementInput.uid
+    )
+    #expect(
+        configuration?.audioConfiguration.selection.physicalOutput.uid
+            == replacementOutput.uid
+    )
 }
 
 @Test @MainActor

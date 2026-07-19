@@ -464,11 +464,17 @@ final class MenuBarModel: ObservableObject {
             physicalOutputs = try catalog.physicalOutputs()
             if let selectedInputUID,
                !physicalInputs.contains(where: { $0.uid == selectedInputUID }) {
-                self.selectedInputUID = nil
+                let defaultUID = try provider.defaultInputDeviceUID()
+                self.selectedInputUID = physicalInputs.first(where: {
+                    $0.uid == defaultUID
+                })?.uid
             }
             if let selectedOutputUID,
                !physicalOutputs.contains(where: { $0.uid == selectedOutputUID }) {
-                self.selectedOutputUID = nil
+                let defaultUID = try provider.defaultOutputDeviceUID()
+                self.selectedOutputUID = physicalOutputs.first(where: {
+                    $0.uid == defaultUID
+                })?.uid
             }
             inventoryError = nil
         } catch {

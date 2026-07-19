@@ -42,6 +42,44 @@ public struct CoreAudioDeviceProvider: AudioDeviceProviding {
         }
     }
 
+    public func defaultInputDeviceUID() throws -> String? {
+        try defaultDeviceUID(selector: kAudioHardwarePropertyDefaultInputDevice)
+    }
+
+    public func defaultOutputDeviceUID() throws -> String? {
+        try defaultDeviceUID(selector: kAudioHardwarePropertyDefaultOutputDevice)
+    }
+
+    private func defaultDeviceUID(
+        selector: AudioObjectPropertySelector
+    ) throws -> String? {
+        let systemObject = AudioObjectID(kAudioObjectSystemObject)
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        try check(
+            AudioObjectGetPropertyData(
+                systemObject,
+                &address,
+                0,
+                nil,
+                &size,
+                &deviceID
+            ),
+            objectID: systemObject,
+            address: address
+        )
+        guard deviceID != kAudioObjectUnknown else { return nil }
+        return try stringProperty(
+            objectID: deviceID,
+            selector: kAudioDevicePropertyDeviceUID
+        )
+    }
+
     private func deviceIDs() throws -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
