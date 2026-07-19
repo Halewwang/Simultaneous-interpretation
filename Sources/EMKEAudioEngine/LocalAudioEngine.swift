@@ -118,7 +118,7 @@ public actor LocalAudioEngine {
         do {
             physicalOutput = try factory.makeOutput(
                 deviceID: selection.physicalOutput.id,
-                capacityFrames: configuration.capacityFrames
+                capacityFrames: configuration.playbackCapacityFrames
             )
         } catch {
             try failCreation(role: .physicalOutput)
@@ -128,7 +128,7 @@ public actor LocalAudioEngine {
         do {
             virtualMicrophoneOutput = try factory.makeOutput(
                 deviceID: selection.virtualMicrophone.id,
-                capacityFrames: configuration.capacityFrames
+                capacityFrames: configuration.playbackCapacityFrames
             )
         } catch {
             try failCreation(role: .virtualMicrophoneOutput)

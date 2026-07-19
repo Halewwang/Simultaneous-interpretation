@@ -31,12 +31,26 @@ public enum AudioEngineEvent: Equatable, Sendable {
 public struct AudioEngineConfiguration: Equatable, Sendable {
     public let selection: AudioDeviceSelection
     public let capacityFrames: UInt32
+    public let playbackCapacityFrames: UInt32
 
     public init(
         selection: AudioDeviceSelection,
         capacityFrames: UInt32 = 4_800
     ) {
+        self.init(
+            selection: selection,
+            capacityFrames: capacityFrames,
+            playbackCapacityFrames: 96_000
+        )
+    }
+
+    public init(
+        selection: AudioDeviceSelection,
+        capacityFrames: UInt32,
+        playbackCapacityFrames: UInt32
+    ) {
         self.selection = selection
         self.capacityFrames = capacityFrames
+        self.playbackCapacityFrames = playbackCapacityFrames
     }
 }

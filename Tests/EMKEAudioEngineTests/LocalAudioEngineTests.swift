@@ -102,8 +102,10 @@ final class EndpointFactoryFake: AudioEndpointFactory,
     ) throws -> any AudioOutputEndpoint {
         outputRequests.append(deviceID)
         if deviceID == selection.physicalOutput.id {
+            physicalOutput.writeLimit = Int(capacityFrames)
             return physicalOutput
         }
+        virtualMicrophoneOutput.writeLimit = Int(capacityFrames)
         return virtualMicrophoneOutput
     }
 }
@@ -267,6 +269,30 @@ func start(_ harness: EngineHarness) async throws {
     #expect(
         harness.factory.virtualMicrophoneOutput.writes
             == [[-1, -1, -1, -1]]
+    )
+    await harness.engine.stop()
+}
+
+@Test func translatedOutputAcceptsARealistic400MillisecondAudioChunk() async throws {
+    let harness = makeHarness()
+    try await harness.engine.start(
+        configuration: AudioEngineConfiguration(
+            selection: harness.selection
+        )
+    )
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .translated
+    )
+    let pcm16 = Data(repeating: 0, count: 9_600 * 2)
+
+    try await harness.engine.enqueueInboundTranslation(pcm16)
+    try await harness.engine.enqueueOutboundTranslation(pcm16)
+
+    #expect(harness.factory.physicalOutput.writes.first?.count == 19_200 * 2)
+    #expect(
+        harness.factory.virtualMicrophoneOutput.writes.first?.count
+            == 19_200 * 2
     )
     await harness.engine.stop()
 }
