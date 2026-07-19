@@ -57,6 +57,26 @@ private struct TranslationMenuDeviceProvider: AudioDeviceProviding {
     }
 }
 
+private final class MutableTranslationMenuDeviceProvider:
+    AudioDeviceProviding,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var inventory: [AudioDevice]
+
+    init(inventory: [AudioDevice]) {
+        self.inventory = inventory
+    }
+
+    func devices() throws -> [AudioDevice] {
+        lock.withLock { inventory }
+    }
+
+    func replaceInventory(_ inventory: [AudioDevice]) {
+        lock.withLock { self.inventory = inventory }
+    }
+}
+
 private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private(set) var configurations: [
         TranslationCoordinatorConfiguration
@@ -229,6 +249,38 @@ func missingDriverAndPhysicalSelectionsBlockStartInOrder() async {
     #expect(model.readiness == .selectPhysicalInput)
     model.selectedInputUID = "physical.input"
     #expect(model.readiness == .selectPhysicalOutput)
+}
+
+@Test @MainActor
+func startRevalidatesAudioDevicesBeforeStartingCoordinator() async throws {
+    let initialInventory = try TranslationMenuDeviceProvider().devices()
+    let provider = MutableTranslationMenuDeviceProvider(
+        inventory: initialInventory
+    )
+    let coordinator = TranslationCoordinatorStub()
+    let model = MenuBarModel(
+        provider: provider,
+        coordinator: coordinator,
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub()
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://gateway.example/v1"
+    model.modelID = "translation-model"
+    #expect(model.canStart)
+
+    provider.replaceInventory(
+        initialInventory.filter { $0.uid != "physical.input" }
+    )
+
+    await model.start()
+
+    #expect(model.selectedInputUID == nil)
+    #expect(model.readiness == .selectPhysicalInput)
+    #expect(await coordinator.configurations.isEmpty)
 }
 
 @Test @MainActor

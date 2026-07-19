@@ -480,6 +480,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func start() async {
+        reloadDevices()
         guard canStart,
               let selectedInputUID,
               let selectedOutputUID else { return }
