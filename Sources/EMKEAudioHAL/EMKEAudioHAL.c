@@ -18,6 +18,7 @@ struct EMKEHALInput {
     float *scratch;
     uint32_t scratchCapacityFrames;
     double clientSampleRate;
+    uint32_t clientChannelCount;
     _Atomic bool started;
     _Atomic uint64_t callbackCount;
     _Atomic uint32_t lastCallbackFrameCount;
@@ -35,7 +36,8 @@ struct EMKEHALOutput {
 };
 
 static AudioStreamBasicDescription EMKEHALTransportFormat(
-    double sampleRate
+    double sampleRate,
+    uint32_t channelCount
 ) {
     AudioStreamBasicDescription format = {0};
     format.mSampleRate = sampleRate;
@@ -43,12 +45,29 @@ static AudioStreamBasicDescription EMKEHALTransportFormat(
     format.mFormatFlags = kAudioFormatFlagIsFloat |
         kAudioFormatFlagIsPacked |
         kAudioFormatFlagsNativeEndian;
-    format.mBytesPerPacket = kEMKEHALChannelCount * sizeof(float);
+    format.mBytesPerPacket = channelCount * sizeof(float);
     format.mFramesPerPacket = 1;
-    format.mBytesPerFrame = kEMKEHALChannelCount * sizeof(float);
-    format.mChannelsPerFrame = kEMKEHALChannelCount;
+    format.mBytesPerFrame = channelCount * sizeof(float);
+    format.mChannelsPerFrame = channelCount;
     format.mBitsPerChannel = 8 * sizeof(float);
     return format;
+}
+
+uint32_t EMKEHALInputClientChannelCount(uint32_t deviceChannelCount) {
+    return deviceChannelCount < kEMKEHALChannelCount
+        ? deviceChannelCount
+        : kEMKEHALChannelCount;
+}
+
+void EMKEHALExpandMonoToStereoInPlace(float *samples, uint32_t frameCount) {
+    if (samples == NULL) {
+        return;
+    }
+    for (uint32_t frame = frameCount; frame > 0; frame--) {
+        const float sample = samples[frame - 1];
+        samples[(size_t)(frame - 1) * kEMKEHALChannelCount] = sample;
+        samples[(size_t)(frame - 1) * kEMKEHALChannelCount + 1] = sample;
+    }
 }
 
 static OSStatus EMKEHALCreateUnit(AudioUnit *outUnit) {
@@ -99,9 +118,13 @@ static OSStatus EMKEHALSetFormat(
     AudioUnit unit,
     AudioUnitScope scope,
     AudioUnitElement element,
-    double sampleRate
+    double sampleRate,
+    uint32_t channelCount
 ) {
-    AudioStreamBasicDescription format = EMKEHALTransportFormat(sampleRate);
+    AudioStreamBasicDescription format = EMKEHALTransportFormat(
+        sampleRate,
+        channelCount
+    );
     return AudioUnitSetProperty(
         unit,
         kAudioUnitProperty_StreamFormat,
@@ -134,9 +157,10 @@ static OSStatus EMKEHALGetFormat(
 
 static OSStatus EMKEHALSetInputChannelMap(
     AudioUnit unit,
+    UInt32 clientChannelCount,
     UInt32 deviceChannelCount
 ) {
-    if (deviceChannelCount == 0) {
+    if (clientChannelCount == 0 || deviceChannelCount == 0) {
         return kAudioUnitErr_FormatNotSupported;
     }
     const SInt32 channelMap[kEMKEHALChannelCount] = {
@@ -149,7 +173,7 @@ static OSStatus EMKEHALSetInputChannelMap(
         kAudioUnitScope_Output,
         1,
         channelMap,
-        sizeof(channelMap)
+        clientChannelCount * sizeof(channelMap[0])
     );
 }
 
@@ -193,9 +217,9 @@ static OSStatus EMKEHALInputCallback(
 
     AudioBufferList bufferList = {0};
     bufferList.mNumberBuffers = 1;
-    bufferList.mBuffers[0].mNumberChannels = kEMKEHALChannelCount;
+    bufferList.mBuffers[0].mNumberChannels = input->clientChannelCount;
     bufferList.mBuffers[0].mDataByteSize =
-        inNumberFrames * kEMKEHALChannelCount * sizeof(float);
+        inNumberFrames * input->clientChannelCount * sizeof(float);
     bufferList.mBuffers[0].mData = input->scratch;
     const OSStatus status = AudioUnitRender(
         input->unit,
@@ -229,6 +253,9 @@ static OSStatus EMKEHALInputCallback(
         inNumberFrames,
         memory_order_relaxed
     );
+    if (input->clientChannelCount == 1) {
+        EMKEHALExpandMonoToStereoInPlace(input->scratch, inNumberFrames);
+    }
 
     const uint32_t writtenFrames = EMKEAudioRingBufferWrite(
         input->buffer,
@@ -378,6 +405,7 @@ OSStatus EMKEHALInputCreate(
     if (status == noErr) {
         status = EMKEHALSetDevice(input->unit, deviceID);
     }
+    UInt32 deviceChannelCount = 0;
     if (status == noErr) {
         AudioStreamBasicDescription deviceFormat = {0};
         status = EMKEHALGetFormat(
@@ -391,6 +419,13 @@ OSStatus EMKEHALInputCreate(
         }
         if (status == noErr) {
             input->clientSampleRate = deviceFormat.mSampleRate;
+            deviceChannelCount = deviceFormat.mChannelsPerFrame;
+            input->clientChannelCount = EMKEHALInputClientChannelCount(
+                deviceChannelCount
+            );
+            if (input->clientChannelCount == 0) {
+                status = kAudioUnitErr_FormatNotSupported;
+            }
         }
     }
     if (status == noErr) {
@@ -398,23 +433,16 @@ OSStatus EMKEHALInputCreate(
             input->unit,
             kAudioUnitScope_Output,
             1,
-            input->clientSampleRate
+            input->clientSampleRate,
+            input->clientChannelCount
         );
     }
     if (status == noErr) {
-        AudioStreamBasicDescription deviceFormat = {0};
-        status = EMKEHALGetFormat(
+        status = EMKEHALSetInputChannelMap(
             input->unit,
-            kAudioUnitScope_Input,
-            1,
-            &deviceFormat
+            input->clientChannelCount,
+            deviceChannelCount
         );
-        if (status == noErr) {
-            status = EMKEHALSetInputChannelMap(
-                input->unit,
-                deviceFormat.mChannelsPerFrame
-            );
-        }
     }
     if (status == noErr) {
         AURenderCallbackStruct callback = {
@@ -573,6 +601,7 @@ void EMKEHALInputGetDiagnostics(
     );
     outDiagnostics->scratchCapacityFrames = input->scratchCapacityFrames;
     outDiagnostics->clientSampleRate = input->clientSampleRate;
+    outDiagnostics->clientChannelCount = input->clientChannelCount;
 }
 
 void EMKEHALInputDestroy(EMKEHALInput *input) {
@@ -638,7 +667,8 @@ OSStatus EMKEHALOutputCreate(
             output->unit,
             kAudioUnitScope_Input,
             0,
-            48000.0
+            48000.0,
+            kEMKEHALChannelCount
         );
     }
     if (status == noErr) {

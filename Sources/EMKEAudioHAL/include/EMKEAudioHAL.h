@@ -23,7 +23,11 @@ typedef struct EMKEHALInputDiagnostics {
     OSStatus lastRenderStatus;
     uint32_t scratchCapacityFrames;
     double clientSampleRate;
+    uint32_t clientChannelCount;
 } EMKEHALInputDiagnostics;
+
+uint32_t EMKEHALInputClientChannelCount(uint32_t deviceChannelCount);
+void EMKEHALExpandMonoToStereoInPlace(float *samples, uint32_t frameCount);
 
 OSStatus EMKEHALInputCreate(
     AudioObjectID deviceID,

@@ -17,7 +17,8 @@ Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtu
 
 ## Audio Formats
 
-- Every app/HAL endpoint exposes 48,000 Hz, two-channel, interleaved Float32 PCM.
+- The device-facing AUHAL input uses the selected device's native sample rate and at most two native channels. A mono input is duplicated into stereo in the preallocated callback scratch buffer after `AudioUnitRender` succeeds.
+- The ring-buffer and Swift engine boundary remains two-channel, interleaved Float32 PCM. Output endpoints use 48,000 Hz stereo; input resampling to that transport rate remains outside the AUHAL callback.
 - Each worker cycle processes at most 480 frames, or 10 ms at 48 kHz.
 - The default endpoint ring capacity is 4,800 frames, or 100 ms.
 - Translation input/output uses 24,000 Hz, mono, signed little-endian PCM16.
@@ -26,7 +27,7 @@ Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtu
 
 ## Real-Time Boundary
 
-`EMKEAudioHAL` owns all AUHAL callbacks and preallocates its scratch/ring storage before start. Input callbacks call `AudioUnitRender` and bounded-write an SPSC ring. Output callbacks bounded-read an SPSC ring and zero-fill every underrun.
+`EMKEAudioHAL` owns all AUHAL callbacks and preallocates its scratch/ring storage before start. Input callbacks call `AudioUnitRender`, expand mono frames to the fixed stereo transport layout in place when needed, and bounded-write an SPSC ring. Output callbacks bounded-read an SPSC ring and zero-fill every underrun.
 
 Callbacks do not call Swift, allocate memory, acquire locks, access files or the network, parse JSON, update UI, or emit logs. Swift polls or writes the C endpoint buffers outside the real-time callback.
 

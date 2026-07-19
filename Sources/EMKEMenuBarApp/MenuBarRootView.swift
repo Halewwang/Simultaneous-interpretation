@@ -21,8 +21,8 @@ struct MenuBarRootView: View {
             Task {
                 await model.setWindowVisible(true)
                 await model.loadConfiguration()
+                await model.reloadDevicesAsync()
             }
-            model.reloadDevices()
         }
         .onDisappear {
             Task { await model.setWindowVisible(false) }

@@ -3,7 +3,9 @@ import SwiftUI
 @main
 @MainActor
 struct EMKEMenuBarApp: App {
-    @StateObject private var model = MenuBarModel()
+    @StateObject private var model = MenuBarModel(
+        deferInitialDeviceReload: true
+    )
 
     var body: some Scene {
         MenuBarExtra {

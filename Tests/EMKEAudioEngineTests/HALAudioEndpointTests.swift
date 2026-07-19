@@ -42,6 +42,20 @@ import Testing
     EMKEHALOutputDestroy(nil)
 }
 
+@Test func monoDeviceFramesAreExpandedToStereoInPlace() {
+    #expect(EMKEHALInputClientChannelCount(0) == 0)
+    #expect(EMKEHALInputClientChannelCount(1) == 1)
+    #expect(EMKEHALInputClientChannelCount(2) == 2)
+    #expect(EMKEHALInputClientChannelCount(8) == 2)
+
+    var samples: [Float] = [0.25, -0.5, 0, 0]
+    samples.withUnsafeMutableBufferPointer { buffer in
+        EMKEHALExpandMonoToStereoInPlace(buffer.baseAddress, 2)
+    }
+
+    #expect(samples == [0.25, 0.25, -0.5, -0.5])
+}
+
 @Test(
     .enabled(
         if: installedVirtualDevicesAreAvailable,

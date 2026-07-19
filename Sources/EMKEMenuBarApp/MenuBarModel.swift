@@ -6,6 +6,19 @@ import EMKECore
 import EMKESecurity
 import Foundation
 
+private struct DeviceInventorySnapshot: Sendable {
+    let driverAvailable: Bool
+    let physicalInputs: [AudioDevice]
+    let physicalOutputs: [AudioDevice]
+    let defaultInputUID: String?
+    let defaultOutputUID: String?
+}
+
+private enum DeviceInventoryLoadResult: Sendable {
+    case success(DeviceInventorySnapshot)
+    case failure(String)
+}
+
 protocol TranslationCoordinatorControlling: Sendable {
     func start(
         configuration: TranslationCoordinatorConfiguration
@@ -306,7 +319,8 @@ final class MenuBarModel: ObservableObject {
             LocalAudioDiagnostics(),
         audioOutputTestDelay: @escaping @Sendable () async throws -> Void = {
             try await Task.sleep(for: .milliseconds(450))
-        }
+        },
+        deferInitialDeviceReload: Bool = false
     ) {
         self.provider = provider
         self.coordinator = coordinator
@@ -317,7 +331,9 @@ final class MenuBarModel: ObservableObject {
         self.audioDiagnostics = audioDiagnostics
         self.audioOutputTestDelay = audioOutputTestDelay
         apply(settingsStore.load())
-        reloadDevices()
+        if !deferInitialDeviceReload {
+            reloadDevices()
+        }
     }
 
     var readiness: MenuBarReadiness {
@@ -501,34 +517,115 @@ final class MenuBarModel: ObservableObject {
     }
 
     func reloadDevices() {
+        applyDeviceInventory(
+            loadDeviceInventory(
+                selectedInputUID: selectedInputUID,
+                selectedOutputUID: selectedOutputUID
+            )
+        )
+    }
+
+    func reloadDevicesAsync() async {
+        let provider = self.provider
+        let selectedInputUID = self.selectedInputUID
+        let selectedOutputUID = self.selectedOutputUID
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.loadDeviceInventory(
+                provider: provider,
+                selectedInputUID: selectedInputUID,
+                selectedOutputUID: selectedOutputUID
+            )
+        }.value
+        applyDeviceInventory(result)
+    }
+
+    private func loadDeviceInventory(
+        selectedInputUID: String?,
+        selectedOutputUID: String?
+    ) -> DeviceInventoryLoadResult {
+        Self.loadDeviceInventory(
+            provider: provider,
+            selectedInputUID: selectedInputUID,
+            selectedOutputUID: selectedOutputUID
+        )
+    }
+
+    nonisolated private static func loadDeviceInventory(
+        provider: any AudioDeviceProviding,
+        selectedInputUID: String?,
+        selectedOutputUID: String?
+    ) -> DeviceInventoryLoadResult {
         do {
             let devices = try provider.devices()
-            let uids = Set(devices.map(\.uid))
-            driverAvailable = uids.contains(AudioDevice.virtualSpeakerUID)
-                && uids.contains(AudioDevice.virtualMicrophoneUID)
-            let catalog = AudioDeviceCatalog(provider: provider)
-            physicalInputs = try catalog.physicalInputs()
-            physicalOutputs = try catalog.physicalOutputs()
+            let physicalDevices = devices
+                .filter { !$0.isEMKEVirtualDevice }
+                .sorted { lhs, rhs in
+                    let order = lhs.name.localizedStandardCompare(rhs.name)
+                    if order == .orderedSame { return lhs.uid < rhs.uid }
+                    return order == .orderedAscending
+                }
+            let physicalInputs = physicalDevices.filter {
+                $0.inputChannelCount > 0
+            }
+            let physicalOutputs = physicalDevices.filter {
+                $0.outputChannelCount > 0
+            }
+            let defaultInputUID: String? = if let selectedInputUID,
+                !physicalInputs.contains(where: { $0.uid == selectedInputUID })
+            {
+                try provider.defaultInputDeviceUID()
+            } else {
+                nil
+            }
+            let defaultOutputUID: String? = if let selectedOutputUID,
+                !physicalOutputs.contains(where: { $0.uid == selectedOutputUID })
+            {
+                try provider.defaultOutputDeviceUID()
+            } else {
+                nil
+            }
+            return .success(
+                DeviceInventorySnapshot(
+                    driverAvailable: devices.contains(where: {
+                        $0.uid == AudioDevice.virtualSpeakerUID
+                    }) && devices.contains(where: {
+                        $0.uid == AudioDevice.virtualMicrophoneUID
+                    }),
+                    physicalInputs: physicalInputs,
+                    physicalOutputs: physicalOutputs,
+                    defaultInputUID: defaultInputUID,
+                    defaultOutputUID: defaultOutputUID
+                )
+            )
+        } catch {
+            return .failure(String(describing: error))
+        }
+    }
+
+    private func applyDeviceInventory(_ result: DeviceInventoryLoadResult) {
+        switch result {
+        case let .success(snapshot):
+            driverAvailable = snapshot.driverAvailable
+            physicalInputs = snapshot.physicalInputs
+            physicalOutputs = snapshot.physicalOutputs
             if let selectedInputUID,
                !physicalInputs.contains(where: { $0.uid == selectedInputUID }) {
-                let defaultUID = try provider.defaultInputDeviceUID()
                 self.selectedInputUID = physicalInputs.first(where: {
-                    $0.uid == defaultUID
+                    $0.uid == snapshot.defaultInputUID
                 })?.uid
             }
             if let selectedOutputUID,
                !physicalOutputs.contains(where: { $0.uid == selectedOutputUID }) {
-                let defaultUID = try provider.defaultOutputDeviceUID()
                 self.selectedOutputUID = physicalOutputs.first(where: {
-                    $0.uid == defaultUID
+                    $0.uid == snapshot.defaultOutputUID
                 })?.uid
             }
             inventoryError = nil
-        } catch {
+        case let .failure(message):
             driverAvailable = false
             physicalInputs = []
             physicalOutputs = []
-            inventoryError = String(describing: error)
+            inventoryError = message
         }
     }
 

@@ -351,6 +351,30 @@ func missingDriverAndPhysicalSelectionsBlockStartInOrder() async {
 }
 
 @Test @MainActor
+func deferredInitialDeviceReloadLeavesLaunchPathNonblocking() async {
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        deferInitialDeviceReload: true
+    )
+
+    #expect(model.physicalInputs.isEmpty)
+    #expect(model.physicalOutputs.isEmpty)
+
+    await model.reloadDevicesAsync()
+
+    #expect(model.physicalInputs.map(\.uid) == ["physical.input"])
+    #expect(model.physicalOutputs.map(\.uid) == ["physical.output"])
+    #expect(model.readiness == .selectPhysicalInput)
+}
+
+@Test @MainActor
 func startRevalidatesAudioDevicesBeforeStartingCoordinator() async throws {
     let initialInventory = try TranslationMenuDeviceProvider().devices()
     let provider = MutableTranslationMenuDeviceProvider(
