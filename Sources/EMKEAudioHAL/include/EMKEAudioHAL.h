@@ -22,6 +22,7 @@ typedef struct EMKEHALInputDiagnostics {
     uint64_t oversizedCallbackCount;
     OSStatus lastRenderStatus;
     uint32_t scratchCapacityFrames;
+    double clientSampleRate;
 } EMKEHALInputDiagnostics;
 
 OSStatus EMKEHALInputCreate(

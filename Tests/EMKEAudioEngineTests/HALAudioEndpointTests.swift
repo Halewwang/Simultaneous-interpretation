@@ -70,6 +70,27 @@ func stoppedVirtualEndpointsHaveEmptyQueues() throws {
     #expect(EMKEHALOutputQueuedFrames(output) == 0)
 }
 
+@Test func inputEndpointUsesTheDeviceNativeSampleRate() throws {
+    let provider = CoreAudioDeviceProvider()
+    let devices = try provider.devices()
+    let optionalDefaultInputUID = try provider.defaultInputDeviceUID()
+    let defaultInputUID = try #require(optionalDefaultInputUID)
+    let defaultInput = try #require(
+        devices.first { $0.uid == defaultInputUID }
+    )
+    let endpoint = try HALAudioInputEndpoint(
+        deviceID: defaultInput.id,
+        capacityFrames: 4_800
+    )
+
+    #expect(
+        abs(
+            endpoint.diagnostics().clientSampleRate
+                - defaultInput.nominalSampleRate
+        ) < 0.5
+    )
+}
+
 private let installedVirtualDevicesAreAvailable: Bool = {
     guard let devices = try? CoreAudioDeviceProvider().devices() else {
         return false

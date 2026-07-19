@@ -17,6 +17,7 @@ public struct AudioInputTransportDiagnostics: Equatable, Sendable {
     public let oversizedCallbackCount: UInt64
     public let lastRenderStatus: OSStatus
     public let scratchCapacityFrames: UInt32
+    public let clientSampleRate: Double
 
     public init(
         isAvailable: Bool,
@@ -28,7 +29,8 @@ public struct AudioInputTransportDiagnostics: Equatable, Sendable {
         renderErrorCount: UInt64,
         oversizedCallbackCount: UInt64,
         lastRenderStatus: OSStatus,
-        scratchCapacityFrames: UInt32
+        scratchCapacityFrames: UInt32,
+        clientSampleRate: Double = 0
     ) {
         self.isAvailable = isAvailable
         self.isStarted = isStarted
@@ -40,6 +42,7 @@ public struct AudioInputTransportDiagnostics: Equatable, Sendable {
         self.oversizedCallbackCount = oversizedCallbackCount
         self.lastRenderStatus = lastRenderStatus
         self.scratchCapacityFrames = scratchCapacityFrames
+        self.clientSampleRate = clientSampleRate
     }
 
     public static let unavailable = AudioInputTransportDiagnostics(
@@ -52,7 +55,8 @@ public struct AudioInputTransportDiagnostics: Equatable, Sendable {
         renderErrorCount: 0,
         oversizedCallbackCount: 0,
         lastRenderStatus: noErr,
-        scratchCapacityFrames: 0
+        scratchCapacityFrames: 0,
+        clientSampleRate: 0
     )
 }
 
@@ -132,7 +136,8 @@ private struct SystemHALInputOperations: HALInputOperations {
             renderErrorCount: snapshot.renderErrorCount,
             oversizedCallbackCount: snapshot.oversizedCallbackCount,
             lastRenderStatus: snapshot.lastRenderStatus,
-            scratchCapacityFrames: snapshot.scratchCapacityFrames
+            scratchCapacityFrames: snapshot.scratchCapacityFrames,
+            clientSampleRate: snapshot.clientSampleRate
         )
     }
 }

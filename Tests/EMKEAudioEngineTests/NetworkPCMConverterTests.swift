@@ -2,6 +2,58 @@ import Foundation
 @testable import EMKEAudioEngine
 import Testing
 
+@Test func stereoResamplerKeeps48kFramesBitExact() {
+    var resampler = StreamingStereoResampler(
+        sourceSampleRate: 48_000,
+        targetSampleRate: 48_000
+    )
+    let samples: [Float] = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+
+    #expect(resampler.append(samples) == samples)
+}
+
+@Test func stereoResamplerUpsamples24kWithLinearContinuity() {
+    var resampler = StreamingStereoResampler(
+        sourceSampleRate: 24_000,
+        targetSampleRate: 48_000
+    )
+
+    let converted = resampler.append([
+        0, 0,
+        1, 1,
+        2, 2,
+    ])
+
+    #expect(converted == [
+        0, 0,
+        0.5, 0.5,
+        1, 1,
+        1.5, 1.5,
+    ])
+}
+
+@Test func stereoResamplerMatchesContiguousInputAcrossChunks() {
+    let samples = (0..<480).flatMap { frame -> [Float] in
+        let value = Float(frame) / 480
+        return [value, -value]
+    }
+    var contiguous = StreamingStereoResampler(
+        sourceSampleRate: 44_100,
+        targetSampleRate: 48_000
+    )
+    let expected = contiguous.append(samples)
+
+    var chunked = StreamingStereoResampler(
+        sourceSampleRate: 44_100,
+        targetSampleRate: 48_000
+    )
+    var actual = chunked.append(Array(samples[..<320]))
+    actual.append(contentsOf: chunked.append(Array(samples[320...])))
+
+    #expect(actual == expected)
+    #expect(actual.count / 2 == 522)
+}
+
 @Test func encoderKeepsSilenceSilent() throws {
     var encoder = NetworkPCMEncoder()
 

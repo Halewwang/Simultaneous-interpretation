@@ -17,6 +17,7 @@ struct EMKEHALInput {
     EMKEAudioRingBuffer *buffer;
     float *scratch;
     uint32_t scratchCapacityFrames;
+    double clientSampleRate;
     _Atomic bool started;
     _Atomic uint64_t callbackCount;
     _Atomic uint32_t lastCallbackFrameCount;
@@ -33,9 +34,11 @@ struct EMKEHALOutput {
     _Atomic bool started;
 };
 
-static AudioStreamBasicDescription EMKEHALTransportFormat(void) {
+static AudioStreamBasicDescription EMKEHALTransportFormat(
+    double sampleRate
+) {
     AudioStreamBasicDescription format = {0};
-    format.mSampleRate = 48000.0;
+    format.mSampleRate = sampleRate;
     format.mFormatID = kAudioFormatLinearPCM;
     format.mFormatFlags = kAudioFormatFlagIsFloat |
         kAudioFormatFlagIsPacked |
@@ -95,9 +98,10 @@ static OSStatus EMKEHALSetDevice(AudioUnit unit, AudioObjectID deviceID) {
 static OSStatus EMKEHALSetFormat(
     AudioUnit unit,
     AudioUnitScope scope,
-    AudioUnitElement element
+    AudioUnitElement element,
+    double sampleRate
 ) {
-    AudioStreamBasicDescription format = EMKEHALTransportFormat();
+    AudioStreamBasicDescription format = EMKEHALTransportFormat(sampleRate);
     return AudioUnitSetProperty(
         unit,
         kAudioUnitProperty_StreamFormat,
@@ -105,6 +109,47 @@ static OSStatus EMKEHALSetFormat(
         element,
         &format,
         sizeof(format)
+    );
+}
+
+static OSStatus EMKEHALGetFormat(
+    AudioUnit unit,
+    AudioUnitScope scope,
+    AudioUnitElement element,
+    AudioStreamBasicDescription *outFormat
+) {
+    if (outFormat == NULL) {
+        return kAudioUnitErr_InvalidPropertyValue;
+    }
+    UInt32 size = sizeof(*outFormat);
+    return AudioUnitGetProperty(
+        unit,
+        kAudioUnitProperty_StreamFormat,
+        scope,
+        element,
+        outFormat,
+        &size
+    );
+}
+
+static OSStatus EMKEHALSetInputChannelMap(
+    AudioUnit unit,
+    UInt32 deviceChannelCount
+) {
+    if (deviceChannelCount == 0) {
+        return kAudioUnitErr_FormatNotSupported;
+    }
+    const SInt32 channelMap[kEMKEHALChannelCount] = {
+        0,
+        deviceChannelCount > 1 ? 1 : 0,
+    };
+    return AudioUnitSetProperty(
+        unit,
+        kAudioOutputUnitProperty_ChannelMap,
+        kAudioUnitScope_Output,
+        1,
+        channelMap,
+        sizeof(channelMap)
     );
 }
 
@@ -334,11 +379,42 @@ OSStatus EMKEHALInputCreate(
         status = EMKEHALSetDevice(input->unit, deviceID);
     }
     if (status == noErr) {
+        AudioStreamBasicDescription deviceFormat = {0};
+        status = EMKEHALGetFormat(
+            input->unit,
+            kAudioUnitScope_Input,
+            1,
+            &deviceFormat
+        );
+        if (status == noErr && deviceFormat.mSampleRate <= 0) {
+            status = kAudioUnitErr_InvalidPropertyValue;
+        }
+        if (status == noErr) {
+            input->clientSampleRate = deviceFormat.mSampleRate;
+        }
+    }
+    if (status == noErr) {
         status = EMKEHALSetFormat(
             input->unit,
             kAudioUnitScope_Output,
-            1
+            1,
+            input->clientSampleRate
         );
+    }
+    if (status == noErr) {
+        AudioStreamBasicDescription deviceFormat = {0};
+        status = EMKEHALGetFormat(
+            input->unit,
+            kAudioUnitScope_Input,
+            1,
+            &deviceFormat
+        );
+        if (status == noErr) {
+            status = EMKEHALSetInputChannelMap(
+                input->unit,
+                deviceFormat.mChannelsPerFrame
+            );
+        }
     }
     if (status == noErr) {
         AURenderCallbackStruct callback = {
@@ -496,6 +572,7 @@ void EMKEHALInputGetDiagnostics(
         memory_order_relaxed
     );
     outDiagnostics->scratchCapacityFrames = input->scratchCapacityFrames;
+    outDiagnostics->clientSampleRate = input->clientSampleRate;
 }
 
 void EMKEHALInputDestroy(EMKEHALInput *input) {
@@ -560,7 +637,8 @@ OSStatus EMKEHALOutputCreate(
         status = EMKEHALSetFormat(
             output->unit,
             kAudioUnitScope_Input,
-            0
+            0,
+            48000.0
         );
     }
     if (status == noErr) {

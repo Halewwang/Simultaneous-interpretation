@@ -114,7 +114,9 @@ struct EngineHarness {
     let engine: LocalAudioEngine
 }
 
-func makeHarness() -> EngineHarness {
+func makeHarness(
+    physicalInputSampleRate: Double = 48_000
+) -> EngineHarness {
     let selection = AudioDeviceSelection(
         virtualSpeaker: AudioDevice(
             id: 10,
@@ -138,7 +140,7 @@ func makeHarness() -> EngineHarness {
             name: "Physical Input",
             inputChannelCount: 1,
             outputChannelCount: 0,
-            nominalSampleRate: 48_000
+            nominalSampleRate: physicalInputSampleRate
         ),
         physicalOutput: AudioDevice(
             id: 21,
@@ -216,6 +218,29 @@ func start(_ harness: EngineHarness) async throws {
     #expect(
         harness.factory.virtualMicrophoneOutput.writes
             == [[0.5, 0.6, 0.7, 0.8]]
+    )
+    await harness.engine.stop()
+}
+
+@Test func outboundBypassResamplesNativeMicrophoneRateTo48k() async throws {
+    let harness = makeHarness(physicalInputSampleRate: 24_000)
+    try await start(harness)
+    harness.factory.physicalMicrophoneInput.chunks = [[
+        0.5, 0.5,
+        0.5, 0.5,
+        0.5, 0.5,
+        0.5, 0.5,
+    ]]
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .originalBypass
+    )
+
+    await harness.engine.processOnceForTesting()
+
+    #expect(
+        harness.factory.virtualMicrophoneOutput.writes
+            == [Array(repeating: 0.5, count: 12)]
     )
     await harness.engine.stop()
 }

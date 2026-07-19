@@ -55,6 +55,10 @@ public actor LocalAudioEngine {
     private var workerTask: Task<Void, Never>?
     private var inboundEncoder = NetworkPCMEncoder()
     private var outboundEncoder = NetworkPCMEncoder()
+    private var outboundInputResampler = StreamingStereoResampler(
+        sourceSampleRate: 48_000,
+        targetSampleRate: 48_000
+    )
     private var inboundDecoder = NetworkPCMDecoder()
     private var outboundDecoder = NetworkPCMDecoder()
     private var inboundCapture = Array(
@@ -163,6 +167,14 @@ public actor LocalAudioEngine {
             physicalOutput: physicalOutput,
             virtualMicrophoneOutput: virtualMicrophoneOutput
         )
+        let configuredInputSampleRate = physicalMicrophoneInput
+            .diagnostics().clientSampleRate
+        outboundInputResampler = StreamingStereoResampler(
+            sourceSampleRate: configuredInputSampleRate > 0
+                ? configuredInputSampleRate
+                : selection.physicalInput.nominalSampleRate,
+            targetSampleRate: 48_000
+        )
         inboundMode = .translated
         outboundMode = .translated
         state = .running
@@ -188,6 +200,10 @@ public actor LocalAudioEngine {
         endpoints = nil
         inboundEncoder = NetworkPCMEncoder()
         outboundEncoder = NetworkPCMEncoder()
+        outboundInputResampler = StreamingStereoResampler(
+            sourceSampleRate: 48_000,
+            targetSampleRate: 48_000
+        )
         inboundDecoder = NetworkPCMDecoder()
         outboundDecoder = NetworkPCMDecoder()
         inboundCapture = Array(
@@ -298,7 +314,10 @@ public actor LocalAudioEngine {
             endpoints.physicalMicrophoneInput.read(into: $0)
         }
         if outboundFrames > 0 {
-            let samples = Array(outboundCapture.prefix(outboundFrames * 2))
+            let capturedSamples = Array(
+                outboundCapture.prefix(outboundFrames * 2)
+            )
+            let samples = outboundInputResampler.append(capturedSamples)
             if let pcm16 = try? outboundEncoder.append48kStereo(samples),
                !pcm16.isEmpty {
                 emit(.outboundNetworkAudio(pcm16))
