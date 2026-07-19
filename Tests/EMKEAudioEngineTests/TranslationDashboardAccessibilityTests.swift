@@ -64,6 +64,17 @@ func settingsShowsVisibleLockedState() throws {
 }
 
 @Test
+func settingsAudioControlsMatchLanguageMenusAndExposeLocalDiagnostics() throws {
+    let source = try sourceFile(named: "TranslationSettingsView.swift")
+
+    #expect(source.contains("AudioDeviceMenuButton("))
+    #expect(!source.contains("Picker("))
+    #expect(source.contains("LiveWaveformView("))
+    #expect(source.contains("测试麦克风"))
+    #expect(source.contains("播放测试音"))
+}
+
+@Test
 func dashboardUsesSemanticPhysicalPixelSeparators() throws {
     let source = try sourceFile(named: "TranslationDashboardView.swift")
     let separatorCount = source.components(

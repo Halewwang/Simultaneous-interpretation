@@ -1,4 +1,5 @@
 import Combine
+import CoreAudio
 import EMKEAudioEngine
 import EMKECoordinator
 import EMKECore
@@ -27,6 +28,18 @@ protocol TranslationConnectionProbing: Sendable {
 }
 
 extension TranslationConnectionProbe: TranslationConnectionProbing {}
+
+protocol AudioDiagnosticsControlling: Sendable {
+    func startInput(deviceID: AudioObjectID) async throws
+    func sampleInput() async -> AudioInputDiagnosticSample
+    func stopInput() async
+    func startOutputTest(
+        deviceID: AudioObjectID
+    ) async throws -> AudioOutputDiagnosticResult
+    func stopOutputTest() async
+}
+
+extension LocalAudioDiagnostics: AudioDiagnosticsControlling {}
 
 enum MenuBarReadiness: Equatable {
     case driverUnavailable
@@ -225,6 +238,8 @@ final class MenuBarModel: ObservableObject {
     private let settingsStore: any AppSettingsStoring
     private let microphonePermissionProvider:
         any MicrophonePermissionProviding
+    private let audioDiagnostics: any AudioDiagnosticsControlling
+    private let audioOutputTestDelay: @Sendable () async throws -> Void
 
     @Published var physicalInputs: [AudioDevice] = []
     @Published var physicalOutputs: [AudioDevice] = []
@@ -262,10 +277,17 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var outboundLevel = 0.0
     @Published private(set) var translationStartedAt: Date?
     @Published private(set) var isWindowVisible = false
+    @Published private(set) var isTestingAudioInput = false
+    @Published private(set) var isPlayingAudioOutputTest = false
+    @Published private(set) var audioInputDiagnosticLevel = 0.0
+    @Published private(set) var audioInputDiagnosticText = "未测试"
+    @Published private(set) var audioOutputDiagnosticText = "未测试"
+    @Published private(set) var audioDiagnosticError: String?
 
     private var driverAvailable = false
     private var hasStoredAPIKey = false
     private var eventTask: Task<Void, Never>?
+    private var audioInputDiagnosticTask: Task<Void, Never>?
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
 
@@ -279,7 +301,12 @@ final class MenuBarModel: ObservableObject {
         settingsStore: any AppSettingsStoring =
             UserDefaultsAppSettingsStore(),
         microphonePermissionProvider: any MicrophonePermissionProviding =
-            SystemMicrophonePermissionProvider()
+            SystemMicrophonePermissionProvider(),
+        audioDiagnostics: any AudioDiagnosticsControlling =
+            LocalAudioDiagnostics(),
+        audioOutputTestDelay: @escaping @Sendable () async throws -> Void = {
+            try await Task.sleep(for: .milliseconds(450))
+        }
     ) {
         self.provider = provider
         self.coordinator = coordinator
@@ -287,6 +314,8 @@ final class MenuBarModel: ObservableObject {
         self.secretStore = secretStore
         self.settingsStore = settingsStore
         self.microphonePermissionProvider = microphonePermissionProvider
+        self.audioDiagnostics = audioDiagnostics
+        self.audioOutputTestDelay = audioOutputTestDelay
         apply(settingsStore.load())
         reloadDevices()
     }
@@ -328,6 +357,18 @@ final class MenuBarModel: ObservableObject {
 
     var selectionsLocked: Bool {
         coordinatorState.isRunning || isStarting
+    }
+
+    var audioDeviceControlsLocked: Bool {
+        selectionsLocked || isTestingAudioInput || isPlayingAudioOutputTest
+    }
+
+    var canTestAudioInput: Bool {
+        !audioDeviceControlsLocked && selectedPhysicalInput != nil
+    }
+
+    var canTestAudioOutput: Bool {
+        !audioDeviceControlsLocked && selectedPhysicalOutput != nil
     }
 
     var combinedLevel: Double {
@@ -440,6 +481,7 @@ final class MenuBarModel: ObservableObject {
         isWindowVisible = visible
         await coordinator.setAudioLevelUpdatesEnabled(visible)
         if !visible {
+            await stopAudioInputTest()
             inboundLevel = 0
             outboundLevel = 0
         }
@@ -491,6 +533,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func start() async {
+        await stopAudioInputTest()
         reloadDevices()
         guard canStart,
               let selectedInputUID,
@@ -542,6 +585,61 @@ final class MenuBarModel: ObservableObject {
         eventTask = nil
         coordinatorState = TranslationCoordinatorState()
         resetRuntimePresentation()
+    }
+
+    func startAudioInputTest() async {
+        guard canTestAudioInput, let device = selectedPhysicalInput else { return }
+        audioDiagnosticError = nil
+        do {
+            try await requireMicrophonePermission()
+            try await audioDiagnostics.startInput(deviceID: device.id)
+            isTestingAudioInput = true
+            await refreshAudioInputDiagnostic()
+            audioInputDiagnosticTask = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(for: .milliseconds(50))
+                    } catch {
+                        return
+                    }
+                    guard let self else { return }
+                    await self.refreshAudioInputDiagnostic()
+                }
+            }
+        } catch {
+            await audioDiagnostics.stopInput()
+            isTestingAudioInput = false
+            audioInputDiagnosticLevel = 0
+            audioInputDiagnosticText = "麦克风测试失败"
+            audioDiagnosticError = String(describing: error)
+        }
+    }
+
+    func stopAudioInputTest() async {
+        await stopAudioInputTest(resetStatus: true)
+    }
+
+    func playAudioOutputTest() async {
+        guard canTestAudioOutput, let device = selectedPhysicalOutput else { return }
+        isPlayingAudioOutputTest = true
+        audioDiagnosticError = nil
+        audioOutputDiagnosticText = "正在播放测试音…"
+        do {
+            let result = try await audioDiagnostics.startOutputTest(
+                deviceID: device.id
+            )
+            guard result.writtenFrames == result.requestedFrames else {
+                throw AudioDiagnosticPresentationError.outputBackpressure
+            }
+            try await audioOutputTestDelay()
+            await audioDiagnostics.stopOutputTest()
+            audioOutputDiagnosticText = "测试音已播放"
+        } catch {
+            await audioDiagnostics.stopOutputTest()
+            audioOutputDiagnosticText = "扬声器测试失败"
+            audioDiagnosticError = String(describing: error)
+        }
+        isPlayingAudioOutputTest = false
     }
 
     func testConnection() async {
@@ -637,6 +735,42 @@ final class MenuBarModel: ObservableObject {
             throw MenuBarConfigurationError.microphoneAccessDenied
         case .restricted:
             throw MenuBarConfigurationError.microphoneAccessRestricted
+        }
+    }
+
+    private var selectedPhysicalInput: AudioDevice? {
+        guard let selectedInputUID else { return nil }
+        return physicalInputs.first { $0.uid == selectedInputUID }
+    }
+
+    private var selectedPhysicalOutput: AudioDevice? {
+        guard let selectedOutputUID else { return nil }
+        return physicalOutputs.first { $0.uid == selectedOutputUID }
+    }
+
+    private func refreshAudioInputDiagnostic() async {
+        let sample = await audioDiagnostics.sampleInput()
+        audioInputDiagnosticLevel = sample.level
+        audioInputDiagnosticText = switch sample.state {
+        case .stopped:
+            "未测试"
+        case .waitingForFrames:
+            "未收到音频帧"
+        case .receivingSilence:
+            "设备已连接，等待声音"
+        case .receivingAudio:
+            "已检测到麦克风输入"
+        }
+    }
+
+    private func stopAudioInputTest(resetStatus: Bool) async {
+        audioInputDiagnosticTask?.cancel()
+        audioInputDiagnosticTask = nil
+        await audioDiagnostics.stopInput()
+        isTestingAudioInput = false
+        audioInputDiagnosticLevel = 0
+        if resetStatus {
+            audioInputDiagnosticText = "未测试"
         }
     }
 
@@ -786,6 +920,17 @@ private enum MenuBarConfigurationError: Error, CustomStringConvertible {
             "麦克风权限未开启，请在系统设置的隐私与安全性中允许 EMKE Translation"
         case .microphoneAccessRestricted:
             "当前系统策略限制了麦克风访问"
+        }
+    }
+}
+
+private enum AudioDiagnosticPresentationError: Error, CustomStringConvertible {
+    case outputBackpressure
+
+    var description: String {
+        switch self {
+        case .outputBackpressure:
+            "测试音未完整写入所选输出设备"
         }
     }
 }

@@ -1,4 +1,5 @@
 import Combine
+import CoreAudio
 import EMKEAudioEngine
 import EMKECoordinator
 import EMKECore
@@ -221,6 +222,54 @@ private actor MicrophonePermissionStub: MicrophonePermissionProviding {
     func requestAccess() async -> Bool {
         requestCount += 1
         return requestResult
+    }
+}
+
+private actor AudioDiagnosticsStub: AudioDiagnosticsControlling {
+    let inputSample: AudioInputDiagnosticSample
+    let outputResult: AudioOutputDiagnosticResult
+    private(set) var inputDeviceIDs: [AudioObjectID] = []
+    private(set) var outputDeviceIDs: [AudioObjectID] = []
+    private(set) var stopInputCount = 0
+    private(set) var stopOutputCount = 0
+
+    init(
+        inputSample: AudioInputDiagnosticSample = AudioInputDiagnosticSample(
+            state: .waitingForFrames,
+            level: 0,
+            frameCount: 0,
+            rms: 0
+        ),
+        outputResult: AudioOutputDiagnosticResult = AudioOutputDiagnosticResult(
+            requestedFrames: 16_800,
+            writtenFrames: 16_800
+        )
+    ) {
+        self.inputSample = inputSample
+        self.outputResult = outputResult
+    }
+
+    func startInput(deviceID: AudioObjectID) async throws {
+        inputDeviceIDs.append(deviceID)
+    }
+
+    func sampleInput() async -> AudioInputDiagnosticSample {
+        inputSample
+    }
+
+    func stopInput() async {
+        stopInputCount += 1
+    }
+
+    func startOutputTest(
+        deviceID: AudioObjectID
+    ) async throws -> AudioOutputDiagnosticResult {
+        outputDeviceIDs.append(deviceID)
+        return outputResult
+    }
+
+    func stopOutputTest() async {
+        stopOutputCount += 1
     }
 }
 
@@ -614,6 +663,65 @@ func startStopsBeforeAudioWhenMicrophonePermissionIsDenied() async {
 
     #expect(await coordinator.configurations.isEmpty)
     #expect(model.configurationError?.contains("麦克风权限未开启") == true)
+}
+
+@Test @MainActor
+func localInputDiagnosticPublishesCapturedPCMState() async {
+    let diagnostics = AudioDiagnosticsStub(
+        inputSample: AudioInputDiagnosticSample(
+            state: .receivingAudio,
+            level: 0.72,
+            frameCount: 480,
+            rms: 0.11
+        )
+    )
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+
+    await model.startAudioInputTest()
+
+    #expect(model.isTestingAudioInput)
+    #expect(model.audioInputDiagnosticLevel == 0.72)
+    #expect(model.audioInputDiagnosticText == "已检测到麦克风输入")
+    #expect(await diagnostics.inputDeviceIDs == [20])
+
+    await model.stopAudioInputTest()
+    #expect(!model.isTestingAudioInput)
+    #expect(await diagnostics.stopInputCount == 1)
+}
+
+@Test @MainActor
+func localOutputDiagnosticTargetsSelectedPhysicalDevice() async {
+    let diagnostics = AudioDiagnosticsStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics,
+        audioOutputTestDelay: {}
+    )
+    model.selectedOutputUID = "physical.output"
+
+    await model.playAudioOutputTest()
+
+    #expect(await diagnostics.outputDeviceIDs == [21])
+    #expect(await diagnostics.stopOutputCount == 1)
+    #expect(model.audioOutputDiagnosticText == "测试音已播放")
 }
 
 @Test @MainActor

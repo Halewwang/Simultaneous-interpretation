@@ -1,4 +1,5 @@
 import AppKit
+import EMKEAudioEngine
 import EMKECoordinator
 import SwiftUI
 
@@ -103,36 +104,29 @@ struct TranslationSettingsView: View {
             sectionTitle("音频设备", systemImage: "waveform")
 
             settingField("真实麦克风") {
-                Picker("真实麦克风", selection: $model.selectedInputUID) {
-                    Text("请选择").tag(String?.none)
-                    ForEach(model.physicalInputs) { device in
-                        Text(device.name).tag(Optional(device.uid))
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(model.selectionsLocked)
+                AudioDeviceMenuButton(
+                    title: "真实麦克风",
+                    devices: model.physicalInputs,
+                    selection: $model.selectedInputUID
+                )
+                .disabled(model.audioDeviceControlsLocked)
             }
 
             settingField("真实耳机 / 扬声器") {
-                Picker(
-                    "真实耳机 / 扬声器",
+                AudioDeviceMenuButton(
+                    title: "真实耳机 / 扬声器",
+                    devices: model.physicalOutputs,
                     selection: $model.selectedOutputUID
-                ) {
-                    Text("请选择").tag(String?.none)
-                    ForEach(model.physicalOutputs) { device in
-                        Text(device.name).tag(Optional(device.uid))
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .disabled(model.selectionsLocked)
+                )
+                .disabled(model.audioDeviceControlsLocked)
             }
 
             Button("刷新设备") {
                 model.reloadDevices()
             }
-            .disabled(model.selectionsLocked)
+            .disabled(model.audioDeviceControlsLocked)
+
+            localAudioDiagnostics
 
             if let repairMessage = model.repairMessage {
                 Label(repairMessage, systemImage: "exclamationmark.triangle")
@@ -144,6 +138,74 @@ struct TranslationSettingsView: View {
                 errorLabel(error)
             }
         }
+    }
+
+    private var localAudioDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider().opacity(EMKEVisualStyle.dividerOpacity)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("本地音频诊断")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("仅检查本机音频，不连接翻译服务")
+                    .font(.system(size: 11))
+                    .foregroundStyle(EMKEVisualStyle.secondaryText)
+            }
+
+            HStack(spacing: 12) {
+                Button(
+                    model.isTestingAudioInput ? "停止测试" : "测试麦克风"
+                ) {
+                    Task {
+                        if model.isTestingAudioInput {
+                            await model.stopAudioInputTest()
+                        } else {
+                            await model.startAudioInputTest()
+                        }
+                    }
+                }
+                .disabled(
+                    !model.isTestingAudioInput && !model.canTestAudioInput
+                )
+
+                LiveWaveformView(
+                    level: model.audioInputDiagnosticLevel,
+                    maximumHeight: 28,
+                    compact: true
+                )
+                .frame(width: WaveformBarLayout.compactRequiredWidth)
+
+                Spacer(minLength: 0)
+                diagnosticStatus(model.audioInputDiagnosticText)
+            }
+
+            HStack(spacing: 12) {
+                Button(
+                    model.isPlayingAudioOutputTest
+                        ? "正在播放…"
+                        : "播放测试音"
+                ) {
+                    Task { await model.playAudioOutputTest() }
+                }
+                .disabled(!model.canTestAudioOutput)
+                Spacer()
+                diagnosticStatus(model.audioOutputDiagnosticText)
+            }
+
+            if let error = model.audioDiagnosticError {
+                errorLabel(error)
+            }
+        }
+    }
+
+    private func diagnosticStatus(_ text: String) -> some View {
+        Label(
+            text,
+            systemImage: text.contains("检测到") || text.contains("已播放")
+                ? "checkmark.circle.fill"
+                : "circle.dotted"
+        )
+        .font(.system(size: 11))
+        .foregroundStyle(EMKEVisualStyle.secondaryText)
     }
 
     private func sectionTitle(
@@ -231,5 +293,94 @@ struct TranslationSettingsView: View {
             .font(.system(size: 12))
             .foregroundStyle(EMKEVisualStyle.failure)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct AudioDeviceMenuButton: View {
+    let title: String
+    let devices: [AudioDevice]
+    @Binding var selection: String?
+    @State private var isPresented = false
+
+    private var selectedName: String {
+        devices.first { $0.uid == selection }?.name ?? "请选择"
+    }
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            valueLabel
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            menuContent
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(selectedName)
+        .accessibilityHint("选择音频设备")
+    }
+
+    private var valueLabel: some View {
+        HStack(spacing: 8) {
+            Text(selectedName)
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .accessibilityHidden(true)
+        }
+        .font(.system(size: 14, weight: .medium))
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(EMKEVisualStyle.separator)
+                .frame(height: EMKEVisualStyle.separatorThickness)
+        }
+    }
+
+    private var menuContent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 3)
+            ForEach(devices) { device in
+                deviceButton(device)
+            }
+        }
+        .padding(4)
+        .frame(width: 280)
+    }
+
+    private func deviceButton(_ device: AudioDevice) -> some View {
+        Button {
+            selection = device.uid
+            isPresented = false
+        } label: {
+            HStack(spacing: 10) {
+                Text(device.name)
+                    .lineLimit(1)
+                Spacer(minLength: 16)
+                if selection == device.uid {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(.system(size: 14, weight: .medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(device.name)
+        .accessibilityValue(selection == device.uid ? "已选择" : "")
     }
 }

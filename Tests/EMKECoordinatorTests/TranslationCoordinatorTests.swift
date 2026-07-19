@@ -166,6 +166,71 @@ private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
     }
 }
 
+private actor BlockingCoordinatorSession: TranslationSessionControlling {
+    private(set) var connectCount = 0
+    private var connectWaiters: [CheckedContinuation<Void, Never>] = []
+    private var eventWaiters: [
+        CheckedContinuation<TranslationServerEvent, any Error>
+    ] = []
+
+    func connect() async throws {
+        connectCount += 1
+        await withCheckedContinuation { continuation in
+            connectWaiters.append(continuation)
+        }
+    }
+
+    func appendAudio(_ pcm16: Data) async throws {}
+
+    func nextEvent() async throws -> TranslationServerEvent {
+        try await withCheckedThrowingContinuation { continuation in
+            eventWaiters.append(continuation)
+        }
+    }
+
+    func close() async throws {
+        let waiters = eventWaiters
+        eventWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: .closed)
+        }
+    }
+
+    func releaseConnections() {
+        let waiters = connectWaiters
+        connectWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+}
+
+private actor RepeatingCoordinatorSessionBuilder: TranslationSessionBuilding {
+    let session: BlockingCoordinatorSession
+
+    init(session: BlockingCoordinatorSession) {
+        self.session = session
+    }
+
+    func makeSession(
+        configuration: APIConfiguration,
+        sessionConfiguration: TranslationSessionConfiguration,
+        apiKey: String
+    ) async -> any TranslationSessionControlling {
+        session
+    }
+}
+
+private actor AudioLevelEventRecorder {
+    private(set) var receivedAudioLevel = false
+
+    func record(_ event: TranslationCoordinatorEvent) {
+        if case .audioLevels = event {
+            receivedAudioLevel = true
+        }
+    }
+}
+
 private struct CoordinatorHarness {
     let audio = CoordinatorAudioEngineFake()
     let levelClock: CoordinatorLevelClock
@@ -324,6 +389,56 @@ func coordinatorPublishesSeparateInboundAndOutboundLevels() async throws {
     let outbound = await harness.nextAudioLevelEvent()
     #expect(outbound.inbound > 0)
     #expect(outbound.outbound > 0)
+}
+
+@Test
+func localAudioLevelIsPublishedWhileRealtimeConnectionsArePending() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let session = BlockingCoordinatorSession()
+    let coordinator = TranslationCoordinator(
+        audioEngine: audio,
+        sessionBuilder: RepeatingCoordinatorSessionBuilder(session: session)
+    )
+    let configuration = TranslationCoordinatorConfiguration(
+        apiConfiguration: .default,
+        preferences: TranslationPreferences(
+            motherLanguage: .chinese,
+            meetingOutputLanguage: .german
+        ),
+        audioConfiguration: AudioEngineConfiguration(
+            selection: coordinatorAudioSelection()
+        ),
+        apiKey: "test-key"
+    )
+    let recorder = AudioLevelEventRecorder()
+    let eventTask = Task {
+        while !Task.isCancelled {
+            let event = await coordinator.nextEvent()
+            await recorder.record(event)
+            if event == .stopped { return }
+        }
+    }
+    let startTask = Task {
+        try await coordinator.start(configuration: configuration)
+    }
+
+    #expect(await eventually {
+        await audio.startConfigurations.count == 1
+    })
+    #expect(await eventually { await session.connectCount == 2 })
+    await audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 18_000)
+    ))
+    let receivedBeforeConnections = await eventually {
+        await recorder.receivedAudioLevel
+    }
+
+    await session.releaseConnections()
+    try await startTask.value
+    await coordinator.stop()
+    await eventTask.value
+
+    #expect(receivedBeforeConnections)
 }
 
 @Test

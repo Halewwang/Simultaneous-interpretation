@@ -173,6 +173,7 @@ public actor TranslationCoordinator {
         resetRuntimeBuffers(motherLanguage: configuration.preferences.motherLanguage)
         routing = RoutingStateMachine()
         routing.handle(.translationStarted)
+        startAudioLoop()
 
         let inbound = await sessionBuilder.makeSession(
             configuration: configuration.apiConfiguration,
@@ -243,7 +244,6 @@ public actor TranslationCoordinator {
         await applyRouting()
         state.isRunning = true
         publishState()
-        startAudioLoop()
     }
 
     public func stop() async {
