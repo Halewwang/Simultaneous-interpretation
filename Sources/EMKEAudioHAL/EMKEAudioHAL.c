@@ -18,6 +18,13 @@ struct EMKEHALInput {
     float *scratch;
     uint32_t scratchCapacityFrames;
     _Atomic bool started;
+    _Atomic uint64_t callbackCount;
+    _Atomic uint32_t lastCallbackFrameCount;
+    _Atomic uint64_t renderedFrameCount;
+    _Atomic uint64_t writtenFrameCount;
+    _Atomic uint64_t renderErrorCount;
+    _Atomic uint64_t oversizedCallbackCount;
+    _Atomic int32_t lastRenderStatus;
 };
 
 struct EMKEHALOutput {
@@ -115,7 +122,27 @@ static OSStatus EMKEHALInputCallback(
     if (input == NULL || input->scratch == NULL) {
         return kAudioUnitErr_Uninitialized;
     }
+    atomic_fetch_add_explicit(
+        &input->callbackCount,
+        1,
+        memory_order_relaxed
+    );
+    atomic_store_explicit(
+        &input->lastCallbackFrameCount,
+        inNumberFrames,
+        memory_order_relaxed
+    );
     if (inNumberFrames > input->scratchCapacityFrames) {
+        atomic_fetch_add_explicit(
+            &input->oversizedCallbackCount,
+            1,
+            memory_order_relaxed
+        );
+        atomic_store_explicit(
+            &input->lastRenderStatus,
+            kAudioUnitErr_TooManyFramesToProcess,
+            memory_order_relaxed
+        );
         return kAudioUnitErr_TooManyFramesToProcess;
     }
 
@@ -134,15 +161,59 @@ static OSStatus EMKEHALInputCallback(
         &bufferList
     );
     if (status != noErr) {
+        atomic_fetch_add_explicit(
+            &input->renderErrorCount,
+            1,
+            memory_order_relaxed
+        );
+        atomic_store_explicit(
+            &input->lastRenderStatus,
+            status,
+            memory_order_relaxed
+        );
         return status;
     }
 
-    EMKEAudioRingBufferWrite(
+    atomic_store_explicit(
+        &input->lastRenderStatus,
+        noErr,
+        memory_order_relaxed
+    );
+    atomic_fetch_add_explicit(
+        &input->renderedFrameCount,
+        inNumberFrames,
+        memory_order_relaxed
+    );
+
+    const uint32_t writtenFrames = EMKEAudioRingBufferWrite(
         input->buffer,
         input->scratch,
         inNumberFrames
     );
+    atomic_fetch_add_explicit(
+        &input->writtenFrameCount,
+        writtenFrames,
+        memory_order_relaxed
+    );
     return noErr;
+}
+
+static void EMKEHALInputResetDiagnostics(EMKEHALInput *input) {
+    atomic_store_explicit(&input->callbackCount, 0, memory_order_relaxed);
+    atomic_store_explicit(
+        &input->lastCallbackFrameCount,
+        0,
+        memory_order_relaxed
+    );
+    atomic_store_explicit(&input->renderedFrameCount, 0, memory_order_relaxed);
+    atomic_store_explicit(&input->writtenFrameCount, 0, memory_order_relaxed);
+    atomic_store_explicit(&input->renderErrorCount, 0, memory_order_relaxed);
+    atomic_store_explicit(
+        &input->oversizedCallbackCount,
+        0,
+        memory_order_relaxed
+    );
+    atomic_store_explicit(&input->lastRenderStatus, noErr, memory_order_relaxed);
 }
 
 static void EMKEHALZeroAudioBufferList(AudioBufferList *bufferList) {
@@ -234,6 +305,13 @@ OSStatus EMKEHALInputCreate(
         return kAudio_MemFullError;
     }
     atomic_init(&input->started, false);
+    atomic_init(&input->callbackCount, 0);
+    atomic_init(&input->lastCallbackFrameCount, 0);
+    atomic_init(&input->renderedFrameCount, 0);
+    atomic_init(&input->writtenFrameCount, 0);
+    atomic_init(&input->renderErrorCount, 0);
+    atomic_init(&input->oversizedCallbackCount, 0);
+    atomic_init(&input->lastRenderStatus, noErr);
 
     OSStatus status = EMKEHALCreateUnit(&input->unit);
     if (status == noErr) {
@@ -327,6 +405,7 @@ OSStatus EMKEHALInputStart(EMKEHALInput *input) {
         return noErr;
     }
     EMKEAudioRingBufferReset(input->buffer);
+    EMKEHALInputResetDiagnostics(input);
     const OSStatus status = AudioOutputUnitStart(input->unit);
     if (status == noErr) {
         atomic_store_explicit(&input->started, true, memory_order_release);
@@ -371,6 +450,52 @@ uint32_t EMKEHALInputReadableFrames(const EMKEHALInput *input) {
     return input == NULL
         ? 0
         : EMKEAudioRingBufferReadableFrames(input->buffer);
+}
+
+void EMKEHALInputGetDiagnostics(
+    const EMKEHALInput *input,
+    EMKEHALInputDiagnostics *outDiagnostics
+) {
+    if (outDiagnostics == NULL) {
+        return;
+    }
+    memset(outDiagnostics, 0, sizeof(*outDiagnostics));
+    if (input == NULL) {
+        return;
+    }
+    outDiagnostics->isStarted = atomic_load_explicit(
+        &input->started,
+        memory_order_acquire
+    );
+    outDiagnostics->callbackCount = atomic_load_explicit(
+        &input->callbackCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->lastCallbackFrameCount = atomic_load_explicit(
+        &input->lastCallbackFrameCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->renderedFrameCount = atomic_load_explicit(
+        &input->renderedFrameCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->writtenFrameCount = atomic_load_explicit(
+        &input->writtenFrameCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->renderErrorCount = atomic_load_explicit(
+        &input->renderErrorCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->oversizedCallbackCount = atomic_load_explicit(
+        &input->oversizedCallbackCount,
+        memory_order_relaxed
+    );
+    outDiagnostics->lastRenderStatus = atomic_load_explicit(
+        &input->lastRenderStatus,
+        memory_order_relaxed
+    );
+    outDiagnostics->scratchCapacityFrames = input->scratchCapacityFrames;
 }
 
 void EMKEHALInputDestroy(EMKEHALInput *input) {

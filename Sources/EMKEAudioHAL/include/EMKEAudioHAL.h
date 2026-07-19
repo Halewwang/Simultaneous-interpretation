@@ -12,6 +12,18 @@ extern "C" {
 typedef struct EMKEHALInput EMKEHALInput;
 typedef struct EMKEHALOutput EMKEHALOutput;
 
+typedef struct EMKEHALInputDiagnostics {
+    uint32_t isStarted;
+    uint64_t callbackCount;
+    uint32_t lastCallbackFrameCount;
+    uint64_t renderedFrameCount;
+    uint64_t writtenFrameCount;
+    uint64_t renderErrorCount;
+    uint64_t oversizedCallbackCount;
+    OSStatus lastRenderStatus;
+    uint32_t scratchCapacityFrames;
+} EMKEHALInputDiagnostics;
+
 OSStatus EMKEHALInputCreate(
     AudioObjectID deviceID,
     uint32_t capacityFrames,
@@ -25,6 +37,10 @@ uint32_t EMKEHALInputRead(
     uint32_t frameCount
 );
 uint32_t EMKEHALInputReadableFrames(const EMKEHALInput *input);
+void EMKEHALInputGetDiagnostics(
+    const EMKEHALInput *input,
+    EMKEHALInputDiagnostics *outDiagnostics
+);
 void EMKEHALInputDestroy(EMKEHALInput *input);
 
 OSStatus EMKEHALOutputCreate(

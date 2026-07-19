@@ -588,6 +588,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func startAudioInputTest() async {
+        reloadDevices()
         guard canTestAudioInput, let device = selectedPhysicalInput else { return }
         audioDiagnosticError = nil
         do {
@@ -620,6 +621,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func playAudioOutputTest() async {
+        reloadDevices()
         guard canTestAudioOutput, let device = selectedPhysicalOutput else { return }
         isPlayingAudioOutputTest = true
         audioDiagnosticError = nil
@@ -755,12 +757,34 @@ final class MenuBarModel: ObservableObject {
         case .stopped:
             "未测试"
         case .waitingForFrames:
-            "未收到音频帧"
+            Self.inputTransportStatus(sample.transportDiagnostics)
         case .receivingSilence:
             "设备已连接，等待声音"
         case .receivingAudio:
             "已检测到麦克风输入"
         }
+    }
+
+    private static func inputTransportStatus(
+        _ diagnostics: AudioInputTransportDiagnostics
+    ) -> String {
+        guard diagnostics.isAvailable else { return "未收到音频帧" }
+        if diagnostics.oversizedCallbackCount > 0 {
+            return "输入帧超过缓冲区（"
+                + "\(diagnostics.lastCallbackFrameCount) > "
+                + "\(diagnostics.scratchCapacityFrames)）"
+        }
+        if diagnostics.renderErrorCount > 0 {
+            return "读取音频失败（OSStatus "
+                + "\(diagnostics.lastRenderStatus)）"
+        }
+        if diagnostics.callbackCount == 0 {
+            return "设备未触发输入回调"
+        }
+        if diagnostics.writtenFrameCount == 0 {
+            return "输入回调未写入音频"
+        }
+        return "等待下一批音频帧"
     }
 
     private func stopAudioInputTest(resetStatus: Bool) async {

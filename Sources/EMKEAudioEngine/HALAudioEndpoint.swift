@@ -6,10 +6,65 @@ public enum AudioEndpointError: Error, Equatable, Sendable {
     case creationReturnedNoHandle
 }
 
+public struct AudioInputTransportDiagnostics: Equatable, Sendable {
+    public let isAvailable: Bool
+    public let isStarted: Bool
+    public let callbackCount: UInt64
+    public let lastCallbackFrameCount: UInt32
+    public let renderedFrameCount: UInt64
+    public let writtenFrameCount: UInt64
+    public let renderErrorCount: UInt64
+    public let oversizedCallbackCount: UInt64
+    public let lastRenderStatus: OSStatus
+    public let scratchCapacityFrames: UInt32
+
+    public init(
+        isAvailable: Bool,
+        isStarted: Bool,
+        callbackCount: UInt64,
+        lastCallbackFrameCount: UInt32,
+        renderedFrameCount: UInt64,
+        writtenFrameCount: UInt64,
+        renderErrorCount: UInt64,
+        oversizedCallbackCount: UInt64,
+        lastRenderStatus: OSStatus,
+        scratchCapacityFrames: UInt32
+    ) {
+        self.isAvailable = isAvailable
+        self.isStarted = isStarted
+        self.callbackCount = callbackCount
+        self.lastCallbackFrameCount = lastCallbackFrameCount
+        self.renderedFrameCount = renderedFrameCount
+        self.writtenFrameCount = writtenFrameCount
+        self.renderErrorCount = renderErrorCount
+        self.oversizedCallbackCount = oversizedCallbackCount
+        self.lastRenderStatus = lastRenderStatus
+        self.scratchCapacityFrames = scratchCapacityFrames
+    }
+
+    public static let unavailable = AudioInputTransportDiagnostics(
+        isAvailable: false,
+        isStarted: false,
+        callbackCount: 0,
+        lastCallbackFrameCount: 0,
+        renderedFrameCount: 0,
+        writtenFrameCount: 0,
+        renderErrorCount: 0,
+        oversizedCallbackCount: 0,
+        lastRenderStatus: noErr,
+        scratchCapacityFrames: 0
+    )
+}
+
 public protocol AudioInputEndpoint: AnyObject {
     func start() throws
     func stop()
     func read(into interleavedSamples: UnsafeMutableBufferPointer<Float>) -> Int
+    func diagnostics() -> AudioInputTransportDiagnostics
+}
+
+public extension AudioInputEndpoint {
+    func diagnostics() -> AudioInputTransportDiagnostics { .unavailable }
 }
 
 public protocol AudioOutputEndpoint: AnyObject {
@@ -26,6 +81,7 @@ protocol HALInputOperations {
         into samples: UnsafeMutablePointer<Float>?,
         frameCount: UInt32
     ) -> UInt32
+    func diagnostics(_ handle: OpaquePointer) -> AudioInputTransportDiagnostics
     func destroy(_ handle: OpaquePointer)
 }
 
@@ -59,6 +115,25 @@ private struct SystemHALInputOperations: HALInputOperations {
 
     func destroy(_ handle: OpaquePointer) {
         EMKEHALInputDestroy(handle)
+    }
+
+    func diagnostics(
+        _ handle: OpaquePointer
+    ) -> AudioInputTransportDiagnostics {
+        var snapshot = EMKEHALInputDiagnostics()
+        EMKEHALInputGetDiagnostics(handle, &snapshot)
+        return AudioInputTransportDiagnostics(
+            isAvailable: true,
+            isStarted: snapshot.isStarted != 0,
+            callbackCount: snapshot.callbackCount,
+            lastCallbackFrameCount: snapshot.lastCallbackFrameCount,
+            renderedFrameCount: snapshot.renderedFrameCount,
+            writtenFrameCount: snapshot.writtenFrameCount,
+            renderErrorCount: snapshot.renderErrorCount,
+            oversizedCallbackCount: snapshot.oversizedCallbackCount,
+            lastRenderStatus: snapshot.lastRenderStatus,
+            scratchCapacityFrames: snapshot.scratchCapacityFrames
+        )
     }
 }
 
@@ -146,6 +221,10 @@ public final class HALAudioInputEndpoint: AudioInputEndpoint {
             frameCount: UInt32(frameCapacity)
         )
         return min(Int(transferred), frameCapacity)
+    }
+
+    public func diagnostics() -> AudioInputTransportDiagnostics {
+        operations.diagnostics(handle)
     }
 }
 

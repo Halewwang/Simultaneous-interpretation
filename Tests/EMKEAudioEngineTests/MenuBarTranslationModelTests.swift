@@ -701,6 +701,87 @@ func localInputDiagnosticPublishesCapturedPCMState() async {
 }
 
 @Test @MainActor
+func localInputDiagnosticPublishesHALRenderFailure() async {
+    let diagnostics = AudioDiagnosticsStub(
+        inputSample: AudioInputDiagnosticSample(
+            state: .waitingForFrames,
+            level: 0,
+            frameCount: 0,
+            rms: 0,
+            transportDiagnostics: AudioInputTransportDiagnostics(
+                isAvailable: true,
+                isStarted: true,
+                callbackCount: 4,
+                lastCallbackFrameCount: 480,
+                renderedFrameCount: 0,
+                writtenFrameCount: 0,
+                renderErrorCount: 4,
+                oversizedCallbackCount: 0,
+                lastRenderStatus: -50,
+                scratchCapacityFrames: 512
+            )
+        )
+    )
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+
+    await model.startAudioInputTest()
+
+    #expect(model.audioInputDiagnosticText == "读取音频失败（OSStatus -50）")
+    await model.stopAudioInputTest()
+}
+
+@Test @MainActor
+func localInputDiagnosticFallsBackWhenSavedDeviceDisconnected() async throws {
+    let initialInventory = try TranslationMenuDeviceProvider().devices()
+    let provider = MutableTranslationMenuDeviceProvider(
+        inventory: initialInventory
+    )
+    let diagnostics = AudioDiagnosticsStub()
+    let model = MenuBarModel(
+        provider: provider,
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+
+    let replacementInput = AudioDevice(
+        id: 30,
+        uid: "default.input",
+        name: "Default Input",
+        inputChannelCount: 1,
+        outputChannelCount: 0,
+        nominalSampleRate: 48_000
+    )
+    provider.replaceInventory(
+        initialInventory.filter { $0.uid != "physical.input" }
+            + [replacementInput],
+        defaultInputUID: replacementInput.uid
+    )
+
+    await model.startAudioInputTest()
+
+    #expect(model.selectedInputUID == replacementInput.uid)
+    #expect(await diagnostics.inputDeviceIDs == [replacementInput.id])
+}
+
+@Test @MainActor
 func localOutputDiagnosticTargetsSelectedPhysicalDevice() async {
     let diagnostics = AudioDiagnosticsStub()
     let model = MenuBarModel(

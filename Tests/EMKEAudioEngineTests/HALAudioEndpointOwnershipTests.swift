@@ -10,6 +10,7 @@ private final class InputOperationsSpy: HALInputOperations {
     var events: [String] = []
     var startResults: [OSStatus] = [noErr]
     var readResult: UInt32 = 0
+    var diagnosticsResult = AudioInputTransportDiagnostics.unavailable
 
     func start(_ handle: OpaquePointer) -> OSStatus {
         events.append("start")
@@ -32,6 +33,13 @@ private final class InputOperationsSpy: HALInputOperations {
 
     func destroy(_ handle: OpaquePointer) {
         events.append("destroy")
+    }
+
+    func diagnostics(
+        _ handle: OpaquePointer
+    ) -> AudioInputTransportDiagnostics {
+        events.append("diagnostics")
+        return diagnosticsResult
     }
 }
 
@@ -141,6 +149,32 @@ private final class OutputOperationsSpy: HALOutputOperations {
 
     #expect(read == 4)
     #expect(operations.events == ["read:4"])
+}
+
+@Test func inputDiagnosticsExposeHALCallbackBoundary() {
+    let operations = InputOperationsSpy()
+    operations.diagnosticsResult = AudioInputTransportDiagnostics(
+        isAvailable: true,
+        isStarted: true,
+        callbackCount: 12,
+        lastCallbackFrameCount: 480,
+        renderedFrameCount: 5_760,
+        writtenFrameCount: 5_760,
+        renderErrorCount: 0,
+        oversizedCallbackCount: 0,
+        lastRenderStatus: noErr,
+        scratchCapacityFrames: 512
+    )
+    let endpoint = HALAudioInputEndpoint(
+        handle: makeTestHandle(),
+        operations: operations
+    )
+
+    let diagnostics = endpoint.diagnostics()
+
+    #expect(diagnostics.callbackCount == 12)
+    #expect(diagnostics.writtenFrameCount == 5_760)
+    #expect(operations.events == ["diagnostics"])
 }
 
 @Test func partialOutputWriteReportsBackpressure() {

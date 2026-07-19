@@ -13,17 +13,20 @@ public struct AudioInputDiagnosticSample: Equatable, Sendable {
     public let level: Double
     public let frameCount: Int
     public let rms: Double
+    public let transportDiagnostics: AudioInputTransportDiagnostics
 
     public init(
         state: AudioInputDiagnosticState,
         level: Double,
         frameCount: Int,
-        rms: Double
+        rms: Double,
+        transportDiagnostics: AudioInputTransportDiagnostics = .unavailable
     ) {
         self.state = state
         self.level = level
         self.frameCount = frameCount
         self.rms = rms
+        self.transportDiagnostics = transportDiagnostics
     }
 }
 
@@ -79,6 +82,7 @@ public actor LocalAudioDiagnostics {
                 rms: 0
             )
         }
+        let transportDiagnostics = input.diagnostics()
         let frameCount = inputCapture.withUnsafeMutableBufferPointer {
             input.read(into: $0)
         }
@@ -87,7 +91,8 @@ public actor LocalAudioDiagnostics {
                 state: .waitingForFrames,
                 level: 0,
                 frameCount: 0,
-                rms: 0
+                rms: 0,
+                transportDiagnostics: transportDiagnostics
             )
         }
 
@@ -108,7 +113,8 @@ public actor LocalAudioDiagnostics {
                 : .receivingSilence,
             level: level,
             frameCount: frameCount,
-            rms: rms
+            rms: rms,
+            transportDiagnostics: transportDiagnostics
         )
     }
 

@@ -5,6 +5,7 @@ import Testing
 
 private final class DiagnosticInputFake: AudioInputEndpoint, @unchecked Sendable {
     var samples: [Float] = []
+    var transportDiagnostics = AudioInputTransportDiagnostics.unavailable
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
@@ -26,6 +27,10 @@ private final class DiagnosticInputFake: AudioInputEndpoint, @unchecked Sendable
         }
         samples.removeFirst(copiedSampleCount)
         return copiedSampleCount / 2
+    }
+
+    func diagnostics() -> AudioInputTransportDiagnostics {
+        transportDiagnostics
     }
 }
 
@@ -70,6 +75,18 @@ private struct DiagnosticEndpointFactory: AudioEndpointFactory, @unchecked Senda
 @Test
 func inputDiagnosticDistinguishesNoFramesFromCapturedAudio() async throws {
     let input = DiagnosticInputFake()
+    input.transportDiagnostics = AudioInputTransportDiagnostics(
+        isAvailable: true,
+        isStarted: true,
+        callbackCount: 0,
+        lastCallbackFrameCount: 0,
+        renderedFrameCount: 0,
+        writtenFrameCount: 0,
+        renderErrorCount: 0,
+        oversizedCallbackCount: 0,
+        lastRenderStatus: noErr,
+        scratchCapacityFrames: 512
+    )
     let output = DiagnosticOutputFake()
     let diagnostics = LocalAudioDiagnostics(
         factory: DiagnosticEndpointFactory(input: input, output: output)
@@ -79,6 +96,8 @@ func inputDiagnosticDistinguishesNoFramesFromCapturedAudio() async throws {
     let waiting = await diagnostics.sampleInput()
     #expect(waiting.state == .waitingForFrames)
     #expect(waiting.frameCount == 0)
+    #expect(waiting.transportDiagnostics.isAvailable)
+    #expect(waiting.transportDiagnostics.callbackCount == 0)
 
     input.samples = Array(repeating: 0.2, count: 960)
     let captured = await diagnostics.sampleInput()
