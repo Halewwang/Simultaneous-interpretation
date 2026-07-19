@@ -223,6 +223,8 @@ final class MenuBarModel: ObservableObject {
     private let connectionProbe: any TranslationConnectionProbing
     private let secretStore: any SecretStore
     private let settingsStore: any AppSettingsStoring
+    private let microphonePermissionProvider:
+        any MicrophonePermissionProviding
 
     @Published var physicalInputs: [AudioDevice] = []
     @Published var physicalOutputs: [AudioDevice] = []
@@ -275,13 +277,16 @@ final class MenuBarModel: ObservableObject {
             TranslationConnectionProbe(),
         secretStore: any SecretStore = KeychainSecretStore(),
         settingsStore: any AppSettingsStoring =
-            UserDefaultsAppSettingsStore()
+            UserDefaultsAppSettingsStore(),
+        microphonePermissionProvider: any MicrophonePermissionProviding =
+            SystemMicrophonePermissionProvider()
     ) {
         self.provider = provider
         self.coordinator = coordinator
         self.connectionProbe = connectionProbe
         self.secretStore = secretStore
         self.settingsStore = settingsStore
+        self.microphonePermissionProvider = microphonePermissionProvider
         apply(settingsStore.load())
         reloadDevices()
     }
@@ -494,6 +499,7 @@ final class MenuBarModel: ObservableObject {
         defer { isStarting = false }
         configurationError = nil
         do {
+            try await requireMicrophonePermission()
             try await persistDraftKeyIfNeeded()
             guard let apiKey = try await nonemptyStoredAPIKey() else {
                 hasStoredAPIKey = false
@@ -617,6 +623,21 @@ final class MenuBarModel: ObservableObject {
             throw MenuBarConfigurationError.modelRequired
         }
         return APIConfiguration(baseURL: baseURL, modelID: trimmedModelID)
+    }
+
+    private func requireMicrophonePermission() async throws {
+        switch await microphonePermissionProvider.authorizationStatus() {
+        case .authorized:
+            return
+        case .notDetermined:
+            guard await microphonePermissionProvider.requestAccess() else {
+                throw MenuBarConfigurationError.microphoneAccessDenied
+            }
+        case .denied:
+            throw MenuBarConfigurationError.microphoneAccessDenied
+        case .restricted:
+            throw MenuBarConfigurationError.microphoneAccessRestricted
+        }
     }
 
     private func persistDraftKeyIfNeeded() async throws {
@@ -753,12 +774,18 @@ private enum MenuBarConfigurationError: Error, CustomStringConvertible {
     case invalidBaseURL
     case modelRequired
     case apiKeyRequired
+    case microphoneAccessDenied
+    case microphoneAccessRestricted
 
     var description: String {
         switch self {
         case .invalidBaseURL: "Base URL 必须是有效的 HTTPS 或 WSS 地址"
         case .modelRequired: "模型名称不能为空"
         case .apiKeyRequired: "API Key 未写入 Keychain"
+        case .microphoneAccessDenied:
+            "麦克风权限未开启，请在系统设置的隐私与安全性中允许 EMKE Translation"
+        case .microphoneAccessRestricted:
+            "当前系统策略限制了麦克风访问"
         }
     }
 }

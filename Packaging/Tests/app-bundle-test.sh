@@ -23,6 +23,10 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" \
   = "14.0"
 test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"
+ENTITLEMENTS="$TEMP/app-entitlements.plist"
+/usr/bin/codesign -d --entitlements :- "$APP" > "$ENTITLEMENTS" 2>/dev/null
+test "$(/usr/libexec/PlistBuddy -c \
+  'Print :com.apple.security.device.audio-input' "$ENTITLEMENTS")" = true
 FILE_OUTPUT="$(/usr/bin/file "$APP/Contents/MacOS/EMKEMenuBarApp")"
 /usr/bin/grep -q arm64 <<< "$FILE_OUTPUT"
 echo "PASS: app bundle"

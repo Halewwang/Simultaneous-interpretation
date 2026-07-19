@@ -26,5 +26,6 @@ bash "$ROOT/Packaging/Scripts/build-app-icon.sh" \
 /usr/bin/xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
 /usr/bin/xattr -d 'com.apple.fileprovider.fpfs#P' "$APP" 2>/dev/null || true
 /usr/bin/plutil -lint "$APP/Contents/Info.plist"
-/usr/bin/codesign --force --sign - --options runtime --timestamp=none "$APP"
+/usr/bin/codesign --force --sign - --options runtime --timestamp=none \
+  --entitlements "$ROOT/Packaging/App/EMKETranslation.entitlements" "$APP"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"

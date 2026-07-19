@@ -201,6 +201,29 @@ private actor TranslationSecretStoreStub: SecretStore {
     }
 }
 
+private actor MicrophonePermissionStub: MicrophonePermissionProviding {
+    let state: MicrophonePermissionState
+    let requestResult: Bool
+    private(set) var requestCount = 0
+
+    init(
+        state: MicrophonePermissionState,
+        requestResult: Bool = false
+    ) {
+        self.state = state
+        self.requestResult = requestResult
+    }
+
+    func authorizationStatus() async -> MicrophonePermissionState {
+        state
+    }
+
+    func requestAccess() async -> Bool {
+        requestCount += 1
+        return requestResult
+    }
+}
+
 @MainActor
 private final class TranslationSettingsStoreStub: AppSettingsStoring {
     var value: AppSettings
@@ -244,7 +267,10 @@ private func makeTranslationMenuModel(
             report: protocolOnlyReport
         ),
         secretStore: TranslationSecretStoreStub(value: secret),
-        settingsStore: settings
+        settingsStore: settings,
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        )
     )
 }
 
@@ -287,7 +313,10 @@ func startRevalidatesAudioDevicesBeforeStartingCoordinator() async throws {
         coordinator: coordinator,
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub()
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        )
     )
     await model.loadConfiguration()
     model.selectedInputUID = "physical.input"
@@ -319,7 +348,10 @@ func startFallsBackToCurrentDefaultsWhenSavedDevicesDisappear() async throws {
         coordinator: coordinator,
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub()
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        )
     )
     await model.loadConfiguration()
     model.selectedInputUID = "physical.input"
@@ -532,6 +564,56 @@ func startMovesDraftKeyToKeychainAndBuildsCoordinatorConfiguration() async {
     #expect(model.apiKeyDraft.isEmpty)
     #expect(model.coordinatorState.isRunning)
     await model.stop()
+}
+
+@Test @MainActor
+func startRequestsUndeterminedMicrophonePermissionBeforeAudio() async {
+    let permission = MicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true
+    )
+    let coordinator = TranslationCoordinatorStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: coordinator,
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: permission
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://api.openai.com/v1"
+    model.modelID = "gpt-realtime-translate"
+
+    await model.start()
+
+    #expect(await permission.requestCount == 1)
+    #expect(await coordinator.configurations.count == 1)
+}
+
+@Test @MainActor
+func startStopsBeforeAudioWhenMicrophonePermissionIsDenied() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: coordinator,
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(state: .denied)
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://api.openai.com/v1"
+    model.modelID = "gpt-realtime-translate"
+
+    await model.start()
+
+    #expect(await coordinator.configurations.isEmpty)
+    #expect(model.configurationError?.contains("麦克风权限未开启") == true)
 }
 
 @Test @MainActor

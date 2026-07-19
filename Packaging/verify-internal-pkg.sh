@@ -283,6 +283,13 @@ require_plist_value NSMicrophoneUsageDescription \
 require_plist_value NSPrincipalClass NSApplication
 require /usr/bin/codesign --verify --strict --verbose=2 "$APP"
 require /usr/bin/codesign --verify --strict --verbose=2 "$DRIVER"
+if ! /usr/bin/codesign -d --entitlements :- "$APP" \
+  > "$TEMP/app-entitlements" 2>/dev/null; then
+  echo "app entitlements capture failed" >&2; exit 1
+fi
+require test "$(/usr/libexec/PlistBuddy -c \
+  'Print :com.apple.security.device.audio-input' \
+  "$TEMP/app-entitlements")" = true
 if ! /usr/bin/codesign -dv --verbose=4 "$APP" > "$TEMP/app-codesign" 2>&1; then
   echo "app codesign metadata capture failed" >&2; exit 1
 fi
