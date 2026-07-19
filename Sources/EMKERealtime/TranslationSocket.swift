@@ -2,6 +2,7 @@ import Foundation
 
 public enum TranslationSocketError: Error, Equatable {
     case disconnected
+    case invalidUTF8TextFrame
 }
 
 public protocol TranslationSocket: Sendable {

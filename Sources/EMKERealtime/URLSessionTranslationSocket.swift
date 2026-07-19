@@ -18,7 +18,16 @@ public actor URLSessionTranslationSocket: TranslationSocket {
     }
 
     public func send(_ data: Data) async throws {
-        try await task.send(.data(data))
+        try await task.send(try Self.outboundMessage(for: data))
+    }
+
+    static func outboundMessage(
+        for data: Data
+    ) throws -> URLSessionWebSocketTask.Message {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw TranslationSocketError.invalidUTF8TextFrame
+        }
+        return .string(text)
     }
 
     public func receive() async throws -> Data {
