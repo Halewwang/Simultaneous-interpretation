@@ -8,15 +8,27 @@
 - full-view comparison: `docs/visual-qa/pass-6/artifacts/comparison-surface.png`
 - reproducibility geometry: `docs/visual-qa/pass-6/artifacts/geometry.json`
 - tracked renderer and verifier: `docs/visual-qa/pass-6/render-pass-6.swift` and `docs/visual-qa/pass-6/verify-pass-6.swift`
+- latest user-supplied target: `/var/folders/0_/46h2btb55jn23xnsb8gksj1h0000gn/T/codex-clipboard-a859e4d2-853a-46af-b04b-4ed8132cc365.png`
+- Pass 7 running comparison: `docs/visual-qa/pass-7/artifacts/comparison-surface.png`
+- Pass 7 ready-state screenshot: `docs/visual-qa/pass-7/artifacts/implementation-ready.png`
+- Pass 7 focused language comparison: `docs/visual-qa/pass-7/artifacts/comparison-language-controls.png`
+- Pass 7 installed dashboard: `docs/visual-qa/pass-7/artifacts/installed-dashboard.jpeg`
+- Pass 7 installed language menu: `docs/visual-qa/pass-7/artifacts/installed-language-menu.jpeg`
+- Pass 7 installed status-bar Logo: `docs/visual-qa/pass-7/artifacts/installed-status-bar-logo.png`
+- packaged menu-bar logo: `Sources/EMKEMenuBarApp/Resources/EMKE-MenuBarIcon.png`
 - prior focused channel comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
 - native dashboard capture: `.superpowers/artifacts/task-7/native-dashboard-window.png`
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
 - viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 6 将批准稿表面以单一等比缩放 + 居中裁切规范化为 840 × 1240 px；实现 raw 保持 840 × 1240 px 原样。两者分别以 1:1 嵌入 888 × 1288 px 验收面板，再组成 1776 × 1288 px surface comparison。原生窗口截图另含系统 32 pt 窗口栏。
-- state: 浅色运行态 fixture（中文母语、德语会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；当前机器深色未配置控制台与设置页用于原生交互验收。
+- state: 浅色运行态 fixture（中文母语、德语会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；Pass 7 另增同视口浅色就绪态，专门验证可编辑语言控件。
 
 ## Findings
 
-没有剩余的可执行 P0、P1 或 P2。最终结论只基于 Pass 6 的 tracked、1:1 像素证据；Pass 5 仍保持失效。
+没有剩余的可执行 P0、P1 或 P2。当前结论基于 Pass 7 就绪态与 Logo 证据，并继承 Pass 6 未变的 tracked、1:1 运行态像素证据；Pass 5 仍保持失效。
+
+- Pass 7 复现并修复了用户报告的两项 P1：就绪态两个语言值回退为 macOS 默认紧凑灰色 `Picker(.menu)`；菜单栏入口仍使用状态 SF Symbol，而非已批准 Logo。现在就绪态和运行态共用 22 pt 纯文本值与独立下箭头；可编辑态使用可点击的定制 popover 选项列表。菜单栏改用从已批准 App Icon 精确提取的透明 Template Image。
+
+- Pass 7 的运行态 raw capture SHA-256 仍为 `5c92aee42f7f6e64284a9a04dcc94c9a35e36903afcaf36464fd73cf926196a2`，与 Pass 6 完全一致，证明修复未改动已批准运行态。Pass 7 的语言槽对照以 1:1 像素左右并排，实现态没有默认控件底色、裁切、错位或替代字形。
 
 - Pass 6 修复了两项 P2：验收包装器不再缩放实现内容；语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间四个边界改用 `NSColor.separatorColor` 和 0.5 pt 厚度，在 2× 捕获中稳定为 1 physical pixel。深浅系统外观的合成对比度均由测试约束在 1.15–1.5，保持可见且克制。
 
@@ -30,7 +42,7 @@
 - 间距与布局：420 × 620 pt 内六区完整；按确认稿微调后的 22/24 pt 左右边距、45 pt 主按钮、分隔线、通道列和底部隐私区稳定，无滚动、溢出或动作重叠。
 - 颜色与令牌：黑白灰为主，蓝色仅用于装饰性活动端点；稳定、旁路、失败和锁定状态同时有文字与 SF Symbol。深浅外观均采用系统语义色。
 - 图标：齿轮、返回、耳机、麦克风、锁和状态图标均使用 SF Symbols；装饰图标隐藏于辅助功能，交互图标有文字标签。
-- 图片与资产：视觉稿没有需要导入的品牌或栅格资产；实现没有用自绘 SVG、emoji 或占位图替代目标资产。
+- 图片与资产：面板不需要栅格资产；菜单栏使用由已批准 `EMKE-AppIcon-Approved.png` 提取的真实 Logo 资源，没有用自绘 SVG、emoji、文字符号或占位图代替。
 - 文案：主状态、语言方向、双通道、旁路动作和隐私拓扑文案可独立理解；保留的 P3 语言差异见上。
 - 状态与交互：Computer Use 验证齿轮进入设置、返回控制台、未配置状态、禁用主动作、SecureField 不回填 Key、设置滚动及窗口关闭/重新呈现。没有发起付费或实时翻译会话。
 - 可访问性：主状态与通道状态有明确标签，音波隐藏，旁路按钮朗读结果；Reduce Motion 分支不附加显式动画；锁定状态使用文字和图标；焦点源顺序为设置、语言、入站动作、出站动作、主动作。当前机器的系统完整键盘访问没有提供可观察焦点环，因此以原生 AX 顺序和源码合同记录此项。
@@ -92,10 +104,22 @@ tracked renderer 对批准稿的已测 MenuBarExtra 表面做单一等比缩放�
 
 实现者与主任务 reviewer 均以 original detail 打开两张 tracked 对照图。四条分隔线现在清晰、克制；字体、波形、语言、通道、CTA、footer 与系统表面没有可执行 P0–P2。canonical surface comparison SHA-256 为 `d699fca2d7d1a6324a5f8e3194a06392682bb86cd4464919ee46158fd08ab2f7`。
 
+### Pass 7 — passed / current
+
+Evidence: `docs/visual-qa/pass-7/artifacts/comparison-surface.png`, `docs/visual-qa/pass-7/artifacts/implementation-ready.png`, `docs/visual-qa/pass-7/artifacts/comparison-language-controls.png`, `docs/visual-qa/pass-7/artifacts/installed-dashboard.jpeg`, `docs/visual-qa/pass-7/artifacts/installed-language-menu.jpeg`, `docs/visual-qa/pass-7/artifacts/installed-status-bar-logo.png`, and `Sources/EMKEMenuBarApp/Resources/EMKE-MenuBarIcon.png`.
+
+先用用户的 2026-07-19 截图确认安装版真实问题只位于就绪态语言选择控件，不把静止零电平波形伪装为运行态。失败渲染测试复现了 `Menu` 控件在确定性 `ImageRenderer` 中出现黄色替代图形的问题，因此最终使用纯 `Button` 标签 + 真实 popover 选项列表，关闭态可确定渲染，点击后仍能修改绑定语言。
+
+目标运行态与当前运行态以同一 420 × 620 pt / 2× 视口比较，Pass 6 raw hash 保持不变。语言槽进一步在同一 840 × 1240 px 内容几何中裁切并以 1:1 像素并排；可编辑右侧的字号、字重、对齐、值和下箭头与批准左侧一致。没有剩余 P0–P2。
+
+Package 验收要求 `EMKE-MenuBarIcon.png` 必须是 36 × 36 px RGBA，运行时测试要求 18 × 18 pt 且 `isTemplate = true`。入口源码不再调用 `systemImage: model.systemImage`。
+
+安装后的真实 `/Applications/EMKE Translation.app` 已由 Computer Use 以 420 × 620 px 窗口原尺寸打开。AX 树确认“我的母语”与“会议输出”是两个可点击按钮，值分别为“中文”与“德语”；两个 popover 均实际展开并显示中文、英语、德语三项与当前选中标记，验收后取消弹窗，未更改选择或启动翻译。
+
 ## 验证缺口
 
 - `xcrun xctrace` 在当前 Command Line Tools 环境不可用，因此无法生成 SwiftUI/Time Profiler trace。自动化测试已验证电平事件最高 30 Hz、隐藏窗口禁用并清空排队快照、晚到电平不回填，以及关闭窗口不停止翻译；这不等同于 Instruments 实测。
 - 未输入真实凭据，也未连接生产服务商；第三方服务商端到端体验未验证。
-- Computer Use 无法直接寻址尚未打开的无窗口 MenuBarExtra 状态项。实际 `swift run EMKEMenuBarApp` 启动已验证；齿轮、返回、设置与窗口交互使用同一二进制和 `MenuBarRootView` 的临时非提交 Window 场景采集，采集后已还原生产 MenuBarExtra 入口。
+- Computer Use 已直接打开安装版 MenuBarExtra 面板并验收两个语言 popover。在显示系统菜单栏后，状态栏入口也以真实系统表面截图复核：显示已批准的阶梯式四向结构 Logo，没有回退为音波 SF Symbol。安装包内资源哈希、36 × 36 px RGBA 合同、18 × 18 pt Template Image 运行时测试和安装版像素证据相互一致。
 
 final result: passed

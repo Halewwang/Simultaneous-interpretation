@@ -179,15 +179,10 @@ struct TranslationDashboardContent: View {
                     language: selection.wrappedValue
                 )
             } else {
-                Picker(title, selection: selection) {
-                    ForEach(SupportedLanguage.allCases, id: \.self) { language in
-                        Text(language.displayName).tag(language)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .font(.system(size: 22, weight: .semibold))
-                .accessibilityLabel(title)
+                LanguageMenuButton(
+                    title: title,
+                    selection: selection
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,18 +193,11 @@ struct TranslationDashboardContent: View {
         title: String,
         language: SupportedLanguage
     ) -> some View {
-        HStack(spacing: 8) {
-            Text(language.displayName)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(EMKEVisualStyle.secondaryText)
-                .accessibilityHidden(true)
-        }
-        .font(.system(size: 22, weight: .semibold))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(language.displayName)
-        .accessibilityHint("翻译运行期间不可修改")
+        LanguageValueLabel(language: language)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityValue(language.displayName)
+            .accessibilityHint("翻译运行期间不可修改")
     }
 
     private var channelRows: some View {
@@ -271,5 +259,76 @@ struct TranslationDashboardContent: View {
         .padding(.top, EMKEDashboardMetrics.privacyTopPadding)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(value.privacyText)
+    }
+}
+
+private struct LanguageValueLabel: View {
+    let language: SupportedLanguage
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(language.displayName)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .accessibilityHidden(true)
+        }
+        .font(.system(size: 22, weight: .semibold))
+        .contentShape(Rectangle())
+    }
+}
+
+private struct LanguageMenuButton: View {
+    let title: String
+    @Binding var selection: SupportedLanguage
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            LanguageValueLabel(language: selection)
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(EMKEVisualStyle.secondaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    .padding(.bottom, 3)
+                ForEach(SupportedLanguage.allCases, id: \.self) { language in
+                    Button {
+                        selection = language
+                        isPresented = false
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(language.displayName)
+                            Spacer(minLength: 16)
+                            if selection == language {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(language.displayName)
+                    .accessibilityValue(selection == language ? "已选择" : "")
+                }
+            }
+            .padding(4)
+            .frame(width: 148)
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(selection.displayName)
+        .accessibilityHint("选择翻译语言")
     }
 }

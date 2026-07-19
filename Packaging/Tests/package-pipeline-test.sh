@@ -19,6 +19,9 @@ test "$(/usr/bin/stat -f '%Lp' "$TEMP/expanded/Payload")" = 755
 /usr/bin/grep -q 'Applications/EMKE Translation.app/Contents/Info.plist' \
   "$TEMP/payload-files"
 /usr/bin/grep -q \
+  'Applications/EMKE Translation.app/Contents/Resources/EMKE-MenuBarIcon.png' \
+  "$TEMP/payload-files"
+/usr/bin/grep -q \
   'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/Contents/Info.plist' \
   "$TEMP/payload-files"
 /usr/bin/grep -q \

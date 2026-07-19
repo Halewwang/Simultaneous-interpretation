@@ -6,7 +6,13 @@ import Testing
 
 @Test @MainActor
 func captureRunningDashboardForVisualReview() throws {
-    let bitmap = try runningDashboardBitmap()
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.running.makePresentation(
+            inboundLevel: 0.42,
+            outboundLevel: 0.68
+        ),
+        languagesLocked: true
+    )
 
     #expect(bitmap.pixelsWide == 840)
     #expect(bitmap.pixelsHigh == 1240)
@@ -19,18 +25,61 @@ func captureRunningDashboardForVisualReview() throws {
     )
 }
 
-@MainActor
-private func runningDashboardBitmap() throws -> NSBitmapImageRep {
-
-    let value = DashboardFixture.running.makePresentation(
-        inboundLevel: 0.42,
-        outboundLevel: 0.68
+@Test @MainActor
+func captureReadyDashboardForVisualReview() throws {
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.ready.makePresentation(
+            inboundLevel: 0,
+            outboundLevel: 0
+        ),
+        languagesLocked: false
     )
+
+    #expect(bitmap.pixelsWide == 840)
+    #expect(bitmap.pixelsHigh == 1240)
+
+    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else { return }
+
+    let data = try #require(bitmap.tiffRepresentation)
+    try data.write(
+        to: URL(fileURLWithPath: "/tmp/emke-ready-dashboard.tiff")
+    )
+}
+
+@Test @MainActor
+func readyLanguageControlsRenderWithoutFallbackPlaceholders() throws {
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.ready.makePresentation(
+            inboundLevel: 0,
+            outboundLevel: 0
+        ),
+        languagesLocked: false
+    )
+
+    var saturatedPlaceholderPixels = 0
+    for y in 440..<620 {
+        for x in 120..<720 {
+            guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+            if color.redComponent > 0.85,
+               color.greenComponent > 0.55,
+               color.blueComponent < 0.25 {
+                saturatedPlaceholderPixels += 1
+            }
+        }
+    }
+    #expect(saturatedPlaceholderPixels == 0)
+}
+
+@MainActor
+private func dashboardBitmap(
+    value: TranslationDashboardPresentation,
+    languagesLocked: Bool
+) throws -> NSBitmapImageRep {
     let view = TranslationDashboardContent(
         value: value,
         motherLanguage: .constant(.chinese),
         meetingOutputLanguage: .constant(.german),
-        languagesLocked: true,
+        languagesLocked: languagesLocked,
         settingsAction: {},
         inboundAction: {},
         outboundAction: {},

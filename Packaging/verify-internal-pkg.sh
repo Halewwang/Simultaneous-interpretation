@@ -180,6 +180,7 @@ require_raw_payload_entries() {
     'Applications/EMKE Translation.app/Contents/Info.plist' \
     'Applications/EMKE Translation.app/Contents/MacOS/EMKEMenuBarApp' \
     'Applications/EMKE Translation.app/Contents/Resources/AppIcon.icns' \
+    'Applications/EMKE Translation.app/Contents/Resources/EMKE-MenuBarIcon.png' \
     'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver' \
     'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/Contents/Info.plist' \
     'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver/Contents/MacOS/EMKEAudioDriver' \
@@ -295,6 +296,16 @@ require bash "$ROOT/Packaging/Scripts/verify-codesign-metadata.sh" \
 require test "$(/usr/bin/lipo -archs "$APP/Contents/MacOS/EMKEMenuBarApp")" = arm64
 require test "$(/usr/bin/lipo -archs "$DRIVER/Contents/MacOS/EMKEAudioDriver")" = arm64
 require test -s "$APP/Contents/Resources/AppIcon.icns"
+require test -s "$APP/Contents/Resources/EMKE-MenuBarIcon.png"
+require test "$(/usr/bin/sips -g pixelWidth \
+  "$APP/Contents/Resources/EMKE-MenuBarIcon.png" | \
+  /usr/bin/awk '/pixelWidth/ { print $2 }')" = 36
+require test "$(/usr/bin/sips -g pixelHeight \
+  "$APP/Contents/Resources/EMKE-MenuBarIcon.png" | \
+  /usr/bin/awk '/pixelHeight/ { print $2 }')" = 36
+require test "$(/usr/bin/sips -g hasAlpha \
+  "$APP/Contents/Resources/EMKE-MenuBarIcon.png" | \
+  /usr/bin/awk '/hasAlpha/ { print $2 }')" = yes
 DECODED_ICONSET="$TEMP/decoded.iconset"
 /usr/bin/iconutil -c iconset "$APP/Contents/Resources/AppIcon.icns" \
   -o "$DECODED_ICONSET"

@@ -59,7 +59,8 @@ let package = Package(
                 "EMKECoordinator",
                 "EMKECore",
                 "EMKESecurity",
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "EMKECoreTests",

@@ -18,8 +18,13 @@ bash "$ROOT/Packaging/Scripts/build-app-icon.sh" \
 /usr/bin/ditto "$ROOT/Packaging/App/Info.plist" "$APP/Contents/Info.plist"
 /usr/bin/ditto "$ICON_OUTPUT/AppIcon.icns" \
   "$APP/Contents/Resources/AppIcon.icns"
+/usr/bin/ditto \
+  "$ROOT/Sources/EMKEMenuBarApp/Resources/EMKE-MenuBarIcon.png" \
+  "$APP/Contents/Resources/EMKE-MenuBarIcon.png"
 /bin/chmod 755 "$APP/Contents/MacOS/EMKEMenuBarApp"
 /usr/bin/xattr -cr "$APP"
+/usr/bin/xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
+/usr/bin/xattr -d 'com.apple.fileprovider.fpfs#P' "$APP" 2>/dev/null || true
 /usr/bin/plutil -lint "$APP/Contents/Info.plist"
 /usr/bin/codesign --force --sign - --options runtime --timestamp=none "$APP"
 /usr/bin/codesign --verify --strict --verbose=2 "$APP"

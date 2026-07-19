@@ -103,6 +103,29 @@ func lockedLanguagesRemainLegibleWithoutAnEnabledControlStyle() throws {
 }
 
 @Test
+func editableLanguagesUseTheSameReferenceScaleAsLockedLanguages() throws {
+    let source = try sourceFile(named: "TranslationDashboardView.swift")
+
+    #expect(source.contains("LanguageMenuButton("))
+    #expect(source.contains(".popover(isPresented:"))
+    #expect(source.contains("LanguageValueLabel("))
+}
+
+@Test
+func menuBarUsesTheApprovedLogoInsteadOfAStatusSymbol() throws {
+    let source = try sourceFile(named: "EMKEMenuBarApp.swift")
+
+    #expect(source.contains("MenuBarLogo.image"))
+    #expect(!source.contains("systemImage: model.systemImage"))
+}
+
+@Test @MainActor
+func approvedMenuBarLogoUsesTemplateImageSizing() {
+    #expect(MenuBarLogo.image.size == NSSize(width: 18, height: 18))
+    #expect(MenuBarLogo.image.isTemplate)
+}
+
+@Test
 func channelRowsReserveVisualColumnsForIconAndStatus() {
     #expect(EMKEChannelMetrics.iconWidth == 48)
     #expect(EMKEChannelMetrics.statusWidth == 105)
