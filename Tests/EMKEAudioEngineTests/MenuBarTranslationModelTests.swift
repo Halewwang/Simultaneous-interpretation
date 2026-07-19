@@ -102,6 +102,29 @@ private final class MutableTranslationMenuDeviceProvider:
     }
 }
 
+private final class BlockingTranslationMenuDeviceProvider:
+    AudioDeviceProviding,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private let releaseSemaphore = DispatchSemaphore(value: 0)
+    private var callCountStorage = 0
+
+    var callCount: Int {
+        lock.withLock { callCountStorage }
+    }
+
+    func devices() throws -> [AudioDevice] {
+        lock.withLock { callCountStorage += 1 }
+        releaseSemaphore.wait()
+        return try TranslationMenuDeviceProvider().devices()
+    }
+
+    func release() {
+        releaseSemaphore.signal()
+    }
+}
+
 private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private(set) var configurations: [
         TranslationCoordinatorConfiguration
@@ -372,6 +395,44 @@ func deferredInitialDeviceReloadLeavesLaunchPathNonblocking() async {
     #expect(model.physicalInputs.map(\.uid) == ["physical.input"])
     #expect(model.physicalOutputs.map(\.uid) == ["physical.output"])
     #expect(model.readiness == .selectPhysicalInput)
+}
+
+@Test @MainActor
+func concurrentDeviceReloadsShareOneCoreAudioRequest() async throws {
+    let provider = BlockingTranslationMenuDeviceProvider()
+    let model = MenuBarModel(
+        provider: provider,
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        deferInitialDeviceReload: true
+    )
+
+    let firstReload = Task { @MainActor in
+        await model.reloadDevicesAsync()
+    }
+    while provider.callCount == 0 {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.isReloadingDevices)
+
+    let secondReload = Task { @MainActor in
+        await model.reloadDevicesAsync()
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(provider.callCount == 1)
+
+    provider.release()
+    await firstReload.value
+    await secondReload.value
+
+    #expect(!model.isReloadingDevices)
+    #expect(model.physicalInputs.map(\.uid) == ["physical.input"])
+    #expect(model.physicalOutputs.map(\.uid) == ["physical.output"])
 }
 
 @Test @MainActor

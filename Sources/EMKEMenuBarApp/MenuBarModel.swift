@@ -281,6 +281,7 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var inventoryError: String?
     @Published private(set) var configurationError: String?
     @Published private(set) var isTestingConnection = false
+    @Published private(set) var isReloadingDevices = false
     @Published private(set) var isStarting = false
     @Published private(set) var isStopping = false
     @Published private(set) var inboundBypassEnabled = false
@@ -301,6 +302,7 @@ final class MenuBarModel: ObservableObject {
     private var hasStoredAPIKey = false
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
+    private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
 
@@ -376,7 +378,10 @@ final class MenuBarModel: ObservableObject {
     }
 
     var audioDeviceControlsLocked: Bool {
-        selectionsLocked || isTestingAudioInput || isPlayingAudioOutputTest
+        selectionsLocked
+            || isReloadingDevices
+            || isTestingAudioInput
+            || isPlayingAudioOutputTest
     }
 
     var canTestAudioInput: Bool {
@@ -516,7 +521,7 @@ final class MenuBarModel: ObservableObject {
         }
     }
 
-    func reloadDevices() {
+    private func reloadDevices() {
         applyDeviceInventory(
             loadDeviceInventory(
                 selectedInputUID: selectedInputUID,
@@ -526,16 +531,26 @@ final class MenuBarModel: ObservableObject {
     }
 
     func reloadDevicesAsync() async {
+        if let deviceReloadTask {
+            _ = await deviceReloadTask.value
+            return
+        }
+
         let provider = self.provider
         let selectedInputUID = self.selectedInputUID
         let selectedOutputUID = self.selectedOutputUID
-        let result = await Task.detached(priority: .userInitiated) {
+        isReloadingDevices = true
+        let task = Task.detached(priority: .userInitiated) {
             Self.loadDeviceInventory(
                 provider: provider,
                 selectedInputUID: selectedInputUID,
                 selectedOutputUID: selectedOutputUID
             )
-        }.value
+        }
+        deviceReloadTask = task
+        let result = await task.value
+        deviceReloadTask = nil
+        isReloadingDevices = false
         applyDeviceInventory(result)
     }
 
@@ -631,7 +646,7 @@ final class MenuBarModel: ObservableObject {
 
     func start() async {
         await stopAudioInputTest()
-        reloadDevices()
+        await reloadDevicesAsync()
         guard canStart,
               let selectedInputUID,
               let selectedOutputUID else { return }
@@ -685,7 +700,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func startAudioInputTest() async {
-        reloadDevices()
+        await reloadDevicesAsync()
         guard canTestAudioInput, let device = selectedPhysicalInput else { return }
         audioDiagnosticError = nil
         do {
@@ -718,7 +733,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func playAudioOutputTest() async {
-        reloadDevices()
+        await reloadDevicesAsync()
         guard canTestAudioOutput, let device = selectedPhysicalOutput else { return }
         isPlayingAudioOutputTest = true
         audioDiagnosticError = nil

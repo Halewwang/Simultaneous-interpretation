@@ -121,8 +121,8 @@ struct TranslationSettingsView: View {
                 .disabled(model.audioDeviceControlsLocked)
             }
 
-            Button("刷新设备") {
-                model.reloadDevices()
+            Button(model.isReloadingDevices ? "正在检测设备…" : "刷新设备") {
+                Task { await model.reloadDevicesAsync() }
             }
             .disabled(model.audioDeviceControlsLocked)
 
