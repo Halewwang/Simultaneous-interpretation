@@ -36,6 +36,18 @@ func fixedPCMProducesNormalizedDeterministicLevel() throws {
 }
 
 @Test
+func typicalBuiltInMicrophoneSpeechProducesVisibleLevel() throws {
+    var meter = PCMLevelMeter()
+    let typicalMicPCM = levelMeterPCM16(amplitude: 262)
+
+    for _ in 0..<10 {
+        _ = try meter.observe(typicalMicPCM)
+    }
+
+    #expect(meter.level > 0.2)
+}
+
+@Test
 func attackIsFasterThanRelease() throws {
     var meter = PCMLevelMeter()
     let loud = levelMeterPCM16(amplitude: 18_000)

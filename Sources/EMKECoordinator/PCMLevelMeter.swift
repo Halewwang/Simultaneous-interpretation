@@ -14,8 +14,8 @@ public struct PCMLevelMeter: Sendable {
     private let releaseSeconds: Double
 
     public init(
-        noiseFloor: Double = 0.01,
-        ceiling: Double = 0.35,
+        noiseFloor: Double = 0.0015,
+        ceiling: Double = 0.1,
         attackSeconds: Double = 0.08,
         releaseSeconds: Double = 0.22
     ) {
@@ -51,8 +51,13 @@ public struct PCMLevelMeter: Sendable {
             }
         }
         let rms = sqrt(sumOfSquares / Double(sampleCount))
-        let range = max(ceiling - noiseFloor, .leastNonzeroMagnitude)
-        let target = min(max((rms - noiseFloor) / range, 0), 1)
+        let safeNoiseFloor = max(noiseFloor, .leastNonzeroMagnitude)
+        let safeCeiling = max(ceiling, safeNoiseFloor)
+        let floorDB = 20 * log10(safeNoiseFloor)
+        let ceilingDB = 20 * log10(safeCeiling)
+        let rmsDB = rms > 0 ? 20 * log10(rms) : -.infinity
+        let rangeDB = max(ceilingDB - floorDB, .leastNonzeroMagnitude)
+        let target = min(max((rmsDB - floorDB) / rangeDB, 0), 1)
         let duration = Double(sampleCount) / sampleRate
         let timeConstant = target > level ? attackSeconds : releaseSeconds
         let alpha = 1 - exp(-duration / timeConstant)

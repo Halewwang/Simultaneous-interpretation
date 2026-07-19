@@ -111,6 +111,26 @@ func inputDiagnosticDistinguishesNoFramesFromCapturedAudio() async throws {
 }
 
 @Test
+func inputDiagnosticConsumesOneRealtimeMicQuantumPerRefresh() async throws {
+    let input = DiagnosticInputFake()
+    let output = DiagnosticOutputFake()
+    let diagnostics = LocalAudioDiagnostics(
+        factory: DiagnosticEndpointFactory(input: input, output: output)
+    )
+    let quietFrames = 1_725
+    let voicedFrames = 480
+    input.samples = Array(repeating: 0, count: quietFrames * 2)
+        + Array(repeating: 0.1, count: voicedFrames * 2)
+
+    try await diagnostics.startInput(deviceID: 42)
+    let sample = await diagnostics.sampleInput()
+
+    #expect(sample.frameCount == quietFrames + voicedFrames)
+    #expect(sample.state == .receivingAudio)
+    #expect(sample.level > 0.3)
+}
+
+@Test
 func outputDiagnosticWritesSafeStereoTestTone() async throws {
     let input = DiagnosticInputFake()
     let output = DiagnosticOutputFake()

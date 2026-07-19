@@ -42,10 +42,10 @@ public struct AudioOutputDiagnosticResult: Equatable, Sendable {
 
 public actor LocalAudioDiagnostics {
     private static let capacityFrames: UInt32 = 48_000
-    private static let sampleFrames = 480
+    private static let sampleFrames = 4_800
     private static let audioThreshold = 0.005
-    private static let displayNoiseFloor = 0.002
-    private static let displayCeiling = 0.15
+    private static let displayNoiseFloor = 0.0015
+    private static let displayCeiling = 0.1
 
     private let factory: any AudioEndpointFactory
     private var input: (any AudioInputEndpoint)?
@@ -102,11 +102,7 @@ public actor LocalAudioDiagnostics {
             sum += Double(sample * sample)
         }
         let rms = sqrt(sumOfSquares / Double(sampleCount))
-        let displayRange = Self.displayCeiling - Self.displayNoiseFloor
-        let level = min(
-            max((rms - Self.displayNoiseFloor) / displayRange, 0),
-            1
-        )
+        let level = Self.displayLevel(forRMS: rms)
         return AudioInputDiagnosticSample(
             state: rms >= Self.audioThreshold
                 ? .receivingAudio
@@ -171,5 +167,13 @@ public actor LocalAudioDiagnostics {
             samples.append(sample)
         }
         return samples
+    }
+
+    private static func displayLevel(forRMS rms: Double) -> Double {
+        guard rms > 0 else { return 0 }
+        let floorDB = 20 * log10(displayNoiseFloor)
+        let ceilingDB = 20 * log10(displayCeiling)
+        let rmsDB = 20 * log10(rms)
+        return min(max((rmsDB - floorDB) / (ceilingDB - floorDB), 0), 1)
     }
 }
