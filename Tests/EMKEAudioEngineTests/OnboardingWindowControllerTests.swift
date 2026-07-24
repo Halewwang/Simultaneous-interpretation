@@ -39,13 +39,34 @@ private final class OnboardingWindowPresenterStub:
 }
 
 @MainActor
+private final class OnboardingDiagnosticCleanupSpy {
+    private(set) var callCount = 0
+
+    func call() {
+        callCount += 1
+    }
+}
+
+@MainActor
 private func makeOnboardingController(
     store: OnboardingProgressStoreStub =
-        OnboardingProgressStoreStub()
+        OnboardingProgressStoreStub(),
+    stopAudioInputDiagnostic: @escaping () -> Void = {}
 ) -> OnboardingWindowController {
-    let controller = OnboardingWindowController(progressStore: store)
+    let controller = OnboardingWindowController(
+        progressStore: store,
+        stopAudioInputDiagnostic: stopAudioInputDiagnostic
+    )
     controller.attachWindow(OnboardingWindowPresenterStub())
     return controller
+}
+
+@MainActor
+private func moveToAudioSetup(_ controller: OnboardingWindowController) {
+    controller.show()
+    controller.moveForward()
+    controller.moveForward()
+    #expect(controller.flow.step == .audioSetup)
 }
 
 @Test @MainActor
@@ -112,4 +133,61 @@ func settingsReopenRestartsAtFirstStep() {
 
     #expect(controller.flow.step == .overview)
     #expect(controller.isVisible)
+}
+
+@Test @MainActor
+func leavingAudioSetupInEitherDirectionStopsTheInputDiagnostic() {
+    let cleanup = OnboardingDiagnosticCleanupSpy()
+    let controller = makeOnboardingController(
+        stopAudioInputDiagnostic: cleanup.call
+    )
+
+    moveToAudioSetup(controller)
+    controller.moveForward()
+    #expect(cleanup.callCount == 1)
+
+    controller.show()
+    controller.moveForward()
+    controller.moveForward()
+    controller.moveBackward()
+    #expect(cleanup.callCount == 2)
+}
+
+@Test @MainActor
+func everyAudioSetupDismissalStopsTheInputDiagnostic() {
+    let cleanup = OnboardingDiagnosticCleanupSpy()
+
+    let skipped = makeOnboardingController(
+        stopAudioInputDiagnostic: cleanup.call
+    )
+    moveToAudioSetup(skipped)
+    skipped.skipForNow()
+
+    let suppressed = makeOnboardingController(
+        stopAudioInputDiagnostic: cleanup.call
+    )
+    moveToAudioSetup(suppressed)
+    suppressed.doNotShowAgain()
+
+    let completed = makeOnboardingController(
+        stopAudioInputDiagnostic: cleanup.call
+    )
+    moveToAudioSetup(completed)
+    completed.complete()
+
+    #expect(cleanup.callCount == 3)
+}
+
+@Test @MainActor
+func reopeningFromAudioSetupStopsTheInputDiagnosticBeforeRestarting() {
+    let cleanup = OnboardingDiagnosticCleanupSpy()
+    let controller = makeOnboardingController(
+        stopAudioInputDiagnostic: cleanup.call
+    )
+    moveToAudioSetup(controller)
+
+    controller.show()
+
+    #expect(cleanup.callCount == 1)
+    #expect(controller.flow.step == .overview)
 }

@@ -260,20 +260,11 @@ func onboardingRendersEveryStepInBothLanguages() async throws {
         for step in OnboardingStep.allCases {
             let microphoneState: MicrophonePermissionState =
                 step == .microphone ? .denied : .authorized
-            let firstBitmap = try await onboardingBitmap(
+            let bitmap = try await onboardingBitmap(
                 language: language,
                 step: step,
                 microphoneState: microphoneState
             )
-            let secondBitmap = try await onboardingBitmap(
-                language: language,
-                step: step,
-                microphoneState: microphoneState
-            )
-            let bitmap = onboardingHeaderInkPixels(in: firstBitmap)
-                >= onboardingHeaderInkPixels(in: secondBitmap)
-                ? firstBitmap
-                : secondBitmap
             #expect(bitmap.pixelsWide == 1_120)
             #expect(bitmap.pixelsHigh == 1_240)
             #expect(
@@ -285,8 +276,28 @@ func onboardingRendersEveryStepInBothLanguages() async throws {
                 "Onboarding \(step) \(language) must not contain renderer fallback controls"
             )
             #expect(
-                onboardingHeaderInkPixels(in: bitmap) > 30,
+                onboardingHeaderInkPixels(in: bitmap) > 500,
                 "Onboarding \(step) \(language) must render the complete header"
+            )
+            #expect(
+                onboardingFooterInkPixels(in: bitmap) > 250,
+                "Onboarding \(step) \(language) must render footer controls"
+            )
+            #expect(
+                onboardingProgressInkPixels(in: bitmap) > 20,
+                "Onboarding \(step) \(language) must render n / 4 progress"
+            )
+            #expect(
+                onboardingPrimaryActionPixels(in: bitmap) > 150,
+                "Onboarding \(step) \(language) must render its primary action"
+            )
+            #expect(
+                onboardingEdgeInkPixels(in: bitmap) == 0,
+                "Onboarding \(step) \(language) must stay inside frame bounds"
+            )
+            #expect(
+                onboardingOpaqueBoundarySamples(in: bitmap) == 12,
+                "Onboarding \(step) \(language) must render an opaque full frame"
             )
             try writeQACapture(
                 bitmap,
@@ -301,8 +312,8 @@ private func onboardingHeaderInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
     var count = 0
-    for y in stride(from: 30, to: 120, by: 2) {
-        for x in stride(from: 45, to: 145, by: 2) {
+    for y in stride(from: 75, to: 120, by: 1) {
+        for x in stride(from: 140, to: 520, by: 1) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
             else {
@@ -311,9 +322,130 @@ private func onboardingHeaderInkPixels(
             let luminance = (0.2126 * color.redComponent)
                 + (0.7152 * color.greenComponent)
                 + (0.0722 * color.blueComponent)
-            if luminance < 0.75 {
+            if luminance < 0.25 {
                 count += 1
             }
+        }
+    }
+    return count
+}
+
+private func onboardingFooterInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    darkPixelCount(
+        in: bitmap,
+        xRange: 40..<1_080,
+        yRange: 1_095..<1_215,
+        strideBy: 2
+    )
+}
+
+private func onboardingProgressInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    darkPixelCount(
+        in: bitmap,
+        xRange: 40..<260,
+        yRange: 1_155..<1_215,
+        strideBy: 1
+    )
+}
+
+private func onboardingPrimaryActionPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 1_145, to: 1_215, by: 2) {
+        for x in stride(from: 900, to: 1_085, by: 2) {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            if color.blueComponent > 0.65,
+               color.redComponent < 0.25,
+               color.greenComponent > 0.35 {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+private func onboardingEdgeInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    let horizontalTop = darkPixelCount(
+        in: bitmap,
+        xRange: 0..<bitmap.pixelsWide,
+        yRange: 0..<30,
+        strideBy: 1
+    )
+    let horizontalBottom = darkPixelCount(
+        in: bitmap,
+        xRange: 0..<bitmap.pixelsWide,
+        yRange: (bitmap.pixelsHigh - 30)..<bitmap.pixelsHigh,
+        strideBy: 1
+    )
+    let verticalLeft = darkPixelCount(
+        in: bitmap,
+        xRange: 0..<8,
+        yRange: 0..<bitmap.pixelsHigh,
+        strideBy: 1
+    )
+    let verticalRight = darkPixelCount(
+        in: bitmap,
+        xRange: (bitmap.pixelsWide - 8)..<bitmap.pixelsWide,
+        yRange: 0..<bitmap.pixelsHigh,
+        strideBy: 1
+    )
+    return horizontalTop + horizontalBottom + verticalLeft + verticalRight
+}
+
+private func onboardingOpaqueBoundarySamples(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    let points = [
+        (0, 0),
+        (bitmap.pixelsWide / 2, 0),
+        (bitmap.pixelsWide - 1, 0),
+        (0, bitmap.pixelsHigh / 2),
+        (bitmap.pixelsWide - 1, bitmap.pixelsHigh / 2),
+        (0, bitmap.pixelsHigh - 1),
+        (bitmap.pixelsWide / 2, bitmap.pixelsHigh - 1),
+        (bitmap.pixelsWide - 1, bitmap.pixelsHigh - 1),
+        (1, 1),
+        (bitmap.pixelsWide - 2, 1),
+        (1, bitmap.pixelsHigh - 2),
+        (bitmap.pixelsWide - 2, bitmap.pixelsHigh - 2),
+    ]
+    return points.reduce(into: 0) { count, point in
+        guard let color = bitmap.colorAt(x: point.0, y: point.1) else {
+            return
+        }
+        count += color.alphaComponent > 0.99 ? 1 : 0
+    }
+}
+
+private func darkPixelCount(
+    in bitmap: NSBitmapImageRep,
+    xRange: Range<Int>,
+    yRange: Range<Int>,
+    strideBy: Int
+) -> Int {
+    var count = 0
+    for y in stride(from: yRange.lowerBound, to: yRange.upperBound, by: strideBy) {
+        for x in stride(from: xRange.lowerBound, to: xRange.upperBound, by: strideBy) {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            let luminance = (0.2126 * color.redComponent)
+                + (0.7152 * color.greenComponent)
+                + (0.0722 * color.blueComponent)
+            count += luminance < 0.75 ? 1 : 0
         }
     }
     return count
@@ -768,21 +900,11 @@ private func onboardingBitmap(
     )
         .frame(width: 560, height: 620)
         .environment(\.colorScheme, .light)
-    var candidates: [NSBitmapImageRep] = []
-    for _ in 0..<3 {
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 2
-        renderer.proposedSize = ProposedViewSize(width: 560, height: 620)
-        let data = try #require(renderer.nsImage?.tiffRepresentation)
-        candidates.append(try #require(NSBitmapImageRep(data: data)))
-        await Task.yield()
-    }
-    return try #require(
-        candidates.max {
-            onboardingHeaderInkPixels(in: $0)
-                < onboardingHeaderInkPixels(in: $1)
-        }
-    )
+    let renderer = ImageRenderer(content: content)
+    renderer.scale = 2
+    renderer.proposedSize = ProposedViewSize(width: 560, height: 620)
+    let data = try #require(renderer.nsImage?.tiffRepresentation)
+    return try #require(NSBitmapImageRep(data: data))
 }
 
 @Test @MainActor

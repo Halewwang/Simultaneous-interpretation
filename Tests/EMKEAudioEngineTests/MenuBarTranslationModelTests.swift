@@ -1182,6 +1182,39 @@ func localInputDiagnosticPublishesCapturedPCMState() async {
 }
 
 @Test @MainActor
+func onboardingCleanupStopsActiveInputDiagnosticAndResetsPresentation() async {
+    let diagnostics = AudioDiagnosticsStub(
+        inputSample: AudioInputDiagnosticSample(
+            state: .receivingAudio,
+            level: 0.64,
+            frameCount: 480,
+            rms: 0.1
+        )
+    )
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+    await model.startAudioInputTest()
+    #expect(model.isTestingAudioInput)
+
+    await model.stopAudioInputTest()
+
+    #expect(!model.isTestingAudioInput)
+    #expect(model.audioInputDiagnosticLevel == 0)
+    #expect(model.audioInputDiagnosticText == "未测试")
+    #expect(await diagnostics.stopInputCount == 1)
+}
+
+@Test @MainActor
 func localInputDiagnosticPublishesHALRenderFailure() async {
     let diagnostics = AudioDiagnosticsStub(
         inputSample: AudioInputDiagnosticSample(

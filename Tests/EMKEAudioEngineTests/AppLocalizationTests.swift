@@ -67,6 +67,8 @@ func onboardingCopyIsCompleteInBothLanguages() {
         .onboardingAudioBody,
         .onboardingMeetingTitle,
         .onboardingMeetingBody,
+        .meetingAppSpeaker,
+        .meetingAppMicrophone,
         .onboardingProgress,
     ]
 
@@ -79,6 +81,26 @@ func onboardingCopyIsCompleteInBothLanguages() {
             #expect(!copy.text(key).isEmpty)
         }
     }
+}
+
+@Test
+func meetingEndpointLabelsExplicitlyNameTheMeetingAppControls() {
+    #expect(
+        AppCopy(language: .zhHans).text(.meetingAppSpeaker)
+            == "会议应用扬声器"
+    )
+    #expect(
+        AppCopy(language: .zhHans).text(.meetingAppMicrophone)
+            == "会议应用麦克风"
+    )
+    #expect(
+        AppCopy(language: .english).text(.meetingAppSpeaker)
+            == "Meeting app speaker"
+    )
+    #expect(
+        AppCopy(language: .english).text(.meetingAppMicrophone)
+            == "Meeting app microphone"
+    )
 }
 
 @Test

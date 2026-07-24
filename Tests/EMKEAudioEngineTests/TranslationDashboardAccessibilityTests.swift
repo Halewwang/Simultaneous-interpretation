@@ -254,6 +254,8 @@ func menuBarAppOwnsOnboardingWindow() throws {
     #expect(source.contains("OnboardingAppWindowPresenter("))
     #expect(source.contains("OnboardingView("))
     #expect(source.contains("onboardingWindowController.showIfNeeded()"))
+    #expect(source.contains("stopAudioInputDiagnostic:"))
+    #expect(source.contains("await model?.stopAudioInputTest()"))
 }
 
 @Test
@@ -290,6 +292,64 @@ func onboardingReusesExistingDiagnosticAndConnectionActions() throws {
     #expect(source.contains("model.testConnection()"))
     #expect(source.contains("EMKE Virtual Speaker"))
     #expect(source.contains("EMKE Virtual Microphone"))
+    #expect(source.contains("case .audioSetup:"))
+    #expect(source.contains("await model.reloadDevicesAsync()"))
+}
+
+@Test
+func onboardingLocksProviderControlsWithRunningSelections() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(
+        source.components(
+            separatedBy: ".disabled(model.selectionsLocked)"
+        ).count - 1 >= 4
+    )
+    #expect(
+        source.contains(
+            ".disabled(model.selectionsLocked || !model.canTestConnection)"
+        )
+    )
+}
+
+@Test
+func onboardingUsesExplicitMeetingEndpointLabelsAndProgressValue() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(source.contains("copy.text(.meetingAppSpeaker)"))
+    #expect(source.contains("copy.text(.meetingAppMicrophone)"))
+    #expect(source.contains(".accessibilityValue(progressText)"))
+}
+
+@Test
+func onboardingCaptureUsesOneDeterministicRendererPerFixture() throws {
+    let repositoryRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let source = try String(
+        contentsOf: repositoryRoot
+            .appendingPathComponent(
+                "Tests/EMKEAudioEngineTests/TranslationDashboardRenderTests.swift"
+            ),
+        encoding: .utf8
+    )
+
+    #expect(!source.contains("firstBitmap"))
+    #expect(!source.contains("secondBitmap"))
+    #expect(!source.contains("var candidates: [NSBitmapImageRep]"))
+    #expect(source.contains("renderer.proposedSize = ProposedViewSize("))
+}
+
+@Test
+func onboardingPinsChromeToTheFixedWindowCoordinateSpace() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(source.contains("GeometryReader"))
+    #expect(source.contains("ZStack(alignment: .topLeading)"))
+    #expect(source.contains(".position(x: 280, y: 38)"))
+    #expect(source.contains(".position(x: 280, y: 310)"))
+    #expect(source.contains(".position(x: 280, y: 582)"))
 }
 
 @Test

@@ -21,28 +21,35 @@ struct OnboardingView: View {
     private var copy: AppCopy { model.copy }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-                .opacity(EMKEVisualStyle.dividerOpacity)
-                .frame(height: 1)
-            stepContent
-                .frame(
-                    minWidth: 492,
-                    maxWidth: 492,
-                    minHeight: 418,
-                    maxHeight: 418,
-                    alignment: .topLeading
-                )
-                .padding(.horizontal, 34)
-                .padding(.vertical, 24)
-                .frame(width: 560, height: 466, alignment: .topLeading)
-                .clipped()
-            Divider()
-                .opacity(EMKEVisualStyle.dividerOpacity)
-                .frame(height: 1)
-            footer
-                .clipped()
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                header
+                    .position(x: 280, y: 38)
+                Divider()
+                    .opacity(EMKEVisualStyle.dividerOpacity)
+                    .frame(width: 560, height: 1)
+                    .position(x: 280, y: 76.5)
+                stepContent
+                    .frame(
+                        width: 492,
+                        height: 418,
+                        alignment: .topLeading
+                    )
+                    .clipped()
+                    .position(x: 280, y: 310)
+                Divider()
+                    .opacity(EMKEVisualStyle.dividerOpacity)
+                    .frame(width: 560, height: 1)
+                    .position(x: 280, y: 543.5)
+                footer
+                    .clipped()
+                    .position(x: 280, y: 582)
+            }
+            .frame(
+                width: geometry.size.width,
+                height: geometry.size.height,
+                alignment: .topLeading
+            )
         }
         .frame(width: 560, height: 620)
         .clipped()
@@ -174,7 +181,7 @@ struct OnboardingView: View {
             ) {
                 Task { await model.testConnection() }
             }
-            .disabled(!model.canTestConnection)
+            .disabled(model.selectionsLocked || !model.canTestConnection)
 
             if !model.connectionTestMessage.isEmpty {
                 Label(
@@ -188,12 +195,12 @@ struct OnboardingView: View {
 
             HStack(spacing: 12) {
                 routingCard(
-                    title: copy.text(.audioOutput),
+                    title: copy.text(.meetingAppSpeaker),
                     value: "EMKE Virtual Speaker",
                     systemImage: "speaker.wave.2.fill"
                 )
                 routingCard(
-                    title: copy.text(.physicalMicrophone),
+                    title: copy.text(.meetingAppMicrophone),
                     value: "EMKE Virtual Microphone",
                     systemImage: "mic.fill"
                 )
@@ -421,6 +428,7 @@ struct OnboardingView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(model.selectionsLocked)
         .popover(
             isPresented: $isProviderEditorPresented,
             arrowEdge: .bottom
@@ -455,10 +463,13 @@ struct OnboardingView: View {
                 text: $model.apiKeyDraft
             )
             .textFieldStyle(.roundedBorder)
+            .disabled(model.selectionsLocked)
             TextField("Base URL", text: $model.baseURLString)
                 .textFieldStyle(.roundedBorder)
+                .disabled(model.selectionsLocked)
             TextField(copy.text(.modelID), text: $model.modelID)
                 .textFieldStyle(.roundedBorder)
+                .disabled(model.selectionsLocked)
         }
         .padding(16)
         .frame(width: 360)
@@ -510,12 +521,13 @@ struct OnboardingView: View {
                         action: controller.moveBackward
                     )
                 }
-                Text(
+                let progressText =
                     "\(controller.flow.step.rawValue + 1) / \(OnboardingStep.allCases.count)"
-                )
+                Text(progressText)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .accessibilityLabel(copy.text(.onboardingProgress))
+                .accessibilityValue(progressText)
                 Spacer()
                 if controller.flow.canMoveForward {
                     Button(
@@ -544,7 +556,7 @@ struct OnboardingView: View {
         case .microphone:
             await model.refreshMicrophonePermissionState()
         case .audioSetup:
-            return
+            await model.reloadDevicesAsync()
         case .meetingSetup:
             return
         }

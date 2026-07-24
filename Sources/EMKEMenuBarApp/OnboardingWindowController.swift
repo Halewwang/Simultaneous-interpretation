@@ -13,10 +13,15 @@ final class OnboardingWindowController: ObservableObject {
     @Published private(set) var isVisible = false
 
     private let progressStore: any OnboardingProgressStoring
+    private let stopAudioInputDiagnostic: () -> Void
     private var window: (any OnboardingWindowPresenting)?
 
-    init(progressStore: any OnboardingProgressStoring) {
+    init(
+        progressStore: any OnboardingProgressStoring,
+        stopAudioInputDiagnostic: @escaping () -> Void = {}
+    ) {
         self.progressStore = progressStore
+        self.stopAudioInputDiagnostic = stopAudioInputDiagnostic
     }
 
     func attachWindow(_ window: any OnboardingWindowPresenting) {
@@ -32,20 +37,28 @@ final class OnboardingWindowController: ObservableObject {
     }
 
     func show() {
+        if flow.step == .audioSetup {
+            stopAudioInputDiagnostic()
+        }
         flow.restart()
         isVisible = true
         window?.show()
     }
 
     func moveForward() {
+        let previousStep = flow.step
         flow.moveForward()
+        stopDiagnosticIfLeavingAudioSetup(from: previousStep)
     }
 
     func moveBackward() {
+        let previousStep = flow.step
         flow.moveBackward()
+        stopDiagnosticIfLeavingAudioSetup(from: previousStep)
     }
 
     func skipForNow() {
+        stopAudioInputDiagnostic()
         isVisible = false
         window?.hide()
     }
@@ -59,9 +72,20 @@ final class OnboardingWindowController: ObservableObject {
     }
 
     private func finishAndHide() {
+        stopAudioInputDiagnostic()
         progressStore.markCompleted(version: OnboardingVersion.current)
         isVisible = false
         window?.hide()
+    }
+
+    private func stopDiagnosticIfLeavingAudioSetup(
+        from previousStep: OnboardingStep
+    ) {
+        guard previousStep == .audioSetup,
+              flow.step != .audioSetup else {
+            return
+        }
+        stopAudioInputDiagnostic()
     }
 }
 

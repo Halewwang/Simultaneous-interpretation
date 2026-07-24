@@ -54,6 +54,8 @@ enum AppCopyKey: CaseIterable, Sendable {
     case onboardingAudioBody
     case onboardingMeetingTitle
     case onboardingMeetingBody
+    case meetingAppSpeaker
+    case meetingAppMicrophone
     case onboardingProgress
     case translationSettingsLocked
     case interface
@@ -233,6 +235,16 @@ struct AppCopy: Equatable, Sendable {
             localized(
                 zhHans: "保存服务商配置并测试连接，然后在会议应用中选择下方两个 EMKE 虚拟设备。",
                 english: "Save your provider configuration and test the connection, then select the two EMKE virtual devices shown below in your meeting app."
+            )
+        case .meetingAppSpeaker:
+            localized(
+                zhHans: "会议应用扬声器",
+                english: "Meeting app speaker"
+            )
+        case .meetingAppMicrophone:
+            localized(
+                zhHans: "会议应用麦克风",
+                english: "Meeting app microphone"
             )
         case .onboardingProgress:
             localized(zhHans: "引导进度", english: "Onboarding progress")
