@@ -10,6 +10,65 @@ EXPECTED="$TEMP/expected-appcast.xml"
 URL="https://example.com/EMKE-Translation-1.2.3.pkg?channel=internal&source=test"
 SIGNATURE='base64+signature/with=&<>"'"'"
 
+assert_absent() {
+  local forbidden="$1"
+  local file="$2"
+  local label="${3:-forbidden text}"
+  if /usr/bin/grep -Fq -- "$forbidden" "$file"; then
+    echo "$label was present: $forbidden ($file)" >&2
+    return 1
+  else
+    local status="$?"
+    if test "$status" -ne 1; then
+      echo "$label scan failed: $file" >&2
+      return 1
+    fi
+  fi
+}
+
+assert_absent_regex() {
+  local forbidden="$1"
+  local label="$2"
+  shift 2
+  if /usr/bin/grep -RIEq -- "$forbidden" "$@"; then
+    echo "$label was present" >&2
+    return 1
+  else
+    local status="$?"
+    if test "$status" -ne 1; then
+      echo "$label scan failed" >&2
+      return 1
+    fi
+  fi
+}
+
+assert_not_called() {
+  local call="$1"
+  local log="$2"
+  assert_absent "$call" "$log" "unexpected command"
+}
+
+NEGATIVE_ASSERTION_FIXTURE="$TEMP/negative-assertion-fixture"
+/usr/bin/printf '%s\n' 'forbidden-call' > "$NEGATIVE_ASSERTION_FIXTURE"
+if (assert_absent 'forbidden-call' "$NEGATIVE_ASSERTION_FIXTURE") \
+  > "$TEMP/assert-absent.stdout" 2> "$TEMP/assert-absent.stderr"; then
+  echo "assert_absent accepted injected forbidden text" >&2
+  exit 1
+fi
+if (assert_not_called 'forbidden-call' "$NEGATIVE_ASSERTION_FIXTURE") \
+  > "$TEMP/assert-not-called.stdout" 2> "$TEMP/assert-not-called.stderr"; then
+  echo "assert_not_called accepted an injected forbidden call" >&2
+  exit 1
+fi
+
+if /usr/bin/grep -nE \
+  '^[[:space:]]*![[:space:]]+(/usr/bin/)?grep([[:space:]]|$)' \
+  "$0" > "$TEMP/naked-negative-grep"; then
+  /bin/cat "$TEMP/naked-negative-grep" >&2
+  echo "bare ! grep negative assertions are forbidden" >&2
+  exit 1
+fi
+
 /bin/cat > "$EXPECTED" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0"
@@ -113,13 +172,17 @@ expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
   "1.2.3" "123" "$URL" "$SIGNATURE" "4567" \
   "$TEMP/linked-parent/escape.xml"
 
-PRIVATE_MARKER="SPARKLE_"'PRIVATE_KEY'
-PEM_MARKER="BEGIN "'PRIVATE KEY'
-! /usr/bin/grep -RIlE "$PRIVATE_MARKER|$PEM_MARKER" \
-  "$ROOT/Packaging" > "$TEMP/private-content-files"
+PRIVATE_MATERIAL_REGEX="-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|SPARKLE_PRIVATE_KEY[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9+/]{32,}={0,2}"
+assert_absent_regex "$PRIVATE_MATERIAL_REGEX" "private key material" \
+  "$ROOT/.github/workflows/release.yml" \
+  "$ROOT/Packaging/App" \
+  "$ROOT/Packaging/Scripts" \
+  "$ROOT/Packaging/build-internal-pkg.sh"
 test -z "$(/usr/bin/find "$ROOT/Packaging" -type f \
   \( -iname '*private*key*' -o -iname '*sparkle*secret*' \) -print)"
-! /usr/bin/grep -Fq "$PRIVATE_MARKER" "$OUTPUT"
+assert_absent_regex \
+  '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' \
+  "private key material in Appcast" "$OUTPUT"
 
 WORKFLOW="$ROOT/.github/workflows/release.yml"
 if ! test -s "$WORKFLOW"; then
@@ -201,11 +264,20 @@ require_workflow_text '/usr/bin/cmp "$runner_temp/appcast.xml" "$existing_appcas
 require_workflow_text 'GIT_ASKPASS="$askpass"'
 
 test "$(/usr/bin/grep -Fc 'secrets.SPARKLE_PRIVATE_KEY' "$WORKFLOW")" -eq 1
-! /usr/bin/grep -Fq 'echo "$SPARKLE_PRIVATE_KEY"' "$WORKFLOW"
-! /usr/bin/grep -Fq 'x-access-token:${GITHUB_TOKEN}' "$WORKFLOW"
-! /usr/bin/grep -Fq 'secrets.GITHUB_TOKEN' "$WORKFLOW"
-! /usr/bin/grep -Fq 'pull_request:' "$WORKFLOW"
-! /usr/bin/grep -Fq -- '--clobber' "$WORKFLOW"
+assert_absent 'echo "$SPARKLE_PRIVATE_KEY"' "$WORKFLOW" \
+  "private key echo"
+assert_absent '--ed-key-file -' "$WORKFLOW" \
+  "private key stdin materialization"
+assert_absent '-s "$SPARKLE_PRIVATE_KEY"' "$WORKFLOW" \
+  "private key command-line argument"
+assert_absent 'x-access-token:${GITHUB_TOKEN}' "$WORKFLOW" \
+  "token-bearing remote URL"
+assert_absent 'secrets.GITHUB_TOKEN' "$WORKFLOW" \
+  "committed GitHub token secret reference"
+assert_absent 'pull_request:' "$WORKFLOW" \
+  "unexpected pull-request trigger"
+assert_absent '--clobber' "$WORKFLOW" \
+  "mutable Release upload"
 
 assert_workflow_order '- name: Resolve version and build' \
   '- name: Run Swift tests'
@@ -494,24 +566,24 @@ assert_log_order() {
 }
 
 run_release_fixture asset-identical pass
-! /usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
-! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+assert_not_called 'release create v1.2.3' "$MOCK_GH_LOG"
+assert_not_called 'release upload v1.2.3' "$MOCK_GH_LOG"
 test "$(/usr/bin/grep -Fc 'api repos/' "$MOCK_GH_LOG")" -eq 2
 
 run_release_fixture asset-missing pass
 /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
-! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+assert_not_called '--clobber' "$MOCK_GH_LOG"
 test "$(/usr/bin/grep -Fc 'api repos/' "$MOCK_GH_LOG")" -eq 2
 assert_log_order 'api repos/' 'release upload v1.2.3'
 
 run_release_fixture create-race pass
 test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
 assert_log_order 'release create v1.2.3' 'release upload v1.2.3'
-! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+assert_not_called '--clobber' "$MOCK_GH_LOG"
 
 run_release_fixture create-failure fail
 test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
-! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+assert_not_called 'release upload v1.2.3' "$MOCK_GH_LOG"
 
 run_release_fixture absent-release pass
 /usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
@@ -520,12 +592,12 @@ run_release_fixture absent-release pass
 for unsafe_mode in asset-different asset-size-mismatch \
   digest-missing digest-malformed duplicate; do
   run_release_fixture "$unsafe_mode" fail
-  ! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+  assert_not_called 'release upload v1.2.3' "$MOCK_GH_LOG"
 done
 
 run_release_fixture upload-failure fail
 /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
-! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+assert_not_called '--clobber' "$MOCK_GH_LOG"
 
 APPCAST_BLOCK="$TEMP/appcast-publication.sh"
 /usr/bin/awk '
@@ -681,19 +753,19 @@ run_appcast_fixture lower "$LOWER_APPCAST" pass
 /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
 
 run_appcast_fixture equal-identical "$CANDIDATE_APPCAST" pass
-! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+assert_not_called 'push origin gh-pages' "$MOCK_GIT_LOG"
 /usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
   > "$TEMP/published-appcast.xml"
 /usr/bin/cmp "$CANDIDATE_APPCAST" "$TEMP/published-appcast.xml"
 
 run_appcast_fixture equal-different "$EQUAL_DIFFERENT_APPCAST" fail
-! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+assert_not_called 'push origin gh-pages' "$MOCK_GIT_LOG"
 /usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
   > "$TEMP/published-appcast.xml"
 /usr/bin/cmp "$EQUAL_DIFFERENT_APPCAST" "$TEMP/published-appcast.xml"
 
 run_appcast_fixture higher "$HIGHER_APPCAST" fail
-! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+assert_not_called 'push origin gh-pages' "$MOCK_GIT_LOG"
 /usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
   > "$TEMP/published-appcast.xml"
 /usr/bin/cmp "$HIGHER_APPCAST" "$TEMP/published-appcast.xml"
