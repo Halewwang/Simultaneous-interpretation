@@ -571,6 +571,22 @@ final class MenuBarModel: ObservableObject {
         )
     }
 
+    func floatingPresentation(
+        at now: Date
+    ) -> FloatingTranslationPresentation {
+        FloatingTranslationPresentation.make(
+            coordinatorState: coordinatorState,
+            isStarting: isStarting,
+            isStopping: isStopping,
+            inboundLevel: inboundLevel,
+            outboundLevel: outboundLevel,
+            translationStartedAt: translationStartedAt,
+            now: now,
+            errorText: configurationError ?? inventoryError,
+            copy: copy
+        )
+    }
+
     func setWindowVisible(_ visible: Bool) async {
         isWindowVisible = visible
         await coordinator.setAudioLevelUpdatesEnabled(visible)
