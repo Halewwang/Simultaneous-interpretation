@@ -9,14 +9,19 @@ private actor FakeSocket: TranslationSocket {
     private(set) var receivedCount = 0
     private var incoming: [Data]
     private var receiveWaiters: [CheckedContinuation<Data, any Error>] = []
+    private var closeSendWaiter: CheckedContinuation<Void, Never>?
     private let acknowledgesClose: Bool
+    private let waitsForCancellationBeforeCloseSendReturns: Bool
 
     init(
         incoming: [Data] = [],
-        acknowledgesClose: Bool = true
+        acknowledgesClose: Bool = true,
+        waitsForCancellationBeforeCloseSendReturns: Bool = false
     ) {
         self.incoming = incoming
         self.acknowledgesClose = acknowledgesClose
+        self.waitsForCancellationBeforeCloseSendReturns =
+            waitsForCancellationBeforeCloseSendReturns
     }
 
     func send(_ data: Data) async throws {
@@ -24,6 +29,9 @@ private actor FakeSocket: TranslationSocket {
         if acknowledgesClose,
            String(decoding: data, as: UTF8.self).contains("session.close") {
             enqueue(Data(#"{"type":"session.closed"}"#.utf8))
+            if waitsForCancellationBeforeCloseSendReturns {
+                await withCheckedContinuation { closeSendWaiter = $0 }
+            }
         }
     }
 
@@ -39,6 +47,8 @@ private actor FakeSocket: TranslationSocket {
 
     func cancel() async {
         wasCancelled = true
+        closeSendWaiter?.resume()
+        closeSendWaiter = nil
         let waiters = receiveWaiters
         receiveWaiters.removeAll()
         for waiter in waiters {
@@ -70,8 +80,10 @@ private struct FakeFactory: TranslationSocketFactory {
 private actor CloseDeadlineGate {
     private var fired = false
     private var waiter: CheckedContinuation<Void, Never>?
+    private(set) var waitCount = 0
 
     func wait() async {
+        waitCount += 1
         guard !fired else { return }
         await withCheckedContinuation { waiter = $0 }
     }
@@ -243,6 +255,24 @@ func serverCloseBeforeDeadlineKeepsTailAudioAndDoesNotWaitForDeadline()
     #expect(try await event == expectedTailAudio)
     #expect(await socket.wasCancelled)
     await deadline.fire()
+}
+
+@Test
+func fastServerCloseDuringSendDoesNotArmDeadline() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        waitsForCancellationBeforeCloseSendReturns: true
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    try await session.close()
+
+    #expect(await socket.wasCancelled)
+    #expect(!(await eventually { await deadline.waitCount > 0 }))
 }
 
 @Test

@@ -129,11 +129,13 @@ public actor TranslationSession {
                 throw error
             }
 
-            let deadline = closeDeadline
-            closeDeadlineTask = Task { [weak self] in
-                await deadline()
-                guard !Task.isCancelled else { return }
-                await self?.forceFinishClose(connectionID: id, socket: socket)
+            if connectionID == id, isClosing {
+                let deadline = closeDeadline
+                closeDeadlineTask = Task { [weak self] in
+                    await deadline()
+                    guard !Task.isCancelled else { return }
+                    await self?.forceFinishClose(connectionID: id, socket: socket)
+                }
             }
         }
 
