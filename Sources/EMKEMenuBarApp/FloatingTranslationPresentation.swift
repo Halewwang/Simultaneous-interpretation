@@ -25,11 +25,13 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
         outboundLevel: Double,
         translationStartedAt: Date?,
         now: Date,
-        errorText: String?,
+        hasFatalSessionError: Bool,
         copy: AppCopy
     ) -> Self {
         let running = coordinatorState.isRunning
         let visible = isStarting || running || isStopping
+        let safeInboundLevel = inboundLevel.isFinite ? inboundLevel : 0
+        let safeOutboundLevel = outboundLevel.isFinite ? outboundLevel : 0
         let elapsed = running
             ? MenuBarModel.formatElapsed(
                 seconds: now.timeIntervalSince(translationStartedAt ?? now)
@@ -40,7 +42,7 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
             statusAndTone = (copy.text(.stopping), .neutral)
         } else if isStarting && !running {
             statusAndTone = (copy.text(.connecting), .neutral)
-        } else if running, errorText != nil {
+        } else if running, hasFatalSessionError {
             statusAndTone = (copy.text(.translationError), .failure)
         } else if running, case .failed = coordinatorState.outbound {
             statusAndTone = (copy.text(.outboundMuted), .degraded)
@@ -54,7 +56,7 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
             tone: statusAndTone.1,
             status: statusAndTone.0,
             elapsed: elapsed,
-            level: min(max(max(inboundLevel, outboundLevel), 0), 1),
+            level: min(max(max(safeInboundLevel, safeOutboundLevel), 0), 1),
             stopEnabled: running && !isStopping,
             stopAccessibilityLabel: copy.text(.stopTranslation)
         )

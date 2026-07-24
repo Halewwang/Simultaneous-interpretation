@@ -1040,6 +1040,64 @@ func modelConsumesLatestAudioLevelSnapshot() async {
 }
 
 @Test @MainActor
+func floatingPresentationTreatsBackpressureAsWarningNotFatal() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    model.interfaceLanguage = .english
+
+    let warningConsumed = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if state.subtitles.inboundSource == "after-backpressure" {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioBackpressure(droppedFrames: 37))
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active,
+            subtitles: SubtitleSnapshot(
+                inboundSource: "after-backpressure"
+            )
+        )
+    ))
+    await warningConsumed.value
+
+    #expect(model.inventoryError == "Audio output busy; dropped 37 frames")
+    var value = model.floatingPresentation(at: Date())
+    #expect(value.tone == .healthy)
+    #expect(value.status == "Translating")
+
+    let failureConsumed = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if case .failed = state.outbound {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.stateChanged(
+        TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .failed(message: "offline")
+        )
+    ))
+    await failureConsumed.value
+
+    value = model.floatingPresentation(at: Date())
+    #expect(value.tone == .degraded)
+    #expect(value.status == "Outbound muted")
+
+    await model.stop()
+}
+
+@Test @MainActor
 func stoppingClearsLevelsAndRunStartDate() async {
     let model = makeTranslationMenuModel(secret: "test-key")
     await configureAndStart(model)

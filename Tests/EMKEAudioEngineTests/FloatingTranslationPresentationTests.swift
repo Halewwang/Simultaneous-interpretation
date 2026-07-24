@@ -25,7 +25,7 @@ private func makeFloatingPresentation(
     inboundLevel: Double = 0,
     outboundLevel: Double = 0,
     translationStartedAt: Date? = nil,
-    errorText: String? = nil,
+    hasFatalSessionError: Bool = false,
     language: ResolvedInterfaceLanguage = .english
 ) -> FloatingTranslationPresentation {
     FloatingTranslationPresentation.make(
@@ -36,7 +36,7 @@ private func makeFloatingPresentation(
         outboundLevel: outboundLevel,
         translationStartedAt: translationStartedAt,
         now: floatingNow,
-        errorText: errorText,
+        hasFatalSessionError: hasFatalSessionError,
         copy: AppCopy(language: language)
     )
 }
@@ -55,7 +55,7 @@ func runningFloatingPresentationUsesCombinedRealLevelAndTimer() {
         outboundLevel: 0.72,
         translationStartedAt: Date(timeIntervalSince1970: 9_935),
         now: Date(timeIntervalSince1970: 10_000),
-        errorText: nil,
+        hasFatalSessionError: false,
         copy: AppCopy(language: .english)
     )
 
@@ -78,7 +78,7 @@ func idleFloatingPresentationIsHidden() {
         outboundLevel: 0,
         translationStartedAt: nil,
         now: .now,
-        errorText: "configuration error",
+        hasFatalSessionError: true,
         copy: AppCopy(language: .english)
     )
 
@@ -148,7 +148,7 @@ func fatalRunningErrorFloatingPresentationTakesPriority() {
             outbound: .failed(message: "outbound offline")
         ),
         translationStartedAt: nil,
-        errorText: "fatal",
+        hasFatalSessionError: true,
         language: .zhHans
     )
 
@@ -170,7 +170,7 @@ func stoppingFloatingPresentationTakesPriorityAndDisablesStop() {
         isStarting: true,
         isStopping: true,
         translationStartedAt: floatingNow.addingTimeInterval(-65),
-        errorText: "fatal"
+        hasFatalSessionError: true
     )
 
     #expect(value.isVisible)
@@ -210,6 +210,43 @@ func levelClampingFloatingPresentationHandlesOutOfRangeValues() {
     #expect(aboveOne.level == 1)
 }
 
+@Test
+func nonFiniteFloatingPresentationLevelsAreSanitizedIndividually() {
+    let nanInbound = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(isRunning: true),
+        inboundLevel: .nan,
+        outboundLevel: 0.65
+    )
+    let infiniteOutbound = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(isRunning: true),
+        inboundLevel: 0.4,
+        outboundLevel: .infinity
+    )
+    let negativeInfiniteInbound = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(isRunning: true),
+        inboundLevel: -.infinity,
+        outboundLevel: 0.25
+    )
+
+    #expect(nanInbound.level == 0.65)
+    #expect(infiniteOutbound.level == 0.4)
+    #expect(negativeInfiniteInbound.level == 0.25)
+}
+
+@Test
+func futureStartDateFloatingPresentationClampsElapsedToZero() {
+    let value = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        ),
+        translationStartedAt: floatingNow.addingTimeInterval(5)
+    )
+
+    #expect(value.elapsed == "00:00")
+}
+
 @Test @MainActor
 func menuBarModelFloatingPresentationIsAPureCurrentStateProjection() {
     let model = MenuBarModel(
@@ -229,19 +266,12 @@ func menuBarModelFloatingPresentationIsAPureCurrentStateProjection() {
 
     let value = model.floatingPresentation(at: now)
 
-    #expect(
-        value == FloatingTranslationPresentation.make(
-            coordinatorState: before.state,
-            isStarting: before.isStarting,
-            isStopping: before.isStopping,
-            inboundLevel: before.inboundLevel,
-            outboundLevel: before.outboundLevel,
-            translationStartedAt: before.startedAt,
-            now: now,
-            errorText: model.configurationError ?? model.inventoryError,
-            copy: AppCopy(language: .english)
-        )
-    )
+    #expect(!value.isVisible)
+    #expect(value.status == "Translating")
+    #expect(value.tone == .healthy)
+    #expect(value.elapsed == nil)
+    #expect(value.level == 0)
+    #expect(!value.stopEnabled)
     #expect(model.coordinatorState == before.state)
     #expect(model.isStarting == before.isStarting)
     #expect(model.isStopping == before.isStopping)

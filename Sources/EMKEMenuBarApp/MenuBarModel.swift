@@ -582,7 +582,7 @@ final class MenuBarModel: ObservableObject {
             outboundLevel: outboundLevel,
             translationStartedAt: translationStartedAt,
             now: now,
-            errorText: configurationError ?? inventoryError,
+            hasFatalSessionError: configurationErrorValue != nil,
             copy: copy
         )
     }
