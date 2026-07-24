@@ -107,7 +107,7 @@ func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
     )
 }
 
-@Test
+@Test @MainActor
 func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
     let copy = AppCopy(language: .english)
     let ready = DashboardFixture.ready.makePresentation(copy: copy)
@@ -176,7 +176,7 @@ func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
     }
 }
 
-@Test
+@Test @MainActor
 func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
     let copy = AppCopy(language: .zhHans)
     let ready = DashboardFixture.ready.makePresentation(copy: copy)
@@ -199,7 +199,7 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
     )
 }
 
-@Test
+@Test @MainActor
 func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
     #expect(
         EMKEChannelRowLayoutDecision.resolve(
@@ -211,7 +211,7 @@ func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
     )
 }
 
-@Test
+@Test @MainActor
 func dashboardChannelBudgetTracksPanelHeightAndErrorAllocation() {
     let panel = EMKEDashboardVerticalLayoutGeometry(
         panelHeight: EMKEVisualStyle.panelHeight

@@ -100,6 +100,7 @@ enum EMKEChannelMetrics {
     static let verticalPadding: CGFloat = 23.5
 }
 
+@MainActor
 struct EMKEDashboardVerticalLayoutGeometry: Equatable {
     let panelHeight: CGFloat
 

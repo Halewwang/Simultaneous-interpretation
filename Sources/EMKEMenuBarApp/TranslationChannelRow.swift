@@ -156,6 +156,7 @@ enum EMKEChannelRowLayoutMode: Equatable {
     case expanded
 }
 
+@MainActor
 enum EMKEChannelRowLayoutDecision {
     static func resolve(
         direction: String,
@@ -192,6 +193,7 @@ enum EMKEChannelRowLayoutDecision {
     }
 }
 
+@MainActor
 private enum EMKEChannelContentMeasurement {
     static func textWidth(
         _ text: String,
@@ -244,6 +246,7 @@ private enum EMKEChannelContentMeasurement {
     }
 }
 
+@MainActor
 struct EMKEExpandedChannelLayoutGeometry: Equatable {
     let contentBounds: CGRect
     let directionFrame: CGRect
