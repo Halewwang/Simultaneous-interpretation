@@ -324,6 +324,7 @@ final class MenuBarModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
     private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
+    private var microphonePermissionRequestTask: Task<Bool, Never>?
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
     private var localeObserver: AnyCancellable?
@@ -379,7 +380,7 @@ final class MenuBarModel: ObservableObject {
     func requestMicrophonePermissionForOnboarding() async {
         await refreshMicrophonePermissionState()
         guard microphonePermissionState == .notDetermined else { return }
-        let granted = await microphonePermissionProvider.requestAccess()
+        let granted = await requestMicrophonePermission()
         microphonePermissionState = granted ? .authorized : .denied
     }
 
@@ -970,7 +971,7 @@ final class MenuBarModel: ObservableObject {
         case .authorized:
             return
         case .notDetermined:
-            let granted = await microphonePermissionProvider.requestAccess()
+            let granted = await requestMicrophonePermission()
             microphonePermissionState = granted ? .authorized : .denied
             guard granted else {
                 throw MenuBarConfigurationError.microphoneAccessDenied
@@ -980,6 +981,19 @@ final class MenuBarModel: ObservableObject {
         case .restricted:
             throw MenuBarConfigurationError.microphoneAccessRestricted
         }
+    }
+
+    private func requestMicrophonePermission() async -> Bool {
+        if let microphonePermissionRequestTask {
+            return await microphonePermissionRequestTask.value
+        }
+
+        let provider = microphonePermissionProvider
+        let task = Task { await provider.requestAccess() }
+        microphonePermissionRequestTask = task
+        let granted = await task.value
+        microphonePermissionRequestTask = nil
+        return granted
     }
 
     private var selectedPhysicalInput: AudioDevice? {

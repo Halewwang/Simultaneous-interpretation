@@ -383,6 +383,87 @@ private actor MicrophonePermissionStub: MicrophonePermissionProviding {
     }
 }
 
+private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
+    private var state: MicrophonePermissionState
+    private let requestResult: Bool
+    private var authorizationStatusGateOpen = false
+    private var requestGateOpen = false
+    private var authorizationStatusReadCount = 0
+    private var twoStatusReadWaiters: [CheckedContinuation<Void, Never>] = []
+    private var authorizationStatusWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRequestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var requestCount = 0
+
+    init(
+        state: MicrophonePermissionState,
+        requestResult: Bool
+    ) {
+        self.state = state
+        self.requestResult = requestResult
+    }
+
+    func authorizationStatus() async -> MicrophonePermissionState {
+        authorizationStatusReadCount += 1
+        if authorizationStatusReadCount >= 2 {
+            let waiters = twoStatusReadWaiters
+            twoStatusReadWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+        guard !authorizationStatusGateOpen else { return state }
+        await withCheckedContinuation { continuation in
+            authorizationStatusWaiters.append(continuation)
+        }
+        return state
+    }
+
+    func requestAccess() async -> Bool {
+        requestCount += 1
+        if requestCount == 1 {
+            let waiters = firstRequestWaiters
+            firstRequestWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+        guard !requestGateOpen else {
+            state = requestResult ? .authorized : .denied
+            return requestResult
+        }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+        state = requestResult ? .authorized : .denied
+        return requestResult
+    }
+
+    func waitForTwoAuthorizationStatusReads() async {
+        guard authorizationStatusReadCount < 2 else { return }
+        await withCheckedContinuation { continuation in
+            twoStatusReadWaiters.append(continuation)
+        }
+    }
+
+    func releaseAuthorizationStatusReads() {
+        authorizationStatusGateOpen = true
+        let waiters = authorizationStatusWaiters
+        authorizationStatusWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    func waitForFirstRequest() async {
+        guard requestCount == 0 else { return }
+        await withCheckedContinuation { continuation in
+            firstRequestWaiters.append(continuation)
+        }
+    }
+
+    func completeRequests() {
+        requestGateOpen = true
+        let waiters = requestWaiters
+        requestWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}
+
 private actor AudioDiagnosticsStub: AudioDiagnosticsControlling {
     let inputSample: AudioInputDiagnosticSample
     let outputResult: AudioOutputDiagnosticResult
@@ -466,7 +547,7 @@ private func makeTranslationMenuModel(
     coordinator: TranslationCoordinatorStub = TranslationCoordinatorStub(),
     settings: TranslationSettingsStoreStub = TranslationSettingsStoreStub(),
     provider: TranslationMenuDeviceProvider = TranslationMenuDeviceProvider(),
-    microphonePermissionProvider: MicrophonePermissionStub =
+    microphonePermissionProvider: any MicrophonePermissionProviding =
         MicrophonePermissionStub(state: .authorized)
 ) -> MenuBarModel {
     MenuBarModel(
@@ -909,6 +990,66 @@ func onboardingPermissionActionRequestsOnceAndPublishesResult() async {
 
     #expect(model.microphonePermissionState == .authorized)
     #expect(await permission.requestCount == 1)
+}
+
+@Test @MainActor
+func concurrentOnboardingPermissionActionsShareOneProviderRequest() async {
+    let permission = BlockingMicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true
+    )
+    let model = makeTranslationMenuModel(
+        microphonePermissionProvider: permission
+    )
+
+    async let first: Void = model.requestMicrophonePermissionForOnboarding()
+    async let second: Void = model.requestMicrophonePermissionForOnboarding()
+    await permission.waitForTwoAuthorizationStatusReads()
+    await permission.releaseAuthorizationStatusReads()
+    await permission.waitForFirstRequest()
+    for _ in 0..<10 { await Task.yield() }
+
+    #expect(await permission.requestCount == 1)
+    await permission.completeRequests()
+    await first
+    await second
+
+    #expect(model.microphonePermissionState == .authorized)
+}
+
+@Test @MainActor
+func onboardingAndStartShareOneInFlightPermissionRequest() async {
+    let permission = BlockingMicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true
+    )
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "stored-key",
+        coordinator: coordinator,
+        microphonePermissionProvider: permission
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://api.openai.com/v1"
+    model.modelID = "gpt-realtime-translate"
+
+    async let onboarding: Void =
+        model.requestMicrophonePermissionForOnboarding()
+    async let start: Void = model.start()
+    await permission.waitForTwoAuthorizationStatusReads()
+    await permission.releaseAuthorizationStatusReads()
+    await permission.waitForFirstRequest()
+    for _ in 0..<10 { await Task.yield() }
+
+    #expect(await permission.requestCount == 1)
+    await permission.completeRequests()
+    await onboarding
+    await start
+
+    #expect(model.microphonePermissionState == .authorized)
+    #expect(await coordinator.configurations.count == 1)
 }
 
 @Test @MainActor
