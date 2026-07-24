@@ -6,34 +6,44 @@ import Testing
 private actor FakeSocket: TranslationSocket {
     private(set) var sent: [Data] = []
     private(set) var wasCancelled = false
+    private(set) var cancellationCount = 0
     private(set) var receivedCount = 0
     private var incoming: [Data]
     private var receiveWaiters: [CheckedContinuation<Data, any Error>] = []
     private var closeSendWaiter: CheckedContinuation<Void, Never>?
+    private var closeSendStarted = false
+    private var closeSendStartWaiter: CheckedContinuation<Void, Never>?
     private var cancellationStarted = false
     private var cancellationStartWaiter: CheckedContinuation<Void, Never>?
     private var cancellationFinishWaiter: CheckedContinuation<Void, Never>?
     private let acknowledgesClose: Bool
+    private let blocksCloseSend: Bool
     private let waitsForCancellationToFinish: Bool
 
     init(
         incoming: [Data] = [],
         acknowledgesClose: Bool = true,
+        blocksCloseSend: Bool = false,
         waitsForCancellationToFinish: Bool = false
     ) {
         self.incoming = incoming
         self.acknowledgesClose = acknowledgesClose
+        self.blocksCloseSend = blocksCloseSend
         self.waitsForCancellationToFinish = waitsForCancellationToFinish
     }
 
     func send(_ data: Data) async throws {
         sent.append(data)
-        if acknowledgesClose,
-           String(decoding: data, as: UTF8.self).contains("session.close") {
+        let isClose = String(decoding: data, as: UTF8.self)
+            .contains("session.close")
+        if acknowledgesClose, isClose {
             enqueue(Data(#"{"type":"session.closed"}"#.utf8))
-            if waitsForCancellationToFinish {
-                await withCheckedContinuation { closeSendWaiter = $0 }
-            }
+        }
+        if blocksCloseSend, isClose {
+            closeSendStarted = true
+            closeSendStartWaiter?.resume()
+            closeSendStartWaiter = nil
+            await withCheckedContinuation { closeSendWaiter = $0 }
         }
     }
 
@@ -49,6 +59,7 @@ private actor FakeSocket: TranslationSocket {
 
     func cancel() async {
         wasCancelled = true
+        cancellationCount += 1
         cancellationStarted = true
         cancellationStartWaiter?.resume()
         cancellationStartWaiter = nil
@@ -67,6 +78,11 @@ private actor FakeSocket: TranslationSocket {
     func waitForCancellationStart() async {
         guard !cancellationStarted else { return }
         await withCheckedContinuation { cancellationStartWaiter = $0 }
+    }
+
+    func waitForCloseSendStart() async {
+        guard !closeSendStarted else { return }
+        await withCheckedContinuation { closeSendStartWaiter = $0 }
     }
 
     func finishCancellation() {
@@ -276,10 +292,11 @@ func serverCloseBeforeDeadlineKeepsTailAudioAndDoesNotWaitForDeadline()
 }
 
 @Test
-func fastServerCloseDuringSendFinishesBeforeDeadlineCanArm() async throws {
+func fastServerCloseDuringSendFinishesBeforeArmedDeadlineFires() async throws {
     let deadline = CloseDeadlineGate()
     let socket = FakeSocket(
         incoming: handshakeEvents,
+        blocksCloseSend: true,
         waitsForCancellationToFinish: true
     )
     let session = makeSession(socket: socket) {
@@ -295,8 +312,67 @@ func fastServerCloseDuringSendFinishesBeforeDeadlineCanArm() async throws {
     }
     await socket.finishCancellation()
     try await closeTask.value
+    await deadline.fire()
 
-    #expect(await deadline.waitCount == 0)
+    #expect(await deadline.waitCount == 1)
+    #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func closeDeadlineCancelsAStalledCloseSend() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    let closeTask = Task { try await session.close() }
+    await socket.waitForCloseSendStart()
+
+    let deadlineWasArmed = await eventually {
+        await deadline.waitCount == 1
+    }
+    #expect(deadlineWasArmed)
+    guard deadlineWasArmed else {
+        await socket.cancel()
+        return
+    }
+
+    await deadline.fire()
+    try await closeTask.value
+
+    #expect(await socket.wasCancelled)
+    #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func concurrentCloseCallersShareOneForcedSocketCancellation() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    let firstClose = Task { try await session.close() }
+    await socket.waitForCloseSendStart()
+    let secondClose = Task { try await session.close() }
+
+    await deadline.fire()
+    try await firstClose.value
+    try await secondClose.value
+
+    #expect(await socket.sent.count == 2)
+    #expect(await socket.cancellationCount == 1)
 }
 
 @Test
