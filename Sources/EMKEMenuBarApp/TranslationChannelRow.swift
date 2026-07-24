@@ -160,35 +160,213 @@ enum EMKEChannelRowLayoutDecision {
     static func resolve(
         direction: String,
         status: String,
+        statusSymbol: String,
         actionTitle: String
     ) -> EMKEChannelRowLayoutMode {
-        let directionFits = textWidth(
+        let directionFits = EMKEChannelContentMeasurement.textWidth(
             direction,
-            size: EMKEChannelMetrics.directionSize
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.directionSize
+            )
         ) <= EMKEChannelMetrics.directionWidth
-        let statusFits = textWidth(status, size: 12)
-            + EMKEChannelMetrics.statusIconSize
+        let statusFits = EMKEChannelContentMeasurement.textWidth(
+            status,
+            font: .systemFont(ofSize: 12)
+        )
+            + EMKEChannelContentMeasurement.symbolSize(
+                statusSymbol,
+                size: EMKEChannelMetrics.statusIconSize
+            ).width
             + EMKEChannelMetrics.statusIconSpacing
             <= EMKEChannelMetrics.statusWidth
-        let actionFits = textWidth(
+        let actionFits = EMKEChannelContentMeasurement.textWidth(
             actionTitle,
-            size: EMKEChannelMetrics.actionSize
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.actionSize
+            )
         ) <= EMKEChannelMetrics.actionWidth
 
         return directionFits && statusFits && actionFits
             ? .compact
             : .expanded
     }
+}
 
-    private static func textWidth(
+private enum EMKEChannelContentMeasurement {
+    static func textWidth(
         _ text: String,
-        size: CGFloat
+        font: NSFont
     ) -> CGFloat {
         (text as NSString).size(
             withAttributes: [
-                .font: NSFont.systemFont(ofSize: size),
+                .font: font,
             ]
         ).width
+    }
+
+    static func textHeight(
+        _ text: String,
+        font: NSFont,
+        width: CGFloat
+    ) -> CGFloat {
+        ceil(
+            (text as NSString).boundingRect(
+                with: NSSize(
+                    width: max(width, 1),
+                    height: .greatestFiniteMagnitude
+                ),
+                options: [
+                    .usesLineFragmentOrigin,
+                    .usesFontLeading,
+                ],
+                attributes: [
+                    .font: font,
+                ]
+            ).height
+        )
+    }
+
+    static func symbolSize(
+        _ name: String,
+        size: CGFloat
+    ) -> NSSize {
+        let configuration = NSImage.SymbolConfiguration(
+            pointSize: size,
+            weight: .medium
+        )
+        return NSImage(
+            systemSymbolName: name,
+            accessibilityDescription: nil
+        )?
+            .withSymbolConfiguration(configuration)?
+            .size
+            ?? NSSize(width: size + 3, height: size)
+    }
+}
+
+struct EMKEExpandedChannelLayoutGeometry: Equatable {
+    let contentBounds: CGRect
+    let directionFrame: CGRect
+    let statusFrame: CGRect
+    let actionFrame: CGRect
+    let waveformFrame: CGRect
+    let statusContentHeight: CGFloat
+    let actionContentHeight: CGFloat
+    let descriptionHeight: CGFloat
+    let requiredHeight: CGFloat
+
+    static func resolve(
+        title: String,
+        direction: String,
+        status: String,
+        statusSymbol: String,
+        actionTitle: String
+    ) -> EMKEExpandedChannelLayoutGeometry {
+        let contentWidth = EMKEChannelMetrics.expandedContentWidth
+        let titleFont = NSFont.systemFont(
+            ofSize: EMKEChannelMetrics.titleSize,
+            weight: .semibold
+        )
+        let directionFont = NSFont.systemFont(
+            ofSize: EMKEChannelMetrics.directionSize
+        )
+        let statusFont = NSFont.systemFont(ofSize: 12)
+        let actionFont = NSFont.systemFont(
+            ofSize: EMKEChannelMetrics.actionSize
+        )
+        let titleHeight = EMKEChannelContentMeasurement.textHeight(
+            title,
+            font: titleFont,
+            width: contentWidth
+        )
+        let directionHeight = EMKEChannelContentMeasurement.textHeight(
+            direction,
+            font: directionFont,
+            width: contentWidth
+        )
+        let descriptionHeight = titleHeight
+            + 4
+            + directionHeight
+        let statusActionWidth = contentWidth
+            - EMKEChannelMetrics.expandedStatusActionSpacing
+        let naturalActionWidth = EMKEChannelContentMeasurement.textWidth(
+            actionTitle,
+            font: actionFont
+        )
+        let actionWidth = min(
+            naturalActionWidth,
+            statusActionWidth * 0.45
+        )
+        let statusWidth = statusActionWidth - actionWidth
+        let statusSymbolSize = EMKEChannelContentMeasurement.symbolSize(
+            statusSymbol,
+            size: EMKEChannelMetrics.statusIconSize
+        )
+        let statusTextWidth = statusWidth
+            - statusSymbolSize.width
+            - EMKEChannelMetrics.statusIconSpacing
+        let statusContentHeight = max(
+            statusSymbolSize.height,
+            EMKEChannelContentMeasurement.textHeight(
+                status,
+                font: statusFont,
+                width: statusTextWidth
+            )
+        )
+        let actionContentHeight = EMKEChannelContentMeasurement.textHeight(
+            actionTitle,
+            font: actionFont,
+            width: actionWidth
+        )
+        let statusActionHeight = max(
+            statusContentHeight,
+            actionContentHeight
+        )
+        let statusActionY = descriptionHeight
+            + EMKEChannelMetrics.expandedCopySpacing
+        let waveformY = statusActionY
+            + statusActionHeight
+            + EMKEChannelMetrics.expandedCopySpacing
+        let requiredHeight = waveformY
+            + EMKEChannelMetrics.expandedWaveformHeight
+
+        return EMKEExpandedChannelLayoutGeometry(
+            contentBounds: CGRect(
+                x: 0,
+                y: 0,
+                width: contentWidth,
+                height: requiredHeight
+            ),
+            directionFrame: CGRect(
+                x: 0,
+                y: titleHeight + 4,
+                width: contentWidth,
+                height: directionHeight
+            ),
+            statusFrame: CGRect(
+                x: 0,
+                y: statusActionY,
+                width: statusWidth,
+                height: statusActionHeight
+            ),
+            actionFrame: CGRect(
+                x: statusWidth
+                    + EMKEChannelMetrics.expandedStatusActionSpacing,
+                y: statusActionY,
+                width: actionWidth,
+                height: statusActionHeight
+            ),
+            waveformFrame: CGRect(
+                x: 0,
+                y: waveformY,
+                width: contentWidth,
+                height: EMKEChannelMetrics.expandedWaveformHeight
+            ),
+            statusContentHeight: statusContentHeight,
+            actionContentHeight: actionContentHeight,
+            descriptionHeight: descriptionHeight,
+            requiredHeight: requiredHeight
+        )
     }
 }
 
@@ -200,10 +378,21 @@ struct TranslationChannelRow: View {
     let presentation: TranslationChannelPresentation
     let action: () -> Void
 
+    private var expandedGeometry: EMKEExpandedChannelLayoutGeometry {
+        EMKEExpandedChannelLayoutGeometry.resolve(
+            title: title,
+            direction: direction,
+            status: presentation.status,
+            statusSymbol: presentation.statusSymbol,
+            actionTitle: presentation.actionTitle
+        )
+    }
+
     var body: some View {
         switch EMKEChannelRowLayoutDecision.resolve(
             direction: direction,
             status: presentation.status,
+            statusSymbol: presentation.statusSymbol,
             actionTitle: presentation.actionTitle
         ) {
         case .compact:
@@ -233,19 +422,42 @@ struct TranslationChannelRow: View {
             channelIcon
             VStack(alignment: .leading, spacing: EMKEChannelMetrics.expandedCopySpacing) {
                 channelDescription
+                    .frame(
+                        width: expandedGeometry.contentBounds.width,
+                        height: expandedGeometry.descriptionHeight,
+                        alignment: .topLeading
+                    )
                 HStack(
                     alignment: .top,
                     spacing: EMKEChannelMetrics.expandedCopySpacing
                 ) {
                     channelStatusLabel
+                        .frame(
+                            width: expandedGeometry.statusFrame.width,
+                            height: expandedGeometry.statusFrame.height,
+                            alignment: .topLeading
+                        )
                     Spacer(
                         minLength: EMKEChannelMetrics.expandedCopySpacing
                     )
-                    channelAction(compact: false)
+                    channelAction(
+                        compact: false,
+                        width: expandedGeometry.actionFrame.width,
+                        height: expandedGeometry.actionFrame.height
+                    )
                 }
+                .frame(
+                    width: expandedGeometry.contentBounds.width,
+                    height: expandedGeometry.statusFrame.height,
+                    alignment: .topLeading
+                )
                 channelWaveform
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(
+                width: expandedGeometry.contentBounds.width,
+                height: expandedGeometry.requiredHeight,
+                alignment: .topLeading
+            )
         }
     }
 
@@ -311,12 +523,16 @@ struct TranslationChannelRow: View {
     private var channelWaveform: some View {
         LiveWaveformView(
             level: level,
-            maximumHeight: 24,
+            maximumHeight: EMKEChannelMetrics.expandedWaveformHeight,
             compact: true
         )
     }
 
-    private func channelAction(compact: Bool) -> some View {
+    private func channelAction(
+        compact: Bool,
+        width: CGFloat? = nil,
+        height: CGFloat? = nil
+    ) -> some View {
         Button(action: action) {
             Text(presentation.actionTitle)
                 .multilineTextAlignment(.trailing)
@@ -326,7 +542,8 @@ struct TranslationChannelRow: View {
         .font(.system(size: EMKEChannelMetrics.actionSize))
         .foregroundStyle(EMKEVisualStyle.secondaryText)
         .frame(
-            width: compact ? EMKEChannelMetrics.actionWidth : nil,
+            width: compact ? EMKEChannelMetrics.actionWidth : width,
+            height: compact ? nil : height,
             alignment: .trailing
         )
         .offset(y: compact ? EMKEChannelMetrics.actionOffsetY : 0)

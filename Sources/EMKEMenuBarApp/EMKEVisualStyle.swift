@@ -72,6 +72,18 @@ enum EMKEChannelMetrics {
     static let actionOffsetY: CGFloat = 14
     static let expandedHorizontalSpacing: CGFloat = 8
     static let expandedCopySpacing: CGFloat = 6
+    static let expandedContentWidth: CGFloat =
+        EMKEVisualStyle.panelWidth
+        - EMKEDashboardMetrics.leadingPadding
+        - EMKEDashboardMetrics.trailingPadding
+        - iconWidth
+        - expandedHorizontalSpacing
+    static let expandedStatusActionSpacing: CGFloat =
+        expandedCopySpacing * 3
+    static let expandedWaveformHeight: CGFloat = 24
+    static let expandedMaximumRowHeight: CGFloat = 112
+    static let expandedChannelSectionHeightBudget: CGFloat =
+        expandedMaximumRowHeight * 2
     static let verticalPadding: CGFloat = 23.5
 }
 

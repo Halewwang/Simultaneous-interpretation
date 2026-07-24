@@ -1,5 +1,6 @@
 import AppKit
 import EMKECoordinator
+import EMKECore
 import Foundation
 import SwiftUI
 import Testing
@@ -168,6 +169,7 @@ func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
             EMKEChannelRowLayoutDecision.resolve(
                 direction: item.0,
                 status: item.1.status,
+                statusSymbol: item.1.statusSymbol,
                 actionTitle: item.1.actionTitle
             ) == .expanded
         )
@@ -183,6 +185,7 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
         EMKEChannelRowLayoutDecision.resolve(
             direction: ready.inboundDirection,
             status: ready.inbound.status,
+            statusSymbol: ready.inbound.statusSymbol,
             actionTitle: ready.inbound.actionTitle
         ) == .compact
     )
@@ -190,8 +193,79 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
         EMKEChannelRowLayoutDecision.resolve(
             direction: ready.outboundDirection,
             status: ready.outbound.status,
+            statusSymbol: ready.outbound.statusSymbol,
             actionTitle: ready.outbound.actionTitle
         ) == .compact
+    )
+}
+
+@Test
+func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
+    #expect(
+        EMKEChannelRowLayoutDecision.resolve(
+            direction: "A",
+            status: "MMMMMMMMA",
+            statusSymbol: "stop.circle",
+            actionTitle: "Go"
+        ) == .expanded
+    )
+}
+
+@Test(arguments: EnglishDashboardStressCase.allCases)
+@MainActor
+private func englishStressDashboardsRenderWithinSharedGeometry(
+    scenario: EnglishDashboardStressCase
+) throws {
+    let fixture = scenario.fixture
+    let bitmap = try dashboardBitmap(
+        value: fixture.value,
+        copy: fixture.copy,
+        languagesLocked: fixture.languagesLocked,
+        motherLanguage: fixture.motherLanguage,
+        meetingOutputLanguage: fixture.meetingOutputLanguage
+    )
+
+    #expect(bitmap.pixelsWide == 840)
+    #expect(bitmap.pixelsHigh == 1240)
+
+    let layouts = [
+        EMKEExpandedChannelLayoutGeometry.resolve(
+            title: fixture.copy.text(.heardByMe),
+            direction: fixture.value.inboundDirection,
+            status: fixture.value.inbound.status,
+            statusSymbol: fixture.value.inbound.statusSymbol,
+            actionTitle: fixture.value.inbound.actionTitle
+        ),
+        EMKEExpandedChannelLayoutGeometry.resolve(
+            title: fixture.copy.text(.heardByOther),
+            direction: fixture.value.outboundDirection,
+            status: fixture.value.outbound.status,
+            statusSymbol: fixture.value.outbound.statusSymbol,
+            actionTitle: fixture.value.outbound.actionTitle
+        ),
+    ]
+
+    for layout in layouts {
+        #expect(layout.contentBounds.contains(layout.directionFrame))
+        #expect(layout.contentBounds.contains(layout.statusFrame))
+        #expect(layout.contentBounds.contains(layout.actionFrame))
+        #expect(layout.contentBounds.contains(layout.waveformFrame))
+        #expect(!layout.directionFrame.intersects(layout.statusFrame))
+        #expect(!layout.directionFrame.intersects(layout.actionFrame))
+        #expect(!layout.statusFrame.intersects(layout.actionFrame))
+        #expect(!layout.statusFrame.intersects(layout.waveformFrame))
+        #expect(!layout.actionFrame.intersects(layout.waveformFrame))
+        #expect(layout.statusFrame.height >= layout.statusContentHeight)
+        #expect(layout.actionFrame.height >= layout.actionContentHeight)
+        #expect(
+            layout.requiredHeight
+                <= EMKEChannelMetrics.expandedMaximumRowHeight
+        )
+    }
+
+    #expect(
+        layouts.reduce(0) { $0 + $1.requiredHeight }
+            <= EMKEChannelMetrics.expandedChannelSectionHeightBudget
     )
 }
 
@@ -199,27 +273,155 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
 private func dashboardBitmap(
     value: TranslationDashboardPresentation,
     copy: AppCopy,
-    languagesLocked: Bool
+    languagesLocked: Bool,
+    motherLanguage: SupportedLanguage = .chinese,
+    meetingOutputLanguage: SupportedLanguage = .german
 ) throws -> NSBitmapImageRep {
-    let view = TranslationDashboardContent(
+    let view = dashboardView(
         value: value,
         copy: copy,
-        motherLanguage: .constant(.chinese),
-        meetingOutputLanguage: .constant(.german),
         languagesLocked: languagesLocked,
-        settingsAction: {},
-        inboundAction: {},
-        outboundAction: {},
-        primaryAction: {}
+        motherLanguage: motherLanguage,
+        meetingOutputLanguage: meetingOutputLanguage
     )
-    .frame(
-        width: EMKEVisualStyle.panelWidth,
-        height: EMKEVisualStyle.panelHeight
-    )
-    .background(Color(nsColor: .windowBackgroundColor))
 
     let renderer = ImageRenderer(content: view)
     renderer.scale = EMKEVisualStyle.captureScale
     let data = try #require(renderer.nsImage?.tiffRepresentation)
     return try #require(NSBitmapImageRep(data: data))
+}
+
+@MainActor
+private func dashboardView(
+    value: TranslationDashboardPresentation,
+    copy: AppCopy,
+    languagesLocked: Bool,
+    motherLanguage: SupportedLanguage,
+    meetingOutputLanguage: SupportedLanguage
+) -> AnyView {
+    AnyView(
+        TranslationDashboardContent(
+            value: value,
+            copy: copy,
+            motherLanguage: .constant(motherLanguage),
+            meetingOutputLanguage: .constant(meetingOutputLanguage),
+            languagesLocked: languagesLocked,
+            settingsAction: {},
+            inboundAction: {},
+            outboundAction: {},
+            primaryAction: {}
+        )
+        .frame(
+            width: EMKEVisualStyle.panelWidth,
+            height: EMKEVisualStyle.panelHeight
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
+    )
+}
+
+private enum EnglishDashboardStressCase: String, CaseIterable, Sendable {
+    case ready
+    case running
+    case manualBypass
+    case reconnecting
+    case sameLanguagePassThrough
+    case inboundFailed
+    case outboundFailed
+
+    var fixture: EnglishDashboardStressFixture {
+        let copy = AppCopy(language: .english)
+        switch self {
+        case .ready:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture.ready.makePresentation(copy: copy),
+                copy: copy,
+                languagesLocked: false
+            )
+        case .running:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture.running.makePresentation(copy: copy),
+                copy: copy
+            )
+        case .manualBypass:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture(
+                    readiness: .active,
+                    coordinatorState: TranslationCoordinatorState(
+                        isRunning: true,
+                        inbound: .bypassed,
+                        outbound: .bypassed
+                    ),
+                    inboundBypassEnabled: true,
+                    outboundBypassEnabled: true,
+                    startedAt: DashboardFixture.now
+                ).makePresentation(copy: copy),
+                copy: copy
+            )
+        case .reconnecting:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture(
+                    readiness: .active,
+                    coordinatorState: TranslationCoordinatorState(
+                        isRunning: true,
+                        inbound: .reconnecting(attempt: 12),
+                        outbound: .reconnecting(attempt: 12)
+                    ),
+                    startedAt: DashboardFixture.now
+                ).makePresentation(copy: copy),
+                copy: copy
+            )
+        case .sameLanguagePassThrough:
+            let motherLanguage = SupportedLanguage.english
+            let meetingOutputLanguage = SupportedLanguage.english
+            let state = TranslationCoordinatorState(
+                isRunning: true,
+                inbound: .active,
+                outbound: .bypassed
+            )
+            let value = TranslationDashboardPresentation.make(
+                readiness: .active,
+                coordinatorState: state,
+                isStarting: false,
+                isStopping: false,
+                inboundBypassEnabled: false,
+                outboundBypassEnabled: false,
+                inboundLevel: 0.35,
+                outboundLevel: 0.72,
+                translationStartedAt: DashboardFixture.now,
+                motherLanguage: motherLanguage,
+                meetingOutputLanguage: meetingOutputLanguage,
+                now: DashboardFixture.now,
+                errorText: nil,
+                copy: copy
+            )
+            return EnglishDashboardStressFixture(
+                value: value,
+                copy: copy,
+                motherLanguage: motherLanguage,
+                meetingOutputLanguage: meetingOutputLanguage
+            )
+        case .inboundFailed:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture.inboundFailed.makePresentation(
+                    copy: copy
+                ),
+                copy: copy
+            )
+        case .outboundFailed:
+            return EnglishDashboardStressFixture(
+                value: DashboardFixture.outboundFailed.makePresentation(
+                    copy: copy
+                ),
+                copy: copy
+            )
+        }
+    }
+}
+
+private struct EnglishDashboardStressFixture {
+    let value: TranslationDashboardPresentation
+    let copy: AppCopy
+    var languagesLocked = true
+    var motherLanguage = SupportedLanguage.chinese
+    var meetingOutputLanguage = SupportedLanguage.german
 }
