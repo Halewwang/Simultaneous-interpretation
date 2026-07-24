@@ -58,13 +58,31 @@ func microphonePresentationNeverOffersRepeatPromptAfterDenial() {
 }
 
 @Test
-func staleOpenDevicePickerCannotChangeSelectionAfterLock() {
-    var selection: String? = "physical.input.old"
+@MainActor
+func deviceSelectionActionQueriesAuthoritativeLockAtInvocation() {
+    let state = AuthoritativeDeviceSelectionState(
+        selection: "physical.input.old"
+    )
+    let action = OnboardingDeviceSelectionPolicy.makeAction(
+        isLocked: { state.isLocked },
+        updateSelection: { state.selection = $0 }
+    )
 
-    if OnboardingDeviceSelectionPolicy.canSelect(isLocked: true) {
-        selection = "physical.input.new"
+    state.isLocked = true
+    #expect(!action("physical.input.locked"))
+    #expect(state.selection == "physical.input.old")
+
+    state.isLocked = false
+    #expect(action("physical.input.new"))
+    #expect(state.selection == "physical.input.new")
+}
+
+@MainActor
+private final class AuthoritativeDeviceSelectionState {
+    var isLocked = false
+    var selection: String?
+
+    init(selection: String?) {
+        self.selection = selection
     }
-
-    #expect(selection == "physical.input.old")
-    #expect(OnboardingDeviceSelectionPolicy.canSelect(isLocked: false))
 }

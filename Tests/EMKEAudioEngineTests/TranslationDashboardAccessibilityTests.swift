@@ -318,9 +318,11 @@ func onboardingDevicePopoverRechecksLockAndDismissesWhenLockActivates() throws {
 
     #expect(
         source.contains(
-            "guard OnboardingDeviceSelectionPolicy.canSelect(isLocked: isDisabled)"
+            "isLocked: { model.audioDeviceControlsLocked }"
         )
     )
+    #expect(source.contains("guard selectDevice(device.uid) else"))
+    #expect(!source.contains("canSelect(isLocked: isDisabled)"))
     #expect(source.contains(".disabled(isDisabled)"))
     #expect(source.contains(".onChange(of: isDisabled)"))
     #expect(source.contains("if isDisabled { isPresented = false }"))

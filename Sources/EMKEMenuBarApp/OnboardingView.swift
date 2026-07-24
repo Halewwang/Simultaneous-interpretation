@@ -3,8 +3,16 @@ import EMKEAudioEngine
 import SwiftUI
 
 enum OnboardingDeviceSelectionPolicy {
-    static func canSelect(isLocked: Bool) -> Bool {
-        !isLocked
+    @MainActor
+    static func makeAction(
+        isLocked: @escaping @MainActor () -> Bool,
+        updateSelection: @escaping @MainActor (String) -> Void
+    ) -> @MainActor (String) -> Bool {
+        { deviceUID in
+            guard !isLocked() else { return false }
+            updateSelection(deviceUID)
+            return true
+        }
     }
 }
 
@@ -349,7 +357,11 @@ struct OnboardingView: View {
             title: title,
             devices: devices,
             selection: selection,
-            isDisabled: model.audioDeviceControlsLocked
+            isDisabled: model.audioDeviceControlsLocked,
+            selectDevice: OnboardingDeviceSelectionPolicy.makeAction(
+                isLocked: { model.audioDeviceControlsLocked },
+                updateSelection: { selection.wrappedValue = $0 }
+            )
         )
     }
 
@@ -583,6 +595,7 @@ private struct OnboardingDevicePicker: View {
     let devices: [AudioDevice]
     @Binding var selection: String?
     let isDisabled: Bool
+    let selectDevice: @MainActor (String) -> Bool
     @State private var isPresented = false
 
     private var selectedName: String {
@@ -626,12 +639,10 @@ private struct OnboardingDevicePicker: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(devices) { device in
                         Button {
-                            guard OnboardingDeviceSelectionPolicy.canSelect(isLocked: isDisabled)
-                            else {
+                            guard selectDevice(device.uid) else {
                                 isPresented = false
                                 return
                             }
-                            selection = device.uid
                             isPresented = false
                         } label: {
                             HStack {
