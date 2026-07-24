@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
-PKG="$ROOT/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+PKG="$ROOT/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 VERIFIER="$ROOT/Packaging/verify-internal-pkg.sh"
 SIGNATURE_HELPER="$ROOT/Packaging/Scripts/verify-codesign-metadata.sh"
 test -s "$PKG" || bash "$ROOT/Packaging/build-internal-pkg.sh"
@@ -115,7 +115,7 @@ CONTROL_FILE="$CONTROL_APP/Contents/Resources/control"$'\n'"name.dat"
   "$CONTROL_APP"
 /usr/bin/pkgbuild --root "$CONTROL_EXPANDED/Payload" \
   --scripts "$CONTROL_EXPANDED/Scripts" \
-  --identifier com.emke.translation.internal --version 0.1.0 \
+  --identifier com.emke.translation.internal --version 0.2.0 \
   --install-location / "$TEMP/control.pkg"
 expect_rejected control-character-path "$TEMP/control.pkg" \
   'control character found in package path'

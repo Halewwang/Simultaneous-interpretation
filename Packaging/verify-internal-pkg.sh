@@ -109,16 +109,43 @@ require_payload_modes() {
   local expected
   local listing="$TEMP/payload-mode-items"
   local special
-  if ! /usr/bin/find "$1" \( -type d -o -type f \) -print0 > "$listing"; then
+  local target
+  if ! /usr/bin/find "$1" \( -type d -o -type f -o -type l \) \
+    -print0 > "$listing"; then
     echo "payload mode path discovery failed" >&2; exit 1
   fi
   while IFS= read -r -d '' item; do
+    if test -L "$item"; then
+      case "$item" in
+        "$SPARKLE"/*) ;;
+        *) echo "unexpected payload symlink: $item" >&2; exit 1 ;;
+      esac
+      target="$(/usr/bin/readlink "$item")"
+      case "$target" in
+        ""|/*|.|..|./*|../*|*/./*|*/../*|*/.|*/..)
+          echo "unsafe payload symlink target: $item" >&2; exit 1 ;;
+      esac
+      if ! test -e "$item"; then
+        echo "broken payload symlink: $item" >&2; exit 1
+      fi
+      continue
+    fi
     actual="$(/usr/bin/stat -f '%Lp' "$item")"
     if test -d "$item"; then
       expected=755
     else
       case "$item" in
         "$APP/Contents/MacOS/EMKEMenuBarApp"|\
+        "$SPARKLE"/Sparkle|\
+        "$SPARKLE"/Autoupdate|\
+        "$SPARKLE"/Updater.app/Contents/MacOS/Updater|\
+        "$SPARKLE"/XPCServices/Downloader.xpc/Contents/MacOS/Downloader|\
+        "$SPARKLE"/XPCServices/Installer.xpc/Contents/MacOS/Installer|\
+        "$SPARKLE"/Versions/*/Sparkle|\
+        "$SPARKLE"/Versions/*/Autoupdate|\
+        "$SPARKLE"/Versions/*/Updater.app/Contents/MacOS/Updater|\
+        "$SPARKLE"/Versions/*/XPCServices/Downloader.xpc/Contents/MacOS/Downloader|\
+        "$SPARKLE"/Versions/*/XPCServices/Installer.xpc/Contents/MacOS/Installer|\
         "$DRIVER/Contents/MacOS/EMKEAudioDriver"|"$UNINSTALLER") expected=755 ;;
         *) expected=644 ;;
       esac
@@ -128,7 +155,8 @@ require_payload_modes() {
       exit 1
     fi
   done < "$listing"
-  if ! special="$(/usr/bin/find "$1" ! -type d ! -type f -print -quit)"; then
+  if ! special="$(/usr/bin/find "$1" ! -type d ! -type f ! -type l \
+    -print -quit)"; then
     echo "payload object-type discovery failed" >&2; exit 1
   fi
   if test -n "$special"; then
@@ -179,6 +207,8 @@ require_raw_payload_entries() {
     'Applications/EMKE Translation.app' \
     'Applications/EMKE Translation.app/Contents/Info.plist' \
     'Applications/EMKE Translation.app/Contents/MacOS/EMKEMenuBarApp' \
+    'Applications/EMKE Translation.app/Contents/Frameworks/Sparkle.framework' \
+    'Applications/EMKE Translation.app/Contents/Frameworks/Sparkle.framework/Versions/Current' \
     'Applications/EMKE Translation.app/Contents/Resources/AppIcon.icns' \
     'Applications/EMKE Translation.app/Contents/Resources/EMKE-MenuBarIcon.png' \
     'Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver' \
@@ -207,6 +237,7 @@ BOM="$EXPANDED/Bom"
 PAYLOAD_ROOT="$EXPANDED/Payload"
 SCRIPTS_ROOT="$EXPANDED/Scripts"
 APP="$PAYLOAD_ROOT/Applications/EMKE Translation.app"
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 DRIVER="$PAYLOAD_ROOT/Library/Audio/Plug-Ins/HAL/EMKEAudioDriver.driver"
 UNINSTALLER="$PAYLOAD_ROOT/Library/Application Support/EMKE Translation/uninstall-emke.sh"
 require_exact_expanded_layout
@@ -234,7 +265,8 @@ PACKAGE_AUTH="$(/usr/bin/xmllint --xpath \
 if test "$PACKAGE_IDENTIFIER" != com.emke.translation.internal; then
   echo "unexpected package identifier" >&2; exit 1
 fi
-if test "$PACKAGE_VERSION" != 0.1.0; then
+if [[ ! "$PACKAGE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \
+  [[ "${#PACKAGE_VERSION}" -gt 64 ]]; then
   echo "unexpected package version" >&2; exit 1
 fi
 if test "$INSTALL_LOCATION" != /; then
@@ -273,15 +305,30 @@ require_plist_value CFBundleIdentifier com.emke.translation.app
 require_plist_value CFBundleInfoDictionaryVersion 6.0
 require_plist_value CFBundleName 'EMKE Translation'
 require_plist_value CFBundlePackageType APPL
-require_plist_value CFBundleShortVersionString 0.1.0
-require_plist_value CFBundleVersion 1
+require_plist_value CFBundleShortVersionString "$PACKAGE_VERSION"
+APP_BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c \
+  'Print :CFBundleVersion' "$PLIST")"
+if [[ ! "$APP_BUILD_NUMBER" =~ ^[0-9]+$ ]] || \
+  [[ "${#APP_BUILD_NUMBER}" -gt 20 ]]; then
+  echo "unexpected app build number" >&2; exit 1
+fi
 require_plist_value LSMinimumSystemVersion 14.0
 require_plist_value LSUIElement true
 require_plist_value NSHighResolutionCapable true
 require_plist_value NSMicrophoneUsageDescription \
   'EMKE 需要访问麦克风，以便在本机翻译并将译音发送到会议应用。'
 require_plist_value NSPrincipalClass NSApplication
-require /usr/bin/codesign --verify --strict --verbose=2 "$APP"
+require_plist_value SUEnableAutomaticChecks true
+require_plist_value SUAutomaticallyUpdate true
+require_plist_value SUFeedURL \
+  'https://raw.githubusercontent.com/Halewwang/Simultaneous-interpretation/gh-pages/appcast.xml'
+require_plist_value SUPublicEDKey \
+  '6JsBQ/d+InVfoZEG2nlLM+L9GaVss0kaC/ZyoMhDYoM='
+require test -d "$SPARKLE"
+require test -L "$SPARKLE/Versions/Current"
+require test "$(/usr/bin/readlink "$SPARKLE/Versions/Current")" = B
+require /usr/bin/codesign --verify --strict --verbose=2 "$SPARKLE"
+require /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
 require /usr/bin/codesign --verify --strict --verbose=2 "$DRIVER"
 if ! /usr/bin/codesign -d --entitlements :- "$APP" \
   > "$TEMP/app-entitlements" 2>/dev/null; then
@@ -289,6 +336,9 @@ if ! /usr/bin/codesign -d --entitlements :- "$APP" \
 fi
 require test "$(/usr/libexec/PlistBuddy -c \
   'Print :com.apple.security.device.audio-input' \
+  "$TEMP/app-entitlements")" = true
+require test "$(/usr/libexec/PlistBuddy -c \
+  'Print :com.apple.security.cs.disable-library-validation' \
   "$TEMP/app-entitlements")" = true
 if ! /usr/bin/codesign -dv --verbose=4 "$APP" > "$TEMP/app-codesign" 2>&1; then
   echo "app codesign metadata capture failed" >&2; exit 1

@@ -13,8 +13,22 @@ recorders, and other active audio apps because Core Audio will restart.
 
 `bash Packaging/build-internal-pkg.sh`
 
+The shared default release inputs are app version `0.2.0` and build number
+`2000`. Override them for a release without editing source metadata:
+
+```bash
+EMKE_VERSION=0.2.0 EMKE_BUILD_NUMBER=2000 \
+  bash Packaging/build-internal-pkg.sh
+```
+
+Both inputs accept numeric components only. The app bundle receives both
+values, while the component package uses `EMKE_VERSION` as its package
+version. The versioned delivery artifact is
+`.build/distribution/EMKE-Translation-$EMKE_VERSION-internal.pkg`.
+
 The only delivery artifact is
-`.build/distribution/EMKE-Translation-0.1.0-internal.pkg` after the command's
+`.build/distribution/EMKE-Translation-0.2.0-internal.pkg` after the default
+command's
 verifier passes. `.build/distribution/components` and `staging-root` are local
 scratch/intermediate trees, not handoff artifacts; FileProvider may add xattrs
 to them after generation. The pipeline still verifies fresh app/driver bundles
@@ -28,13 +42,46 @@ root and rejects symlinked `.build`, distribution, or owned cleanup children.
 Cleanup is limited to its exact descendants and never follows an external
 symlink target.
 
+## Sparkle update metadata
+
+The app embeds the resolved `Sparkle.framework`, enables automatic checks and
+downloads, and uses this HTTPS feed:
+
+`https://raw.githubusercontent.com/Halewwang/Simultaneous-interpretation/gh-pages/appcast.xml`
+
+`Packaging/App/Info.plist` contains only the application-specific public EdDSA
+key. The matching private key remains in the local login Keychain under account
+`com.emke.translation.app`; it must never be exported, logged, committed,
+copied into `.build`, or placed in an Appcast/report.
+
+After signing a release artifact with Sparkle's Keychain-backed `sign_update`
+tool, render deterministic metadata with:
+
+```bash
+SOURCE_DATE_EPOCH=0 bash Packaging/Scripts/render-appcast.sh \
+  VERSION BUILD HTTPS_URL EDDSA_SIGNATURE BYTE_LENGTH /physical/output/appcast.xml
+```
+
+The renderer XML-escapes inputs and rejects malformed numeric values,
+non-HTTPS URLs, empty signatures, control characters, relative/traversing
+paths, symlink destinations, and non-canonical output parents.
+
+The current app and embedded Sparkle code are ad-hoc signed. The
+`com.apple.security.cs.disable-library-validation` entitlement is restricted
+to this internal build. A public Developer ID/notarized package must remove
+that entitlement, sign all nested code with the production identity, notarize,
+staple, and pass clean-Mac update acceptance.
+
 ## Install
 
 ```bash
 sudo installer \
-  -pkg .build/distribution/EMKE-Translation-0.1.0-internal.pkg \
+  -pkg .build/distribution/EMKE-Translation-0.2.0-internal.pkg \
   -target /
 ```
+
+Installation still requires administrator authorization and installs both the
+app and the virtual audio driver with root-owned package payload entries.
 
 ## Uninstall while preserving settings and Keychain
 

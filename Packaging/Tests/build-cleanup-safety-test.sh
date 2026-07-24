@@ -43,7 +43,7 @@ expect_rejected_without_mutation build-root-symlink "$BUILD_LINK_REPO" \
   'symlink in build cleanup path' \
   "$BUILD_LINK_REPO/.build/distribution/staging-root" \
   "$BUILD_LINK_REPO/.build/distribution/components" \
-  "$BUILD_LINK_REPO/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+  "$BUILD_LINK_REPO/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 
 # Exercise the real builder entry point from a safe temporary Git repository.
 # Its symlink guard must fire before tool discovery or any cleanup command.
@@ -80,7 +80,7 @@ expect_rejected_without_mutation distribution-root-symlink "$DIST_LINK_REPO" \
   'symlink in build cleanup path' \
   "$DIST_LINK_REPO/.build/distribution/staging-root" \
   "$DIST_LINK_REPO/.build/distribution/components" \
-  "$DIST_LINK_REPO/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+  "$DIST_LINK_REPO/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 
 CHILD_LINK_REPO="$TEMP/child-link-repo"
 make_repo "$CHILD_LINK_REPO"
@@ -93,7 +93,7 @@ expect_rejected_without_mutation owned-child-symlink "$CHILD_LINK_REPO" \
   'symlink in build cleanup path' \
   "$CHILD_LINK_REPO/.build/distribution/staging-root" \
   "$CHILD_LINK_REPO/.build/distribution/components" \
-  "$CHILD_LINK_REPO/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+  "$CHILD_LINK_REPO/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 
 EXACT_REPO="$TEMP/exact-repo"
 make_repo "$EXACT_REPO"
@@ -102,14 +102,14 @@ expect_rejected_without_mutation non-exact-target "$EXACT_REPO" \
   'unexpected build cleanup target' \
   "$EXACT_REPO/.build/distribution" \
   "$EXACT_REPO/.build/distribution/components" \
-  "$EXACT_REPO/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+  "$EXACT_REPO/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 
 SAFE_REPO="$TEMP/safe-repo"
 make_repo "$SAFE_REPO"
 bash "$VALIDATOR" "$SAFE_REPO" \
   "$SAFE_REPO/.build/distribution/staging-root" \
   "$SAFE_REPO/.build/distribution/components" \
-  "$SAFE_REPO/.build/distribution/EMKE-Translation-0.1.0-internal.pkg"
+  "$SAFE_REPO/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
 test ! -e "$SAFE_REPO/.build"
 
 echo "PASS: build cleanup validation is canonical and non-mutating"

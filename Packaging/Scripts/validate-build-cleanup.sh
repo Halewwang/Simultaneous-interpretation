@@ -34,7 +34,11 @@ GIT_ROOT="$(cd "$GIT_ROOT" 2>/dev/null && pwd -P)" || \
 DIST="$ROOT/.build/distribution"
 EXPECTED_STAGE="$DIST/staging-root"
 EXPECTED_COMPONENTS="$DIST/components"
-EXPECTED_PKG="$DIST/EMKE-Translation-0.1.0-internal.pkg"
+EMKE_VERSION="${EMKE_VERSION:-0.2.0}"
+[[ "$EMKE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \
+  fail "invalid EMKE_VERSION"
+[[ "${#EMKE_VERSION}" -le 64 ]] || fail "invalid EMKE_VERSION"
+EXPECTED_PKG="$DIST/EMKE-Translation-$EMKE_VERSION-internal.pkg"
 [[ "$STAGE" = "$EXPECTED_STAGE" ]] || fail "unexpected build cleanup target: $STAGE"
 [[ "$COMPONENTS" = "$EXPECTED_COMPONENTS" ]] || \
   fail "unexpected build cleanup target: $COMPONENTS"

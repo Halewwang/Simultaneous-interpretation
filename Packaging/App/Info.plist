@@ -9,12 +9,18 @@
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>EMKE Translation</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleVersion</key><string>2000</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>EMKE 需要访问麦克风，以便在本机翻译并将译音发送到会议应用。</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUAutomaticallyUpdate</key><true/>
+  <key>SUFeedURL</key>
+  <string>https://raw.githubusercontent.com/Halewwang/Simultaneous-interpretation/gh-pages/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>6JsBQ/d+InVfoZEG2nlLM+L9GaVss0kaC/ZyoMhDYoM=</string>
 </dict></plist>
