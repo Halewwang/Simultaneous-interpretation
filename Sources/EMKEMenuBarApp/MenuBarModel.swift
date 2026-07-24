@@ -324,7 +324,9 @@ final class MenuBarModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
     private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
-    private var microphonePermissionRequestTask: Task<Bool, Never>?
+    private var microphonePermissionOperationTask:
+        Task<MicrophonePermissionState, Never>?
+    private var microphonePermissionStateRevision: UInt = 0
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
     private var localeObserver: AnyCancellable?
@@ -373,15 +375,15 @@ final class MenuBarModel: ObservableObject {
     }
 
     func refreshMicrophonePermissionState() async {
-        microphonePermissionState =
-            await microphonePermissionProvider.authorizationStatus()
+        let revision = microphonePermissionStateRevision
+        let state = await microphonePermissionProvider.authorizationStatus()
+        guard revision == microphonePermissionStateRevision else { return }
+        publishMicrophonePermissionState(state)
     }
 
     func requestMicrophonePermissionForOnboarding() async {
-        await refreshMicrophonePermissionState()
-        guard microphonePermissionState == .notDetermined else { return }
-        let granted = await requestMicrophonePermission()
-        microphonePermissionState = granted ? .authorized : .denied
+        let state = await resolveMicrophonePermissionForRequest()
+        publishMicrophonePermissionState(state)
     }
 
     var resolvedInterfaceLanguage: ResolvedInterfaceLanguage {
@@ -966,34 +968,41 @@ final class MenuBarModel: ObservableObject {
     }
 
     private func requireMicrophonePermission() async throws {
-        await refreshMicrophonePermissionState()
-        switch microphonePermissionState {
+        let state = await resolveMicrophonePermissionForRequest()
+        publishMicrophonePermissionState(state)
+        switch state {
         case .authorized:
             return
-        case .notDetermined:
-            let granted = await requestMicrophonePermission()
-            microphonePermissionState = granted ? .authorized : .denied
-            guard granted else {
-                throw MenuBarConfigurationError.microphoneAccessDenied
-            }
-        case .denied:
+        case .notDetermined, .denied:
             throw MenuBarConfigurationError.microphoneAccessDenied
         case .restricted:
             throw MenuBarConfigurationError.microphoneAccessRestricted
         }
     }
 
-    private func requestMicrophonePermission() async -> Bool {
-        if let microphonePermissionRequestTask {
-            return await microphonePermissionRequestTask.value
+    private func resolveMicrophonePermissionForRequest() async
+        -> MicrophonePermissionState {
+        if let microphonePermissionOperationTask {
+            return await microphonePermissionOperationTask.value
         }
 
         let provider = microphonePermissionProvider
-        let task = Task { await provider.requestAccess() }
-        microphonePermissionRequestTask = task
-        let granted = await task.value
-        microphonePermissionRequestTask = nil
-        return granted
+        let task = Task<MicrophonePermissionState, Never> {
+            let state = await provider.authorizationStatus()
+            guard state == .notDetermined else { return state }
+            return await provider.requestAccess() ? .authorized : .denied
+        }
+        microphonePermissionOperationTask = task
+        let state = await task.value
+        microphonePermissionOperationTask = nil
+        return state
+    }
+
+    private func publishMicrophonePermissionState(
+        _ state: MicrophonePermissionState
+    ) {
+        microphonePermissionStateRevision &+= 1
+        microphonePermissionState = state
     }
 
     private var selectedPhysicalInput: AudioDevice? {

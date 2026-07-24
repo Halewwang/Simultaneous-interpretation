@@ -386,42 +386,59 @@ private actor MicrophonePermissionStub: MicrophonePermissionProviding {
 private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
     private var state: MicrophonePermissionState
     private let requestResult: Bool
-    private var authorizationStatusGateOpen = false
+    private let heldAuthorizationStatusReadIndices: Set<Int>
     private var requestGateOpen = false
-    private var authorizationStatusReadCount = 0
-    private var twoStatusReadWaiters: [CheckedContinuation<Void, Never>] = []
-    private var authorizationStatusWaiters: [CheckedContinuation<Void, Never>] = []
-    private var firstRequestWaiters: [CheckedContinuation<Void, Never>] = []
+    private var heldAuthorizationStatusReadWaiters:
+        [Int: CheckedContinuation<Void, Never>] = [:]
+    private var authorizationStatusReadCountWaiters:
+        [Int: [CheckedContinuation<Void, Never>]] = [:]
+    private var requestCountWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var authorizationStatusReadCount = 0
     private(set) var requestCount = 0
 
     init(
         state: MicrophonePermissionState,
-        requestResult: Bool
+        requestResult: Bool,
+        heldAuthorizationStatusReadIndices: Set<Int> = [],
+        holdRequestAccess: Bool = true
     ) {
         self.state = state
         self.requestResult = requestResult
+        self.heldAuthorizationStatusReadIndices =
+            heldAuthorizationStatusReadIndices
+        self.requestGateOpen = !holdRequestAccess
     }
 
     func authorizationStatus() async -> MicrophonePermissionState {
+        let status = state
         authorizationStatusReadCount += 1
-        if authorizationStatusReadCount >= 2 {
-            let waiters = twoStatusReadWaiters
-            twoStatusReadWaiters.removeAll()
+        let readyCounts = authorizationStatusReadCountWaiters.keys.filter {
+            authorizationStatusReadCount >= $0
+        }
+        for count in readyCounts {
+            let waiters = authorizationStatusReadCountWaiters.removeValue(
+                forKey: count
+            ) ?? []
             waiters.forEach { $0.resume() }
         }
-        guard !authorizationStatusGateOpen else { return state }
-        await withCheckedContinuation { continuation in
-            authorizationStatusWaiters.append(continuation)
+        let readIndex = authorizationStatusReadCount
+        guard heldAuthorizationStatusReadIndices.contains(readIndex) else {
+            return status
         }
-        return state
+        await withCheckedContinuation { continuation in
+            heldAuthorizationStatusReadWaiters[readIndex] = continuation
+        }
+        return status
     }
 
     func requestAccess() async -> Bool {
         requestCount += 1
-        if requestCount == 1 {
-            let waiters = firstRequestWaiters
-            firstRequestWaiters.removeAll()
+        let readyCounts = requestCountWaiters.keys.filter {
+            requestCount >= $0
+        }
+        for count in readyCounts {
+            let waiters = requestCountWaiters.removeValue(forKey: count) ?? []
             waiters.forEach { $0.resume() }
         }
         guard !requestGateOpen else {
@@ -435,24 +452,23 @@ private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
         return requestResult
     }
 
-    func waitForTwoAuthorizationStatusReads() async {
-        guard authorizationStatusReadCount < 2 else { return }
+    func waitForAuthorizationStatusReadCount(_ count: Int) async {
+        guard authorizationStatusReadCount < count else { return }
         await withCheckedContinuation { continuation in
-            twoStatusReadWaiters.append(continuation)
+            authorizationStatusReadCountWaiters[count, default: []].append(
+                continuation
+            )
         }
     }
 
-    func releaseAuthorizationStatusReads() {
-        authorizationStatusGateOpen = true
-        let waiters = authorizationStatusWaiters
-        authorizationStatusWaiters.removeAll()
-        waiters.forEach { $0.resume() }
+    func releaseAuthorizationStatusRead(_ index: Int) {
+        heldAuthorizationStatusReadWaiters.removeValue(forKey: index)?.resume()
     }
 
-    func waitForFirstRequest() async {
-        guard requestCount == 0 else { return }
+    func waitForRequestCount(_ count: Int) async {
+        guard requestCount < count else { return }
         await withCheckedContinuation { continuation in
-            firstRequestWaiters.append(continuation)
+            requestCountWaiters[count, default: []].append(continuation)
         }
     }
 
@@ -996,7 +1012,8 @@ func onboardingPermissionActionRequestsOnceAndPublishesResult() async {
 func concurrentOnboardingPermissionActionsShareOneProviderRequest() async {
     let permission = BlockingMicrophonePermissionStub(
         state: .notDetermined,
-        requestResult: true
+        requestResult: true,
+        heldAuthorizationStatusReadIndices: [1]
     )
     let model = makeTranslationMenuModel(
         microphonePermissionProvider: permission
@@ -1004,16 +1021,15 @@ func concurrentOnboardingPermissionActionsShareOneProviderRequest() async {
 
     async let first: Void = model.requestMicrophonePermissionForOnboarding()
     async let second: Void = model.requestMicrophonePermissionForOnboarding()
-    await permission.waitForTwoAuthorizationStatusReads()
-    await permission.releaseAuthorizationStatusReads()
-    await permission.waitForFirstRequest()
-    for _ in 0..<10 { await Task.yield() }
-
-    #expect(await permission.requestCount == 1)
+    await permission.waitForAuthorizationStatusReadCount(1)
+    await permission.releaseAuthorizationStatusRead(1)
+    await permission.waitForRequestCount(1)
     await permission.completeRequests()
     await first
     await second
 
+    #expect(await permission.authorizationStatusReadCount == 1)
+    #expect(await permission.requestCount == 1)
     #expect(model.microphonePermissionState == .authorized)
 }
 
@@ -1021,7 +1037,8 @@ func concurrentOnboardingPermissionActionsShareOneProviderRequest() async {
 func onboardingAndStartShareOneInFlightPermissionRequest() async {
     let permission = BlockingMicrophonePermissionStub(
         state: .notDetermined,
-        requestResult: true
+        requestResult: true,
+        heldAuthorizationStatusReadIndices: [1]
     )
     let coordinator = TranslationCoordinatorStub()
     let model = makeTranslationMenuModel(
@@ -1038,18 +1055,43 @@ func onboardingAndStartShareOneInFlightPermissionRequest() async {
     async let onboarding: Void =
         model.requestMicrophonePermissionForOnboarding()
     async let start: Void = model.start()
-    await permission.waitForTwoAuthorizationStatusReads()
-    await permission.releaseAuthorizationStatusReads()
-    await permission.waitForFirstRequest()
-    for _ in 0..<10 { await Task.yield() }
-
-    #expect(await permission.requestCount == 1)
+    await permission.waitForAuthorizationStatusReadCount(1)
+    await permission.releaseAuthorizationStatusRead(1)
+    await permission.waitForRequestCount(1)
     await permission.completeRequests()
     await onboarding
     await start
 
+    #expect(await permission.authorizationStatusReadCount == 1)
+    #expect(await permission.requestCount == 1)
     #expect(model.microphonePermissionState == .authorized)
     #expect(await coordinator.configurations.count == 1)
+}
+
+@Test @MainActor
+func stalePermissionRefreshCannotOverwriteCompletedPermissionRequest() async {
+    let permission = BlockingMicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true,
+        heldAuthorizationStatusReadIndices: [1]
+    )
+    let model = makeTranslationMenuModel(
+        microphonePermissionProvider: permission
+    )
+
+    async let staleRefresh: Void = model.refreshMicrophonePermissionState()
+    await permission.waitForAuthorizationStatusReadCount(1)
+    async let request: Void = model.requestMicrophonePermissionForOnboarding()
+    await permission.waitForRequestCount(1)
+    await permission.completeRequests()
+    await request
+
+    #expect(model.microphonePermissionState == .authorized)
+    await permission.releaseAuthorizationStatusRead(1)
+    await staleRefresh
+
+    #expect(await permission.requestCount == 1)
+    #expect(model.microphonePermissionState == .authorized)
 }
 
 @Test @MainActor
