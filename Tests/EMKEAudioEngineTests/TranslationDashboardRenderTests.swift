@@ -6,11 +6,14 @@ import Testing
 
 @Test @MainActor
 func captureRunningDashboardForVisualReview() throws {
+    let copy = AppCopy(language: .zhHans)
     let bitmap = try dashboardBitmap(
         value: DashboardFixture.running.makePresentation(
             inboundLevel: 0.42,
-            outboundLevel: 0.68
+            outboundLevel: 0.68,
+            copy: copy
         ),
+        copy: copy,
         languagesLocked: true
     )
 
@@ -27,11 +30,14 @@ func captureRunningDashboardForVisualReview() throws {
 
 @Test @MainActor
 func captureReadyDashboardForVisualReview() throws {
+    let copy = AppCopy(language: .zhHans)
     let bitmap = try dashboardBitmap(
         value: DashboardFixture.ready.makePresentation(
             inboundLevel: 0,
-            outboundLevel: 0
+            outboundLevel: 0,
+            copy: copy
         ),
+        copy: copy,
         languagesLocked: false
     )
 
@@ -48,11 +54,14 @@ func captureReadyDashboardForVisualReview() throws {
 
 @Test @MainActor
 func readyLanguageControlsRenderWithoutFallbackPlaceholders() throws {
+    let copy = AppCopy(language: .zhHans)
     let bitmap = try dashboardBitmap(
         value: DashboardFixture.ready.makePresentation(
             inboundLevel: 0,
-            outboundLevel: 0
+            outboundLevel: 0,
+            copy: copy
         ),
+        copy: copy,
         languagesLocked: false
     )
 
@@ -70,13 +79,32 @@ func readyLanguageControlsRenderWithoutFallbackPlaceholders() throws {
     #expect(saturatedPlaceholderPixels == 0)
 }
 
+@Test @MainActor
+func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
+    let copy = AppCopy(language: .english)
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.ready.makePresentation(
+            inboundLevel: 0,
+            outboundLevel: 0,
+            copy: copy
+        ),
+        copy: copy,
+        languagesLocked: false
+    )
+
+    #expect(bitmap.pixelsWide == 840)
+    #expect(bitmap.pixelsHigh == 1240)
+}
+
 @MainActor
 private func dashboardBitmap(
     value: TranslationDashboardPresentation,
+    copy: AppCopy,
     languagesLocked: Bool
 ) throws -> NSBitmapImageRep {
     let view = TranslationDashboardContent(
         value: value,
+        copy: copy,
         motherLanguage: .constant(.chinese),
         meetingOutputLanguage: .constant(.german),
         languagesLocked: languagesLocked,

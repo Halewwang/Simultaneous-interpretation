@@ -32,7 +32,7 @@ func dashboardIconsAndStatusExposeAccessibleCopy() throws {
     let dashboard = try sourceFile(named: "TranslationDashboardView.swift")
     let channel = try sourceFile(named: "TranslationChannelRow.swift")
 
-    #expect(dashboard.contains(".accessibilityLabel(\"打开设置\")"))
+    #expect(dashboard.contains(".accessibilityLabel(copy.text(.openSettings))"))
     #expect(dashboard.contains(".accessibilityLabel(value.privacyText)"))
     #expect(
         dashboard.contains(
@@ -41,13 +41,11 @@ func dashboardIconsAndStatusExposeAccessibleCopy() throws {
     )
     #expect(
         dashboard.contains(
-            #".accessibilityLabel("翻译状态：\(value.primaryStatus)")"#
+            ".accessibilityLabel(copy.translationStatus(value.primaryStatus))"
         )
     )
     #expect(channel.contains(".accessibilityHidden(true)"))
-    #expect(
-        channel.contains(#""\(title)状态：\(presentation.status)""#)
-    )
+    #expect(channel.contains("copy.channelStatus("))
 }
 
 @Test
@@ -55,12 +53,8 @@ func settingsShowsVisibleLockedState() throws {
     let source = try sourceFile(named: "TranslationSettingsView.swift")
 
     #expect(source.contains("if model.selectionsLocked"))
-    #expect(
-        source.contains(
-            "Label(\"翻译运行期间设置已锁定\", systemImage: \"lock.fill\")"
-        )
-    )
-    #expect(source.contains(".accessibilityLabel(\"返回翻译控制台\")"))
+    #expect(source.contains("copy.text(.translationSettingsLocked)"))
+    #expect(source.contains(".accessibilityLabel(copy.text(.backToDashboard))"))
 }
 
 @Test
@@ -70,8 +64,31 @@ func settingsAudioControlsMatchLanguageMenusAndExposeLocalDiagnostics() throws {
     #expect(source.contains("AudioDeviceMenuButton("))
     #expect(!source.contains("Picker("))
     #expect(source.contains("LiveWaveformView("))
-    #expect(source.contains("测试麦克风"))
-    #expect(source.contains("播放测试音"))
+    #expect(source.contains("copy.text(.testMicrophone)"))
+    #expect(source.contains("copy.text(.playTestTone)"))
+    #expect(source.contains("succeeded: model.audioInputDiagnosticSucceeded"))
+    #expect(source.contains("succeeded: model.audioOutputDiagnosticSucceeded"))
+}
+
+@Test
+func settingsUsesLocalizedInterfaceMenuAndStyledQuitButton() throws {
+    let settings = try sourceFile(named: "TranslationSettingsView.swift")
+
+    #expect(settings.contains("InterfaceLanguageMenuButton("))
+    #expect(settings.contains("Label(copy.text(.quitEMKE), systemImage: \"power\")"))
+    #expect(settings.contains(".frame(maxWidth: .infinity, minHeight: 40)"))
+    #expect(!settings.contains("Button(\"退出 EMKE\")"))
+}
+
+@Test
+func dashboardUsesLocalizedCopyInsteadOfChineseViewLiterals() throws {
+    let dashboard = try sourceFile(named: "TranslationDashboardView.swift")
+
+    #expect(dashboard.contains("copy.text(.openSettings)"))
+    #expect(dashboard.contains("copy.languageName(language)"))
+    #expect(!dashboard.contains(".accessibilityLabel(\"打开设置\")"))
+    #expect(!dashboard.contains("Text(\"我的母语\")"))
+    #expect(!dashboard.contains("Text(\"会议输出\")"))
 }
 
 @Test
@@ -110,7 +127,7 @@ func lockedLanguagesRemainLegibleWithoutAnEnabledControlStyle() throws {
 
     #expect(source.contains("if languagesLocked"))
     #expect(source.contains("lockedLanguageValue"))
-    #expect(source.contains("翻译运行期间不可修改"))
+    #expect(source.contains("copy.text(.languageLockedHint)"))
 }
 
 @Test

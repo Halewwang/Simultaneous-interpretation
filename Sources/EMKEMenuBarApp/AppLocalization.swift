@@ -42,6 +42,35 @@ enum AppCopyKey: CaseIterable, Sendable {
     case selected
     case chooseDevice
     case chooseTranslationLanguage
+    case provider
+    case enterNewAPIKey
+    case modelID
+    case translationModel
+    case testing
+    case testConnection
+    case audioDevices
+    case physicalMicrophone
+    case physicalOutput
+    case detectingDevices
+    case refreshDevices
+    case localAudioDiagnostics
+    case localAudioOnly
+    case stopTest
+    case testMicrophone
+    case playing
+    case playTestTone
+    case authentication
+    case protocolHandshake
+    case targetLanguage
+    case dualChannel
+    case sourceTranscript
+    case audioOutput
+    case secureClose
+    case passed
+    case needsAudioTest
+    case incompatible
+    case chooseAudioDevice
+    case chooseInterfaceLanguage
     case myLanguage
     case meetingOutput
     case heardByMe
@@ -139,6 +168,70 @@ struct AppCopy: Equatable, Sendable {
             localized(zhHans: "请选择", english: "Choose")
         case .chooseTranslationLanguage:
             localized(zhHans: "选择翻译语言", english: "Choose translation language")
+        case .provider:
+            localized(zhHans: "服务商", english: "Provider")
+        case .enterNewAPIKey:
+            localized(zhHans: "输入新的 API Key", english: "Enter a new API key")
+        case .modelID:
+            localized(zhHans: "Model ID", english: "Model ID")
+        case .translationModel:
+            localized(zhHans: "翻译模型", english: "Translation model")
+        case .testing:
+            localized(zhHans: "测试中…", english: "Testing…")
+        case .testConnection:
+            localized(zhHans: "测试连接", english: "Test connection")
+        case .audioDevices:
+            localized(zhHans: "音频设备", english: "Audio devices")
+        case .physicalMicrophone:
+            localized(zhHans: "真实麦克风", english: "Physical microphone")
+        case .physicalOutput:
+            localized(
+                zhHans: "真实耳机 / 扬声器",
+                english: "Physical headphones / speakers"
+            )
+        case .detectingDevices:
+            localized(zhHans: "正在检测设备…", english: "Detecting devices…")
+        case .refreshDevices:
+            localized(zhHans: "刷新设备", english: "Refresh devices")
+        case .localAudioDiagnostics:
+            localized(zhHans: "本地音频诊断", english: "Local audio diagnostics")
+        case .localAudioOnly:
+            localized(
+                zhHans: "仅检查本机音频，不连接翻译服务",
+                english: "Checks local audio only; does not connect to the translation service"
+            )
+        case .stopTest:
+            localized(zhHans: "停止测试", english: "Stop test")
+        case .testMicrophone:
+            localized(zhHans: "测试麦克风", english: "Test microphone")
+        case .playing:
+            localized(zhHans: "正在播放…", english: "Playing…")
+        case .playTestTone:
+            localized(zhHans: "播放测试音", english: "Play test tone")
+        case .authentication:
+            localized(zhHans: "认证", english: "Authentication")
+        case .protocolHandshake:
+            localized(zhHans: "协议握手", english: "Protocol handshake")
+        case .targetLanguage:
+            localized(zhHans: "目标语言", english: "Target language")
+        case .dualChannel:
+            localized(zhHans: "双通道", english: "Dual channel")
+        case .sourceTranscript:
+            localized(zhHans: "源语转写", english: "Source transcript")
+        case .audioOutput:
+            localized(zhHans: "音频输出", english: "Audio output")
+        case .secureClose:
+            localized(zhHans: "安全关闭", english: "Secure close")
+        case .passed:
+            localized(zhHans: "通过", english: "Passed")
+        case .needsAudioTest:
+            localized(zhHans: "需要音频测试", english: "Audio test required")
+        case .incompatible:
+            localized(zhHans: "不兼容", english: "Incompatible")
+        case .chooseAudioDevice:
+            localized(zhHans: "选择音频设备", english: "Choose audio device")
+        case .chooseInterfaceLanguage:
+            localized(zhHans: "选择界面语言", english: "Choose interface language")
         case .myLanguage:
             localized(zhHans: "我的母语", english: "My language")
         case .meetingOutput:
@@ -394,6 +487,24 @@ struct AppCopy: Equatable, Sendable {
         to target: SupportedLanguage
     ) -> String {
         "\(languageName(source)) → \(languageName(target))"
+    }
+
+    func translationStatus(_ status: String) -> String {
+        switch language {
+        case .zhHans:
+            "翻译状态：\(status)"
+        case .english:
+            "Translation status: \(status)"
+        }
+    }
+
+    func channelStatus(title: String, status: String) -> String {
+        switch language {
+        case .zhHans:
+            "\(title)状态：\(status)"
+        case .english:
+            "\(title) status: \(status)"
+        }
     }
 
     private func localized(zhHans: String, english: String) -> String {

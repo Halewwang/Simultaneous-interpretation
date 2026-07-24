@@ -151,6 +151,7 @@ struct TranslationChannelPresentation: Equatable {
 }
 
 struct TranslationChannelRow: View {
+    let copy: AppCopy
     let title: String
     let direction: String
     let level: Double
@@ -201,7 +202,10 @@ struct TranslationChannelRow: View {
             .foregroundStyle(presentation.statusColor)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
-                "\(title)状态：\(presentation.status)"
+                copy.channelStatus(
+                    title: title,
+                    status: presentation.status
+                )
             )
             .offset(x: EMKEChannelMetrics.statusOffsetX)
             LiveWaveformView(

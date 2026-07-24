@@ -5,9 +5,12 @@ struct TranslationDashboardView: View {
     @ObservedObject var model: MenuBarModel
     @State private var now = Date()
 
+    private var copy: AppCopy { model.copy }
+
     var body: some View {
         TranslationDashboardContent(
             value: model.dashboardPresentation(at: now),
+            copy: copy,
             motherLanguage: $model.motherLanguage,
             meetingOutputLanguage: $model.meetingOutputLanguage,
             languagesLocked: model.selectionsLocked,
@@ -52,6 +55,7 @@ struct TranslationDashboardView: View {
 
 struct TranslationDashboardContent: View {
     let value: TranslationDashboardPresentation
+    let copy: AppCopy
     @Binding var motherLanguage: SupportedLanguage
     @Binding var meetingOutputLanguage: SupportedLanguage
     let languagesLocked: Bool
@@ -81,7 +85,7 @@ struct TranslationDashboardContent: View {
             .offset(x: -5)
             .offset(y: EMKEDashboardMetrics.statusOffsetY)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("翻译状态：\(value.primaryStatus)")
+            .accessibilityLabel(copy.translationStatus(value.primaryStatus))
             if let errorText = value.errorText {
                 Text(errorText)
                     .font(.system(size: 11))
@@ -133,7 +137,7 @@ struct TranslationDashboardContent: View {
                     .offset(x: EMKEDashboardMetrics.gearOffsetX)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("打开设置")
+            .accessibilityLabel(copy.text(.openSettings))
         }
         .offset(y: EMKEDashboardMetrics.headerOffsetY)
     }
@@ -141,7 +145,7 @@ struct TranslationDashboardContent: View {
     private var languageDirection: some View {
         HStack(alignment: .bottom, spacing: 12) {
             languagePicker(
-                title: "我的母语",
+                title: copy.text(.myLanguage),
                 selection: $motherLanguage,
                 leadingInset: EMKEDashboardMetrics.inputLanguageInset
             )
@@ -156,7 +160,7 @@ struct TranslationDashboardContent: View {
                 .padding(.bottom, 8)
                 .accessibilityHidden(true)
             languagePicker(
-                title: "会议输出",
+                title: copy.text(.meetingOutput),
                 selection: $meetingOutputLanguage,
                 leadingInset: EMKEDashboardMetrics.outputLanguageInset
             )
@@ -180,6 +184,7 @@ struct TranslationDashboardContent: View {
                 )
             } else {
                 LanguageMenuButton(
+                    copy: copy,
                     title: title,
                     selection: selection
                 )
@@ -193,17 +198,18 @@ struct TranslationDashboardContent: View {
         title: String,
         language: SupportedLanguage
     ) -> some View {
-        LanguageValueLabel(language: language)
+        LanguageValueLabel(copy: copy, language: language)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
-            .accessibilityValue(language.displayName)
-            .accessibilityHint("翻译运行期间不可修改")
+            .accessibilityValue(copy.languageName(language))
+            .accessibilityHint(copy.text(.languageLockedHint))
     }
 
     private var channelRows: some View {
         VStack(spacing: 0) {
             TranslationChannelRow(
-                title: "我听到",
+                copy: copy,
+                title: copy.text(.heardByMe),
                 direction: value.inboundDirection,
                 level: value.inboundLevel,
                 presentation: value.inbound,
@@ -211,7 +217,8 @@ struct TranslationDashboardContent: View {
             )
             EMKEDashboardSeparator()
             TranslationChannelRow(
-                title: "对方听到",
+                copy: copy,
+                title: copy.text(.heardByOther),
                 direction: value.outboundDirection,
                 level: value.outboundLevel,
                 presentation: value.outbound,
@@ -263,11 +270,12 @@ struct TranslationDashboardContent: View {
 }
 
 private struct LanguageValueLabel: View {
+    let copy: AppCopy
     let language: SupportedLanguage
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(language.displayName)
+            Text(copy.languageName(language))
             Image(systemName: "chevron.down")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
@@ -279,6 +287,7 @@ private struct LanguageValueLabel: View {
 }
 
 private struct LanguageMenuButton: View {
+    let copy: AppCopy
     let title: String
     @Binding var selection: SupportedLanguage
     @State private var isPresented = false
@@ -287,7 +296,7 @@ private struct LanguageMenuButton: View {
         Button {
             isPresented.toggle()
         } label: {
-            LanguageValueLabel(language: selection)
+            LanguageValueLabel(copy: copy, language: selection)
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
@@ -305,7 +314,7 @@ private struct LanguageMenuButton: View {
                         isPresented = false
                     } label: {
                         HStack(spacing: 10) {
-                            Text(language.displayName)
+                            Text(copy.languageName(language))
                             Spacer(minLength: 16)
                             if selection == language {
                                 Image(systemName: "checkmark")
@@ -320,15 +329,17 @@ private struct LanguageMenuButton: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(language.displayName)
-                    .accessibilityValue(selection == language ? "已选择" : "")
+                    .accessibilityLabel(copy.languageName(language))
+                    .accessibilityValue(
+                        selection == language ? copy.text(.selected) : ""
+                    )
                 }
             }
             .padding(4)
             .frame(width: 148)
         }
         .accessibilityLabel(title)
-        .accessibilityValue(selection.displayName)
-        .accessibilityHint("选择翻译语言")
+        .accessibilityValue(copy.languageName(selection))
+        .accessibilityHint(copy.text(.chooseTranslationLanguage))
     }
 }

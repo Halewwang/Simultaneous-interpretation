@@ -6,25 +6,30 @@ import SwiftUI
 struct TranslationSettingsView: View {
     @ObservedObject var model: MenuBarModel
 
+    private var copy: AppCopy { model.copy }
+
     var body: some View {
         VStack(spacing: 0) {
             settingsHeader
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    interfaceSection
+                    Divider().opacity(EMKEVisualStyle.dividerOpacity)
                     if model.selectionsLocked {
-                        Label("翻译运行期间设置已锁定", systemImage: "lock.fill")
+                        Label(
+                            copy.text(.translationSettingsLocked),
+                            systemImage: "lock.fill"
+                        )
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(EMKEVisualStyle.secondaryText)
                     }
                     providerSection
                     Divider().opacity(EMKEVisualStyle.dividerOpacity)
                     audioSection
-                    Button("退出 EMKE") {
+                    ExitApplicationButton(copy: copy) {
                         NSApplication.shared.terminate(nil)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(EMKEVisualStyle.secondaryText)
                 }
                 .padding(EMKEVisualStyle.horizontalPadding)
             }
@@ -40,9 +45,9 @@ struct TranslationSettingsView: View {
                     .frame(width: 32, height: 32)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("返回翻译控制台")
+            .accessibilityLabel(copy.text(.backToDashboard))
 
-            Text("设置")
+            Text(copy.text(.settings))
                 .font(.system(size: 18, weight: .semibold))
             Spacer()
         }
@@ -50,12 +55,31 @@ struct TranslationSettingsView: View {
         .padding(.vertical, 14)
     }
 
+    private var interfaceSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionTitle(
+                copy.text(.interface),
+                systemImage: "character.bubble"
+            )
+
+            settingField(copy.text(.interfaceLanguage)) {
+                InterfaceLanguageMenuButton(
+                    copy: copy,
+                    selection: $model.interfaceLanguage
+                )
+            }
+        }
+    }
+
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionTitle("服务商", systemImage: "network")
+            sectionTitle(copy.text(.provider), systemImage: "network")
 
             settingField("API Key") {
-                SecureField("输入新的 API Key", text: $model.apiKeyDraft)
+                SecureField(
+                    copy.text(.enterNewAPIKey),
+                    text: $model.apiKeyDraft
+                )
                     .textFieldStyle(.roundedBorder)
                     .disabled(model.selectionsLocked)
             }
@@ -69,13 +93,20 @@ struct TranslationSettingsView: View {
                     .disabled(model.selectionsLocked)
             }
 
-            settingField("Model ID") {
-                TextField("翻译模型", text: $model.modelID)
+            settingField(copy.text(.modelID)) {
+                TextField(
+                    copy.text(.translationModel),
+                    text: $model.modelID
+                )
                     .textFieldStyle(.roundedBorder)
                     .disabled(model.selectionsLocked)
             }
 
-            Button(model.isTestingConnection ? "测试中…" : "测试连接") {
+            Button(
+                model.isTestingConnection
+                    ? copy.text(.testing)
+                    : copy.text(.testConnection)
+            ) {
                 Task { await model.testConnection() }
             }
             .disabled(!model.canTestConnection)
@@ -101,27 +132,33 @@ struct TranslationSettingsView: View {
 
     private var audioSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionTitle("音频设备", systemImage: "waveform")
+            sectionTitle(copy.text(.audioDevices), systemImage: "waveform")
 
-            settingField("真实麦克风") {
+            settingField(copy.text(.physicalMicrophone)) {
                 AudioDeviceMenuButton(
-                    title: "真实麦克风",
+                    copy: copy,
+                    title: copy.text(.physicalMicrophone),
                     devices: model.physicalInputs,
                     selection: $model.selectedInputUID
                 )
                 .disabled(model.audioDeviceControlsLocked)
             }
 
-            settingField("真实耳机 / 扬声器") {
+            settingField(copy.text(.physicalOutput)) {
                 AudioDeviceMenuButton(
-                    title: "真实耳机 / 扬声器",
+                    copy: copy,
+                    title: copy.text(.physicalOutput),
                     devices: model.physicalOutputs,
                     selection: $model.selectedOutputUID
                 )
                 .disabled(model.audioDeviceControlsLocked)
             }
 
-            Button(model.isReloadingDevices ? "正在检测设备…" : "刷新设备") {
+            Button(
+                model.isReloadingDevices
+                    ? copy.text(.detectingDevices)
+                    : copy.text(.refreshDevices)
+            ) {
                 Task { await model.reloadDevicesAsync() }
             }
             .disabled(model.audioDeviceControlsLocked)
@@ -144,16 +181,18 @@ struct TranslationSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             VStack(alignment: .leading, spacing: 4) {
-                Text("本地音频诊断")
+                Text(copy.text(.localAudioDiagnostics))
                     .font(.system(size: 13, weight: .semibold))
-                Text("仅检查本机音频，不连接翻译服务")
+                Text(copy.text(.localAudioOnly))
                     .font(.system(size: 11))
                     .foregroundStyle(EMKEVisualStyle.secondaryText)
             }
 
             HStack(spacing: 12) {
                 Button(
-                    model.isTestingAudioInput ? "停止测试" : "测试麦克风"
+                    model.isTestingAudioInput
+                        ? copy.text(.stopTest)
+                        : copy.text(.testMicrophone)
                 ) {
                     Task {
                         if model.isTestingAudioInput {
@@ -175,20 +214,26 @@ struct TranslationSettingsView: View {
                 .frame(width: WaveformBarLayout.compactRequiredWidth)
 
                 Spacer(minLength: 0)
-                diagnosticStatus(model.audioInputDiagnosticText)
+                diagnosticStatus(
+                    model.audioInputDiagnosticText,
+                    succeeded: model.audioInputDiagnosticSucceeded
+                )
             }
 
             HStack(spacing: 12) {
                 Button(
                     model.isPlayingAudioOutputTest
-                        ? "正在播放…"
-                        : "播放测试音"
+                        ? copy.text(.playing)
+                        : copy.text(.playTestTone)
                 ) {
                     Task { await model.playAudioOutputTest() }
                 }
                 .disabled(!model.canTestAudioOutput)
                 Spacer()
-                diagnosticStatus(model.audioOutputDiagnosticText)
+                diagnosticStatus(
+                    model.audioOutputDiagnosticText,
+                    succeeded: model.audioOutputDiagnosticSucceeded
+                )
             }
 
             if let error = model.audioDiagnosticError {
@@ -197,10 +242,13 @@ struct TranslationSettingsView: View {
         }
     }
 
-    private func diagnosticStatus(_ text: String) -> some View {
+    private func diagnosticStatus(
+        _ text: String,
+        succeeded: Bool
+    ) -> some View {
         Label(
             text,
-            systemImage: text.contains("检测到") || text.contains("已播放")
+            systemImage: succeeded
                 ? "checkmark.circle.fill"
                 : "circle.dotted"
         )
@@ -232,13 +280,34 @@ struct TranslationSettingsView: View {
         _ report: TranslationCompatibilityReport
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            compatibilityRow("认证", status: report.authentication)
-            compatibilityRow("协议握手", status: report.handshake)
-            compatibilityRow("目标语言", status: report.targetLanguage)
-            compatibilityRow("双通道", status: report.dualSession)
-            compatibilityRow("源语转写", status: report.sourceTranscript)
-            compatibilityRow("音频输出", status: report.audioOutput)
-            compatibilityRow("安全关闭", status: report.gracefulClose)
+            compatibilityRow(
+                copy.text(.authentication),
+                status: report.authentication
+            )
+            compatibilityRow(
+                copy.text(.protocolHandshake),
+                status: report.handshake
+            )
+            compatibilityRow(
+                copy.text(.targetLanguage),
+                status: report.targetLanguage
+            )
+            compatibilityRow(
+                copy.text(.dualChannel),
+                status: report.dualSession
+            )
+            compatibilityRow(
+                copy.text(.sourceTranscript),
+                status: report.sourceTranscript
+            )
+            compatibilityRow(
+                copy.text(.audioOutput),
+                status: report.audioOutput
+            )
+            compatibilityRow(
+                copy.text(.secureClose),
+                status: report.gracefulClose
+            )
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,13 +347,25 @@ struct TranslationSettingsView: View {
     ) -> (image: String, text: String, color: Color) {
         switch status {
         case .notRun:
-            ("minus.circle", "未测试", EMKEVisualStyle.secondaryText)
+            (
+                "minus.circle",
+                copy.text(.notTested),
+                EMKEVisualStyle.secondaryText
+            )
         case .passed:
-            ("checkmark.circle.fill", "通过", .green)
+            ("checkmark.circle.fill", copy.text(.passed), .green)
         case .requiresInteractiveAudio:
-            ("waveform.circle", "需要音频测试", EMKEVisualStyle.warning)
+            (
+                "waveform.circle",
+                copy.text(.needsAudioTest),
+                EMKEVisualStyle.warning
+            )
         case .failed:
-            ("xmark.circle.fill", "不兼容", EMKEVisualStyle.failure)
+            (
+                "xmark.circle.fill",
+                copy.text(.incompatible),
+                EMKEVisualStyle.failure
+            )
         }
     }
 
@@ -296,14 +377,142 @@ struct TranslationSettingsView: View {
     }
 }
 
+private struct InterfaceLanguageMenuButton: View {
+    let copy: AppCopy
+    @Binding var selection: AppInterfaceLanguage
+    @State private var isPresented = false
+
+    private var selectedName: String {
+        optionName(for: selection)
+    }
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            valueLabel
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            menuContent
+        }
+        .accessibilityLabel(copy.text(.interfaceLanguage))
+        .accessibilityValue(selectedName)
+        .accessibilityHint(copy.text(.chooseInterfaceLanguage))
+    }
+
+    private var valueLabel: some View {
+        HStack(spacing: 8) {
+            Text(selectedName)
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .accessibilityHidden(true)
+        }
+        .font(.system(size: 14, weight: .medium))
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(EMKEVisualStyle.separator)
+                .frame(height: EMKEVisualStyle.separatorThickness)
+        }
+    }
+
+    private var menuContent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(copy.text(.interfaceLanguage))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 3)
+            ForEach(AppInterfaceLanguage.allCases, id: \.rawValue) {
+                language in
+                optionButton(language)
+            }
+        }
+        .padding(4)
+        .frame(width: 190)
+    }
+
+    private func optionButton(
+        _ language: AppInterfaceLanguage
+    ) -> some View {
+        let name = optionName(for: language)
+        return Button {
+            selection = language
+            isPresented = false
+        } label: {
+            HStack(spacing: 10) {
+                Text(name)
+                Spacer(minLength: 16)
+                if selection == language {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(.system(size: 14, weight: .medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name)
+        .accessibilityValue(
+            selection == language ? copy.text(.selected) : ""
+        )
+    }
+
+    private func optionName(
+        for language: AppInterfaceLanguage
+    ) -> String {
+        switch language {
+        case .system:
+            copy.text(.followSystem)
+        case .zhHans:
+            "中文"
+        case .english:
+            "English"
+        }
+    }
+}
+
+private struct ExitApplicationButton: View {
+    let copy: AppCopy
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(copy.text(.quitEMKE), systemImage: "power")
+                .font(.system(size: 13, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .background(RoundedRectangle(cornerRadius: 10).fill(isHovered ? EMKEVisualStyle.surfaceBackground.opacity(0.82) : EMKEVisualStyle.surfaceBackground))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(EMKEVisualStyle.separator, lineWidth: 1))
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(copy.text(.quitEMKE))
+    }
+}
+
 private struct AudioDeviceMenuButton: View {
+    let copy: AppCopy
     let title: String
     let devices: [AudioDevice]
     @Binding var selection: String?
     @State private var isPresented = false
 
     private var selectedName: String {
-        devices.first { $0.uid == selection }?.name ?? "请选择"
+        devices.first { $0.uid == selection }?.name
+            ?? copy.text(.chooseDevice)
     }
 
     var body: some View {
@@ -319,7 +528,7 @@ private struct AudioDeviceMenuButton: View {
         }
         .accessibilityLabel(title)
         .accessibilityValue(selectedName)
-        .accessibilityHint("选择音频设备")
+        .accessibilityHint(copy.text(.chooseAudioDevice))
     }
 
     private var valueLabel: some View {
@@ -381,6 +590,8 @@ private struct AudioDeviceMenuButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(device.name)
-        .accessibilityValue(selection == device.uid ? "已选择" : "")
+        .accessibilityValue(
+            selection == device.uid ? copy.text(.selected) : ""
+        )
     }
 }
