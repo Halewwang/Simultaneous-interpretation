@@ -132,12 +132,12 @@ public actor TranslationSession {
             do {
                 try await socket.send(TranslationClientEvent.close.encoded())
             } catch {
-                if connectionID != id {
-                    if let terminalError { throw terminalError }
-                    return
+                if finishConnection(connectionID: id, error: error) {
+                    await socket.cancel()
+                    throw error
                 }
-                finishConnection(connectionID: id, error: error)
-                throw error
+                if let terminalError { throw terminalError }
+                return
             }
         }
 
@@ -163,8 +163,9 @@ public actor TranslationSession {
                 guard connectionID == id else { return }
                 emit(event)
                 if case .closed = event {
-                    finishConnection(connectionID: id, error: nil)
-                    await socket.cancel()
+                    if finishConnection(connectionID: id, error: nil) {
+                        await socket.cancel()
+                    }
                     return
                 }
                 if case .serverError(let code, let message) = event {
@@ -172,14 +173,16 @@ public actor TranslationSession {
                         code: code,
                         message: message
                     )
-                    await socket.cancel()
-                    finishConnection(connectionID: id, error: error)
+                    if finishConnection(connectionID: id, error: error) {
+                        await socket.cancel()
+                    }
                     return
                 }
             } catch {
                 guard connectionID == id else { return }
-                await socket.cancel()
-                finishConnection(connectionID: id, error: error)
+                if finishConnection(connectionID: id, error: error) {
+                    await socket.cancel()
+                }
                 return
             }
         }
@@ -190,8 +193,9 @@ public actor TranslationSession {
         socket: any TranslationSocket
     ) async {
         guard connectionID == id, isClosing else { return }
-        finishConnection(connectionID: id, error: nil)
-        await socket.cancel()
+        if finishConnection(connectionID: id, error: nil) {
+            await socket.cancel()
+        }
     }
 
     private func emit(_ event: TranslationServerEvent) {
@@ -207,11 +211,12 @@ public actor TranslationSession {
         }
     }
 
+    @discardableResult
     private func finishConnection(
         connectionID id: UUID?,
         error: (any Error)?
-    ) {
-        guard connectionID == id else { return }
+    ) -> Bool {
+        guard connectionID == id else { return false }
         closeDeadlineTask?.cancel()
         closeDeadlineTask = nil
         terminalError = error
@@ -240,6 +245,8 @@ public actor TranslationSession {
                 waiter.resume()
             }
         }
+
+        return true
     }
 
     private func resetConnectionState() {

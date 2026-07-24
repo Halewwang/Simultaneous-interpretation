@@ -9,25 +9,29 @@ private actor FakeSocket: TranslationSocket {
     private(set) var cancellationCount = 0
     private(set) var receivedCount = 0
     private var incoming: [Data]
+    private var receiveErrors: [TranslationSocketError] = []
     private var receiveWaiters: [CheckedContinuation<Data, any Error>] = []
     private var closeSendWaiter: CheckedContinuation<Void, Never>?
     private var closeSendStarted = false
     private var closeSendStartWaiter: CheckedContinuation<Void, Never>?
     private var cancellationStarted = false
     private var cancellationStartWaiter: CheckedContinuation<Void, Never>?
-    private var cancellationFinishWaiter: CheckedContinuation<Void, Never>?
+    private var cancellationFinishWaiters: [CheckedContinuation<Void, Never>] = []
     private let acknowledgesClose: Bool
+    private let closeSendError: TranslationSocketError?
     private let blocksCloseSend: Bool
     private let waitsForCancellationToFinish: Bool
 
     init(
         incoming: [Data] = [],
         acknowledgesClose: Bool = true,
+        closeSendError: TranslationSocketError? = nil,
         blocksCloseSend: Bool = false,
         waitsForCancellationToFinish: Bool = false
     ) {
         self.incoming = incoming
         self.acknowledgesClose = acknowledgesClose
+        self.closeSendError = closeSendError
         self.blocksCloseSend = blocksCloseSend
         self.waitsForCancellationToFinish = waitsForCancellationToFinish
     }
@@ -36,6 +40,9 @@ private actor FakeSocket: TranslationSocket {
         sent.append(data)
         let isClose = String(decoding: data, as: UTF8.self)
             .contains("session.close")
+        if isClose, let closeSendError {
+            throw closeSendError
+        }
         if acknowledgesClose, isClose {
             enqueue(Data(#"{"type":"session.closed"}"#.utf8))
         }
@@ -52,6 +59,9 @@ private actor FakeSocket: TranslationSocket {
             receivedCount += 1
             return incoming.removeFirst()
         }
+        if !receiveErrors.isEmpty {
+            throw receiveErrors.removeFirst()
+        }
         return try await withCheckedThrowingContinuation { continuation in
             receiveWaiters.append(continuation)
         }
@@ -64,7 +74,9 @@ private actor FakeSocket: TranslationSocket {
         cancellationStartWaiter?.resume()
         cancellationStartWaiter = nil
         if waitsForCancellationToFinish {
-            await withCheckedContinuation { cancellationFinishWaiter = $0 }
+            await withCheckedContinuation { continuation in
+                cancellationFinishWaiters.append(continuation)
+            }
         }
         closeSendWaiter?.resume()
         closeSendWaiter = nil
@@ -86,8 +98,23 @@ private actor FakeSocket: TranslationSocket {
     }
 
     func finishCancellation() {
-        cancellationFinishWaiter?.resume()
-        cancellationFinishWaiter = nil
+        let waiters = cancellationFinishWaiters
+        cancellationFinishWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func enqueueIncoming(_ data: Data) {
+        enqueue(data)
+    }
+
+    func failReceive(_ error: TranslationSocketError) {
+        if receiveWaiters.isEmpty {
+            receiveErrors.append(error)
+        } else {
+            receiveWaiters.removeFirst().resume(throwing: error)
+        }
     }
 
     private func enqueue(_ data: Data) {
@@ -139,6 +166,10 @@ private let handshakeEvents = [
 
 private let tailAudioEvent = Data(
     #"{"type":"session.output_audio.delta","delta":"AAEC","sample_rate":24000,"channels":1,"format":"pcm16"}"#.utf8
+)
+
+private let serverErrorEvent = Data(
+    #"{"type":"error","error":{"code":"test_error","message":"test failure"}}"#.utf8
 )
 
 private let expectedTailAudio = TranslationServerEvent.outputAudio(
@@ -372,6 +403,99 @@ func concurrentCloseCallersShareOneForcedSocketCancellation() async throws {
     try await secondClose.value
 
     #expect(await socket.sent.count == 2)
+    #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func closeSendFailureCancelsSocketAndPropagatesError() async throws {
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        closeSendError: .invalidUTF8TextFrame
+    )
+    let session = TranslationSession(
+        configuration: .default,
+        sessionConfiguration: TranslationSessionConfiguration(
+            targetLanguage: .chinese
+        ),
+        apiKey: "secret",
+        factory: FakeFactory(socket: socket)
+    )
+    try await session.connect()
+
+    do {
+        try await session.close()
+        #expect(Bool(false))
+    } catch let error as TranslationSocketError {
+        #expect(error == .invalidUTF8TextFrame)
+    } catch {
+        #expect(Bool(false))
+    }
+
+    #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func serverErrorWinsDeadlineRaceAndCancelsSocketOnce() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true,
+        waitsForCancellationToFinish: true
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    let closeTask = Task { try await session.close() }
+    await socket.waitForCloseSendStart()
+    await socket.enqueueIncoming(serverErrorEvent)
+    await socket.waitForCancellationStart()
+    await deadline.fire()
+    await socket.finishCancellation()
+
+    do {
+        try await closeTask.value
+        #expect(Bool(false))
+    } catch let error as TranslationSessionError {
+        #expect(error == .server(code: "test_error", message: "test failure"))
+    } catch {
+        #expect(Bool(false))
+    }
+    #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func receiveErrorWinsDeadlineRaceAndCancelsSocketOnce() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true,
+        waitsForCancellationToFinish: true
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    let closeTask = Task { try await session.close() }
+    await socket.waitForCloseSendStart()
+    await socket.failReceive(.invalidUTF8TextFrame)
+    await socket.waitForCancellationStart()
+    await deadline.fire()
+    await socket.finishCancellation()
+
+    do {
+        try await closeTask.value
+        #expect(Bool(false))
+    } catch let error as TranslationSocketError {
+        #expect(error == .invalidUTF8TextFrame)
+    } catch {
+        #expect(Bool(false))
+    }
     #expect(await socket.cancellationCount == 1)
 }
 
