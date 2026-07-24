@@ -1,6 +1,8 @@
 import AppKit
+import EMKEAudioEngine
 import EMKECoordinator
 import EMKECore
+import EMKESecurity
 import Foundation
 import SwiftUI
 import Testing
@@ -21,13 +23,6 @@ func captureRunningDashboardForVisualReview() throws {
 
     #expect(bitmap.pixelsWide == 840)
     #expect(bitmap.pixelsHigh == 1240)
-
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else { return }
-
-    let data = try #require(bitmap.tiffRepresentation)
-    try data.write(
-        to: URL(fileURLWithPath: "/tmp/emke-running-dashboard.tiff")
-    )
 }
 
 @Test @MainActor
@@ -46,12 +41,15 @@ func captureReadyDashboardForVisualReview() throws {
     #expect(bitmap.pixelsWide == 840)
     #expect(bitmap.pixelsHigh == 1240)
 
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else { return }
-
-    let data = try #require(bitmap.tiffRepresentation)
-    try data.write(
-        to: URL(fileURLWithPath: "/tmp/emke-ready-dashboard.tiff")
-    )
+    try writeQACapture(bitmap, named: "dashboard-ready-zh.tiff")
+    if ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" {
+        #expect(
+            FileManager.default.fileExists(
+                atPath:
+                    "/tmp/emke-interface-floating-qa/dashboard-ready-zh.tiff"
+            )
+        )
+    }
 }
 
 @Test @MainActor
@@ -97,14 +95,206 @@ func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
     #expect(bitmap.pixelsWide == 840)
     #expect(bitmap.pixelsHigh == 1240)
 
+    try writeQACapture(bitmap, named: "dashboard-ready-en.tiff")
+}
+
+@Test @MainActor
+func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
+    for (language, filename) in [
+        (AppInterfaceLanguage.zhHans, "settings-zh.tiff"),
+        (AppInterfaceLanguage.english, "settings-en.tiff"),
+    ] {
+        let bitmap = try settingsBitmap(language: language)
+
+        #expect(bitmap.pixelsWide == 840)
+        #expect(bitmap.pixelsHigh == 1240)
+        #expect(
+            visibleSettingsPixelCount(bitmap) > 100,
+            "Settings content below the header must be visible for \(language)"
+        )
+        #expect(
+            visibleQuitControlPixelCount(bitmap) > 20,
+            "The bottom-centered quit control must be visible for \(language)"
+        )
+
+        try writeQACapture(bitmap, named: filename)
+    }
+}
+
+private func visibleSettingsPixelCount(
+    _ bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 80, to: 1_000, by: 4) {
+        for x in stride(from: 40, to: 800, by: 4) {
+            guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+            if color.redComponent < 0.92
+                || color.greenComponent < 0.92
+                || color.blueComponent < 0.92
+            {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+private func visibleQuitControlPixelCount(
+    _ bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 40, to: 180, by: 2) {
+        for x in stride(from: 240, to: 600, by: 2) {
+            guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+            if color.redComponent < 0.72
+                || color.greenComponent < 0.72
+                || color.blueComponent < 0.72
+            {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+@MainActor
+private func settingsBitmap(
+    language: AppInterfaceLanguage
+) throws -> NSBitmapImageRep {
+    var settings = AppSettings.default
+    settings.interfaceLanguage = language
+    let model = MenuBarModel(
+        provider: RenderAudioDeviceProvider(),
+        secretStore: RenderSecretStore(),
+        settingsStore: RenderSettingsStore(settings: settings),
+        microphonePermissionProvider: RenderMicrophonePermissionProvider(),
+        deferInitialDeviceReload: true
+    )
+    let content = TranslationSettingsView(model: model)
+        .frame(
+            width: EMKEVisualStyle.panelWidth,
+            height: EMKEVisualStyle.panelHeight
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
+    let hostingView = NSHostingView(rootView: content)
+    let bounds = NSRect(
+        x: 0,
+        y: 0,
+        width: EMKEVisualStyle.panelWidth,
+        height: EMKEVisualStyle.panelHeight
+    )
+    hostingView.frame = bounds
+    let window = NSWindow(
+        contentRect: bounds,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = hostingView
+    window.contentView?.layoutSubtreeIfNeeded()
+    let scrollView = try #require(firstScrollView(in: hostingView))
+    let documentView = try #require(scrollView.documentView)
+    let bottomY = documentView.isFlipped
+        ? max(0, documentView.bounds.height - scrollView.contentView.bounds.height)
+        : 0
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: bottomY))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    hostingView.layoutSubtreeIfNeeded()
+    let bitmap = try #require(
+        NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(
+                EMKEVisualStyle.panelWidth * EMKEVisualStyle.captureScale
+            ),
+            pixelsHigh: Int(
+                EMKEVisualStyle.panelHeight * EMKEVisualStyle.captureScale
+            ),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bitmapFormat: [],
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )
+    )
+    bitmap.size = bounds.size
+    hostingView.cacheDisplay(in: bounds, to: bitmap)
+    return bitmap
+}
+
+@MainActor
+private func firstScrollView(in view: NSView) -> NSScrollView? {
+    if let scrollView = view as? NSScrollView {
+        return scrollView
+    }
+    for subview in view.subviews {
+        if let scrollView = firstScrollView(in: subview) {
+            return scrollView
+        }
+    }
+    return nil
+}
+
+private struct RenderAudioDeviceProvider: AudioDeviceProviding {
+    func devices() throws -> [AudioDevice] {
+        []
+    }
+}
+
+private actor RenderSecretStore: SecretStore {
+    func saveAPIKey(_ value: String) async throws {}
+    func loadAPIKey() async throws -> String? { nil }
+    func deleteAPIKey() async throws {}
+}
+
+private struct RenderMicrophonePermissionProvider:
+    MicrophonePermissionProviding
+{
+    func authorizationStatus() async -> MicrophonePermissionState {
+        .notDetermined
+    }
+
+    func requestAccess() async -> Bool {
+        false
+    }
+}
+
+@MainActor
+private final class RenderSettingsStore: AppSettingsStoring {
+    private var settings: AppSettings
+
+    init(settings: AppSettings) {
+        self.settings = settings
+    }
+
+    func load() -> AppSettings {
+        settings
+    }
+
+    func save(_ settings: AppSettings) {
+        self.settings = settings
+    }
+}
+
+private func writeQACapture(
+    _ bitmap: NSBitmapImageRep,
+    named filename: String
+) throws {
     guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
         return
     }
-
-    let data = try #require(bitmap.tiffRepresentation)
-    try data.write(
-        to: URL(fileURLWithPath: "/tmp/emke-english-ready-dashboard.tiff")
+    let directory = URL(
+        fileURLWithPath: "/tmp/emke-interface-floating-qa",
+        isDirectory: true
     )
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    let data = try #require(bitmap.tiffRepresentation)
+    try data.write(to: directory.appendingPathComponent(filename))
 }
 
 @Test @MainActor

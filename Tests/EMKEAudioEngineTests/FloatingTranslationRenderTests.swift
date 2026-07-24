@@ -50,16 +50,10 @@ private func floatingCapsuleRendersAtRetinaDimensions() throws {
         #expect(bitmap.pixelsWide == 528, "Unexpected width for \(scenario)")
         #expect(bitmap.pixelsHigh == 104, "Unexpected height for \(scenario)")
 
-        guard
-            ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1"
-        else {
+        guard let filename = scenario.captureFilename else {
             continue
         }
-        try data.write(
-            to: URL(
-                fileURLWithPath: "/tmp/emke-floating-\(scenario.rawValue).tiff"
-            )
-        )
+        try writeFloatingQACapture(data, named: filename)
     }
 }
 
@@ -76,6 +70,21 @@ private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
     case inboundDegradedEnglish
     case failureChinese
     case failureEnglish
+
+    var captureFilename: String? {
+        switch self {
+        case .startingEnglish:
+            "floating-connecting.tiff"
+        case .healthyEnglish:
+            "floating-running.tiff"
+        case .outboundDegradedEnglish:
+            "floating-degraded.tiff"
+        case .stoppingEnglish:
+            "floating-stopping.tiff"
+        default:
+            nil
+        }
+    }
 
     var presentation: FloatingTranslationPresentation {
         let language: ResolvedInterfaceLanguage = rawValue.hasSuffix("Chinese")
@@ -149,4 +158,22 @@ private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
             copy: AppCopy(language: language)
         )
     }
+}
+
+private func writeFloatingQACapture(
+    _ data: Data,
+    named filename: String
+) throws {
+    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
+        return
+    }
+    let directory = URL(
+        fileURLWithPath: "/tmp/emke-interface-floating-qa",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    try data.write(to: directory.appendingPathComponent(filename))
 }
