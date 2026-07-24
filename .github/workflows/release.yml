@@ -33,8 +33,15 @@ jobs:
             echo "resolved build number is outside the supported range" >&2
             exit 64
           fi
+          commit_epoch="$(git show -s --format=%ct "${GITHUB_SHA}^{commit}")"
+          if [[ ! "$commit_epoch" =~ ^[0-9]+$ ]] || \
+            test "${#commit_epoch}" -gt 12 || test "$commit_epoch" -le 0; then
+            echo "tagged commit has an invalid source timestamp" >&2
+            exit 64
+          fi
           /usr/bin/printf 'EMKE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
           /usr/bin/printf 'EMKE_BUILD_NUMBER=%s\n' "$build_number" >> "$GITHUB_ENV"
+          /usr/bin/printf 'SOURCE_DATE_EPOCH=%s\n' "$commit_epoch" >> "$GITHUB_ENV"
 
       - name: Run Swift tests
         run: swift test
@@ -101,9 +108,10 @@ jobs:
           test "$length" -gt 0
           test "$signed_length" = "$length"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$pkg")"
-          bash Packaging/Scripts/render-appcast.sh \
-            "$EMKE_VERSION" "$EMKE_BUILD_NUMBER" "$url" \
-            "$signature" "$length" "$runner_temp/appcast.xml"
+          SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+            bash Packaging/Scripts/render-appcast.sh \
+              "$EMKE_VERSION" "$EMKE_BUILD_NUMBER" "$url" \
+              "$signature" "$length" "$runner_temp/appcast.xml"
           /usr/bin/xmllint --noout "$runner_temp/appcast.xml"
 
       - name: Create GitHub Release
@@ -118,9 +126,14 @@ jobs:
           local_size="$(/usr/bin/stat -f '%z' "$pkg")"
           [[ "$local_size" =~ ^[0-9]+$ ]]
           test "$local_size" -gt 0
+          local_sha="$(
+            /usr/bin/shasum -a 256 "$pkg" | /usr/bin/awk '{print $1}'
+          )"
+          [[ "$local_sha" =~ ^[0-9a-f]{64}$ ]]
+          local_digest="sha256:${local_sha}"
           if gh release view "$GITHUB_REF_NAME" \
             --json id --jq '.id' >/dev/null 2>&1; then
-            echo "GitHub Release already exists; refreshing its PKG asset."
+            echo "GitHub Release already exists; verifying its PKG asset."
           else
             if ! gh release create "$GITHUB_REF_NAME" \
               --title "EMKE Translation ${EMKE_VERSION}" \
@@ -131,27 +144,58 @@ jobs:
                 --json id --jq '.id' >/dev/null
             fi
           fi
-          gh release upload "$GITHUB_REF_NAME" "$pkg" --clobber
-          asset_rows="$(gh release view "$GITHUB_REF_NAME" \
-            --json assets \
-            --jq '.assets[] | [.name, (.size | tostring)] | @tsv')"
-          published_size="$(
-            /usr/bin/awk -F '	' -v expected="$asset_name" '
-              $1 == expected {
-                matches += 1
-                size = $2
-              }
-              END {
-                if (matches != 1) {
-                  exit 64
+          fetch_asset_rows() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+              --jq '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv'
+          }
+          inspect_expected_asset() {
+            local rows="$1"
+            local inspection
+            inspection="$(
+              /usr/bin/awk -F '	' -v expected="$asset_name" '
+                $1 == expected {
+                  matches += 1
+                  size = $2
+                  digest = $3
                 }
-                print size
-              }
-            ' <<< "$asset_rows"
-          )"
-          [[ "$published_size" =~ ^[0-9]+$ ]]
-          test "$published_size" = "$local_size"
-          echo "Verified GitHub Release asset: ${asset_name} (${published_size} bytes)."
+                END {
+                  printf "%d|%s|%s\n", matches, size, digest
+                }
+              ' <<< "$rows"
+            )"
+            IFS='|' read -r asset_count remote_size remote_digest \
+              <<< "$inspection"
+            [[ "$asset_count" =~ ^[0-9]+$ ]]
+          }
+          asset_rows="$(fetch_asset_rows)"
+          inspect_expected_asset "$asset_rows"
+          case "$asset_count" in
+            0)
+              gh release upload "$GITHUB_REF_NAME" "$pkg"
+              ;;
+            1)
+              if [[ ! "$remote_size" =~ ^[0-9]+$ ]] || \
+                [[ ! "$remote_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || \
+                test "$remote_size" != "$local_size" || \
+                test "$remote_digest" != "$local_digest"; then
+                echo "existing GitHub Release asset cannot be proven identical" >&2
+                exit 1
+              fi
+              echo "GitHub Release asset is already identical; reusing it."
+              ;;
+            *)
+              echo "duplicate GitHub Release assets match the expected name" >&2
+              exit 1
+              ;;
+          esac
+          asset_rows="$(fetch_asset_rows)"
+          inspect_expected_asset "$asset_rows"
+          test "$asset_count" = 1
+          [[ "$remote_size" =~ ^[0-9]+$ ]]
+          [[ "$remote_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$remote_size" = "$local_size"
+          test "$remote_digest" = "$local_digest"
+          echo "Verified immutable GitHub Release asset: ${asset_name} (${remote_size} bytes)."
 
       - name: Publish Appcast to gh-pages
         env:
@@ -186,12 +230,93 @@ jobs:
             git -C "$publish" checkout --orphan gh-pages
             git -C "$publish" rm -rf . >/dev/null 2>&1 || true
           fi
+          existing_appcast="$publish/appcast.xml"
+          if test -L "$existing_appcast"; then
+            echo "refusing symlinked existing Appcast" >&2
+            exit 1
+          fi
+          if test -e "$existing_appcast"; then
+            test -f "$existing_appcast"
+            /usr/bin/xmllint --noout "$existing_appcast"
+            enclosure_count="$(
+              /usr/bin/xmllint --xpath \
+                'count(/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"]/*[local-name()="enclosure"])' \
+                "$existing_appcast"
+            )"
+            test "$enclosure_count" = 1
+            enclosure_xpath='/*[local-name()="rss"]/*[local-name()="channel"]/*[local-name()="item"]/*[local-name()="enclosure"]'
+            existing_build="$(
+              /usr/bin/xmllint --xpath \
+                "string($enclosure_xpath/@*[local-name()=\"version\"])" \
+                "$existing_appcast"
+            )"
+            existing_version="$(
+              /usr/bin/xmllint --xpath \
+                "string($enclosure_xpath/@*[local-name()=\"shortVersionString\"])" \
+                "$existing_appcast"
+            )"
+            existing_url="$(
+              /usr/bin/xmllint --xpath \
+                "string($enclosure_xpath/@url)" "$existing_appcast"
+            )"
+            existing_signature="$(
+              /usr/bin/xmllint --xpath \
+                "string($enclosure_xpath/@*[local-name()=\"edSignature\"])" \
+                "$existing_appcast"
+            )"
+            existing_length="$(
+              /usr/bin/xmllint --xpath \
+                "string($enclosure_xpath/@length)" "$existing_appcast"
+            )"
+            [[ "$existing_build" =~ ^[0-9]+$ ]]
+            test "${#existing_build}" -le 20
+            [[ "$existing_version" =~ ^[0-9]+(\.[0-9]+)*$ ]]
+            test "${#existing_version}" -le 64
+            [[ "$existing_url" =~ ^https://[^[:space:]]+$ ]]
+            [[ "$existing_signature" =~ ^[A-Za-z0-9+/]{86}==$ ]]
+            [[ "$existing_length" =~ ^[0-9]+$ ]]
+            test "${#existing_length}" -le 20
+            normalized_existing="$(
+              /usr/bin/printf '%s\n' "$existing_build" | \
+                /usr/bin/sed 's/^0*//'
+            )"
+            normalized_candidate="$(
+              /usr/bin/printf '%s\n' "$EMKE_BUILD_NUMBER" | \
+                /usr/bin/sed 's/^0*//'
+            )"
+            normalized_length="$(
+              /usr/bin/printf '%s\n' "$existing_length" | \
+                /usr/bin/sed 's/^0*//'
+            )"
+            test -n "$normalized_existing" || normalized_existing=0
+            test -n "$normalized_candidate" || normalized_candidate=0
+            test -n "$normalized_length" || normalized_length=0
+            test "$normalized_length" != 0
+            same_width_higher=0
+            if test "${#normalized_existing}" -eq \
+              "${#normalized_candidate}" && \
+              LC_ALL=C /usr/bin/awk \
+                -v left="$normalized_existing" \
+                -v right="$normalized_candidate" \
+                'BEGIN { exit !(("x" left) > ("x" right)) }'; then
+              same_width_higher=1
+            fi
+            if test "${#normalized_existing}" -gt \
+              "${#normalized_candidate}" || test "$same_width_higher" = 1; then
+              echo "refusing Appcast rollback to build $EMKE_BUILD_NUMBER" >&2
+              exit 1
+            fi
+            if test "$normalized_existing" = "$normalized_candidate"; then
+              if /usr/bin/cmp "$runner_temp/appcast.xml" "$existing_appcast"; then
+                echo "Appcast is unchanged; gh-pages already matches this release."
+                exit 0
+              fi
+              echo "Appcast metadata mismatch for existing build $EMKE_BUILD_NUMBER" >&2
+              exit 1
+            fi
+          fi
           /bin/cp "$runner_temp/appcast.xml" "$publish/appcast.xml"
           git -C "$publish" add appcast.xml
-          if git -C "$publish" diff --cached --quiet; then
-            echo "Appcast is unchanged; gh-pages already matches this release."
-            exit 0
-          fi
           git -C "$publish" \
             -c user.name=github-actions \
             -c user.email=41898282+github-actions[bot]@users.noreply.github.com \

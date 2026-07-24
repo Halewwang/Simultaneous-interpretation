@@ -168,11 +168,22 @@ require_workflow_text 'sign_update'
 require_workflow_text 'render-appcast.sh'
 require_workflow_text 'gh release create'
 require_workflow_text 'gh release view'
-require_workflow_text 'gh release upload "$GITHUB_REF_NAME" "$pkg" --clobber'
+require_workflow_text 'gh release upload "$GITHUB_REF_NAME" "$pkg"'
+require_workflow_text 'gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}"'
 require_workflow_text '--verify-tag'
-require_workflow_text '--json assets'
 require_workflow_text 'asset_name="$(basename "$pkg")"'
-require_workflow_text 'test "$published_size" = "$local_size"'
+require_workflow_text '/usr/bin/shasum -a 256 "$pkg"'
+require_workflow_text 'local_digest="sha256:${local_sha}"'
+require_workflow_text 'test "$remote_digest" = "$local_digest"'
+require_workflow_text 'SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"'
+require_workflow_text 'git show -s --format=%ct "${GITHUB_SHA}^{commit}"'
+require_workflow_text 'existing_build='
+require_workflow_text 'existing_version='
+require_workflow_text 'existing_url='
+require_workflow_text 'existing_signature='
+require_workflow_text 'existing_length='
+require_workflow_text 'refusing Appcast rollback'
+require_workflow_text 'Appcast metadata mismatch for existing build'
 require_workflow_text 'gh-pages'
 require_workflow_text 'secrets.SPARKLE_PRIVATE_KEY'
 require_workflow_text 'github.token'
@@ -186,7 +197,7 @@ require_workflow_text 'test -s "$pkg"'
 require_workflow_text '[[ "$length" =~ ^[0-9]+$ ]]'
 require_workflow_text 'test "$length" -gt 0'
 require_workflow_text 'test "$signed_length" = "$length"'
-require_workflow_text 'diff --cached --quiet'
+require_workflow_text '/usr/bin/cmp "$runner_temp/appcast.xml" "$existing_appcast"'
 require_workflow_text 'GIT_ASKPASS="$askpass"'
 
 test "$(/usr/bin/grep -Fc 'secrets.SPARKLE_PRIVATE_KEY' "$WORKFLOW")" -eq 1
@@ -194,6 +205,7 @@ test "$(/usr/bin/grep -Fc 'secrets.SPARKLE_PRIVATE_KEY' "$WORKFLOW")" -eq 1
 ! /usr/bin/grep -Fq 'x-access-token:${GITHUB_TOKEN}' "$WORKFLOW"
 ! /usr/bin/grep -Fq 'secrets.GITHUB_TOKEN' "$WORKFLOW"
 ! /usr/bin/grep -Fq 'pull_request:' "$WORKFLOW"
+! /usr/bin/grep -Fq -- '--clobber' "$WORKFLOW"
 
 assert_workflow_order '- name: Resolve version and build' \
   '- name: Run Swift tests'
@@ -238,12 +250,15 @@ assert_tag_resolves() {
   local tag="$1"
   local expected_version="$2"
   local expected_build="$3"
+  local expected_epoch="$4"
   local github_env="$TEMP/github-env"
   local expected_env="$TEMP/expected-github-env"
   : > "$github_env"
-  /usr/bin/printf 'EMKE_VERSION=%s\nEMKE_BUILD_NUMBER=%s\n' \
-    "$expected_version" "$expected_build" > "$expected_env"
-  GITHUB_REF_NAME="$tag" GITHUB_ENV="$github_env" \
+  /usr/bin/printf \
+    'EMKE_VERSION=%s\nEMKE_BUILD_NUMBER=%s\nSOURCE_DATE_EPOCH=%s\n' \
+    "$expected_version" "$expected_build" "$expected_epoch" > "$expected_env"
+  GITHUB_REF_NAME="$tag" GITHUB_SHA="$RESOLVE_SHA" \
+    GITHUB_ENV="$github_env" \
     /bin/bash "$RESOLVE_BLOCK" > "$TEMP/resolve.stdout" \
     2> "$TEMP/resolve.stderr"
   /usr/bin/cmp "$expected_env" "$github_env"
@@ -253,7 +268,8 @@ assert_tag_rejected() {
   local tag="$1"
   local github_env="$TEMP/github-env"
   : > "$github_env"
-  if GITHUB_REF_NAME="$tag" GITHUB_ENV="$github_env" \
+  if GITHUB_REF_NAME="$tag" GITHUB_SHA="$RESOLVE_SHA" \
+    GITHUB_ENV="$github_env" \
     /bin/bash "$RESOLVE_BLOCK" > "$TEMP/resolve.stdout" \
     2> "$TEMP/resolve.stderr"; then
     echo "unsafe release tag was accepted: $tag" >&2
@@ -262,9 +278,12 @@ assert_tag_rejected() {
   test ! -s "$github_env"
 }
 
-assert_tag_resolves "v0.0.0" "0.0.0" "0"
-assert_tag_resolves "v1.2.3" "1.2.3" "1002003"
-assert_tag_resolves "v999.999.999" "999.999.999" "999999999"
+RESOLVE_SHA="$(git -C "$ROOT" rev-parse 'HEAD^{commit}')"
+RESOLVE_EPOCH="$(git -C "$ROOT" show -s --format=%ct "${RESOLVE_SHA}^{commit}")"
+assert_tag_resolves "v0.0.0" "0.0.0" "0" "$RESOLVE_EPOCH"
+assert_tag_resolves "v1.2.3" "1.2.3" "1002003" "$RESOLVE_EPOCH"
+assert_tag_resolves "v999.999.999" "999.999.999" "999999999" \
+  "$RESOLVE_EPOCH"
 assert_tag_rejected "1.2.3"
 assert_tag_rejected "v01.2.3"
 assert_tag_rejected "v1.02.3"
@@ -275,6 +294,14 @@ assert_tag_rejected "v1000.0.0"
 assert_tag_rejected "v0.1000.0"
 assert_tag_rejected "v0.0.1000"
 assert_tag_rejected "v9223372036854775807.0.0"
+: > "$TEMP/github-env"
+if GITHUB_REF_NAME="v1.2.3" GITHUB_SHA="not-a-commit" \
+  GITHUB_ENV="$TEMP/github-env" /bin/bash "$RESOLVE_BLOCK" \
+  > "$TEMP/resolve.stdout" 2> "$TEMP/resolve.stderr"; then
+  echo "invalid tagged commit was accepted" >&2
+  exit 1
+fi
+test ! -s "$TEMP/github-env"
 
 RELEASE_BLOCK="$TEMP/release-publication.sh"
 /usr/bin/awk '
@@ -305,13 +332,18 @@ test -s "$RELEASE_BLOCK"
 
 MOCK_BIN="$TEMP/mock-bin"
 MOCK_GH_LOG="$TEMP/mock-gh.log"
-MOCK_GH_STATE="$TEMP/mock-gh.state"
+MOCK_GH_VIEW_STATE="$TEMP/mock-gh-view.state"
+MOCK_GH_API_STATE="$TEMP/mock-gh-api.state"
 RELEASE_WORKSPACE="$TEMP/release-workspace"
 /bin/mkdir -p "$MOCK_BIN" "$RELEASE_WORKSPACE/.build/distribution"
 RELEASE_PKG="$RELEASE_WORKSPACE/.build/distribution/EMKE-Translation-1.2.3-internal.pkg"
 /usr/bin/printf '%s' 'release-fixture-pkg' > "$RELEASE_PKG"
 EXPECTED_ASSET_NAME="${RELEASE_PKG##*/}"
 EXPECTED_ASSET_SIZE="$(/usr/bin/stat -f '%z' "$RELEASE_PKG")"
+EXPECTED_ASSET_SHA="$(
+  /usr/bin/shasum -a 256 "$RELEASE_PKG" | /usr/bin/awk '{print $1}'
+)"
+EXPECTED_ASSET_DIGEST="sha256:$EXPECTED_ASSET_SHA"
 
 /bin/cat > "$MOCK_BIN/gh" <<'MOCK_GH'
 #!/bin/bash
@@ -327,33 +359,14 @@ has_arg() {
   return 1
 }
 if test "${1:-}" = release && test "${2:-}" = view; then
-  if has_arg assets "$@"; then
-    case "$MOCK_RELEASE_MODE" in
-      asset-missing)
-        /usr/bin/printf 'other.pkg\t%s\n' "$EXPECTED_ASSET_SIZE"
-        ;;
-      asset-size-mismatch)
-        /usr/bin/printf '%s\t%s\n' \
-          "$EXPECTED_ASSET_NAME" "$((EXPECTED_ASSET_SIZE + 1))"
-        ;;
-      *)
-        /usr/bin/printf '%s\t%s\n' \
-          "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE"
-        ;;
-    esac
-    exit 0
-  fi
   view_count=0
-  test ! -s "$MOCK_GH_STATE" || read -r view_count < "$MOCK_GH_STATE"
+  test ! -s "$MOCK_GH_VIEW_STATE" || \
+    read -r view_count < "$MOCK_GH_VIEW_STATE"
   view_count="$((view_count + 1))"
-  /usr/bin/printf '%s\n' "$view_count" > "$MOCK_GH_STATE"
+  /usr/bin/printf '%s\n' "$view_count" > "$MOCK_GH_VIEW_STATE"
   case "$MOCK_RELEASE_MODE" in
-    absent|asset-missing|asset-size-mismatch)
+    absent-release)
       exit 1
-      ;;
-    existing)
-      /usr/bin/printf '%s\n' 'release-id'
-      exit 0
       ;;
     create-race)
       test "$view_count" -gt 1
@@ -363,18 +376,76 @@ if test "${1:-}" = release && test "${2:-}" = view; then
     create-failure)
       exit 1
       ;;
+    *)
+      /usr/bin/printf '%s\n' 'release-id'
+      exit 0
+      ;;
   esac
 fi
 if test "${1:-}" = release && test "${2:-}" = create; then
   has_arg --verify-tag "$@" || exit 96
   case "$MOCK_RELEASE_MODE" in
-    absent|asset-missing|asset-size-mismatch) exit 0 ;;
-    existing) exit 99 ;;
+    absent-release) exit 0 ;;
     create-race|create-failure) exit 1 ;;
+    *) exit 99 ;;
   esac
 fi
 if test "${1:-}" = release && test "${2:-}" = upload; then
-  has_arg --clobber "$@" || exit 98
+  has_arg --clobber "$@" && exit 98
+  test "$MOCK_RELEASE_MODE" != upload-failure
+  exit 0
+fi
+if test "${1:-}" = api; then
+  api_count=0
+  test ! -s "$MOCK_GH_API_STATE" || \
+    read -r api_count < "$MOCK_GH_API_STATE"
+  api_count="$((api_count + 1))"
+  /usr/bin/printf '%s\n' "$api_count" > "$MOCK_GH_API_STATE"
+  case "$MOCK_RELEASE_MODE" in
+    asset-identical)
+      /usr/bin/printf '%s\t%s\t%s\n' \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST"
+      ;;
+    asset-missing|absent-release|create-race)
+      if test "$api_count" -eq 1; then
+        /usr/bin/printf '%s\t%s\t%s\n' \
+          "other.pkg" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST"
+      else
+        /usr/bin/printf '%s\t%s\t%s\n' \
+          "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST"
+      fi
+      ;;
+    asset-different)
+      /usr/bin/printf '%s\t%s\t%s\n' \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" \
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ;;
+    asset-size-mismatch)
+      /usr/bin/printf '%s\t%s\t%s\n' \
+        "$EXPECTED_ASSET_NAME" "$((EXPECTED_ASSET_SIZE + 1))" \
+        "$EXPECTED_ASSET_DIGEST"
+      ;;
+    digest-missing)
+      /usr/bin/printf '%s\t%s\t\n' \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE"
+      ;;
+    digest-malformed)
+      /usr/bin/printf '%s\t%s\t%s\n' \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" "sha256:not-a-digest"
+      ;;
+    duplicate)
+      /usr/bin/printf '%s\t%s\t%s\n%s\t%s\t%s\n' \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST" \
+        "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST"
+      ;;
+    upload-failure)
+      /usr/bin/printf '%s\t%s\t%s\n' \
+        "other.pkg" "$EXPECTED_ASSET_SIZE" "$EXPECTED_ASSET_DIGEST"
+      ;;
+    create-failure)
+      exit 97
+      ;;
+  esac
   exit 0
 fi
 exit 97
@@ -385,16 +456,20 @@ run_release_fixture() {
   local mode="$1"
   local expected_result="$2"
   : > "$MOCK_GH_LOG"
-  : > "$MOCK_GH_STATE"
+  : > "$MOCK_GH_VIEW_STATE"
+  : > "$MOCK_GH_API_STATE"
   if (
     cd "$RELEASE_WORKSPACE"
     PATH="$MOCK_BIN:/usr/bin:/bin" \
       MOCK_RELEASE_MODE="$mode" \
       MOCK_GH_LOG="$MOCK_GH_LOG" \
-      MOCK_GH_STATE="$MOCK_GH_STATE" \
+      MOCK_GH_VIEW_STATE="$MOCK_GH_VIEW_STATE" \
+      MOCK_GH_API_STATE="$MOCK_GH_API_STATE" \
       EXPECTED_ASSET_NAME="$EXPECTED_ASSET_NAME" \
       EXPECTED_ASSET_SIZE="$EXPECTED_ASSET_SIZE" \
+      EXPECTED_ASSET_DIGEST="$EXPECTED_ASSET_DIGEST" \
       GITHUB_REF_NAME="v1.2.3" \
+      GITHUB_REPOSITORY="Halewwang/Simultaneous-interpretation" \
       EMKE_VERSION="1.2.3" \
       /bin/bash "$RELEASE_BLOCK"
   ) > "$TEMP/release-$mode.stdout" 2> "$TEMP/release-$mode.stderr"; then
@@ -418,28 +493,208 @@ assert_log_order() {
   test "${first%%:*}" -lt "${second%%:*}"
 }
 
-run_release_fixture absent pass
-/usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
-/usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
-/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
-assert_log_order 'release create v1.2.3' 'release upload v1.2.3'
-assert_log_order 'release upload v1.2.3' '--json assets'
-
-run_release_fixture existing pass
+run_release_fixture asset-identical pass
 ! /usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
-/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
-assert_log_order '--json id' 'release upload v1.2.3'
-assert_log_order 'release upload v1.2.3' '--json assets'
+! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+test "$(/usr/bin/grep -Fc 'api repos/' "$MOCK_GH_LOG")" -eq 2
+
+run_release_fixture asset-missing pass
+/usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+test "$(/usr/bin/grep -Fc 'api repos/' "$MOCK_GH_LOG")" -eq 2
+assert_log_order 'api repos/' 'release upload v1.2.3'
 
 run_release_fixture create-race pass
 test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
 assert_log_order 'release create v1.2.3' 'release upload v1.2.3'
-/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
 
 run_release_fixture create-failure fail
 test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
 ! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
 
-run_release_fixture asset-missing fail
-run_release_fixture asset-size-mismatch fail
+run_release_fixture absent-release pass
+/usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
+/usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+
+for unsafe_mode in asset-different asset-size-mismatch \
+  digest-missing digest-malformed duplicate; do
+  run_release_fixture "$unsafe_mode" fail
+  ! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+done
+
+run_release_fixture upload-failure fail
+/usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+! /usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+
+APPCAST_BLOCK="$TEMP/appcast-publication.sh"
+/usr/bin/awk '
+  $0 == "      - name: Publish Appcast to gh-pages" {
+    found_step = 1
+    next
+  }
+  found_step && $0 == "        run: |" {
+    in_block = 1
+    next
+  }
+  in_block && $0 ~ /^      - name:/ {
+    exit
+  }
+  in_block {
+    if ($0 == "") {
+      print
+      next
+    }
+    if (substr($0, 1, 10) != "          ") {
+      exit 65
+    }
+    print substr($0, 11)
+  }
+' "$WORKFLOW" > "$APPCAST_BLOCK"
+test -s "$APPCAST_BLOCK"
+/bin/bash -n "$APPCAST_BLOCK"
+
+APPCAST_FIXTURES="$TEMP/appcast-fixtures"
+/bin/mkdir -p "$APPCAST_FIXTURES"
+FIXTURE_SIGNATURE_A='WVyVJpOx+a5+vNWJVY79TRjFKveNk+VhGJf2iti4CZtJsJewIUGvh/1AKKEAFbH1qUwx+vro1ECuzOsMmumoBA=='
+FIXTURE_SIGNATURE_B='pNFd7KbcQSu+Mq7UYrbQXTPq82luht2ACXm/r2utp1u/Uv/5hWqctdT2jwQgMejW7DRoeV/hVr6J4VdZYdwWDw=='
+CANDIDATE_APPCAST="$APPCAST_FIXTURES/candidate.xml"
+CANDIDATE_COPY="$APPCAST_FIXTURES/candidate-copy.xml"
+LOWER_APPCAST="$APPCAST_FIXTURES/lower.xml"
+EQUAL_DIFFERENT_APPCAST="$APPCAST_FIXTURES/equal-different.xml"
+HIGHER_APPCAST="$APPCAST_FIXTURES/higher.xml"
+SOURCE_DATE_EPOCH=1700000000 /bin/bash \
+  "$ROOT/Packaging/Scripts/render-appcast.sh" \
+  "1.2.3" "1002003" \
+  "https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v1.2.3/$EXPECTED_ASSET_NAME" \
+  "$FIXTURE_SIGNATURE_A" "$EXPECTED_ASSET_SIZE" "$CANDIDATE_APPCAST"
+SOURCE_DATE_EPOCH=1700000000 /bin/bash \
+  "$ROOT/Packaging/Scripts/render-appcast.sh" \
+  "1.2.3" "1002003" \
+  "https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v1.2.3/$EXPECTED_ASSET_NAME" \
+  "$FIXTURE_SIGNATURE_A" "$EXPECTED_ASSET_SIZE" "$CANDIDATE_COPY"
+/usr/bin/cmp "$CANDIDATE_APPCAST" "$CANDIDATE_COPY"
+SOURCE_DATE_EPOCH=1699999999 /bin/bash \
+  "$ROOT/Packaging/Scripts/render-appcast.sh" \
+  "1.2.2" "1002002" \
+  "https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v1.2.2/EMKE-Translation-1.2.2-internal.pkg" \
+  "$FIXTURE_SIGNATURE_A" "$EXPECTED_ASSET_SIZE" "$LOWER_APPCAST"
+SOURCE_DATE_EPOCH=1700000000 /bin/bash \
+  "$ROOT/Packaging/Scripts/render-appcast.sh" \
+  "1.2.3" "1002003" \
+  "https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v1.2.3/$EXPECTED_ASSET_NAME?mismatch=1" \
+  "$FIXTURE_SIGNATURE_B" "$EXPECTED_ASSET_SIZE" "$EQUAL_DIFFERENT_APPCAST"
+SOURCE_DATE_EPOCH=1700000001 /bin/bash \
+  "$ROOT/Packaging/Scripts/render-appcast.sh" \
+  "1.2.4" "1002004" \
+  "https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v1.2.4/EMKE-Translation-1.2.4-internal.pkg" \
+  "$FIXTURE_SIGNATURE_A" "$EXPECTED_ASSET_SIZE" "$HIGHER_APPCAST"
+
+MOCK_GIT_LOG="$TEMP/mock-git.log"
+/bin/cat > "$MOCK_BIN/git" <<'MOCK_GIT'
+#!/bin/bash
+set -euo pipefail
+if test "${1:-}" = clone; then
+  target=""
+  for argument in "$@"; do
+    target="$argument"
+  done
+  /usr/bin/printf 'clone %s\n' "$target" >> "$MOCK_GIT_LOG"
+  exec /usr/bin/git clone --no-checkout "$MOCK_GIT_ORIGIN" "$target"
+fi
+for argument in "$@"; do
+  if test "$argument" = push; then
+    /usr/bin/printf '%s\n' "$*" >> "$MOCK_GIT_LOG"
+    break
+  fi
+done
+exec /usr/bin/git "$@"
+MOCK_GIT
+/bin/chmod 755 "$MOCK_BIN/git"
+
+prepare_appcast_origin() {
+  local mode="$1"
+  local existing_appcast="$2"
+  local scenario="$TEMP/appcast-$mode"
+  local seed="$scenario/seed"
+  MOCK_GIT_ORIGIN="$scenario/origin.git"
+  /bin/mkdir -p "$seed"
+  /usr/bin/git -C "$seed" init -q -b main
+  /usr/bin/git -C "$seed" config user.name fixture
+  /usr/bin/git -C "$seed" config user.email fixture@example.com
+  /usr/bin/printf '%s\n' fixture > "$seed/README.md"
+  /usr/bin/git -C "$seed" add README.md
+  /usr/bin/git -C "$seed" commit -q -m main
+  /usr/bin/git init -q --bare "$MOCK_GIT_ORIGIN"
+  /usr/bin/git -C "$seed" remote add origin "$MOCK_GIT_ORIGIN"
+  /usr/bin/git -C "$seed" push -q origin main
+  if test -n "$existing_appcast"; then
+    /usr/bin/git -C "$seed" checkout -q --orphan gh-pages
+    /usr/bin/git -C "$seed" rm -q -rf .
+    /bin/cp "$existing_appcast" "$seed/appcast.xml"
+    /usr/bin/git -C "$seed" add appcast.xml
+    /usr/bin/git -C "$seed" commit -q -m appcast
+    /usr/bin/git -C "$seed" push -q origin gh-pages
+  fi
+}
+
+run_appcast_fixture() {
+  local mode="$1"
+  local existing_appcast="$2"
+  local expected_result="$3"
+  local runner_temp="$TEMP/appcast-runner-$mode"
+  prepare_appcast_origin "$mode" "$existing_appcast"
+  /bin/mkdir -p "$runner_temp"
+  /bin/cp "$CANDIDATE_APPCAST" "$runner_temp/appcast.xml"
+  : > "$MOCK_GIT_LOG"
+  if PATH="$MOCK_BIN:/usr/bin:/bin" \
+    MOCK_GIT_LOG="$MOCK_GIT_LOG" \
+    MOCK_GIT_ORIGIN="$MOCK_GIT_ORIGIN" \
+    RUNNER_TEMP="$runner_temp" \
+    GITHUB_TOKEN="offline-token" \
+    GITHUB_REPOSITORY="Halewwang/Simultaneous-interpretation" \
+    EMKE_VERSION="1.2.3" \
+    EMKE_BUILD_NUMBER="1002003" \
+    /bin/bash "$APPCAST_BLOCK" \
+    > "$TEMP/appcast-$mode.stdout" 2> "$TEMP/appcast-$mode.stderr"; then
+    if test "$expected_result" != pass; then
+      echo "unsafe Appcast publication fixture passed: $mode" >&2
+      exit 1
+    fi
+  elif test "$expected_result" = pass; then
+    echo "Appcast publication fixture failed: $mode" >&2
+    /bin/cat "$TEMP/appcast-$mode.stderr" >&2
+    exit 1
+  fi
+}
+
+run_appcast_fixture absent "" pass
+/usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
+  > "$TEMP/published-appcast.xml"
+/usr/bin/cmp "$CANDIDATE_APPCAST" "$TEMP/published-appcast.xml"
+/usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+
+run_appcast_fixture lower "$LOWER_APPCAST" pass
+/usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
+  > "$TEMP/published-appcast.xml"
+/usr/bin/cmp "$CANDIDATE_APPCAST" "$TEMP/published-appcast.xml"
+/usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+
+run_appcast_fixture equal-identical "$CANDIDATE_APPCAST" pass
+! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+/usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
+  > "$TEMP/published-appcast.xml"
+/usr/bin/cmp "$CANDIDATE_APPCAST" "$TEMP/published-appcast.xml"
+
+run_appcast_fixture equal-different "$EQUAL_DIFFERENT_APPCAST" fail
+! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+/usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
+  > "$TEMP/published-appcast.xml"
+/usr/bin/cmp "$EQUAL_DIFFERENT_APPCAST" "$TEMP/published-appcast.xml"
+
+run_appcast_fixture higher "$HIGHER_APPCAST" fail
+! /usr/bin/grep -Fq 'push origin gh-pages' "$MOCK_GIT_LOG"
+/usr/bin/git --git-dir="$MOCK_GIT_ORIGIN" show gh-pages:appcast.xml \
+  > "$TEMP/published-appcast.xml"
+/usr/bin/cmp "$HIGHER_APPCAST" "$TEMP/published-appcast.xml"
 echo "PASS: release metadata"

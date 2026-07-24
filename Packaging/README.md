@@ -71,10 +71,18 @@ leading zeroes) run `.github/workflows/release.yml` on `macos-26`. The workflow
 reruns the Swift and packaging suites, passes the resolved version and build
 number into a fresh internal-package build, creates the GitHub Release with the
 versioned PKG asset, and only then publishes `appcast.xml` to `gh-pages`.
-Release publication is retry-safe: an existing tag Release is reused, its PKG
-asset is replaced, and the remote asset name and byte length are verified
-before Appcast publication. Publishing an unchanged Appcast is an explicit
-successful no-op.
+Release publication is immutable and retry-safe: an existing tag Release is
+reused only when its one matching PKG asset has the exact local byte length and
+GitHub-reported SHA-256 digest. A missing asset is uploaded once without
+replacement; a different, duplicate, or unverifiable asset fails closed and is
+never deleted or overwritten.
+
+The tagged commit timestamp is passed to the Appcast renderer as
+`SOURCE_DATE_EPOCH`, so rerunning the same tag does not change `pubDate`.
+Appcast publication is monotonic by numeric build: a lower existing build may
+advance, a higher existing build refuses rollback, and an equal build succeeds
+only when the complete Appcast bytes are already identical. Equal-build
+metadata differences fail closed instead of rewriting history.
 
 The repository Actions secret `SPARKLE_PRIVATE_KEY` is required for this
 automation. It is materialized only in a mode-`600` file below
