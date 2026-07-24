@@ -53,7 +53,9 @@ final class AppUpdateController: ObservableObject {
     }
 
     func checkForUpdates() {
-        guard canCheckForUpdates else { return }
+        let liveCanCheckForUpdates = driver.canCheckForUpdates
+        canCheckForUpdates = liveCanCheckForUpdates
+        guard liveCanCheckForUpdates else { return }
         driver.checkForUpdates()
         refreshAvailability()
     }

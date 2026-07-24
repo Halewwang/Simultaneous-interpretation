@@ -43,3 +43,16 @@ func updateControllerDoesNotForwardManualCheckWhileUnavailable() {
     #expect(!controller.canCheckForUpdates)
     #expect(driver.checkCount == 0)
 }
+
+@Test @MainActor
+func updateControllerRechecksLiveAvailabilityBeforeManualCheck() {
+    let driver = UpdaterDriverStub()
+    driver.availability.send(true)
+    let controller = AppUpdateController(driver: driver)
+
+    driver.availability.send(false)
+    controller.checkForUpdates()
+
+    #expect(driver.checkCount == 0)
+    #expect(!controller.canCheckForUpdates)
+}
