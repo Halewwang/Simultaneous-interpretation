@@ -1,0 +1,165 @@
+name: Release EMKE Translation
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve version and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$ ]]; then
+            echo "release tag must be vMAJOR.MINOR.PATCH with components from 0 through 999" >&2
+            exit 64
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          IFS=. read -r major minor patch <<< "$version"
+          build_number="$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))"
+          if test "$build_number" -lt 0 || test "$build_number" -gt 999999999; then
+            echo "resolved build number is outside the supported range" >&2
+            exit 64
+          fi
+          /usr/bin/printf 'EMKE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          /usr/bin/printf 'EMKE_BUILD_NUMBER=%s\n' "$build_number" >> "$GITHUB_ENV"
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Run packaging tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u EMKE_VERSION -u EMKE_BUILD_NUMBER \
+            bash Packaging/Tests/run-all.sh
+
+      - name: Build versioned internal package
+        shell: bash
+        run: |
+          set -euo pipefail
+          EMKE_VERSION="$EMKE_VERSION" \
+            EMKE_BUILD_NUMBER="$EMKE_BUILD_NUMBER" \
+            bash Packaging/build-internal-pkg.sh
+
+      - name: Sign update and render Appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SPARKLE_PRIVATE_KEY"
+          runner_temp="$(cd "$RUNNER_TEMP" && pwd -P)"
+          test "$runner_temp" != /
+          pkg=".build/distribution/EMKE-Translation-${EMKE_VERSION}-internal.pkg"
+          test -s "$pkg"
+          sign_tool="$(/usr/bin/find .build/artifacts \
+            -type f -path '*/Sparkle/bin/sign_update' -perm -111 \
+            -print -quit)"
+          test -x "$sign_tool"
+          key_file=""
+          cleanup_key() {
+            case "${key_file:-}" in
+              "$runner_temp"/emke-sparkle-key.*)
+                /bin/rm -f -- "$key_file"
+                ;;
+              "")
+                ;;
+              *)
+                echo "refusing unsafe Sparkle key cleanup target" >&2
+                ;;
+            esac
+          }
+          trap cleanup_key EXIT
+          key_file="$(/usr/bin/mktemp "$runner_temp/emke-sparkle-key.XXXXXX")"
+          /bin/chmod 600 "$key_file"
+          test "$(/usr/bin/stat -f '%Lp' "$key_file")" = "600"
+          /usr/bin/printf '%s' "$SPARKLE_PRIVATE_KEY" > "$key_file"
+          unset SPARKLE_PRIVATE_KEY
+          signing_output="$("$sign_tool" --ed-key-file "$key_file" "$pkg")"
+          signature_pattern='^sparkle:edSignature="([A-Za-z0-9+/]{86}==)" length="([0-9]+)"$'
+          if [[ ! "$signing_output" =~ $signature_pattern ]]; then
+            echo "Sparkle sign_update returned an unexpected result" >&2
+            exit 1
+          fi
+          signature="${BASH_REMATCH[1]}"
+          signed_length="${BASH_REMATCH[2]}"
+          length="$(/usr/bin/stat -f '%z' "$pkg")"
+          [[ "$length" =~ ^[0-9]+$ ]]
+          test "$length" -gt 0
+          test "$signed_length" = "$length"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$pkg")"
+          bash Packaging/Scripts/render-appcast.sh \
+            "$EMKE_VERSION" "$EMKE_BUILD_NUMBER" "$url" \
+            "$signature" "$length" "$runner_temp/appcast.xml"
+          /usr/bin/xmllint --noout "$runner_temp/appcast.xml"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg=".build/distribution/EMKE-Translation-${EMKE_VERSION}-internal.pkg"
+          test -s "$pkg"
+          gh release create "$GITHUB_REF_NAME" "$pkg" \
+            --title "EMKE Translation ${EMKE_VERSION}" \
+            --generate-notes
+
+      - name: Publish Appcast to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_temp="$(cd "$RUNNER_TEMP" && pwd -P)"
+          test "$runner_temp" != /
+          test -s "$runner_temp/appcast.xml"
+          publish="$runner_temp/emke-appcast-branch"
+          case "$publish" in
+            "$runner_temp"/*) ;;
+            *) echo "unsafe Appcast checkout path" >&2; exit 1 ;;
+          esac
+          askpass="$runner_temp/emke-git-askpass.sh"
+          /usr/bin/printf '%s\n' \
+            '#!/bin/bash' \
+            'case "$1" in' \
+            '  *Username*) /usr/bin/printf "%s\n" "x-access-token" ;;' \
+            '  *Password*) /usr/bin/printf "%s\n" "$GITHUB_TOKEN" ;;' \
+            '  *) exit 1 ;;' \
+            'esac' > "$askpass"
+          /bin/chmod 700 "$askpass"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git clone --no-checkout \
+              "https://github.com/${GITHUB_REPOSITORY}.git" "$publish"
+          if git -C "$publish" show-ref --verify --quiet \
+            refs/remotes/origin/gh-pages; then
+            git -C "$publish" checkout -B gh-pages origin/gh-pages
+          else
+            git -C "$publish" checkout --orphan gh-pages
+            git -C "$publish" rm -rf . >/dev/null 2>&1 || true
+          fi
+          /bin/cp "$runner_temp/appcast.xml" "$publish/appcast.xml"
+          git -C "$publish" add appcast.xml
+          if git -C "$publish" diff --cached --quiet; then
+            echo "Appcast is unchanged; gh-pages already matches this release."
+            exit 0
+          fi
+          git -C "$publish" \
+            -c user.name=github-actions \
+            -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -m "release: publish ${EMKE_VERSION} appcast"
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -C "$publish" push origin gh-pages

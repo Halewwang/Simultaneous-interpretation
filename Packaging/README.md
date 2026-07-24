@@ -66,11 +66,31 @@ The renderer XML-escapes inputs and rejects malformed numeric values,
 non-HTTPS URLs, empty signatures, control characters, relative/traversing
 paths, symlink destinations, and non-canonical output parents.
 
+Exact `vMAJOR.MINOR.PATCH` tag pushes (each component `0...999`, without
+leading zeroes) run `.github/workflows/release.yml` on `macos-26`. The workflow
+reruns the Swift and packaging suites, passes the resolved version and build
+number into a fresh internal-package build, creates the GitHub Release with the
+versioned PKG asset, and only then publishes `appcast.xml` to `gh-pages`.
+Publishing an unchanged Appcast is an explicit successful no-op.
+
+The repository Actions secret `SPARKLE_PRIVATE_KEY` is required for this
+automation. It is materialized only in a mode-`600` file below
+`RUNNER_TEMP`, removed by the signing step's exit trap, and never printed or
+stored in the checkout, release notes, Appcast, or Git history. GitHub's
+ephemeral workflow token is supplied through step environments and is not
+embedded in a remote URL or committed.
+
 The current app and embedded Sparkle code are ad-hoc signed. The
 `com.apple.security.cs.disable-library-validation` entitlement is restricted
 to this internal build. A public Developer ID/notarized package must remove
 that entitlement, sign all nested code with the production identity, notarize,
 staple, and pass clean-Mac update acceptance.
+
+The tag workflow does not change that distribution boundary: its GitHub
+Release asset remains an unsigned, unnotarized, arm64-only internal test
+package, and installation or update still requires the existing macOS
+administrator authorization. Publishing the signed Sparkle metadata is not
+public-release approval.
 
 ## Install
 

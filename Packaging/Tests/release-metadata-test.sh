@@ -120,4 +120,153 @@ PEM_MARKER="BEGIN "'PRIVATE KEY'
 test -z "$(/usr/bin/find "$ROOT/Packaging" -type f \
   \( -iname '*private*key*' -o -iname '*sparkle*secret*' \) -print)"
 ! /usr/bin/grep -Fq "$PRIVATE_MARKER" "$OUTPUT"
+
+WORKFLOW="$ROOT/.github/workflows/release.yml"
+if ! test -s "$WORKFLOW"; then
+  echo "release workflow is missing" >&2
+  exit 1
+fi
+
+require_workflow_text() {
+  if ! /usr/bin/grep -Fq -- "$1" "$WORKFLOW"; then
+    echo "release workflow is missing required contract: $1" >&2
+    exit 1
+  fi
+}
+
+workflow_line() {
+  local match
+  match="$(/usr/bin/grep -nF -- "$1" "$WORKFLOW" | /usr/bin/head -n 1)"
+  test -n "$match" || {
+    echo "release workflow ordering marker is missing: $1" >&2
+    exit 1
+  }
+  /usr/bin/printf '%s\n' "${match%%:*}"
+}
+
+assert_workflow_order() {
+  local first
+  local second
+  first="$(workflow_line "$1")"
+  second="$(workflow_line "$2")"
+  if test "$first" -ge "$second"; then
+    echo "release workflow order is unsafe: $1 must precede $2" >&2
+    exit 1
+  fi
+}
+
+require_workflow_text 'tags:'
+require_workflow_text '- "v[0-9]*.[0-9]*.[0-9]*"'
+require_workflow_text 'contents: write'
+require_workflow_text 'runs-on: macos-26'
+require_workflow_text 'actions/checkout@v6'
+require_workflow_text 'Packaging/Tests/run-all.sh'
+require_workflow_text 'Packaging/build-internal-pkg.sh'
+require_workflow_text 'EMKE_VERSION="$EMKE_VERSION"'
+require_workflow_text 'EMKE_BUILD_NUMBER="$EMKE_BUILD_NUMBER"'
+require_workflow_text 'sign_update'
+require_workflow_text 'render-appcast.sh'
+require_workflow_text 'gh release create'
+require_workflow_text 'gh-pages'
+require_workflow_text 'secrets.SPARKLE_PRIVATE_KEY'
+require_workflow_text 'github.token'
+require_workflow_text 'mktemp "$runner_temp/emke-sparkle-key.XXXXXX"'
+require_workflow_text 'chmod 600 "$key_file"'
+require_workflow_text 'trap cleanup_key EXIT'
+require_workflow_text 'sparkle:edSignature="([A-Za-z0-9+/]{86}==)" length="([0-9]+)"'
+require_workflow_text 'signature="${BASH_REMATCH[1]}"'
+require_workflow_text 'signed_length="${BASH_REMATCH[2]}"'
+require_workflow_text 'test -s "$pkg"'
+require_workflow_text '[[ "$length" =~ ^[0-9]+$ ]]'
+require_workflow_text 'test "$length" -gt 0'
+require_workflow_text 'test "$signed_length" = "$length"'
+require_workflow_text 'diff --cached --quiet'
+require_workflow_text 'GIT_ASKPASS="$askpass"'
+
+test "$(/usr/bin/grep -Fc 'secrets.SPARKLE_PRIVATE_KEY' "$WORKFLOW")" -eq 1
+! /usr/bin/grep -Fq 'echo "$SPARKLE_PRIVATE_KEY"' "$WORKFLOW"
+! /usr/bin/grep -Fq 'x-access-token:${GITHUB_TOKEN}' "$WORKFLOW"
+! /usr/bin/grep -Fq 'secrets.GITHUB_TOKEN' "$WORKFLOW"
+! /usr/bin/grep -Fq 'pull_request:' "$WORKFLOW"
+
+assert_workflow_order '- name: Resolve version and build' \
+  '- name: Run Swift tests'
+assert_workflow_order '- name: Run Swift tests' \
+  '- name: Run packaging tests'
+assert_workflow_order '- name: Run packaging tests' \
+  '- name: Build versioned internal package'
+assert_workflow_order '- name: Build versioned internal package' \
+  '- name: Sign update and render Appcast'
+assert_workflow_order '- name: Sign update and render Appcast' \
+  '- name: Create GitHub Release'
+assert_workflow_order '- name: Create GitHub Release' \
+  '- name: Publish Appcast to gh-pages'
+
+RESOLVE_BLOCK="$TEMP/resolve-version-and-build.sh"
+/usr/bin/awk '
+  $0 == "      - name: Resolve version and build" {
+    found_step = 1
+    next
+  }
+  found_step && $0 == "        run: |" {
+    in_block = 1
+    next
+  }
+  in_block && $0 ~ /^      - name:/ {
+    exit
+  }
+  in_block {
+    if ($0 == "") {
+      print
+      next
+    }
+    if (substr($0, 1, 10) != "          ") {
+      exit 65
+    }
+    print substr($0, 11)
+  }
+' "$WORKFLOW" > "$RESOLVE_BLOCK"
+test -s "$RESOLVE_BLOCK"
+
+assert_tag_resolves() {
+  local tag="$1"
+  local expected_version="$2"
+  local expected_build="$3"
+  local github_env="$TEMP/github-env"
+  local expected_env="$TEMP/expected-github-env"
+  : > "$github_env"
+  /usr/bin/printf 'EMKE_VERSION=%s\nEMKE_BUILD_NUMBER=%s\n' \
+    "$expected_version" "$expected_build" > "$expected_env"
+  GITHUB_REF_NAME="$tag" GITHUB_ENV="$github_env" \
+    /bin/bash "$RESOLVE_BLOCK" > "$TEMP/resolve.stdout" \
+    2> "$TEMP/resolve.stderr"
+  /usr/bin/cmp "$expected_env" "$github_env"
+}
+
+assert_tag_rejected() {
+  local tag="$1"
+  local github_env="$TEMP/github-env"
+  : > "$github_env"
+  if GITHUB_REF_NAME="$tag" GITHUB_ENV="$github_env" \
+    /bin/bash "$RESOLVE_BLOCK" > "$TEMP/resolve.stdout" \
+    2> "$TEMP/resolve.stderr"; then
+    echo "unsafe release tag was accepted: $tag" >&2
+    exit 1
+  fi
+  test ! -s "$github_env"
+}
+
+assert_tag_resolves "v0.0.0" "0.0.0" "0"
+assert_tag_resolves "v1.2.3" "1.2.3" "1002003"
+assert_tag_resolves "v999.999.999" "999.999.999" "999999999"
+assert_tag_rejected "1.2.3"
+assert_tag_rejected "v01.2.3"
+assert_tag_rejected "v1.02.3"
+assert_tag_rejected "v1.2.03"
+assert_tag_rejected "v1.2.3-alpha"
+assert_tag_rejected "v1.2.3.4"
+assert_tag_rejected "v1000.0.0"
+assert_tag_rejected "v0.1000.0"
+assert_tag_rejected "v0.0.1000"
+assert_tag_rejected "v9223372036854775807.0.0"
 echo "PASS: release metadata"
