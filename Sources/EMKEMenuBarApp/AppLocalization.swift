@@ -197,8 +197,8 @@ struct AppCopy: Equatable, Sendable {
             )
         case .onboardingOverviewBody:
             localized(
-                zhHans: "EMKE 在真实麦克风、翻译服务和虚拟会议设备之间建立两条独立音频路径。音频会发送到你配置的服务商进行处理。",
-                english: "EMKE creates two independent audio paths between your real microphone, translation provider, and virtual meeting devices. Audio is sent to your configured provider for processing."
+                zhHans: "EMKE 在真实麦克风、翻译服务和虚拟会议设备之间建立两条独立音频路径。音频仅在运行时发送至你配置的服务商进行处理，EMKE 不保存音频。",
+                english: "EMKE creates two independent audio paths between your real microphone, translation provider, and virtual meeting devices. Audio is sent only to your configured provider while the app is running. EMKE does not save audio."
             )
         case .onboardingMicrophoneTitle:
             localized(zhHans: "允许麦克风访问", english: "Allow microphone access")

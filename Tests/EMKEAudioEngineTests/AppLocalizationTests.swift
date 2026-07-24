@@ -96,6 +96,25 @@ func onboardingCopyIsCompleteInBothLanguages() {
 }
 
 @Test
+func onboardingOverviewExplainsRuntimeProcessingAndNoAudioStorage() {
+    #expect(
+        AppCopy(language: .zhHans).text(.onboardingOverviewBody)
+            .contains(
+                "音频仅在运行时发送至你配置的服务商进行处理，EMKE 不保存音频。"
+            )
+    )
+    #expect(
+        AppCopy(language: .english).text(.onboardingOverviewBody)
+            .contains(
+                """
+                Audio is sent only to your configured provider while the app \
+                is running. EMKE does not save audio.
+                """
+            )
+    )
+}
+
+@Test
 func meetingEndpointLabelsExplicitlyNameTheMeetingAppControls() {
     #expect(
         AppCopy(language: .zhHans).text(.meetingAppSpeaker)

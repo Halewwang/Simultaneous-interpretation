@@ -75,3 +75,28 @@ will be added to `OnboardingView`.
   (29).
 - Fresh full `swift test` passed 361 tests; the environment-gated driver-state
   case was skipped as designed.
+
+## Step 1 privacy-copy follow-up
+
+- Final review found that the overview explained provider processing but did
+  not explicitly say processing occurs only while the app is running or that
+  EMKE does not save audio.
+- A bilingual semantic regression test was added first and observed failing
+  for both languages. The overview now states exactly:
+  `音频仅在运行时发送至你配置的服务商进行处理，EMKE 不保存音频。` and
+  `Audio is sent only to your configured provider while the app is running.
+  EMKE does not save audio.` The same test then passed.
+- Two fresh acceptance processes wrote the complete artifact set to
+  `/tmp/emke-task5-privacy-captures.hKAV7S/run-{1,2}`. The Chinese and English
+  Step 1 TIFFs are 1120 x 1240 and have identical SHA-256 hashes across runs:
+  `1c510e3d2aca01e168c465dd99f5abe6e7211043bad6d51f144f89bcd513340d`
+  (Chinese) and
+  `330aa59a37df48e0c1d0b63af0ad8b9df44e0e90dc66d79d886d236c275a108b`
+  (English).
+- Exact-byte visual inspection confirmed both Step 1 renders show the full
+  privacy sentence, title, two audio paths, footer actions, progress, and
+  primary action without clipping.
+- Focused checks passed: `Onboarding` (20), static localization (1), complete
+  onboarding copy (1), bilingual privacy semantics (1), and the real
+  eight-fixture onboarding renderer (1). Fresh full `swift test` passed 367
+  tests; the two environment-gated live-driver cases were skipped as designed.
