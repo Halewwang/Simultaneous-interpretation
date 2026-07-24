@@ -125,6 +125,43 @@ private final class BlockingTranslationMenuDeviceProvider:
     }
 }
 
+private actor AudioLevelVisibilityGate {
+    private var falseWriteStarted = false
+    private var falseWriteReleased = false
+    private var falseWriteStartWaiters: [
+        CheckedContinuation<Void, Never>
+    ] = []
+    private var falseWriteReleaseWaiter: CheckedContinuation<Void, Never>?
+
+    func suspendFirstFalseWrite() async {
+        guard !falseWriteStarted else { return }
+        falseWriteStarted = true
+        let waiters = falseWriteStartWaiters
+        falseWriteStartWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        guard !falseWriteReleased else { return }
+        await withCheckedContinuation { continuation in
+            falseWriteReleaseWaiter = continuation
+        }
+    }
+
+    func waitUntilFalseWriteStarts() async {
+        guard !falseWriteStarted else { return }
+        await withCheckedContinuation { continuation in
+            falseWriteStartWaiters.append(continuation)
+        }
+    }
+
+    func releaseFalseWrite() {
+        guard !falseWriteReleased else { return }
+        falseWriteReleased = true
+        falseWriteReleaseWaiter?.resume()
+        falseWriteReleaseWaiter = nil
+    }
+}
+
 private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private(set) var configurations: [
         TranslationCoordinatorConfiguration
@@ -137,6 +174,14 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private(set) var audioLevelUpdateFlags: [Bool] = []
     private(set) var inboundBypassValues: [Bool] = []
     private(set) var outboundBypassValues: [Bool] = []
+    private(set) var effectiveAudioLevelUpdatesEnabled = false
+    private(set) var maximumConcurrentAudioLevelWrites = 0
+    private var audioLevelWritesInFlight = 0
+    private let audioLevelVisibilityGate: AudioLevelVisibilityGate?
+
+    init(audioLevelVisibilityGate: AudioLevelVisibilityGate? = nil) {
+        self.audioLevelVisibilityGate = audioLevelVisibilityGate
+    }
 
     func start(
         configuration: TranslationCoordinatorConfiguration
@@ -189,8 +234,19 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     func setOutboundBypass(_ enabled: Bool) async {
         outboundBypassValues.append(enabled)
     }
+
     func setAudioLevelUpdatesEnabled(_ enabled: Bool) async {
+        audioLevelWritesInFlight += 1
+        maximumConcurrentAudioLevelWrites = max(
+            maximumConcurrentAudioLevelWrites,
+            audioLevelWritesInFlight
+        )
+        defer { audioLevelWritesInFlight -= 1 }
         audioLevelUpdateFlags.append(enabled)
+        if !enabled, let audioLevelVisibilityGate {
+            await audioLevelVisibilityGate.suspendFirstFalseWrite()
+        }
+        effectiveAudioLevelUpdatesEnabled = enabled
     }
 }
 
@@ -1129,6 +1185,77 @@ func floatingSurfaceKeepsRealLevelsEnabledAfterMenuCloses() async {
 
     await model.setFloatingWindowVisible(false)
     #expect(await coordinator.audioLevelUpdateFlags == [true, false])
+}
+
+@Test @MainActor
+func overlappingHideAndShowSerializesAudioVisibilityReconciliation() async {
+    let gate = AudioLevelVisibilityGate()
+    let coordinator = TranslationCoordinatorStub(
+        audioLevelVisibilityGate: gate
+    )
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setMenuBarVisible(true)
+
+    let levelsUpdated = Task { @MainActor in
+        for await level in model.$outboundLevel.values {
+            if level == 0.75 {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.25, outbound: 0.75)
+    ))
+    await levelsUpdated.value
+
+    let hideTask = Task { @MainActor in
+        await model.setMenuBarVisible(false)
+    }
+    await gate.waitUntilFalseWriteStarts()
+
+    let showBecameDesired = Task { @MainActor in
+        for await isVisible in model.$isMenuBarVisible.values {
+            if isVisible {
+                return
+            }
+        }
+    }
+    let showTask = Task { @MainActor in
+        await model.setMenuBarVisible(true)
+    }
+    await showBecameDesired.value
+
+    await gate.releaseFalseWrite()
+    await hideTask.value
+    await showTask.value
+
+    #expect(await coordinator.audioLevelUpdateFlags == [true, false, true])
+    #expect(await coordinator.effectiveAudioLevelUpdatesEnabled)
+    #expect(await coordinator.maximumConcurrentAudioLevelWrites == 1)
+    #expect(model.hasVisibleAudioLevelSurface)
+    #expect(model.inboundLevel == 0.25)
+    #expect(model.outboundLevel == 0.75)
+
+    await model.setMenuBarVisible(false)
+
+    #expect(
+        await coordinator.audioLevelUpdateFlags
+            == [true, false, true, false]
+    )
+    #expect(!(await coordinator.effectiveAudioLevelUpdatesEnabled))
+    #expect(!model.hasVisibleAudioLevelSurface)
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+
+    await model.setMenuBarVisible(false)
+    #expect(
+        await coordinator.audioLevelUpdateFlags
+            == [true, false, true, false]
+    )
 }
 
 @Test @MainActor

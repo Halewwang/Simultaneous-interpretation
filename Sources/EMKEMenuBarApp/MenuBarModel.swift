@@ -322,7 +322,8 @@ final class MenuBarModel: ObservableObject {
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
     private var localeObserver: AnyCancellable?
-    private var publishedAudioLevelVisibility = false
+    private var appliedAudioLevelVisibility = false
+    private var audioLevelVisibilityReconciliationTask: Task<Void, Never>?
 
     init(
         provider: any AudioDeviceProviding = CoreAudioDeviceProvider(),
@@ -1098,12 +1099,32 @@ final class MenuBarModel: ObservableObject {
     }
 
     private func synchronizeAudioLevelVisibility() async {
-        let enabled = hasVisibleAudioLevelSurface
-        if enabled != publishedAudioLevelVisibility {
-            publishedAudioLevelVisibility = enabled
-            await coordinator.setAudioLevelUpdatesEnabled(enabled)
+        if let task = audioLevelVisibilityReconciliationTask {
+            await task.value
+            return
         }
-        if !enabled {
+        guard appliedAudioLevelVisibility != hasVisibleAudioLevelSurface else {
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.drainAudioLevelVisibility()
+        }
+        audioLevelVisibilityReconciliationTask = task
+        await task.value
+    }
+
+    private func drainAudioLevelVisibility() async {
+        defer {
+            audioLevelVisibilityReconciliationTask = nil
+        }
+        while appliedAudioLevelVisibility != hasVisibleAudioLevelSurface {
+            let desiredVisibility = hasVisibleAudioLevelSurface
+            await coordinator.setAudioLevelUpdatesEnabled(desiredVisibility)
+            appliedAudioLevelVisibility = desiredVisibility
+        }
+        if !appliedAudioLevelVisibility, !hasVisibleAudioLevelSurface {
             inboundLevel = 0
             outboundLevel = 0
         }
