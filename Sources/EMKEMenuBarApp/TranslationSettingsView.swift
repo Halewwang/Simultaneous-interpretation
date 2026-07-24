@@ -5,6 +5,15 @@ import SwiftUI
 
 struct TranslationSettingsView: View {
     @ObservedObject var model: MenuBarModel
+    let openOnboarding: () -> Void
+
+    init(
+        model: MenuBarModel,
+        openOnboarding: @escaping () -> Void = {}
+    ) {
+        self.model = model
+        self.openOnboarding = openOnboarding
+    }
 
     private var copy: AppCopy { model.copy }
 
@@ -68,6 +77,15 @@ struct TranslationSettingsView: View {
                     selection: $model.interfaceLanguage
                 )
             }
+
+            Button(action: openOnboarding) {
+                Label(
+                    copy.text(.openGettingStarted),
+                    systemImage: "questionmark.circle"
+                )
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(EMKEVisualStyle.activityBlue)
         }
     }
 

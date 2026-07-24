@@ -2,6 +2,15 @@ import SwiftUI
 
 struct MenuBarRootView: View {
     @ObservedObject var model: MenuBarModel
+    let openOnboarding: () -> Void
+
+    init(
+        model: MenuBarModel,
+        openOnboarding: @escaping () -> Void = {}
+    ) {
+        self.model = model
+        self.openOnboarding = openOnboarding
+    }
 
     var body: some View {
         Group {
@@ -9,7 +18,10 @@ struct MenuBarRootView: View {
             case .dashboard:
                 TranslationDashboardView(model: model)
             case .settings:
-                TranslationSettingsView(model: model)
+                TranslationSettingsView(
+                    model: model,
+                    openOnboarding: openOnboarding
+                )
             }
         }
         .frame(

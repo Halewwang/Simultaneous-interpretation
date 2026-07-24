@@ -18,6 +18,14 @@ final class CaptureArtifacts: @unchecked Sendable {
         "floating-running.tiff",
         "floating-degraded.tiff",
         "floating-stopping.tiff",
+        "onboarding-overview-zh.tiff",
+        "onboarding-microphone-zh.tiff",
+        "onboarding-audio-zh.tiff",
+        "onboarding-meeting-zh.tiff",
+        "onboarding-overview-en.tiff",
+        "onboarding-microphone-en.tiff",
+        "onboarding-audio-en.tiff",
+        "onboarding-meeting-en.tiff",
     ]
     static let shared = CaptureArtifacts(
         directory: URL(
@@ -244,7 +252,118 @@ func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
 }
 
 @Test @MainActor
-func captureArtifactDirectoryMatchesExactExpectedSet() throws {
+func onboardingRendersEveryStepInBothLanguages() async throws {
+    for language in [
+        AppInterfaceLanguage.zhHans,
+        AppInterfaceLanguage.english,
+    ] {
+        for step in OnboardingStep.allCases {
+            let microphoneState: MicrophonePermissionState =
+                step == .microphone ? .denied : .authorized
+            let firstBitmap = try await onboardingBitmap(
+                language: language,
+                step: step,
+                microphoneState: microphoneState
+            )
+            let secondBitmap = try await onboardingBitmap(
+                language: language,
+                step: step,
+                microphoneState: microphoneState
+            )
+            let bitmap = onboardingHeaderInkPixels(in: firstBitmap)
+                >= onboardingHeaderInkPixels(in: secondBitmap)
+                ? firstBitmap
+                : secondBitmap
+            #expect(bitmap.pixelsWide == 1_120)
+            #expect(bitmap.pixelsHigh == 1_240)
+            #expect(
+                onboardingContentInkPixels(in: bitmap) > 1_250,
+                "Onboarding \(step) \(language) must render nonblank central content"
+            )
+            #expect(
+                onboardingFallbackPixels(in: bitmap) == 0,
+                "Onboarding \(step) \(language) must not contain renderer fallback controls"
+            )
+            #expect(
+                onboardingHeaderInkPixels(in: bitmap) > 30,
+                "Onboarding \(step) \(language) must render the complete header"
+            )
+            try writeQACapture(
+                bitmap,
+                named:
+                    "onboarding-\(step.captureName)-\(language == .zhHans ? "zh" : "en").tiff"
+            )
+        }
+    }
+}
+
+private func onboardingHeaderInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 30, to: 120, by: 2) {
+        for x in stride(from: 45, to: 145, by: 2) {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            let luminance = (0.2126 * color.redComponent)
+                + (0.7152 * color.greenComponent)
+                + (0.0722 * color.blueComponent)
+            if luminance < 0.75 {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+private func onboardingFallbackPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 150, to: 1_100, by: 2) {
+        for x in stride(from: 40, to: 1_080, by: 2) {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            if color.redComponent > 0.85,
+               color.greenComponent > 0.45,
+               color.blueComponent < 0.35 {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+private func onboardingContentInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    var count = 0
+    for y in stride(from: 180, to: 1_050, by: 2) {
+        for x in stride(from: 50, to: 1_070, by: 2) {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            let luminance = (0.2126 * color.redComponent)
+                + (0.7152 * color.greenComponent)
+                + (0.0722 * color.blueComponent)
+            if luminance < 0.9 {
+                count += 1
+            }
+        }
+    }
+    return count
+}
+
+@Test @MainActor
+func captureArtifactDirectoryMatchesExactExpectedSet() async throws {
     guard CaptureArtifacts.isEnabled else {
         return
     }
@@ -252,6 +371,7 @@ func captureArtifactDirectoryMatchesExactExpectedSet() throws {
     try captureReadyDashboardForVisualReview()
     try englishReadyDashboardKeepsApprovedRenderDimensions()
     try settingsRenderInBothInterfaceLanguagesAtApprovedDimensions()
+    try await onboardingRendersEveryStepInBothLanguages()
     try floatingCapsuleRendersAtRetinaDimensions()
 
     let actualFilenames = try CaptureArtifacts.shared.finish()
@@ -488,6 +608,45 @@ private struct RenderAudioDeviceProvider: AudioDeviceProviding {
     }
 }
 
+private struct OnboardingRenderAudioDeviceProvider: AudioDeviceProviding {
+    func devices() throws -> [AudioDevice] {
+        [
+            AudioDevice(
+                id: 10,
+                uid: AudioDevice.virtualSpeakerUID,
+                name: "EMKE Virtual Speaker",
+                inputChannelCount: 2,
+                outputChannelCount: 2,
+                nominalSampleRate: 48_000
+            ),
+            AudioDevice(
+                id: 11,
+                uid: AudioDevice.virtualMicrophoneUID,
+                name: "EMKE Virtual Microphone",
+                inputChannelCount: 2,
+                outputChannelCount: 2,
+                nominalSampleRate: 48_000
+            ),
+            AudioDevice(
+                id: 20,
+                uid: "onboarding.physical.input",
+                name: "Studio USB Microphone",
+                inputChannelCount: 1,
+                outputChannelCount: 0,
+                nominalSampleRate: 48_000
+            ),
+            AudioDevice(
+                id: 21,
+                uid: "onboarding.physical.output",
+                name: "USB Headphones",
+                inputChannelCount: 0,
+                outputChannelCount: 2,
+                nominalSampleRate: 48_000
+            ),
+        ]
+    }
+}
+
 private actor RenderSecretStore: SecretStore {
     func saveAPIKey(_ value: String) async throws {}
     func loadAPIKey() async throws -> String? { nil }
@@ -504,6 +663,31 @@ private struct RenderMicrophonePermissionProvider:
     func requestAccess() async -> Bool {
         false
     }
+}
+
+private struct OnboardingRenderMicrophonePermissionProvider:
+    MicrophonePermissionProviding
+{
+    let state: MicrophonePermissionState
+
+    func authorizationStatus() async -> MicrophonePermissionState {
+        state
+    }
+
+    func requestAccess() async -> Bool {
+        state == .authorized
+    }
+}
+
+@MainActor
+private final class RenderOnboardingProgressStore:
+    OnboardingProgressStoring
+{
+    func shouldPresent(currentVersion: Int) -> Bool {
+        true
+    }
+
+    func markCompleted(version: Int) {}
 }
 
 @MainActor
@@ -532,6 +716,73 @@ private func writeQACapture(
     }
     let data = try #require(bitmap.tiffRepresentation)
     try CaptureArtifacts.shared.write(data, named: filename)
+}
+
+private extension OnboardingStep {
+    var captureName: String {
+        switch self {
+        case .overview: "overview"
+        case .microphone: "microphone"
+        case .audioSetup: "audio"
+        case .meetingSetup: "meeting"
+        }
+    }
+}
+
+@MainActor
+private func onboardingBitmap(
+    language: AppInterfaceLanguage,
+    step: OnboardingStep,
+    microphoneState: MicrophonePermissionState
+) async throws -> NSBitmapImageRep {
+    var settings = AppSettings.default
+    settings.interfaceLanguage = language
+    settings.selectedInputUID = "onboarding.physical.input"
+    settings.selectedOutputUID = "onboarding.physical.output"
+    let model = MenuBarModel(
+        provider: OnboardingRenderAudioDeviceProvider(),
+        secretStore: RenderSecretStore(),
+        settingsStore: RenderSettingsStore(settings: settings),
+        microphonePermissionProvider:
+            OnboardingRenderMicrophonePermissionProvider(
+                state: microphoneState
+            ),
+        deferInitialDeviceReload: true
+    )
+    await model.reloadDevicesAsync()
+    await model.refreshMicrophonePermissionState()
+
+    let controller = OnboardingWindowController(
+        progressStore: RenderOnboardingProgressStore()
+    )
+    controller.show()
+    while controller.flow.step != step {
+        controller.moveForward()
+    }
+    await Task.yield()
+
+    let content = OnboardingView(
+        model: model,
+        controller: controller,
+        refreshesStateOnStepChange: false
+    )
+        .frame(width: 560, height: 620)
+        .environment(\.colorScheme, .light)
+    var candidates: [NSBitmapImageRep] = []
+    for _ in 0..<3 {
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        renderer.proposedSize = ProposedViewSize(width: 560, height: 620)
+        let data = try #require(renderer.nsImage?.tiffRepresentation)
+        candidates.append(try #require(NSBitmapImageRep(data: data)))
+        await Task.yield()
+    }
+    return try #require(
+        candidates.max {
+            onboardingHeaderInkPixels(in: $0)
+                < onboardingHeaderInkPixels(in: $1)
+        }
+    )
 }
 
 @Test @MainActor

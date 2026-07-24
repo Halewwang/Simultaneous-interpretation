@@ -45,6 +45,43 @@ func everyStaticCopyKeyHasChineseAndEnglishText() {
 }
 
 @Test
+func onboardingCopyIsCompleteInBothLanguages() {
+    let keys: [AppCopyKey] = [
+        .gettingStarted,
+        .openGettingStarted,
+        .onboardingSkipForNow,
+        .onboardingDoNotShowAgain,
+        .onboardingBack,
+        .onboardingContinue,
+        .onboardingFinish,
+        .onboardingOverviewTitle,
+        .onboardingOverviewBody,
+        .onboardingMicrophoneTitle,
+        .onboardingMicrophoneBody,
+        .onboardingAllowMicrophone,
+        .onboardingOpenSystemSettings,
+        .onboardingAuthorized,
+        .onboardingDenied,
+        .onboardingRestricted,
+        .onboardingAudioTitle,
+        .onboardingAudioBody,
+        .onboardingMeetingTitle,
+        .onboardingMeetingBody,
+        .onboardingProgress,
+    ]
+
+    for language in [
+        ResolvedInterfaceLanguage.zhHans,
+        ResolvedInterfaceLanguage.english,
+    ] {
+        let copy = AppCopy(language: language)
+        for key in keys {
+            #expect(!copy.text(key).isEmpty)
+        }
+    }
+}
+
+@Test
 func dashboardBrandFooterIsExactInBothLanguages() {
     #expect(
         AppCopy(language: .zhHans).text(.audioDirectToProvider)

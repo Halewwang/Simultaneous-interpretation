@@ -34,6 +34,27 @@ enum AppCopyKey: CaseIterable, Sendable {
     case settings
     case backToDashboard
     case openSettings
+    case gettingStarted
+    case openGettingStarted
+    case onboardingSkipForNow
+    case onboardingDoNotShowAgain
+    case onboardingBack
+    case onboardingContinue
+    case onboardingFinish
+    case onboardingOverviewTitle
+    case onboardingOverviewBody
+    case onboardingMicrophoneTitle
+    case onboardingMicrophoneBody
+    case onboardingAllowMicrophone
+    case onboardingOpenSystemSettings
+    case onboardingAuthorized
+    case onboardingDenied
+    case onboardingRestricted
+    case onboardingAudioTitle
+    case onboardingAudioBody
+    case onboardingMeetingTitle
+    case onboardingMeetingBody
+    case onboardingProgress
     case translationSettingsLocked
     case interface
     case interfaceLanguage
@@ -152,6 +173,69 @@ struct AppCopy: Equatable, Sendable {
             localized(zhHans: "返回翻译控制台", english: "Back to translation controls")
         case .openSettings:
             localized(zhHans: "打开设置", english: "Open Settings")
+        case .gettingStarted:
+            localized(zhHans: "开始使用 EMKE", english: "Getting started with EMKE")
+        case .openGettingStarted:
+            localized(zhHans: "重新打开使用引导", english: "Open getting started")
+        case .onboardingSkipForNow:
+            localized(zhHans: "暂时跳过", english: "Skip for now")
+        case .onboardingDoNotShowAgain:
+            localized(zhHans: "不再显示", english: "Do not show again")
+        case .onboardingBack:
+            localized(zhHans: "返回", english: "Back")
+        case .onboardingContinue:
+            localized(zhHans: "继续", english: "Continue")
+        case .onboardingFinish:
+            localized(zhHans: "完成", english: "Finish")
+        case .onboardingOverviewTitle:
+            localized(
+                zhHans: "双向实时翻译，保留真实设备",
+                english: "Two-way live translation with your real devices"
+            )
+        case .onboardingOverviewBody:
+            localized(
+                zhHans: "EMKE 在真实麦克风、翻译服务和虚拟会议设备之间建立两条独立音频路径。音频会发送到你配置的服务商进行处理。",
+                english: "EMKE creates two independent audio paths between your real microphone, translation provider, and virtual meeting devices. Audio is sent to your configured provider for processing."
+            )
+        case .onboardingMicrophoneTitle:
+            localized(zhHans: "允许麦克风访问", english: "Allow microphone access")
+        case .onboardingMicrophoneBody:
+            localized(
+                zhHans: "EMKE 需要访问真实麦克风，才能捕获你的语音并进行出站翻译。只有点击下方按钮后才会请求系统权限。",
+                english: "EMKE needs access to your real microphone to capture your voice for outbound translation. macOS permission is requested only after you select the button below."
+            )
+        case .onboardingAllowMicrophone:
+            localized(zhHans: "允许麦克风", english: "Allow microphone")
+        case .onboardingOpenSystemSettings:
+            localized(zhHans: "打开系统设置", english: "Open System Settings")
+        case .onboardingAuthorized:
+            localized(zhHans: "麦克风权限已允许", english: "Microphone access allowed")
+        case .onboardingDenied:
+            localized(
+                zhHans: "麦克风权限已拒绝，请在系统设置中允许",
+                english: "Microphone access denied; allow it in System Settings"
+            )
+        case .onboardingRestricted:
+            localized(
+                zhHans: "系统策略限制了麦克风访问",
+                english: "Microphone access is restricted by system policy"
+            )
+        case .onboardingAudioTitle:
+            localized(zhHans: "检查本地音频", english: "Check local audio")
+        case .onboardingAudioBody:
+            localized(
+                zhHans: "确认已检测到 EMKE 虚拟驱动，并选择真实麦克风与耳机或扬声器。诊断仅在你点击测试按钮后运行。",
+                english: "Confirm the EMKE virtual driver is detected, then select your real microphone and headphones or speakers. Diagnostics run only after you select a test button."
+            )
+        case .onboardingMeetingTitle:
+            localized(zhHans: "连接服务并设置会议", english: "Connect and set up your meeting")
+        case .onboardingMeetingBody:
+            localized(
+                zhHans: "保存服务商配置并测试连接，然后在会议应用中选择下方两个 EMKE 虚拟设备。",
+                english: "Save your provider configuration and test the connection, then select the two EMKE virtual devices shown below in your meeting app."
+            )
+        case .onboardingProgress:
+            localized(zhHans: "引导进度", english: "Onboarding progress")
         case .translationSettingsLocked:
             localized(
                 zhHans: "翻译运行期间设置已锁定",

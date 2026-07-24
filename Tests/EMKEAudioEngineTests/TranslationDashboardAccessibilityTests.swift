@@ -247,6 +247,52 @@ func menuBarAppSharesOneModelWithFloatingPanel() throws {
 }
 
 @Test
+func menuBarAppOwnsOnboardingWindow() throws {
+    let source = try sourceFile(named: "EMKEMenuBarApp.swift")
+
+    #expect(source.contains("OnboardingWindowController("))
+    #expect(source.contains("OnboardingAppWindowPresenter("))
+    #expect(source.contains("OnboardingView("))
+    #expect(source.contains("onboardingWindowController.showIfNeeded()"))
+}
+
+@Test
+func settingsCanReopenGettingStarted() throws {
+    let settings = try sourceFile(named: "TranslationSettingsView.swift")
+
+    #expect(settings.contains("copy.text(.openGettingStarted)"))
+}
+
+@Test
+func onboardingPermissionRequestStaysBehindTheExplainedAction() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(source.contains("OnboardingMicrophonePresentation.make("))
+    #expect(source.contains("case .requestAccess:"))
+    #expect(source.contains("model.requestMicrophonePermissionForOnboarding()"))
+    #expect(source.contains("case .openSystemSettings:"))
+    #expect(
+        source.contains(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        )
+    )
+    #expect(source.contains("case .continueFlow:"))
+    #expect(source.contains("model.refreshMicrophonePermissionState()"))
+}
+
+@Test
+func onboardingReusesExistingDiagnosticAndConnectionActions() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(source.contains("model.startAudioInputTest()"))
+    #expect(source.contains("model.stopAudioInputTest()"))
+    #expect(source.contains("model.playAudioOutputTest()"))
+    #expect(source.contains("model.testConnection()"))
+    #expect(source.contains("EMKE Virtual Speaker"))
+    #expect(source.contains("EMKE Virtual Microphone"))
+}
+
+@Test
 func floatingPanelHostsTheSharedModelAndWiresStop() throws {
     let source = try sourceFile(
         named: "FloatingTranslationPanelController.swift"
