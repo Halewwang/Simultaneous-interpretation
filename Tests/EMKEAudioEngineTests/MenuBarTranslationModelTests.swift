@@ -225,6 +225,22 @@ private actor TranslationSecretStoreStub: SecretStore {
     }
 }
 
+private actor ReloadFailingTranslationSecretStoreStub: SecretStore {
+    private var successfulLoadsRemaining = 2
+
+    func saveAPIKey(_ value: String) async throws {}
+
+    func loadAPIKey() async throws -> String? {
+        guard successfulLoadsRemaining > 0 else {
+            throw SecretStoreError.keychainStatus(-50)
+        }
+        successfulLoadsRemaining -= 1
+        return "stored-key"
+    }
+
+    func deleteAPIKey() async throws {}
+}
+
 private actor MicrophonePermissionStub: MicrophonePermissionProviding {
     let state: MicrophonePermissionState
     let requestResult: Bool
@@ -1093,6 +1109,39 @@ func floatingPresentationTreatsBackpressureAsWarningNotFatal() async {
     value = model.floatingPresentation(at: Date())
     #expect(value.tone == .degraded)
     #expect(value.status == "Outbound muted")
+
+    await model.stop()
+}
+
+@Test @MainActor
+func floatingPresentationIgnoresKeychainReloadFailureDuringHealthySession()
+    async throws
+{
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: ReloadFailingTranslationSecretStoreStub(),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        )
+    )
+    await configureAndStart(model)
+    model.interfaceLanguage = .english
+    let now = try #require(model.translationStartedAt)
+
+    await model.loadConfiguration()
+
+    #expect(model.configurationError?.contains("Could not read Keychain") == true)
+    #expect(model.coordinatorState.isRunning)
+    #expect(model.readiness == .active)
+    let dashboard = model.dashboardPresentation(at: now)
+    #expect(dashboard.errorText?.contains("Could not read Keychain") == true)
+    #expect(dashboard.primaryStatusSymbol == "exclamationmark.triangle")
+    let floating = model.floatingPresentation(at: now)
+    #expect(floating.tone == .healthy)
+    #expect(floating.status == "Translating")
 
     await model.stop()
 }

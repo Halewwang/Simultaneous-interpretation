@@ -582,7 +582,7 @@ final class MenuBarModel: ObservableObject {
             outboundLevel: outboundLevel,
             translationStartedAt: translationStartedAt,
             now: now,
-            hasFatalSessionError: configurationErrorValue != nil,
+            hasFatalSessionError: hasFatalSessionError,
             copy: copy
         )
     }
@@ -1021,6 +1021,11 @@ final class MenuBarModel: ObservableObject {
         coordinatorState.isRunning
             && motherLanguage == meetingOutputLanguage
             && coordinatorState.outbound == .bypassed
+    }
+
+    private var hasFatalSessionError: Bool {
+        // The coordinator currently exposes no global fatal-session event.
+        false
     }
 
     private var currentPublicSettings: AppSettings {
