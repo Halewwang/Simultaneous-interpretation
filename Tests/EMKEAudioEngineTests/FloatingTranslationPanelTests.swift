@@ -85,11 +85,13 @@ func floatingVisibilityPublisherEmitsOnlyLifecycleBoundaries() {
         TranslationCoordinatorState,
         Never
     >(TranslationCoordinatorState())
+    let translationStartedAt = CurrentValueSubject<Date?, Never>(nil)
     var values: [Bool] = []
     let observation = FloatingTranslationPanelVisibilityPublisher.make(
         isStarting: isStarting.eraseToAnyPublisher(),
         isStopping: isStopping.eraseToAnyPublisher(),
-        coordinatorState: coordinatorState.eraseToAnyPublisher()
+        coordinatorState: coordinatorState.eraseToAnyPublisher(),
+        translationStartedAt: translationStartedAt.eraseToAnyPublisher()
     )
     .sink { values.append($0) }
 
@@ -100,6 +102,7 @@ func floatingVisibilityPublisherEmitsOnlyLifecycleBoundaries() {
             outbound: .stopped
         )
     )
+    translationStartedAt.send(Date(timeIntervalSince1970: 10_000))
     coordinatorState.send(TranslationCoordinatorState())
     isStarting.send(true)
     coordinatorState.send(TranslationCoordinatorState(isRunning: true))

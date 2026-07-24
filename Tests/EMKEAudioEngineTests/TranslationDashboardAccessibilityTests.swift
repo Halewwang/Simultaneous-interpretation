@@ -268,7 +268,19 @@ func floatingPanelLifecycleCoalescesRefreshAndPlacesOnlyOnce() throws {
             "coordinatorState: model.$coordinatorState.eraseToAnyPublisher()"
         )
     )
-    #expect(source.contains("state.hasActivePresentation"))
+    #expect(
+        source.contains(
+            """
+            translationStartedAt: model.$translationStartedAt\
+            .eraseToAnyPublisher()
+            """
+        )
+    )
+    #expect(
+        source.contains(
+            "state.hasActivePresentation(translationStartedAt:"
+        )
+    )
     #expect(source.contains(".removeDuplicates()"))
     #expect(source.contains("await Task.yield()"))
     #expect(source.contains("refreshTask?.cancel()"))

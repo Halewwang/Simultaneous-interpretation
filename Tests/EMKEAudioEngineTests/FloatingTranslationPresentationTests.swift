@@ -125,20 +125,22 @@ func nonRunningNonStoppedChannelKeepsFloatingPresentationActive(
 }
 
 @Test
-func nonRunningFailedSessionUsesDegradedStatus() {
+func establishedNonRunningFailedSessionUsesDegradedStatus() {
     let inboundFailure = makeFloatingPresentation(
         coordinatorState: TranslationCoordinatorState(
             isRunning: false,
             inbound: .failed(message: "inbound offline"),
             outbound: .stopped
-        )
+        ),
+        translationStartedAt: floatingNow
     )
     let outboundFailure = makeFloatingPresentation(
         coordinatorState: TranslationCoordinatorState(
             isRunning: false,
             inbound: .stopped,
             outbound: .failed(message: "outbound offline")
-        )
+        ),
+        translationStartedAt: floatingNow
     )
 
     #expect(inboundFailure.isVisible)
@@ -149,6 +151,50 @@ func nonRunningFailedSessionUsesDegradedStatus() {
     #expect(outboundFailure.status == "Muted")
     #expect(outboundFailure.tone == .degraded)
     #expect(outboundFailure.stopEnabled)
+}
+
+@Test
+func nonRunningFailedSessionWithoutStartContextIsHidden() {
+    let value = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: false,
+            inbound: .failed(message: "pre-run failure"),
+            outbound: .stopped
+        ),
+        translationStartedAt: nil
+    )
+
+    #expect(!value.isVisible)
+    #expect(value.elapsed == nil)
+    #expect(!value.stopEnabled)
+}
+
+@Test(arguments: [
+    TranslationChannelState.connecting,
+    TranslationChannelState.failed(message: "pre-run failure"),
+])
+func preRunChannelStateRemainsConnectingAndCannotStop(
+    channelState: TranslationChannelState
+) {
+    for startedAt in [nil, floatingNow] as [Date?] {
+        let value = makeFloatingPresentation(
+            coordinatorState: TranslationCoordinatorState(
+                isRunning: false,
+                inbound: channelState,
+                outbound: .stopped
+            ),
+            isStarting: true,
+            translationStartedAt: startedAt
+        )
+
+        #expect(value.isVisible)
+        #expect(value.tone == .neutral)
+        #expect(value.status == "Connecting")
+        #expect(value.statusAccessibilityLabel == "Connecting")
+        #expect(value.showsActivityPulse)
+        #expect(value.elapsed == nil)
+        #expect(!value.stopEnabled)
+    }
 }
 
 @Test

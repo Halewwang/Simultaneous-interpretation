@@ -179,6 +179,13 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private var audioLevelWritesInFlight = 0
     private let audioLevelVisibilityGate: AudioLevelVisibilityGate?
     private let stopResultState: TranslationCoordinatorState?
+    private var shouldGateNextCurrentState = false
+    private var currentStateSnapshotCaptured = false
+    private var currentStateGateReleased = false
+    private var currentStateCaptureWaiters: [
+        CheckedContinuation<Void, Never>
+    ] = []
+    private var currentStateReleaseWaiter: CheckedContinuation<Void, Never>?
 
     init(
         audioLevelVisibilityGate: AudioLevelVisibilityGate? = nil,
@@ -240,8 +247,46 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         }
     }
 
+    func armNextCurrentStateGate() {
+        shouldGateNextCurrentState = true
+        currentStateSnapshotCaptured = false
+        currentStateGateReleased = false
+        currentStateReleaseWaiter = nil
+    }
+
+    func waitUntilCurrentStateSnapshotIsCaptured() async {
+        guard !currentStateSnapshotCaptured else { return }
+        await withCheckedContinuation { continuation in
+            currentStateCaptureWaiters.append(continuation)
+        }
+    }
+
+    func releaseCurrentStateGate() {
+        guard !currentStateGateReleased else { return }
+        currentStateGateReleased = true
+        currentStateReleaseWaiter?.resume()
+        currentStateReleaseWaiter = nil
+    }
+
     func currentState() async -> TranslationCoordinatorState {
-        current
+        let snapshot = current
+        guard shouldGateNextCurrentState else {
+            return snapshot
+        }
+
+        shouldGateNextCurrentState = false
+        currentStateSnapshotCaptured = true
+        let captureWaiters = currentStateCaptureWaiters
+        currentStateCaptureWaiters.removeAll()
+        for waiter in captureWaiters {
+            waiter.resume()
+        }
+        if !currentStateGateReleased {
+            await withCheckedContinuation { continuation in
+                currentStateReleaseWaiter = continuation
+            }
+        }
+        return snapshot
     }
 
     func setInboundBypass(_ enabled: Bool) async {
@@ -1480,6 +1525,49 @@ func stopPreservesNonRunningFailureUntilInactiveStateEvent() async throws {
     #expect(model.coordinatorState == TranslationCoordinatorState())
     #expect(model.translationStartedAt == nil)
     #expect(!presentation.isVisible)
+}
+
+@Test @MainActor
+func staleStopSnapshotCannotReviveSessionAfterStoppedEvent() async throws {
+    let staleActiveState = TranslationCoordinatorState(
+        isRunning: true,
+        inbound: .active,
+        outbound: .failed(message: "stale stop snapshot")
+    )
+    let coordinator = TranslationCoordinatorStub(
+        stopResultState: staleActiveState
+    )
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    try #require(model.translationStartedAt != nil)
+    await coordinator.armNextCurrentStateGate()
+
+    let stopTask = Task { @MainActor in
+        await model.stop()
+    }
+    await coordinator.waitUntilCurrentStateSnapshotIsCaptured()
+
+    let runtimeCleared = Task { @MainActor in
+        for await value in model.$translationStartedAt.values {
+            if value == nil {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.stopped)
+    await runtimeCleared.value
+    try #require(model.coordinatorState == TranslationCoordinatorState())
+    try #require(!model.floatingPresentation(at: .now).isVisible)
+
+    await coordinator.releaseCurrentStateGate()
+    await stopTask.value
+
+    #expect(model.coordinatorState == TranslationCoordinatorState())
+    #expect(model.translationStartedAt == nil)
+    #expect(!model.floatingPresentation(at: .now).isVisible)
 }
 
 @Test @MainActor

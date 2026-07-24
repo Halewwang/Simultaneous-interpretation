@@ -290,7 +290,9 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var systemPreferredLanguages =
         Locale.preferredLanguages
     @Published var apiKeyDraft = ""
-    @Published private(set) var coordinatorState = TranslationCoordinatorState()
+    @Published private(set) var coordinatorState = TranslationCoordinatorState() {
+        didSet { coordinatorLifecycleRevision &+= 1 }
+    }
     @Published private(set) var compatibilityReport: TranslationCompatibilityReport?
     @Published private var connectionTestMessageValue: AppMessage?
     @Published private var inventoryErrorValue: AppMessage?
@@ -316,6 +318,7 @@ final class MenuBarModel: ObservableObject {
 
     private var driverAvailable = false
     private var hasStoredAPIKey = false
+    private var coordinatorLifecycleRevision: UInt = 0
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
     private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
@@ -795,9 +798,15 @@ final class MenuBarModel: ObservableObject {
         isStopping = true
         defer { isStopping = false }
         await coordinator.stop()
+        let revision = coordinatorLifecycleRevision
         let state = await coordinator.currentState()
+        guard revision == coordinatorLifecycleRevision else {
+            return
+        }
         coordinatorState = state
-        guard !state.hasActivePresentation else {
+        guard !state.hasActivePresentation(
+            translationStartedAt: translationStartedAt
+        ) else {
             return
         }
         finishCoordinatorSession()
@@ -1084,7 +1093,9 @@ final class MenuBarModel: ObservableObject {
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
-                    if !state.hasActivePresentation {
+                    if !state.hasActivePresentation(
+                        translationStartedAt: translationStartedAt
+                    ) {
                         finishCoordinatorSession()
                         return
                     }

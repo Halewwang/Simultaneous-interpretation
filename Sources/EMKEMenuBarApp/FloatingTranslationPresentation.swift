@@ -2,8 +2,14 @@ import EMKECoordinator
 import Foundation
 
 extension TranslationCoordinatorState {
-    var hasActivePresentation: Bool {
-        isRunning || inbound != .stopped || outbound != .stopped
+    func hasActivePresentation(
+        translationStartedAt: Date?
+    ) -> Bool {
+        isRunning
+            || (
+                translationStartedAt != nil
+                    && (inbound != .stopped || outbound != .stopped)
+            )
     }
 }
 
@@ -36,11 +42,14 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
         hasFatalSessionError: Bool,
         copy: AppCopy
     ) -> Self {
-        let active = coordinatorState.hasActivePresentation
-        let visible = isStarting || active || isStopping
+        let preRunStarting = isStarting && !coordinatorState.isRunning
+        let active = coordinatorState.hasActivePresentation(
+            translationStartedAt: translationStartedAt
+        )
+        let visible = preRunStarting || active || isStopping
         let safeInboundLevel = inboundLevel.isFinite ? inboundLevel : 0
         let safeOutboundLevel = outboundLevel.isFinite ? outboundLevel : 0
-        let elapsed = active
+        let elapsed = active && !preRunStarting
             ? MenuBarModel.formatElapsed(
                 seconds: now.timeIntervalSince(translationStartedAt ?? now)
             )
@@ -53,7 +62,7 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
         if isStopping {
             let status = copy.text(.stopping)
             statusAndTone = (status, status, .neutral)
-        } else if isStarting && !active {
+        } else if preRunStarting {
             let status = copy.text(.connecting)
             statusAndTone = (status, status, .neutral)
         } else if active, hasFatalSessionError {
@@ -83,10 +92,10 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
             tone: statusAndTone.tone,
             status: statusAndTone.visible,
             statusAccessibilityLabel: statusAndTone.accessible,
-            showsActivityPulse: isStarting && !active && !isStopping,
+            showsActivityPulse: preRunStarting && !isStopping,
             elapsed: elapsed,
             level: min(max(max(safeInboundLevel, safeOutboundLevel), 0), 1),
-            stopEnabled: active && !isStopping,
+            stopEnabled: active && !preRunStarting && !isStopping,
             stopAccessibilityLabel: copy.text(.stopTranslation)
         )
     }

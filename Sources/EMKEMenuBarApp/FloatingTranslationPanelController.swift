@@ -30,11 +30,19 @@ enum FloatingTranslationPanelVisibilityPublisher {
     static func make(
         isStarting: AnyPublisher<Bool, Never>,
         isStopping: AnyPublisher<Bool, Never>,
-        coordinatorState: AnyPublisher<TranslationCoordinatorState, Never>
+        coordinatorState: AnyPublisher<TranslationCoordinatorState, Never>,
+        translationStartedAt: AnyPublisher<Date?, Never>
     ) -> AnyPublisher<Bool, Never> {
-        Publishers.CombineLatest3(isStarting, isStopping, coordinatorState)
-            .map { starting, stopping, state in
-                starting || stopping || state.hasActivePresentation
+        Publishers.CombineLatest4(
+            isStarting,
+            isStopping,
+            coordinatorState,
+            translationStartedAt
+        )
+            .map { starting, stopping, state, startedAt in
+                starting
+                    || stopping
+                    || state.hasActivePresentation(translationStartedAt: startedAt)
             }
             .removeDuplicates()
             .eraseToAnyPublisher()
@@ -119,7 +127,8 @@ final class FloatingTranslationPanelController: ObservableObject {
             .make(
                 isStarting: model.$isStarting.eraseToAnyPublisher(),
                 isStopping: model.$isStopping.eraseToAnyPublisher(),
-                coordinatorState: model.$coordinatorState.eraseToAnyPublisher()
+                coordinatorState: model.$coordinatorState.eraseToAnyPublisher(),
+                translationStartedAt: model.$translationStartedAt.eraseToAnyPublisher()
             )
             .sink { [weak self] desiredVisibility in
                 MainActor.assumeIsolated {
