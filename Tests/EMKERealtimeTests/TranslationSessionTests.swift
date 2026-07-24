@@ -138,6 +138,24 @@ private struct FakeFactory: TranslationSocketFactory {
     }
 }
 
+private actor QueueFactory: TranslationSocketFactory {
+    private var sockets: [FakeSocket]
+
+    init(sockets: [FakeSocket]) {
+        self.sockets = sockets
+    }
+
+    func makeSocket(
+        url: URL,
+        authorization: String
+    ) async throws -> any TranslationSocket {
+        guard !sockets.isEmpty else {
+            throw TranslationSocketError.disconnected
+        }
+        return sockets.removeFirst()
+    }
+}
+
 private actor CloseDeadlineGate {
     private var fired = false
     private var waiter: CheckedContinuation<Void, Never>?
@@ -497,6 +515,99 @@ func receiveErrorWinsDeadlineRaceAndCancelsSocketOnce() async throws {
         #expect(Bool(false))
     }
     #expect(await socket.cancellationCount == 1)
+}
+
+@Test
+func closeCallersKeepDeadlineOutcomeAcrossReconnectBeforeOldSendReturns()
+    async throws
+{
+    let deadline = CloseDeadlineGate()
+    let oldSocket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true,
+        waitsForCancellationToFinish: true
+    )
+    let newSocket = FakeSocket(incoming: handshakeEvents)
+    let session = TranslationSession(
+        configuration: .default,
+        sessionConfiguration: TranslationSessionConfiguration(
+            targetLanguage: .chinese
+        ),
+        apiKey: "secret",
+        factory: QueueFactory(sockets: [oldSocket, newSocket]),
+        closeDeadline: {
+            await deadline.wait()
+        }
+    )
+    try await session.connect()
+
+    let firstClose = Task { try await session.close() }
+    await oldSocket.waitForCloseSendStart()
+    let secondClose = Task { try await session.close() }
+    await session.waitForCloseWaiterCountForTesting(2)
+
+    await deadline.fire()
+    await oldSocket.waitForCancellationStart()
+    try await session.connect()
+    await oldSocket.finishCancellation()
+
+    try await firstClose.value
+    try await secondClose.value
+    #expect(await oldSocket.cancellationCount == 1)
+
+    try await session.close()
+}
+
+@Test
+func closeCallersKeepReaderErrorAcrossReconnectBeforeOldSendReturns()
+    async throws
+{
+    let deadline = CloseDeadlineGate()
+    let oldSocket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false,
+        blocksCloseSend: true,
+        waitsForCancellationToFinish: true
+    )
+    let newSocket = FakeSocket(incoming: handshakeEvents)
+    let session = TranslationSession(
+        configuration: .default,
+        sessionConfiguration: TranslationSessionConfiguration(
+            targetLanguage: .chinese
+        ),
+        apiKey: "secret",
+        factory: QueueFactory(sockets: [oldSocket, newSocket]),
+        closeDeadline: {
+            await deadline.wait()
+        }
+    )
+    try await session.connect()
+
+    let firstClose = Task { try await session.close() }
+    await oldSocket.waitForCloseSendStart()
+    let secondClose = Task { try await session.close() }
+    await session.waitForCloseWaiterCountForTesting(2)
+
+    await oldSocket.enqueueIncoming(serverErrorEvent)
+    await oldSocket.waitForCancellationStart()
+    await deadline.fire()
+    try await session.connect()
+    await oldSocket.finishCancellation()
+
+    for closeTask in [firstClose, secondClose] {
+        do {
+            try await closeTask.value
+            #expect(Bool(false))
+        } catch let error as TranslationSessionError {
+            #expect(error == .server(code: "test_error", message: "test failure"))
+        } catch {
+            #expect(Bool(false))
+        }
+    }
+    #expect(await oldSocket.cancellationCount == 1)
+
+    try await session.close()
 }
 
 @Test

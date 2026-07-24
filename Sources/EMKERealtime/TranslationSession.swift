@@ -22,6 +22,7 @@ public actor TranslationSession {
     private var socket: (any TranslationSocket)?
     private var connectionID: UUID?
     private var readerTask: Task<Void, Never>?
+    private var closeSendTask: Task<Void, Never>?
     private var closeDeadlineTask: Task<Void, Never>?
     private var queuedEvents: [TranslationServerEvent] = []
     private var eventWaiters: [
@@ -30,6 +31,12 @@ public actor TranslationSession {
     private var closeWaiters: [CheckedContinuation<Void, any Error>] = []
     private var terminalError: (any Error)?
     private var isClosing = false
+
+    #if DEBUG
+    private var closeWaiterCountWaiters: [
+        (count: Int, continuation: CheckedContinuation<Void, Never>)
+    ] = []
+    #endif
 
     public init(
         configuration: APIConfiguration,
@@ -128,26 +135,27 @@ public actor TranslationSession {
                 guard !Task.isCancelled else { return }
                 await self?.forceFinishClose(connectionID: id, socket: socket)
             }
-
-            do {
-                try await socket.send(TranslationClientEvent.close.encoded())
-            } catch {
-                if finishConnection(connectionID: id, error: error) {
-                    await socket.cancel()
-                    throw error
-                }
-                if let terminalError { throw terminalError }
-                return
+            closeSendTask = Task { [weak self] in
+                await self?.sendClose(socket: socket, connectionID: id)
             }
-        }
-
-        if connectionID != id {
-            if let terminalError { throw terminalError }
-            return
         }
 
         try await withCheckedThrowingContinuation { continuation in
             closeWaiters.append(continuation)
+            notifyCloseWaiterCountWaiters()
+        }
+    }
+
+    private func sendClose(
+        socket: any TranslationSocket,
+        connectionID id: UUID
+    ) async {
+        do {
+            try await socket.send(TranslationClientEvent.close.encoded())
+        } catch {
+            if finishConnection(connectionID: id, error: error) {
+                await socket.cancel()
+            }
         }
     }
 
@@ -219,6 +227,8 @@ public actor TranslationSession {
         guard connectionID == id else { return false }
         closeDeadlineTask?.cancel()
         closeDeadlineTask = nil
+        closeSendTask?.cancel()
+        closeSendTask = nil
         terminalError = error
         socket = nil
         connectionID = nil
@@ -256,6 +266,29 @@ public actor TranslationSession {
         eventWaiters.removeAll(keepingCapacity: false)
         closeWaiters.removeAll(keepingCapacity: false)
     }
+
+    #if DEBUG
+    func waitForCloseWaiterCountForTesting(_ count: Int) async {
+        guard closeWaiters.count < count else { return }
+        await withCheckedContinuation { continuation in
+            closeWaiterCountWaiters.append((count, continuation))
+        }
+    }
+
+    private func notifyCloseWaiterCountWaiters() {
+        let readyWaiters = closeWaiterCountWaiters.filter {
+            closeWaiters.count >= $0.count
+        }
+        closeWaiterCountWaiters.removeAll {
+            closeWaiters.count >= $0.count
+        }
+        for waiter in readyWaiters {
+            waiter.continuation.resume()
+        }
+    }
+    #else
+    private func notifyCloseWaiterCountWaiters() {}
+    #endif
 
     private func validateHandshake(
         _ event: TranslationServerEvent,
