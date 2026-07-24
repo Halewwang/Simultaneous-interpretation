@@ -607,6 +607,34 @@ func publicSettingsAutosaveEveryEditableFieldAndSurviveReopen() async {
 }
 
 @Test @MainActor
+func interfaceLanguageChangePersistsWithoutChangingTranslationConfiguration() async {
+    var initial = AppSettings.default
+    initial.baseURLString = "https://gateway.example/v7"
+    initial.modelID = "translation-v7"
+    initial.preferences = TranslationPreferences(
+        motherLanguage: .english,
+        meetingOutputLanguage: .chinese
+    )
+    initial.selectedInputUID = "physical.input"
+    initial.selectedOutputUID = "physical.output"
+    let settings = TranslationSettingsStoreStub(value: initial)
+    let model = makeTranslationMenuModel(settings: settings)
+    await model.loadConfiguration()
+    #expect(settings.saved.isEmpty)
+
+    model.interfaceLanguage = .english
+
+    #expect(settings.saved.count == 1)
+    let saved = settings.saved.last
+    #expect(saved?.baseURLString == initial.baseURLString)
+    #expect(saved?.modelID == initial.modelID)
+    #expect(saved?.preferences == initial.preferences)
+    #expect(saved?.selectedInputUID == initial.selectedInputUID)
+    #expect(saved?.selectedOutputUID == initial.selectedOutputUID)
+    #expect(saved?.interfaceLanguage == .english)
+}
+
+@Test @MainActor
 func invalidBaseURLDraftIsPersistedFaithfullyWithoutLossyFallback() async {
     let settings = TranslationSettingsStoreStub()
     var model: MenuBarModel? = makeTranslationMenuModel(settings: settings)
@@ -698,6 +726,24 @@ func startMovesDraftKeyToKeychainAndBuildsCoordinatorConfiguration() async {
     #expect(model.apiKeyDraft.isEmpty)
     #expect(model.coordinatorState.isRunning)
     await model.stop()
+}
+
+@Test @MainActor
+func interfaceLanguageChangeDoesNotRestartOrStopTranslation() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "stored-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    #expect(await coordinator.configurations.count == 1)
+
+    model.interfaceLanguage = .english
+
+    #expect(await coordinator.configurations.count == 1)
+    #expect(model.coordinatorState.isRunning)
+    #expect(model.motherLanguage == .chinese)
+    #expect(model.meetingOutputLanguage == .german)
 }
 
 @Test @MainActor

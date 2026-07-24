@@ -7,6 +7,7 @@ struct AppSettings: Equatable, Sendable {
     var preferences: TranslationPreferences
     var selectedInputUID: String?
     var selectedOutputUID: String?
+    var interfaceLanguage: AppInterfaceLanguage
 
     static let `default` = AppSettings(
         baseURLString: APIConfiguration.default.baseURL.absoluteString,
@@ -16,7 +17,8 @@ struct AppSettings: Equatable, Sendable {
             meetingOutputLanguage: .german
         ),
         selectedInputUID: nil,
-        selectedOutputUID: nil
+        selectedOutputUID: nil,
+        interfaceLanguage: .system
     )
 
     init(
@@ -24,13 +26,15 @@ struct AppSettings: Equatable, Sendable {
         modelID: String,
         preferences: TranslationPreferences,
         selectedInputUID: String?,
-        selectedOutputUID: String?
+        selectedOutputUID: String?,
+        interfaceLanguage: AppInterfaceLanguage = .system
     ) {
         self.baseURLString = baseURLString
         self.modelID = modelID
         self.preferences = preferences
         self.selectedInputUID = selectedInputUID
         self.selectedOutputUID = selectedOutputUID
+        self.interfaceLanguage = interfaceLanguage
     }
 
 }
@@ -50,6 +54,7 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
         static let meetingOutputLanguage = "emke.meetingOutputLanguage"
         static let selectedInputUID = "emke.physicalInputUID"
         static let selectedOutputUID = "emke.physicalOutputUID"
+        static let interfaceLanguage = "emke.interfaceLanguage"
     }
 
     private let defaults: UserDefaults
@@ -85,7 +90,10 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
             ),
             selectedOutputUID: defaults.string(
                 forKey: Key.selectedOutputUID
-            )
+            ),
+            interfaceLanguage: defaults.string(forKey: Key.interfaceLanguage)
+                .flatMap(AppInterfaceLanguage.init(rawValue:))
+                ?? fallback.interfaceLanguage
         )
     }
 
@@ -113,6 +121,10 @@ final class UserDefaultsAppSettingsStore: AppSettingsStoring {
         update(
             settings.selectedOutputUID,
             forKey: Key.selectedOutputUID
+        )
+        defaults.set(
+            settings.interfaceLanguage.rawValue,
+            forKey: Key.interfaceLanguage
         )
     }
 

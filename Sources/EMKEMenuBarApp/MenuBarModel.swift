@@ -274,6 +274,11 @@ final class MenuBarModel: ObservableObject {
     @Published var meetingOutputLanguage: SupportedLanguage = .german {
         didSet { persistPublicSettingsIfNeeded() }
     }
+    @Published var interfaceLanguage: AppInterfaceLanguage = .system {
+        didSet { persistPublicSettingsIfNeeded() }
+    }
+    @Published private(set) var systemPreferredLanguages =
+        Locale.preferredLanguages
     @Published var apiKeyDraft = ""
     @Published private(set) var coordinatorState = TranslationCoordinatorState()
     @Published private(set) var compatibilityReport: TranslationCompatibilityReport?
@@ -305,6 +310,7 @@ final class MenuBarModel: ObservableObject {
     private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
+    private var localeObserver: AnyCancellable?
 
     init(
         provider: any AudioDeviceProviding = CoreAudioDeviceProvider(),
@@ -333,9 +339,29 @@ final class MenuBarModel: ObservableObject {
         self.audioDiagnostics = audioDiagnostics
         self.audioOutputTestDelay = audioOutputTestDelay
         apply(settingsStore.load())
+        localeObserver = NotificationCenter.default.publisher(
+            for: NSLocale.currentLocaleDidChangeNotification
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.systemPreferredLanguages = Locale.preferredLanguages
+            }
+        }
         if !deferInitialDeviceReload {
             reloadDevices()
         }
+    }
+
+    var resolvedInterfaceLanguage: ResolvedInterfaceLanguage {
+        AppLanguageResolver.resolve(
+            preference: interfaceLanguage,
+            preferredLanguages: systemPreferredLanguages
+        )
+    }
+
+    var copy: AppCopy {
+        AppCopy(language: resolvedInterfaceLanguage)
     }
 
     var readiness: MenuBarReadiness {
@@ -937,7 +963,8 @@ final class MenuBarModel: ObservableObject {
             modelID: modelID,
             preferences: currentPreferences,
             selectedInputUID: selectedInputUID,
-            selectedOutputUID: selectedOutputUID
+            selectedOutputUID: selectedOutputUID,
+            interfaceLanguage: interfaceLanguage
         )
     }
 
@@ -961,6 +988,7 @@ final class MenuBarModel: ObservableObject {
         meetingOutputLanguage = settings.preferences.meetingOutputLanguage
         selectedInputUID = settings.selectedInputUID
         selectedOutputUID = settings.selectedOutputUID
+        interfaceLanguage = settings.interfaceLanguage
     }
 
     private func startObservingCoordinator() {
