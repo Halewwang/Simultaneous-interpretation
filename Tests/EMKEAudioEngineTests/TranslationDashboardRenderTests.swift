@@ -617,6 +617,76 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
 }
 
 @Test @MainActor
+func everyChineseDashboardFixtureKeepsLegacyChannelSlotPolicy() {
+    let copy = AppCopy(language: .zhHans)
+    let fixtures = [
+        DashboardFixture.unconfigured,
+        .ready,
+        .connecting,
+        .running,
+        .inboundFailed,
+        .outboundFailed,
+        .inboundBypassed,
+        .outboundBypassed,
+        .stopping,
+    ]
+
+    for fixture in fixtures {
+        let value = fixture.makePresentation(copy: copy)
+        let inboundMode = EMKEChannelRowLayoutDecision.resolve(
+            direction: value.inboundDirection,
+            status: value.inbound.status,
+            statusSymbol: value.inbound.statusSymbol,
+            actionTitle: value.inbound.actionTitle
+        )
+        let outboundMode = EMKEChannelRowLayoutDecision.resolve(
+            direction: value.outboundDirection,
+            status: value.outbound.status,
+            statusSymbol: value.outbound.statusSymbol,
+            actionTitle: value.outbound.actionTitle
+        )
+
+        #expect(
+            !EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+                interfaceLanguage: copy.language,
+                inboundMode: inboundMode,
+                outboundMode: outboundMode
+            )
+        )
+    }
+
+    #expect(
+        !EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+            interfaceLanguage: .zhHans,
+            inboundMode: .expanded,
+            outboundMode: .expanded
+        )
+    )
+    #expect(
+        EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+            interfaceLanguage: .english,
+            inboundMode: .expanded,
+            outboundMode: .expanded
+        )
+    )
+}
+
+@Test @MainActor
+func chineseCompactDashboardMatchesPre84ProductionSeparatorRows() throws {
+    let copy = AppCopy(language: .zhHans)
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.ready.makePresentation(copy: copy),
+        copy: copy,
+        languagesLocked: false
+    )
+
+    #expect(
+        renderedSeparatorRows(in: bitmap)
+            == [436, 597, 782, 1143]
+    )
+}
+
+@Test @MainActor
 func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
     #expect(
         EMKEChannelRowLayoutDecision.resolve(
@@ -807,6 +877,193 @@ private func englishStressDashboardsRenderWithinSharedGeometry(
     )
 }
 
+@Test(arguments: EnglishDashboardStressCase.allCases)
+@MainActor
+private func englishStressRendersBoundedCopyAndTrailingActions(
+    scenario: EnglishDashboardStressCase
+) throws {
+    let fixture = scenario.fixture
+    let bitmap = try dashboardBitmap(
+        value: fixture.value,
+        copy: fixture.copy,
+        languagesLocked: fixture.languagesLocked,
+        motherLanguage: fixture.motherLanguage,
+        meetingOutputLanguage: fixture.meetingOutputLanguage
+    )
+    let separatorRows = renderedSeparatorRows(in: bitmap)
+    try #require(separatorRows.count >= 3)
+    let channelTop = separatorRows[1]
+    let channelMiddle = separatorRows[2]
+    let rowPixelHeight = channelMiddle - channelTop - 1
+    let rowRanges = [
+        (channelTop + 1)..<channelMiddle,
+        (channelMiddle + 1)..<(channelMiddle + 1 + rowPixelHeight),
+    ]
+    let contentStartX = Int(
+        EMKEDashboardMetrics.leadingPadding
+            * EMKEVisualStyle.captureScale
+    )
+    let contentEndX = bitmap.pixelsWide - Int(
+        EMKEDashboardMetrics.trailingPadding
+            * EMKEVisualStyle.captureScale
+    )
+    let actionStartX = Int(CGFloat(contentEndX) * 0.70)
+
+    for rowRange in rowRanges {
+        let rowInk = try #require(
+            renderedInkBounds(
+                in: bitmap,
+                xRange: contentStartX..<contentEndX,
+                yRange: rowRange
+            )
+        )
+        let actionInk = try #require(
+            renderedInkBounds(
+                in: bitmap,
+                xRange: actionStartX..<contentEndX,
+                yRange: rowRange
+            )
+        )
+
+        #expect(rowInk.minY > CGFloat(rowRange.lowerBound))
+        #expect(rowInk.maxY < CGFloat(rowRange.upperBound))
+        #expect(actionInk.minY > CGFloat(rowRange.lowerBound))
+        #expect(actionInk.maxY < CGFloat(rowRange.upperBound))
+        #expect(actionInk.maxX < CGFloat(contentEndX))
+        #expect(actionInk.maxX >= CGFloat(contentEndX - 6))
+    }
+
+    let independentContentWidth = EMKEVisualStyle.panelWidth
+        - EMKEDashboardMetrics.leadingPadding
+        - EMKEDashboardMetrics.trailingPadding
+        - EMKEChannelMetrics.iconWidth
+        - EMKEChannelMetrics.expandedHorizontalSpacing
+    let independentActionWidth = (
+        independentContentWidth
+            - (EMKEChannelMetrics.expandedCopySpacing * 3)
+    ) * 0.45
+    let channelCopies = [
+        (
+            fixture.copy.text(.heardByMe),
+            fixture.value.inboundDirection,
+            fixture.value.inbound.status,
+            fixture.value.inbound.statusSymbol,
+            fixture.value.inbound.actionTitle
+        ),
+        (
+            fixture.copy.text(.heardByOther),
+            fixture.value.outboundDirection,
+            fixture.value.outbound.status,
+            fixture.value.outbound.statusSymbol,
+            fixture.value.outbound.actionTitle
+        ),
+    ]
+    let independentSlotHeight = CGFloat(rowPixelHeight)
+        / EMKEVisualStyle.captureScale
+
+    for item in channelCopies {
+        let titleHeight = independentTextHeight(
+            item.0,
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.titleSize,
+                weight: .semibold
+            ),
+            width: independentContentWidth
+        )
+        let directionHeight = independentTextHeight(
+            item.1,
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.directionSize
+            ),
+            width: independentContentWidth
+        )
+        let naturalActionWidth = (item.4 as NSString).size(
+            withAttributes: [
+                .font: NSFont.systemFont(
+                    ofSize: EMKEChannelMetrics.actionSize
+                ),
+            ]
+        ).width
+        let actionWidth = min(
+            naturalActionWidth,
+            independentActionWidth
+        )
+        let statusSymbolSize = NSImage(
+            systemSymbolName: item.3,
+            accessibilityDescription: nil
+        )?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(
+                    pointSize: EMKEChannelMetrics.statusIconSize,
+                    weight: .medium
+                )
+            )?
+            .size
+            ?? NSSize(
+                width: EMKEChannelMetrics.statusIconSize + 3,
+                height: EMKEChannelMetrics.statusIconSize
+            )
+        let independentStatusWidth = independentContentWidth
+            - (EMKEChannelMetrics.expandedCopySpacing * 3)
+            - actionWidth
+        let statusTextWidth = independentStatusWidth
+            - statusSymbolSize.width
+            - EMKEChannelMetrics.statusIconSpacing
+        let statusHeight = max(
+            statusSymbolSize.height,
+            independentTextHeight(
+                item.2,
+                font: .systemFont(ofSize: 12),
+                width: statusTextWidth
+            )
+        )
+        let actionHeight = independentTextHeight(
+            item.4,
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.actionSize
+            ),
+            width: actionWidth
+        )
+        let singleStatusHeight = independentTextHeight(
+            "Hg",
+            font: .systemFont(ofSize: 12),
+            width: .greatestFiniteMagnitude
+        )
+        let singleActionHeight = independentTextHeight(
+            "Hg",
+            font: .systemFont(
+                ofSize: EMKEChannelMetrics.actionSize
+            ),
+            width: .greatestFiniteMagnitude
+        )
+        let independentVerticalSpacing = (
+            statusHeight > max(
+                statusSymbolSize.height,
+                singleStatusHeight
+            )
+                || actionHeight > singleActionHeight
+        )
+            ? EMKEChannelMetrics.expandedMultilineCopySpacing
+            : EMKEChannelMetrics.expandedCopySpacing
+        let independentlyRequiredHeight = titleHeight
+            + 4
+            + directionHeight
+            + independentVerticalSpacing
+            + max(statusHeight, actionHeight)
+            + independentVerticalSpacing
+            + EMKEChannelMetrics.expandedWaveformHeight
+
+        #expect(
+            titleHeight + 4 + directionHeight
+                <= EMKEChannelMetrics.expandedMaximumRowHeight / 2
+        )
+        #expect(naturalActionWidth <= independentActionWidth)
+        #expect(statusTextWidth > 0)
+        #expect(statusHeight <= singleStatusHeight * 2)
+        #expect(independentlyRequiredHeight <= independentSlotHeight)
+    }
+}
+
 @MainActor
 private func dashboardBitmap(
     value: TranslationDashboardPresentation,
@@ -827,6 +1084,98 @@ private func dashboardBitmap(
     renderer.scale = EMKEVisualStyle.captureScale
     let data = try #require(renderer.nsImage?.tiffRepresentation)
     return try #require(NSBitmapImageRep(data: data))
+}
+
+private func renderedSeparatorRows(
+    in bitmap: NSBitmapImageRep
+) -> [Int] {
+    let startX = Int(
+        EMKEDashboardMetrics.leadingPadding
+            * EMKEVisualStyle.captureScale
+    )
+    let endX = bitmap.pixelsWide - Int(
+        EMKEDashboardMetrics.trailingPadding
+            * EMKEVisualStyle.captureScale
+    )
+
+    return (0..<bitmap.pixelsHigh).filter { y in
+        (startX..<endX).allSatisfy { x in
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                return false
+            }
+
+            return (0.90..<0.95).contains(color.redComponent)
+                && (0.90..<0.95).contains(color.greenComponent)
+                && (0.90..<0.95).contains(color.blueComponent)
+        }
+    }
+}
+
+private func renderedInkBounds(
+    in bitmap: NSBitmapImageRep,
+    xRange: Range<Int>,
+    yRange: Range<Int>
+) -> CGRect? {
+    var minX = Int.max
+    var maxX = Int.min
+    var minY = Int.max
+    var maxY = Int.min
+
+    for y in yRange {
+        for x in xRange {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            let hasVisibleInk = color.redComponent < 0.96
+                || color.greenComponent < 0.96
+                || color.blueComponent < 0.96
+            guard hasVisibleInk else {
+                continue
+            }
+
+            minX = min(minX, x)
+            maxX = max(maxX, x)
+            minY = min(minY, y)
+            maxY = max(maxY, y)
+        }
+    }
+
+    guard minX <= maxX, minY <= maxY else {
+        return nil
+    }
+
+    return CGRect(
+        x: minX,
+        y: minY,
+        width: maxX - minX + 1,
+        height: maxY - minY + 1
+    )
+}
+
+private func independentTextHeight(
+    _ text: String,
+    font: NSFont,
+    width: CGFloat
+) -> CGFloat {
+    ceil(
+        (text as NSString).boundingRect(
+            with: NSSize(
+                width: width,
+                height: .greatestFiniteMagnitude
+            ),
+            options: [
+                .usesLineFragmentOrigin,
+                .usesFontLeading,
+            ],
+            attributes: [
+                .font: font,
+            ]
+        ).height
+    )
 }
 
 @MainActor

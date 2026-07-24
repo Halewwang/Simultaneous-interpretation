@@ -404,7 +404,26 @@ struct TranslationChannelRow: View {
     let direction: String
     let level: Double
     let presentation: TranslationChannelPresentation
+    let slotHeight: CGFloat?
     let action: () -> Void
+
+    init(
+        copy: AppCopy,
+        title: String,
+        direction: String,
+        level: Double,
+        presentation: TranslationChannelPresentation,
+        slotHeight: CGFloat? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.copy = copy
+        self.title = title
+        self.direction = direction
+        self.level = level
+        self.presentation = presentation
+        self.slotHeight = slotHeight
+        self.action = action
+    }
 
     private var expandedGeometry: EMKEExpandedChannelLayoutGeometry {
         EMKEExpandedChannelLayoutGeometry.resolve(
@@ -416,7 +435,18 @@ struct TranslationChannelRow: View {
         )
     }
 
+    @ViewBuilder
     var body: some View {
+        if let slotHeight {
+            rowContent
+                .frame(height: slotHeight, alignment: .center)
+        } else {
+            rowContent
+        }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
         switch EMKEChannelRowLayoutDecision.resolve(
             direction: direction,
             status: presentation.status,

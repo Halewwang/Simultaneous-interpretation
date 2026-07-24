@@ -1,6 +1,18 @@
 import EMKECore
 import SwiftUI
 
+enum EMKEDashboardChannelSlotPolicy {
+    static func usesEqualExpandedSlots(
+        interfaceLanguage: ResolvedInterfaceLanguage,
+        inboundMode: EMKEChannelRowLayoutMode,
+        outboundMode: EMKEChannelRowLayoutMode
+    ) -> Bool {
+        interfaceLanguage == .english
+            && inboundMode == .expanded
+            && outboundMode == .expanded
+    }
+}
+
 struct TranslationDashboardView: View {
     @ObservedObject var model: MenuBarModel
     @State private var now = Date()
@@ -122,9 +134,10 @@ struct TranslationDashboardContent: View {
             EMKEDashboardSeparator()
             channelRows
                 .frame(
-                    height: verticalGeometry.channelSectionHeightBudget(
+                    maxHeight: verticalGeometry.channelSectionHeightBudget(
                         hasErrorText: value.errorText != nil
-                    )
+                    ),
+                    alignment: .top
                 )
             Spacer(
                 minLength: EMKEDashboardMetrics
@@ -247,9 +260,11 @@ struct TranslationDashboardContent: View {
     }
 
     private var channelRows: some View {
-        let slotHeight = verticalGeometry.channelRowSlotHeight(
-            hasErrorText: value.errorText != nil
-        )
+        let slotHeight = usesExpandedChannelSlots
+            ? verticalGeometry.channelRowSlotHeight(
+                hasErrorText: value.errorText != nil
+            )
+            : nil
 
         return VStack(spacing: 0) {
             TranslationChannelRow(
@@ -258,9 +273,9 @@ struct TranslationDashboardContent: View {
                 direction: value.inboundDirection,
                 level: value.inboundLevel,
                 presentation: value.inbound,
+                slotHeight: slotHeight,
                 action: inboundAction
             )
-            .frame(height: slotHeight, alignment: .center)
             EMKEDashboardSeparator()
             TranslationChannelRow(
                 copy: copy,
@@ -268,10 +283,31 @@ struct TranslationDashboardContent: View {
                 direction: value.outboundDirection,
                 level: value.outboundLevel,
                 presentation: value.outbound,
+                slotHeight: slotHeight,
                 action: outboundAction
             )
-            .frame(height: slotHeight, alignment: .center)
         }
+    }
+
+    private var usesExpandedChannelSlots: Bool {
+        let inboundMode = EMKEChannelRowLayoutDecision.resolve(
+            direction: value.inboundDirection,
+            status: value.inbound.status,
+            statusSymbol: value.inbound.statusSymbol,
+            actionTitle: value.inbound.actionTitle
+        )
+        let outboundMode = EMKEChannelRowLayoutDecision.resolve(
+            direction: value.outboundDirection,
+            status: value.outbound.status,
+            statusSymbol: value.outbound.statusSymbol,
+            actionTitle: value.outbound.actionTitle
+        )
+
+        return EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+            interfaceLanguage: copy.language,
+            inboundMode: inboundMode,
+            outboundMode: outboundMode
+        )
     }
 
     private var primaryActionButton: some View {
