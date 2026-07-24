@@ -41,7 +41,7 @@
 
 - Pass 6 修复了两项 P2：验收包装器不再缩放实现内容；语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间四个边界改用 `NSColor.separatorColor` 和 0.5 pt 厚度，在 2× 捕获中稳定为 1 physical pixel。深浅系统外观的合成对比度均由测试约束在 1.15–1.5，保持可见且克制。
 
-- Pass 8 最终把英文普通 ready/running 通道改为真正的水平 compact 行：48 pt 图标、128 pt 描述、96 pt 状态/波形、78 pt 尾部动作和三段 8 pt 间距恰好占满 374 pt 内容宽度；描述块与状态/波形块在真实 bitmap 中共享纵向中心。旁路、重连、same-language 与失败等长文案继续使用 expanded；任一英文行 expanded 时，两个频道统一进入等高 expanded 槽位。此前按用户明确要求缩短的 `Other → {target}` 保持不变。中文 compact 继续使用原生产布局路径，并精确保持四条分隔行 `[436, 597, 782, 1143]`；字体、图标和面板尺寸均未改变。
+- Pass 8 最终把英文普通 ready/running 通道改为真正的水平 compact 行：48 pt 图标、125 pt 描述、99 pt 状态/波形、78 pt 尾部动作和三段 8 pt 间距恰好占满 374 pt 内容宽度；99 pt 状态列精确容纳波形固有宽度，描述块与状态/波形块在真实 bitmap 中共享纵向中心。旁路、重连、same-language 与失败等长文案继续使用 expanded；任一英文行 expanded 时，两个频道统一进入等高 expanded 槽位。此前按用户明确要求缩短的 `Other → {target}` 保持不变。中文 compact 继续使用原生产布局路径，中文失败态不会套用英文强制展开策略，并精确保持四条分隔行 `[436, 597, 782, 1143]`；字体、图标和面板尺寸均未改变。
 
 - [P3] 确认稿入站示例写“德语 → 中文”；实现保留真实的未知入站语种语义：中文为“其他语言 → 中文”，英文按用户要求简写为 `Other → Chinese`，不伪造服务商尚未识别出的具体语言。其他可见语言名已本地化为“中文／英语／德语”，底层存储值仍为 `zh/en/de`。
 - [P3] 实现比确认稿多出极小的全局状态、通道状态和隐私锁 SF Symbols。它们是已确认的文字 + 语义符号可访问性冗余，尺寸和颜色均从属于正文，没有形成第二视觉焦点。
@@ -140,7 +140,7 @@ Evidence: source defect screenshot `docs/visual-qa/interface-language-floating-w
 视口与状态保持一致：Aqua/light，420 × 620 pt，2× 输出 840 × 1240 px，English ready/stopped，中文母语、德语会议输出。before 与 after 均以 1:1 像素放入 1680 × 1240 px 对照图，并已用 original detail 打开复核；source defect screenshot 的红框覆盖本轮验收的两个通道行与三条边界线。
 
 - 字体与排版：passed。系统字体、字号、字重和层级未变；英文普通状态在单行四列 compact 行内完整呈现。
-- 间距与布局：passed。英文 ready/running 使用 48 + 128 + 96 + 78 pt 四列和三段 8 pt 间距，精确等于 374 pt dashboard 内容宽度；没有 `Spacer`。描述块与状态/波形块的实际像素中心差在 4 px 容差内，动作保持尾部对齐。长文案统一回退为两行等高 expanded 槽位。
+- 间距与布局：passed。英文 ready/running 使用 48 + 125 + 99 + 78 pt 四列和三段 8 pt 间距，精确等于 374 pt dashboard 内容宽度；99 pt 状态列与 compact waveform 固有宽度一致，没有 `Spacer`。描述块与状态/波形块的实际像素中心差在 4 px 容差内，动作保持尾部对齐。长文案统一回退为两行等高 expanded 槽位；中文失败态继续走 legacy compact。
 - 颜色与令牌：passed。背景、正文、次要文字、禁用动作、分隔线与波形语义色未变。
 - 图标与图片资产：passed。耳机、麦克风、状态与齿轮 SF Symbols 未变；两个源图保持 840 × 1240 px，机械对照保持 1:1，不含重采样。
 - 文案与状态：passed。英文入站方向按用户 follow-up 精确显示 `Other → Chinese`；中文仍为“其他语言 → 中文”。其余标题、方向、状态、动作、语言值、主动作和 footer 文案不变；7 个 English stress fixtures 无裁切或重叠。
@@ -162,7 +162,7 @@ Pass 8 comparison history:
 - centering follow-up RED 精确命中四个 ready/running English case 都误选 expanded，并由真实 bitmap 命中 71 px / 67.5 px 的纵向中心偏差；统一 fallback policy 也先以 English expanded + compact 返回 false 失败。
 - focused GREEN 覆盖 English compact mode、374 pt column profile、实际 bitmap block center、统一 long-copy fallback、English ready 840 × 1240、Chinese compact separator rows、所有中文 fixture 保持 legacy slot policy，以及 5-case long-copy geometry / 7-case English bitmap stress。
 - 7 个 English stress fixture 均渲染真实 bitmap，并从 separator-derived row bounds 扫描可见 ink 和 trailing action 的右对齐边界；同时以独立 AppKit 测量 title、direction、status、status symbol 与 action，验证两行以内且所需高度落入真实槽位。
-- `EMKE_CAPTURE_UI=1 swift test`、普通测试与 strict-concurrency/warnings-as-errors gate 均为 302 tests passed；两个 opt-in live hardware tests 按预期跳过。
+- `EMKE_CAPTURE_UI=1 swift test`、普通测试与 strict-concurrency/warnings-as-errors gate 均为 303 tests passed；两个 opt-in live hardware tests 按预期跳过。
 - capture set 精确为 8 个 TIFF：dashboard/settings 840 × 1240 px，floating 528 × 104 px；Release warnings-as-errors build passed；`git diff --check` passed。
 
 final result: passed

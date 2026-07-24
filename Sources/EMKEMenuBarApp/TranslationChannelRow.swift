@@ -185,8 +185,8 @@ struct EMKEChannelCompactLayoutProfile: Equatable {
             )
         case .english:
             EMKEChannelCompactLayoutProfile(
-                descriptionWidth: 128,
-                statusWidth: 96,
+                descriptionWidth: 125,
+                statusWidth: WaveformBarLayout.compactRequiredWidth,
                 actionWidth: 78,
                 horizontalSpacing: 8,
                 usesLegacyArrangement: false
@@ -205,7 +205,7 @@ enum EMKEChannelRowLayoutDecision {
         actionTitle: String,
         isBlockingFailure: Bool = false
     ) -> EMKEChannelRowLayoutMode {
-        guard !isBlockingFailure else {
+        if interfaceLanguage == .english && isBlockingFailure {
             return .expanded
         }
         let profile = EMKEChannelCompactLayoutProfile.resolve(

@@ -618,10 +618,11 @@ func englishCompactColumnProfileFitsDashboardContentWidth() {
         - EMKEDashboardMetrics.leadingPadding
         - EMKEDashboardMetrics.trailingPadding
 
-    #expect(profile.descriptionWidth == 128)
-    #expect(profile.statusWidth == 96)
+    #expect(profile.descriptionWidth == 125)
+    #expect(profile.statusWidth == WaveformBarLayout.compactRequiredWidth)
     #expect(profile.actionWidth == 78)
     #expect(profile.horizontalSpacing == 8)
+    #expect(profile.statusWidth >= WaveformBarLayout.compactRequiredWidth)
     #expect(profile.totalWidth == availableWidth)
     #expect(profile.totalWidth <= 374)
 }
@@ -629,6 +630,9 @@ func englishCompactColumnProfileFitsDashboardContentWidth() {
 @Test @MainActor
 func englishReadyCompactRowsCenterDescriptionAndStatusBlocks() throws {
     let copy = AppCopy(language: .english)
+    let profile = EMKEChannelCompactLayoutProfile.resolve(
+        interfaceLanguage: copy.language
+    )
     let bitmap = try dashboardBitmap(
         value: DashboardFixture.ready.makePresentation(copy: copy),
         copy: copy,
@@ -656,10 +660,16 @@ func englishReadyCompactRowsCenterDescriptionAndStatusBlocks() throws {
                 + 8
         ) * scale
     )
-    let descriptionEndX = descriptionStartX + Int(128 * scale)
-    let statusStartX = descriptionEndX + Int(8 * scale)
-    let statusEndX = statusStartX + Int(96 * scale)
-    let actionStartX = statusEndX + Int(8 * scale)
+    let descriptionEndX = descriptionStartX + Int(
+        profile.descriptionWidth * scale
+    )
+    let statusStartX = descriptionEndX + Int(
+        profile.horizontalSpacing * scale
+    )
+    let statusEndX = statusStartX + Int(profile.statusWidth * scale)
+    let actionStartX = statusEndX + Int(
+        profile.horizontalSpacing * scale
+    )
 
     for rowRange in rowRanges {
         let descriptionInk = try #require(
@@ -780,6 +790,38 @@ func everyChineseDashboardFixtureKeepsLegacyChannelSlotPolicy() {
             inboundMode: .expanded,
             outboundMode: .compact
         )
+    )
+}
+
+@Test @MainActor
+func chineseBlockingFailuresKeepLegacyCompactRows() {
+    let copy = AppCopy(language: .zhHans)
+    let inboundFailure = DashboardFixture.inboundFailed.makePresentation(
+        copy: copy
+    )
+    let outboundFailure = DashboardFixture.outboundFailed.makePresentation(
+        copy: copy
+    )
+
+    #expect(
+        EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
+            direction: inboundFailure.inboundDirection,
+            status: inboundFailure.inbound.status,
+            statusSymbol: inboundFailure.inbound.statusSymbol,
+            actionTitle: inboundFailure.inbound.actionTitle,
+            isBlockingFailure: inboundFailure.inbound.isBlockingFailure
+        ) == .compact
+    )
+    #expect(
+        EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
+            direction: outboundFailure.outboundDirection,
+            status: outboundFailure.outbound.status,
+            statusSymbol: outboundFailure.outbound.statusSymbol,
+            actionTitle: outboundFailure.outbound.actionTitle,
+            isBlockingFailure: outboundFailure.outbound.isBlockingFailure
+        ) == .compact
     )
 }
 

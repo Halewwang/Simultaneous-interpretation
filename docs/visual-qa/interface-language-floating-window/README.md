@@ -10,7 +10,7 @@ images use pure presentations. Settings images use an in-memory
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Automated regression and build gates | Passed | 302 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
+| Automated regression and build gates | Passed | 303 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
 | Deterministic static visual inspection | Passed | All eight TIFFs were inspected at original pixel size after temporary PNG conversion. |
 | Real macOS runtime acceptance | Not verified | Computer Use reported that the Mac was locked. The already-running `/Applications` build was not touched, and opening the current app menu was also avoided because it automatically reads the shared Keychain service. |
 
@@ -61,19 +61,19 @@ sips -s format png \
 
 | Command | Status | Evidence |
 | --- | --- | --- |
-| `swift test` | Passed | 302 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
-| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 302 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
+| `swift test` | Passed | 303 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
+| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 303 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
 | `swift build -c release --product EMKEMenuBarApp -Xswiftc -warnings-as-errors` | Passed | Release product build completed. |
 | `make -C Driver clean all verify` | Passed | Fresh repository-equivalent Driver gate: the Makefile cleaned and rebuilt the bundle before verifying arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
 | `git diff --check 514ac2d...HEAD` | Passed | No whitespace errors were reported. |
-| `EMKE_CAPTURE_UI=1 swift test` | Passed | 302 tests passed with the same two opt-in skips; the in-test exact-set assertion accepted only the eight required TIFFs. |
+| `EMKE_CAPTURE_UI=1 swift test` | Passed | 303 tests passed with the same two opt-in skips; the in-test exact-set assertion accepted only the eight required TIFFs. |
 
 ## Static visual inspection
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Chinese dashboard keeps the pre-84 production geometry | Passed | `dashboard-ready-zh.tiff` preserves the header, waveform/status, language hierarchy, two compact channel rows, primary action, and privacy footer. Its separator rows are exactly `[436, 597, 782, 1143]`, matching a direct `ca2c2b2` pre-84 production-renderer capture. Every Chinese dashboard fixture remains outside the English equal-slot policy. |
-| English dashboard channel rows are aligned | Passed | Ordinary ready/running rows use one 374 pt four-column compact profile: 48 pt icon, 128 pt description, 96 pt status/waveform, 78 pt trailing action, and three 8 pt gaps. The description and status/waveform blocks share the same visual center; no spacer pushes the action away from the measured profile. |
+| Chinese dashboard keeps the pre-84 production geometry | Passed | `dashboard-ready-zh.tiff` preserves the header, waveform/status, language hierarchy, two compact channel rows, primary action, and privacy footer. Its separator rows are exactly `[436, 597, 782, 1143]`, matching a direct `ca2c2b2` pre-84 production-renderer capture. Every Chinese dashboard fixture remains outside the English equal-slot policy, and blocking failures continue to use the measured legacy compact rows. |
+| English dashboard channel rows are aligned | Passed | Ordinary ready/running rows use one 374 pt four-column compact profile: 48 pt icon, 125 pt description, 99 pt status/waveform, 78 pt trailing action, and three 8 pt gaps. The status column exactly contains the waveform's 99 pt intrinsic width; the description and status/waveform blocks share the same visual center, and no spacer pushes the action away from the measured profile. |
 | Long English channel copy keeps a safe fallback | Passed | Bypass, reconnecting, same-language, and blocking-failure copy remains expanded. If either English row needs that path, the dashboard forces both rows into equal expanded slots so the pair stays aligned. |
 | English stress copy has no overflow | Passed | Seven deterministic English ready/running/bypass/reconnecting/failure fixtures render real 840 x 1240 px bitmaps. Separator-derived row bounds contain the scanned visible ink, trailing actions remain right-aligned, and independent AppKit measurements for title, direction, status, status symbol, and action fit within two lines and the actual slot height. |
 | Settings language selector contract is localized | Passed | Automated tests verify the real interface-language menu, all three stable preferences, and non-empty Chinese/English copy; the two dashboard captures verify both resolved interface languages. |
