@@ -156,20 +156,67 @@ enum EMKEChannelRowLayoutMode: Equatable {
     case expanded
 }
 
+struct EMKEChannelCompactLayoutProfile: Equatable {
+    let descriptionWidth: CGFloat
+    let statusWidth: CGFloat
+    let actionWidth: CGFloat
+    let horizontalSpacing: CGFloat
+    let usesLegacyArrangement: Bool
+
+    var totalWidth: CGFloat {
+        EMKEChannelMetrics.iconWidth
+            + descriptionWidth
+            + statusWidth
+            + actionWidth
+            + (horizontalSpacing * 3)
+    }
+
+    static func resolve(
+        interfaceLanguage: ResolvedInterfaceLanguage
+    ) -> EMKEChannelCompactLayoutProfile {
+        switch interfaceLanguage {
+        case .zhHans:
+            EMKEChannelCompactLayoutProfile(
+                descriptionWidth: EMKEChannelMetrics.directionWidth,
+                statusWidth: EMKEChannelMetrics.statusWidth,
+                actionWidth: EMKEChannelMetrics.actionWidth,
+                horizontalSpacing: 12,
+                usesLegacyArrangement: true
+            )
+        case .english:
+            EMKEChannelCompactLayoutProfile(
+                descriptionWidth: 128,
+                statusWidth: 96,
+                actionWidth: 78,
+                horizontalSpacing: 8,
+                usesLegacyArrangement: false
+            )
+        }
+    }
+}
+
 @MainActor
 enum EMKEChannelRowLayoutDecision {
     static func resolve(
+        interfaceLanguage: ResolvedInterfaceLanguage,
         direction: String,
         status: String,
         statusSymbol: String,
-        actionTitle: String
+        actionTitle: String,
+        isBlockingFailure: Bool = false
     ) -> EMKEChannelRowLayoutMode {
+        guard !isBlockingFailure else {
+            return .expanded
+        }
+        let profile = EMKEChannelCompactLayoutProfile.resolve(
+            interfaceLanguage: interfaceLanguage
+        )
         let directionFits = EMKEChannelContentMeasurement.textWidth(
             direction,
             font: .systemFont(
                 ofSize: EMKEChannelMetrics.directionSize
             )
-        ) <= EMKEChannelMetrics.directionWidth
+        ) <= profile.descriptionWidth
         let statusFits = EMKEChannelContentMeasurement.textWidth(
             status,
             font: .systemFont(ofSize: 12)
@@ -179,13 +226,13 @@ enum EMKEChannelRowLayoutDecision {
                 size: EMKEChannelMetrics.statusIconSize
             ).width
             + EMKEChannelMetrics.statusIconSpacing
-            <= EMKEChannelMetrics.statusWidth
+            <= profile.statusWidth
         let actionFits = EMKEChannelContentMeasurement.textWidth(
             actionTitle,
             font: .systemFont(
                 ofSize: EMKEChannelMetrics.actionSize
             )
-        ) <= EMKEChannelMetrics.actionWidth
+        ) <= profile.actionWidth
 
         return directionFits && statusFits && actionFits
             ? .compact
@@ -405,6 +452,7 @@ struct TranslationChannelRow: View {
     let level: Double
     let presentation: TranslationChannelPresentation
     let slotHeight: CGFloat?
+    let layoutMode: EMKEChannelRowLayoutMode?
     let action: () -> Void
 
     init(
@@ -414,6 +462,7 @@ struct TranslationChannelRow: View {
         level: Double,
         presentation: TranslationChannelPresentation,
         slotHeight: CGFloat? = nil,
+        layoutMode: EMKEChannelRowLayoutMode? = nil,
         action: @escaping () -> Void
     ) {
         self.copy = copy
@@ -422,7 +471,14 @@ struct TranslationChannelRow: View {
         self.level = level
         self.presentation = presentation
         self.slotHeight = slotHeight
+        self.layoutMode = layoutMode
         self.action = action
+    }
+
+    private var compactProfile: EMKEChannelCompactLayoutProfile {
+        EMKEChannelCompactLayoutProfile.resolve(
+            interfaceLanguage: copy.language
+        )
     }
 
     private var expandedGeometry: EMKEExpandedChannelLayoutGeometry {
@@ -447,12 +503,7 @@ struct TranslationChannelRow: View {
 
     @ViewBuilder
     private var rowContent: some View {
-        switch EMKEChannelRowLayoutDecision.resolve(
-            direction: direction,
-            status: presentation.status,
-            statusSymbol: presentation.statusSymbol,
-            actionTitle: presentation.actionTitle
-        ) {
+        switch resolvedLayoutMode {
         case .compact:
             compactBody
         case .expanded:
@@ -460,7 +511,27 @@ struct TranslationChannelRow: View {
         }
     }
 
+    private var resolvedLayoutMode: EMKEChannelRowLayoutMode {
+        layoutMode ?? EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
+            direction: direction,
+            status: presentation.status,
+            statusSymbol: presentation.statusSymbol,
+            actionTitle: presentation.actionTitle,
+            isBlockingFailure: presentation.isBlockingFailure
+        )
+    }
+
+    @ViewBuilder
     private var compactBody: some View {
+        if compactProfile.usesLegacyArrangement {
+            legacyCompactBody
+        } else {
+            englishCompactBody
+        }
+    }
+
+    private var legacyCompactBody: some View {
         HStack(spacing: 12) {
             channelIcon
             channelDescription
@@ -472,6 +543,24 @@ struct TranslationChannelRow: View {
             Spacer(minLength: 0)
             channelAction(compact: true)
         }
+        .padding(.vertical, EMKEChannelMetrics.verticalPadding)
+    }
+
+    private var englishCompactBody: some View {
+        HStack(spacing: compactProfile.horizontalSpacing) {
+            channelIcon
+            channelDescription
+                .frame(
+                    width: compactProfile.descriptionWidth,
+                    alignment: .leading
+                )
+            englishCompactChannelStatus
+            channelAction(
+                compact: false,
+                width: compactProfile.actionWidth
+            )
+        }
+        .frame(width: compactProfile.totalWidth, alignment: .leading)
         .padding(.vertical, EMKEChannelMetrics.verticalPadding)
     }
 
@@ -556,6 +645,17 @@ struct TranslationChannelRow: View {
         }
         .frame(width: EMKEChannelMetrics.statusWidth)
         .offset(y: EMKEChannelMetrics.statusOffsetY)
+    }
+
+    private var englishCompactChannelStatus: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            channelStatusLabel
+            channelWaveform
+        }
+        .frame(
+            width: compactProfile.statusWidth,
+            alignment: .leading
+        )
     }
 
     private var channelStatusLabel: some View {

@@ -525,7 +525,7 @@ private func writeQACapture(
 }
 
 @Test @MainActor
-func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
+func englishReadyAndRunningUseCompactRowsWhileLongCopyStaysExpanded() {
     let copy = AppCopy(language: .english)
     let ready = DashboardFixture.ready.makePresentation(copy: copy)
     let running = DashboardFixture.running.makePresentation(copy: copy)
@@ -567,11 +567,13 @@ func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
     #expect(reconnecting.inbound.status == "Reconnecting (attempt 12)")
     #expect(sameLanguage.status == "Same-language pass-through")
 
-    let cases: [(String, TranslationChannelPresentation)] = [
+    let compactCases: [(String, TranslationChannelPresentation)] = [
         (ready.inboundDirection, ready.inbound),
         (ready.outboundDirection, ready.outbound),
         (running.inboundDirection, running.inbound),
         (running.outboundDirection, running.outbound),
+    ]
+    let expandedCases: [(String, TranslationChannelPresentation)] = [
         (inboundBypassed.inboundDirection, inboundBypassed.inbound),
         (outboundBypassed.outboundDirection, outboundBypassed.outbound),
         (reconnecting.inboundDirection, reconnecting.inbound),
@@ -581,15 +583,110 @@ func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
         ("English → English", sameLanguage),
     ]
 
-    for item in cases {
+    for item in compactCases {
         #expect(
             EMKEChannelRowLayoutDecision.resolve(
+                interfaceLanguage: copy.language,
                 direction: item.0,
                 status: item.1.status,
                 statusSymbol: item.1.statusSymbol,
-                actionTitle: item.1.actionTitle
+                actionTitle: item.1.actionTitle,
+                isBlockingFailure: item.1.isBlockingFailure
+            ) == .compact
+        )
+    }
+    for item in expandedCases {
+        #expect(
+            EMKEChannelRowLayoutDecision.resolve(
+                interfaceLanguage: copy.language,
+                direction: item.0,
+                status: item.1.status,
+                statusSymbol: item.1.statusSymbol,
+                actionTitle: item.1.actionTitle,
+                isBlockingFailure: item.1.isBlockingFailure
             ) == .expanded
         )
+    }
+}
+
+@Test
+func englishCompactColumnProfileFitsDashboardContentWidth() {
+    let profile = EMKEChannelCompactLayoutProfile.resolve(
+        interfaceLanguage: .english
+    )
+    let availableWidth = EMKEVisualStyle.panelWidth
+        - EMKEDashboardMetrics.leadingPadding
+        - EMKEDashboardMetrics.trailingPadding
+
+    #expect(profile.descriptionWidth == 128)
+    #expect(profile.statusWidth == 96)
+    #expect(profile.actionWidth == 78)
+    #expect(profile.horizontalSpacing == 8)
+    #expect(profile.totalWidth == availableWidth)
+    #expect(profile.totalWidth <= 374)
+}
+
+@Test @MainActor
+func englishReadyCompactRowsCenterDescriptionAndStatusBlocks() throws {
+    let copy = AppCopy(language: .english)
+    let bitmap = try dashboardBitmap(
+        value: DashboardFixture.ready.makePresentation(copy: copy),
+        copy: copy,
+        languagesLocked: false
+    )
+    let separatorRows = renderedSeparatorRows(in: bitmap)
+    try #require(separatorRows.count >= 3)
+    let channelTop = separatorRows[1]
+    let channelMiddle = separatorRows[2]
+    let rowPixelHeight = channelMiddle - channelTop - 1
+    let rowRanges = [
+        (channelTop + 1)..<channelMiddle,
+        (channelMiddle + 1)..<(channelMiddle + 1 + rowPixelHeight),
+    ]
+    let scale = EMKEVisualStyle.captureScale
+    let contentStartX = Int(
+        EMKEDashboardMetrics.leadingPadding * scale
+    )
+    let contentEndX = bitmap.pixelsWide - Int(
+        EMKEDashboardMetrics.trailingPadding * scale
+    )
+    let descriptionStartX = contentStartX + Int(
+        (
+            EMKEChannelMetrics.iconWidth
+                + 8
+        ) * scale
+    )
+    let descriptionEndX = descriptionStartX + Int(128 * scale)
+    let statusStartX = descriptionEndX + Int(8 * scale)
+    let statusEndX = statusStartX + Int(96 * scale)
+    let actionStartX = statusEndX + Int(8 * scale)
+
+    for rowRange in rowRanges {
+        let descriptionInk = try #require(
+            renderedInkBounds(
+                in: bitmap,
+                xRange: descriptionStartX..<descriptionEndX,
+                yRange: rowRange
+            )
+        )
+        let statusInk = try #require(
+            renderedInkBounds(
+                in: bitmap,
+                xRange: statusStartX..<statusEndX,
+                yRange: rowRange
+            )
+        )
+        let actionInk = try #require(
+            renderedInkBounds(
+                in: bitmap,
+                xRange: actionStartX..<contentEndX,
+                yRange: rowRange
+            )
+        )
+
+        #expect(abs(descriptionInk.midY - statusInk.midY) <= 4)
+        #expect(actionInk.maxX >= CGFloat(contentEndX - 6))
+        #expect(actionInk.maxX < CGFloat(contentEndX))
     }
 }
 
@@ -600,18 +697,22 @@ func conciseChineseChannelCopyKeepsApprovedCompactLayout() {
 
     #expect(
         EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: ready.inboundDirection,
             status: ready.inbound.status,
             statusSymbol: ready.inbound.statusSymbol,
-            actionTitle: ready.inbound.actionTitle
+            actionTitle: ready.inbound.actionTitle,
+            isBlockingFailure: ready.inbound.isBlockingFailure
         ) == .compact
     )
     #expect(
         EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: ready.outboundDirection,
             status: ready.outbound.status,
             statusSymbol: ready.outbound.statusSymbol,
-            actionTitle: ready.outbound.actionTitle
+            actionTitle: ready.outbound.actionTitle,
+            isBlockingFailure: ready.outbound.isBlockingFailure
         ) == .compact
     )
 }
@@ -634,16 +735,20 @@ func everyChineseDashboardFixtureKeepsLegacyChannelSlotPolicy() {
     for fixture in fixtures {
         let value = fixture.makePresentation(copy: copy)
         let inboundMode = EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: value.inboundDirection,
             status: value.inbound.status,
             statusSymbol: value.inbound.statusSymbol,
-            actionTitle: value.inbound.actionTitle
+            actionTitle: value.inbound.actionTitle,
+            isBlockingFailure: value.inbound.isBlockingFailure
         )
         let outboundMode = EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: value.outboundDirection,
             status: value.outbound.status,
             statusSymbol: value.outbound.statusSymbol,
-            actionTitle: value.outbound.actionTitle
+            actionTitle: value.outbound.actionTitle,
+            isBlockingFailure: value.outbound.isBlockingFailure
         )
 
         #expect(
@@ -669,6 +774,13 @@ func everyChineseDashboardFixtureKeepsLegacyChannelSlotPolicy() {
             outboundMode: .expanded
         )
     )
+    #expect(
+        EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+            interfaceLanguage: .english,
+            inboundMode: .expanded,
+            outboundMode: .compact
+        )
+    )
 }
 
 @Test @MainActor
@@ -680,16 +792,14 @@ func chineseCompactDashboardMatchesPre84ProductionSeparatorRows() throws {
         languagesLocked: false
     )
 
-    #expect(
-        renderedSeparatorRows(in: bitmap)
-            == [436, 597, 782, 1143]
-    )
+    #expect(renderedSeparatorRows(in: bitmap) == [436, 597, 782, 1143])
 }
 
 @Test @MainActor
 func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
     #expect(
         EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: .zhHans,
             direction: "A",
             status: "MMMMMMMMA",
             statusSymbol: "stop.circle",
@@ -783,7 +893,7 @@ func expandedWaveformMapsToFullDashboardContentCenter() {
     #expect(waveformCenterInRow == availableRowWidth / 2)
 }
 
-@Test(arguments: EnglishDashboardStressCase.allCases)
+@Test(arguments: EnglishDashboardStressCase.longCopyCases)
 @MainActor
 private func englishStressDashboardsRenderWithinSharedGeometry(
     scenario: EnglishDashboardStressCase
@@ -1214,6 +1324,14 @@ private enum EnglishDashboardStressCase: String, CaseIterable, Sendable {
     case sameLanguagePassThrough
     case inboundFailed
     case outboundFailed
+
+    static let longCopyCases: [Self] = [
+        .manualBypass,
+        .reconnecting,
+        .sameLanguagePassThrough,
+        .inboundFailed,
+        .outboundFailed,
+    ]
 
     var fixture: EnglishDashboardStressFixture {
         let copy = AppCopy(language: .english)

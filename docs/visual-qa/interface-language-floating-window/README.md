@@ -10,7 +10,7 @@ images use pure presentations. Settings images use an in-memory
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Automated regression and build gates | Passed | 300 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
+| Automated regression and build gates | Passed | 302 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
 | Deterministic static visual inspection | Passed | All eight TIFFs were inspected at original pixel size after temporary PNG conversion. |
 | Real macOS runtime acceptance | Not verified | Computer Use reported that the Mac was locked. The already-running `/Applications` build was not touched, and opening the current app menu was also avoided because it automatically reads the shared Keychain service. |
 
@@ -61,19 +61,20 @@ sips -s format png \
 
 | Command | Status | Evidence |
 | --- | --- | --- |
-| `swift test` | Passed | 300 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
-| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 300 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
+| `swift test` | Passed | 302 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
+| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 302 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
 | `swift build -c release --product EMKEMenuBarApp -Xswiftc -warnings-as-errors` | Passed | Release product build completed. |
 | `make -C Driver clean all verify` | Passed | Fresh repository-equivalent Driver gate: the Makefile cleaned and rebuilt the bundle before verifying arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
 | `git diff --check 514ac2d...HEAD` | Passed | No whitespace errors were reported. |
-| `EMKE_CAPTURE_UI=1 swift test` | Passed | 300 tests passed with the same two opt-in skips; the in-test exact-set assertion accepted only the eight required TIFFs. |
+| `EMKE_CAPTURE_UI=1 swift test` | Passed | 302 tests passed with the same two opt-in skips; the in-test exact-set assertion accepted only the eight required TIFFs. |
 
 ## Static visual inspection
 
 | Check | Status | Evidence |
 | --- | --- | --- |
 | Chinese dashboard keeps the pre-84 production geometry | Passed | `dashboard-ready-zh.tiff` preserves the header, waveform/status, language hierarchy, two compact channel rows, primary action, and privacy footer. Its separator rows are exactly `[436, 597, 782, 1143]`, matching a direct `ca2c2b2` pre-84 production-renderer capture. Every Chinese dashboard fixture remains outside the English equal-slot policy. |
-| English dashboard channel rows are aligned | Passed | `dashboard-ready-en.tiff` shows `Other → Chinese` and the remaining complete copy in two equal-height channel slots. Each expanded row is vertically centered, and each compact waveform is centered on the full 374 pt dashboard content width instead of the post-icon column. |
+| English dashboard channel rows are aligned | Passed | Ordinary ready/running rows use one 374 pt four-column compact profile: 48 pt icon, 128 pt description, 96 pt status/waveform, 78 pt trailing action, and three 8 pt gaps. The description and status/waveform blocks share the same visual center; no spacer pushes the action away from the measured profile. |
+| Long English channel copy keeps a safe fallback | Passed | Bypass, reconnecting, same-language, and blocking-failure copy remains expanded. If either English row needs that path, the dashboard forces both rows into equal expanded slots so the pair stays aligned. |
 | English stress copy has no overflow | Passed | Seven deterministic English ready/running/bypass/reconnecting/failure fixtures render real 840 x 1240 px bitmaps. Separator-derived row bounds contain the scanned visible ink, trailing actions remain right-aligned, and independent AppKit measurements for title, direction, status, status symbol, and action fit within two lines and the actual slot height. |
 | Settings language selector contract is localized | Passed | Automated tests verify the real interface-language menu, all three stable preferences, and non-empty Chinese/English copy; the two dashboard captures verify both resolved interface languages. |
 | Chinese settings quit control is clear | Passed | Bottom-scrolled `settings-zh.tiff` shows the real full-width bordered/background control, power icon, and complete `退出 EMKE` label. |
@@ -106,7 +107,7 @@ Static render evidence is not used to mark any runtime item as Passed.
 | --- | --- | --- |
 | Endpoint, realtime transport, Keychain/security, routing, conversion, and driver source remain unchanged | Passed | `git diff --name-only 514ac2d...HEAD` contains no files under `EMKECore`, `EMKESecurity`, `EMKERealtime`, `EMKERouting`, `EMKEAudioEngine`, `EMKEAudioHAL`, `EMKEAudioBridge`, or `Driver`. |
 | Public settings change is limited to interface-language persistence | Passed | `AppSettingsStore.swift` only adds the `emke.interfaceLanguage` UserDefaults value and does not change API-key storage or Keychain code. |
-| English alignment and copy follow-ups are tightly scoped | Passed | The layout follow-up changes shared dashboard/channel geometry and focused render evidence. The later copy follow-up changes only the English `inboundDirection` value from `Other languages → {target}` to `Other → {target}`, exact-copy expectations, refreshed Pass 8 evidence, this README, and the root `design-qa.md`; action widths, font sizes, icons, panel dimensions, provider configuration, Keychain, audio routing, and driver code remain unchanged. |
+| English alignment and copy follow-ups are tightly scoped | Passed | The first layout follow-up established expanded fallback geometry; the copy follow-up changed only English `inboundDirection` to `Other → {target}`. The centering follow-up adds a language-resolved compact profile for ordinary English ready/running rows and a shared long-copy fallback policy. It does not change visible copy, font sizes, icons, panel dimensions, Chinese legacy arrangement, provider configuration, Keychain, audio routing, or driver code. |
 | Unrelated `internal-pkg-installer` worktree remains untouched | Passed | Its pre-existing dirty files were observed read-only and were not modified by this task. |
 
 ## Pass 8 tracked evidence
@@ -115,8 +116,11 @@ Static render evidence is not used to mark any runtime item as Passed.
 | --- | --- |
 | User-reported defect | `docs/visual-qa/interface-language-floating-window/pass-8/source-defect.jpg` |
 | User copy follow-up | `docs/visual-qa/interface-language-floating-window/pass-8/source-copy-followup.jpg` |
+| User centering follow-up | `docs/visual-qa/interface-language-floating-window/pass-8/source-centering-followup.jpg` |
+| English pre-centering result | `docs/visual-qa/interface-language-floating-window/pass-8/before-centering-followup.png` |
 | English before / after | `docs/visual-qa/interface-language-floating-window/pass-8/before-en.png` / `docs/visual-qa/interface-language-floating-window/pass-8/after-en.png` |
 | English 1:1 comparison | `docs/visual-qa/interface-language-floating-window/pass-8/comparison-en.png` |
+| English centering follow-up 1:1 comparison | `docs/visual-qa/interface-language-floating-window/pass-8/comparison-centering-followup.png` |
 | Chinese pre-84 production baseline / current | `docs/visual-qa/interface-language-floating-window/pass-8/baseline-zh-pre84.png` / `docs/visual-qa/interface-language-floating-window/pass-8/after-zh.png` |
 | Chinese pre-84/current 1:1 comparison | `docs/visual-qa/interface-language-floating-window/pass-8/comparison-zh-pre84-current.png` |
 

@@ -8,8 +8,10 @@ enum EMKEDashboardChannelSlotPolicy {
         outboundMode: EMKEChannelRowLayoutMode
     ) -> Bool {
         interfaceLanguage == .english
-            && inboundMode == .expanded
-            && outboundMode == .expanded
+            && (
+                inboundMode == .expanded
+                    || outboundMode == .expanded
+            )
     }
 }
 
@@ -260,7 +262,8 @@ struct TranslationDashboardContent: View {
     }
 
     private var channelRows: some View {
-        let slotHeight = usesExpandedChannelSlots
+        let layout = channelLayout
+        let slotHeight = layout.usesEqualExpandedSlots
             ? verticalGeometry.channelRowSlotHeight(
                 hasErrorText: value.errorText != nil
             )
@@ -274,6 +277,7 @@ struct TranslationDashboardContent: View {
                 level: value.inboundLevel,
                 presentation: value.inbound,
                 slotHeight: slotHeight,
+                layoutMode: layout.inboundMode,
                 action: inboundAction
             )
             EMKEDashboardSeparator()
@@ -284,29 +288,44 @@ struct TranslationDashboardContent: View {
                 level: value.outboundLevel,
                 presentation: value.outbound,
                 slotHeight: slotHeight,
+                layoutMode: layout.outboundMode,
                 action: outboundAction
             )
         }
     }
 
-    private var usesExpandedChannelSlots: Bool {
+    private var channelLayout: (
+        inboundMode: EMKEChannelRowLayoutMode,
+        outboundMode: EMKEChannelRowLayoutMode,
+        usesEqualExpandedSlots: Bool
+    ) {
         let inboundMode = EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: value.inboundDirection,
             status: value.inbound.status,
             statusSymbol: value.inbound.statusSymbol,
-            actionTitle: value.inbound.actionTitle
+            actionTitle: value.inbound.actionTitle,
+            isBlockingFailure: value.inbound.isBlockingFailure
         )
         let outboundMode = EMKEChannelRowLayoutDecision.resolve(
+            interfaceLanguage: copy.language,
             direction: value.outboundDirection,
             status: value.outbound.status,
             statusSymbol: value.outbound.statusSymbol,
-            actionTitle: value.outbound.actionTitle
+            actionTitle: value.outbound.actionTitle,
+            isBlockingFailure: value.outbound.isBlockingFailure
         )
+        let usesEqualExpandedSlots =
+            EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
+                interfaceLanguage: copy.language,
+                inboundMode: inboundMode,
+                outboundMode: outboundMode
+            )
 
-        return EMKEDashboardChannelSlotPolicy.usesEqualExpandedSlots(
-            interfaceLanguage: copy.language,
-            inboundMode: inboundMode,
-            outboundMode: outboundMode
+        return (
+            inboundMode: usesEqualExpandedSlots ? .expanded : inboundMode,
+            outboundMode: usesEqualExpandedSlots ? .expanded : outboundMode,
+            usesEqualExpandedSlots: usesEqualExpandedSlots
         )
     }
 

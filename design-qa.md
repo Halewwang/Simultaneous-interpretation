@@ -21,8 +21,11 @@
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
 - Pass 8 source defect screenshot: `docs/visual-qa/interface-language-floating-window/pass-8/source-defect.jpg`
 - Pass 8 user copy follow-up screenshot: `docs/visual-qa/interface-language-floating-window/pass-8/source-copy-followup.jpg`
+- Pass 8 user centering follow-up screenshot: `docs/visual-qa/interface-language-floating-window/pass-8/source-centering-followup.jpg`
+- Pass 8 pre-centering result: `docs/visual-qa/interface-language-floating-window/pass-8/before-centering-followup.png`
 - Pass 8 same-state English before/after: `docs/visual-qa/interface-language-floating-window/pass-8/before-en.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-en.png`
 - Pass 8 English mechanical 1:1 comparison: `docs/visual-qa/interface-language-floating-window/pass-8/comparison-en.png`
+- Pass 8 centering follow-up mechanical 1:1 comparison: `docs/visual-qa/interface-language-floating-window/pass-8/comparison-centering-followup.png`
 - Pass 8 Chinese pre-84/current captures: `docs/visual-qa/interface-language-floating-window/pass-8/baseline-zh-pre84.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-zh.png`
 - Pass 8 Chinese pre-84/current mechanical 1:1 comparison: `docs/visual-qa/interface-language-floating-window/pass-8/comparison-zh-pre84-current.png`
 - viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 6 将批准稿表面以单一等比缩放 + 居中裁切规范化为 840 × 1240 px；实现 raw 保持 840 × 1240 px 原样。两者分别以 1:1 嵌入 888 × 1288 px 验收面板，再组成 1776 × 1288 px surface comparison。原生窗口截图另含系统 32 pt 窗口栏。
@@ -38,7 +41,7 @@
 
 - Pass 6 修复了两项 P2：验收包装器不再缩放实现内容；语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间四个边界改用 `NSColor.separatorColor` 和 0.5 pt 厚度，在 2× 捕获中稳定为 1 physical pixel。深浅系统外观的合成对比度均由测试约束在 1.15–1.5，保持可见且克制。
 
-- Pass 8 修复了英文 expanded 通道区域的两项 P1 与一项 P2：仅当界面语言为英文且两个频道均为 expanded 时，从 dashboard budget 精确等分槽位并各自垂直居中；波形从 post-icon 内容列中心移到完整内容行中心；最长的 same-language 多行副本通过仅对多行 expanded copy 收紧纵向间距避免溢出。后续按用户明确要求，仅将英文入站方向从 `Other languages → {target}` 缩短为 `Other → {target}`，没有调整 action width 或其他布局。中文 compact 继续使用原生产布局路径，并精确保持 pre-84 生产 renderer 的四条分隔行 `[436, 597, 782, 1143]`；字体、图标和面板尺寸均未改变。
+- Pass 8 最终把英文普通 ready/running 通道改为真正的水平 compact 行：48 pt 图标、128 pt 描述、96 pt 状态/波形、78 pt 尾部动作和三段 8 pt 间距恰好占满 374 pt 内容宽度；描述块与状态/波形块在真实 bitmap 中共享纵向中心。旁路、重连、same-language 与失败等长文案继续使用 expanded；任一英文行 expanded 时，两个频道统一进入等高 expanded 槽位。此前按用户明确要求缩短的 `Other → {target}` 保持不变。中文 compact 继续使用原生产布局路径，并精确保持四条分隔行 `[436, 597, 782, 1143]`；字体、图标和面板尺寸均未改变。
 
 - [P3] 确认稿入站示例写“德语 → 中文”；实现保留真实的未知入站语种语义：中文为“其他语言 → 中文”，英文按用户要求简写为 `Other → Chinese`，不伪造服务商尚未识别出的具体语言。其他可见语言名已本地化为“中文／英语／德语”，底层存储值仍为 `zh/en/de`。
 - [P3] 实现比确认稿多出极小的全局状态、通道状态和隐私锁 SF Symbols。它们是已确认的文字 + 语义符号可访问性冗余，尺寸和颜色均从属于正文，没有形成第二视觉焦点。
@@ -132,12 +135,12 @@ Package 验收要求 `EMKE-MenuBarIcon.png` 必须是 36 × 36 px RGBA，运行�
 
 ### Pass 8 — English channel alignment
 
-Evidence: source defect screenshot `docs/visual-qa/interface-language-floating-window/pass-8/source-defect.jpg`; user copy follow-up screenshot `docs/visual-qa/interface-language-floating-window/pass-8/source-copy-followup.jpg`; same-state English before/after `docs/visual-qa/interface-language-floating-window/pass-8/before-en.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-en.png`; English mechanical 1:1 comparison `docs/visual-qa/interface-language-floating-window/pass-8/comparison-en.png`; Chinese pre-84/current captures `docs/visual-qa/interface-language-floating-window/pass-8/baseline-zh-pre84.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-zh.png`; Chinese mechanical 1:1 comparison `docs/visual-qa/interface-language-floating-window/pass-8/comparison-zh-pre84-current.png`.
+Evidence: source defect screenshot `docs/visual-qa/interface-language-floating-window/pass-8/source-defect.jpg`; user copy follow-up screenshot `docs/visual-qa/interface-language-floating-window/pass-8/source-copy-followup.jpg`; user centering follow-up screenshot `docs/visual-qa/interface-language-floating-window/pass-8/source-centering-followup.jpg`; pre-centering result `docs/visual-qa/interface-language-floating-window/pass-8/before-centering-followup.png`; same-state English before/after `docs/visual-qa/interface-language-floating-window/pass-8/before-en.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-en.png`; English mechanical 1:1 comparisons `docs/visual-qa/interface-language-floating-window/pass-8/comparison-en.png` and `docs/visual-qa/interface-language-floating-window/pass-8/comparison-centering-followup.png`; Chinese pre-84/current captures `docs/visual-qa/interface-language-floating-window/pass-8/baseline-zh-pre84.png` and `docs/visual-qa/interface-language-floating-window/pass-8/after-zh.png`; Chinese mechanical 1:1 comparison `docs/visual-qa/interface-language-floating-window/pass-8/comparison-zh-pre84-current.png`.
 
 视口与状态保持一致：Aqua/light，420 × 620 pt，2× 输出 840 × 1240 px，English ready/stopped，中文母语、德语会议输出。before 与 after 均以 1:1 像素放入 1680 × 1240 px 对照图，并已用 original detail 打开复核；source defect screenshot 的红框覆盖本轮验收的两个通道行与三条边界线。
 
-- 字体与排版：passed。系统字体、字号、字重、层级与普通 ready 的 92 pt expanded 固有高度未变。
-- 间距与布局：passed。频道预算精确分为两个等高槽位和中间 0.5 pt 分隔线；每个完整频道行在自己的槽位垂直居中。波形从 post-icon 内容列中心移到完整 374 pt dashboard content row 中心。
+- 字体与排版：passed。系统字体、字号、字重和层级未变；英文普通状态在单行四列 compact 行内完整呈现。
+- 间距与布局：passed。英文 ready/running 使用 48 + 128 + 96 + 78 pt 四列和三段 8 pt 间距，精确等于 374 pt dashboard 内容宽度；没有 `Spacer`。描述块与状态/波形块的实际像素中心差在 4 px 容差内，动作保持尾部对齐。长文案统一回退为两行等高 expanded 槽位。
 - 颜色与令牌：passed。背景、正文、次要文字、禁用动作、分隔线与波形语义色未变。
 - 图标与图片资产：passed。耳机、麦克风、状态与齿轮 SF Symbols 未变；两个源图保持 840 × 1240 px，机械对照保持 1:1，不含重采样。
 - 文案与状态：passed。英文入站方向按用户 follow-up 精确显示 `Other → Chinese`；中文仍为“其他语言 → 中文”。其余标题、方向、状态、动作、语言值、主动作和 footer 文案不变；7 个 English stress fixtures 无裁切或重叠。
@@ -148,16 +151,18 @@ Pass 8 comparison history:
 - P1（before / blocked）：两个 expanded channel 使用顶部对齐的不同固有高度；首行标题贴近上分隔线，两个频道没有稳定共享的槽位中心。
 - P1（before / blocked）：波形在 318 pt post-icon 内容列内居中，映射到 374 pt 行后的中心是 215 pt，而真实行中心是 187 pt，右偏 28 pt。
 - P2（before / blocked）：最长的 same-language 多行状态固有高度 107 pt，超过 ready 槽位 101.5 pt。
-- P0/P1/P2（after / passed）：英文两行等分且垂直居中，两个波形共同对齐完整行中心；same-language 多行副本仅使用 3 pt expanded 纵向间距并完整落入槽位。中文 compact 不进入等分槽位路径，当前捕获与 `ca2c2b2` pre-84 生产 renderer 的分隔行同为 `[436, 597, 782, 1143]`；两张 1:1 原尺寸图目检无几何漂移。历史 `docs/visual-qa/pass-7/artifacts/implementation-ready.png` 的分隔行是 `[467, 628, 813, 1160]`，属于旧验收 artifact 漂移，不是本轮生产回归目标。
+- P1（centering follow-up / blocked）：85d 的普通英文行虽然把 expanded 槽位作为整体居中，但标题/方向仍位于上方，状态/波形仍位于下方；真实 bitmap 扫描中两行的描述块与状态块中心分别相差 71 px 与 67.5 px。
+- P0/P1/P2（final / passed）：英文普通 ready/running 行改为真实四列 compact；描述与状态/波形共享纵向中心，动作尾部对齐。same-language 等长文案继续完整落入 expanded 槽位；只要一行需要 expanded，dashboard 就强制两行进入等高 expanded fallback。中文 compact 不进入英文策略，分隔行仍为 `[436, 597, 782, 1143]`，tracked 1:1 原尺寸对照无几何漂移。历史 `docs/visual-qa/pass-7/artifacts/implementation-ready.png` 的分隔行是 `[467, 628, 813, 1160]`，属于旧验收 artifact 漂移，不是本轮生产回归目标。
 - Copy follow-up（after / passed）：精确本地化合同先以实际值 `Other languages → Chinese/German` 对预期 `Other → Chinese/German` 失败，再只修改英文 `inboundDirection`。最终 1:1 英文对照显示短文案完整，现有等分槽位、动作右对齐和波形中心均未改变。
 
 自动证据：
 
 - RED 命中等分槽位 `407.5 != 203.5`、`373.5 != 186.5`，以及波形中心 `215 != 187`。
 - Copy follow-up RED 精确命中 `Other languages → Chinese/German` 与 `Other → Chinese/German` 的差异；focused GREEN 覆盖本地化、presentation 和 expanded layout 三个真实调用路径。
-- focused GREEN 覆盖 equal slots、waveform center、English ready 840 × 1240、Chinese compact pre-84 separator rows、所有中文 fixture 保持 legacy slot policy，以及 7-case English stress。
+- centering follow-up RED 精确命中四个 ready/running English case 都误选 expanded，并由真实 bitmap 命中 71 px / 67.5 px 的纵向中心偏差；统一 fallback policy 也先以 English expanded + compact 返回 false 失败。
+- focused GREEN 覆盖 English compact mode、374 pt column profile、实际 bitmap block center、统一 long-copy fallback、English ready 840 × 1240、Chinese compact separator rows、所有中文 fixture 保持 legacy slot policy，以及 5-case long-copy geometry / 7-case English bitmap stress。
 - 7 个 English stress fixture 均渲染真实 bitmap，并从 separator-derived row bounds 扫描可见 ink 和 trailing action 的右对齐边界；同时以独立 AppKit 测量 title、direction、status、status symbol 与 action，验证两行以内且所需高度落入真实槽位。
-- `EMKE_CAPTURE_UI=1 swift test`、普通测试与 strict-concurrency/warnings-as-errors gate 均为 300 tests passed；两个 opt-in live hardware tests 按预期跳过。
+- `EMKE_CAPTURE_UI=1 swift test`、普通测试与 strict-concurrency/warnings-as-errors gate 均为 302 tests passed；两个 opt-in live hardware tests 按预期跳过。
 - capture set 精确为 8 个 TIFF：dashboard/settings 840 × 1240 px，floating 528 × 104 px；Release warnings-as-errors build passed；`git diff --check` passed。
 
 final result: passed
