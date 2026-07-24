@@ -27,20 +27,39 @@ final class CaptureArtifacts: @unchecked Sendable {
         "onboarding-audio-en.tiff",
         "onboarding-meeting-en.tiff",
     ]
-    static let shared = CaptureArtifacts(
-        directory: URL(
-            fileURLWithPath: "/tmp/emke-interface-floating-qa",
-            isDirectory: true
-        )
-    )
+    static let shared = CaptureArtifacts(directory: defaultDirectory())
 
     static var isEnabled: Bool {
         ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1"
     }
 
+    static func defaultDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        processIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
+        temporaryRoot: URL = FileManager.default.temporaryDirectory
+    ) -> URL {
+        if let override = environment["EMKE_CAPTURE_OUTPUT_DIR"],
+           !override.isEmpty {
+            return URL(
+                fileURLWithPath: override,
+                isDirectory: true
+            )
+        }
+        return temporaryRoot
+            .appendingPathComponent(
+                "emke-interface-floating-qa",
+                isDirectory: true
+            )
+            .appendingPathComponent(
+                "process-\(processIdentifier)",
+                isDirectory: true
+            )
+    }
+
     private let directory: URL
     private let lock = NSLock()
     private var isPrepared = false
+    private var acceptedFilenames: Set<String> = []
 
     init(directory: URL) {
         self.directory = directory
@@ -57,11 +76,15 @@ final class CaptureArtifacts: @unchecked Sendable {
             guard Self.requiredFilenames.contains(filename) else {
                 throw CocoaError(.fileWriteInvalidFileName)
             }
+            guard !acceptedFilenames.contains(filename) else {
+                throw CocoaError(.fileWriteFileExists)
+            }
             try prepareWhileLocked()
             try data.write(
                 to: directory.appendingPathComponent(filename),
                 options: .atomic
             )
+            acceptedFilenames.insert(filename)
         }
     }
 
@@ -96,6 +119,62 @@ final class CaptureArtifacts: @unchecked Sendable {
     }
 }
 
+struct QACaptureArtifact {
+    let filename: String
+    let data: Data
+    let bitmap: NSBitmapImageRep
+
+    init(bitmap source: NSBitmapImageRep, filename: String) throws {
+        guard let data = source.tiffRepresentation else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try self.init(data: data, filename: filename)
+    }
+
+    init(data: Data, filename: String) throws {
+        guard let bitmap = NSBitmapImageRep(data: data) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.filename = filename
+        self.data = data
+        self.bitmap = bitmap
+    }
+}
+
+@MainActor
+private func hostedCaptureArtifact<Content: View>(
+    content: Content,
+    size: NSSize,
+    scale: CGFloat,
+    filename: String
+) throws -> QACaptureArtifact {
+    let hostingView = NSHostingView(rootView: content)
+    hostingView.frame = NSRect(origin: .zero, size: size)
+    guard let appearance = NSAppearance(named: .aqua) else {
+        throw CocoaError(.featureUnsupported)
+    }
+    hostingView.appearance = appearance
+    hostingView.layoutSubtreeIfNeeded()
+    hostingView.displayIfNeeded()
+    guard let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: Int(size.width * scale),
+        pixelsHigh: Int(size.height * scale),
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    bitmap.size = size
+    hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+    return try QACaptureArtifact(bitmap: bitmap, filename: filename)
+}
+
 @Test
 func captureArtifactsPrepareRemovesStaleFiles() throws {
     let fileManager = FileManager.default
@@ -114,6 +193,97 @@ func captureArtifactsPrepareRemovesStaleFiles() throws {
     try artifacts.prepare()
 
     #expect(!fileManager.fileExists(atPath: staleArtifact.path))
+}
+
+@Test
+func captureArtifactsRejectDuplicateAcceptedFilenameWrites() throws {
+    let fileManager = FileManager.default
+    let directory = fileManager.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? fileManager.removeItem(at: directory) }
+
+    let artifacts = CaptureArtifacts(directory: directory)
+    let filename = "dashboard-ready-zh.tiff"
+    let first = Data("first".utf8)
+    let second = Data("second".utf8)
+    try artifacts.write(first, named: filename)
+
+    var duplicateWasRejected = false
+    do {
+        try artifacts.write(second, named: filename)
+    } catch {
+        duplicateWasRejected = true
+    }
+
+    #expect(duplicateWasRejected)
+    #expect(
+        try Data(
+            contentsOf: directory.appendingPathComponent(filename)
+        ) == first
+    )
+}
+
+@Test
+func captureArtifactDefaultDirectoryIsProcessIsolatedAndOverridable() {
+    let temporaryRoot = URL(
+        fileURLWithPath: "/tmp/emke-capture-directory-contract",
+        isDirectory: true
+    )
+    let first = CaptureArtifacts.defaultDirectory(
+        environment: [:],
+        processIdentifier: 101,
+        temporaryRoot: temporaryRoot
+    )
+    let second = CaptureArtifacts.defaultDirectory(
+        environment: [:],
+        processIdentifier: 202,
+        temporaryRoot: temporaryRoot
+    )
+    let override = temporaryRoot.appendingPathComponent(
+        "explicit-final",
+        isDirectory: true
+    )
+    let overridden = CaptureArtifacts.defaultDirectory(
+        environment: ["EMKE_CAPTURE_OUTPUT_DIR": override.path],
+        processIdentifier: 303,
+        temporaryRoot: temporaryRoot
+    )
+
+    #expect(first != second)
+    #expect(first.lastPathComponent == "process-101")
+    #expect(second.lastPathComponent == "process-202")
+    #expect(overridden.standardizedFileURL == override.standardizedFileURL)
+}
+
+@Test
+func acceptedCaptureArtifactValidatesTheExactSerializedTIFF() throws {
+    let source = try solidBitmap(color: .black)
+    let artifact = try QACaptureArtifact(
+        bitmap: source,
+        filename: "dashboard-ready-zh.tiff"
+    )
+
+    let serialized = try #require(
+        NSBitmapImageRep(data: artifact.data)
+    )
+    #expect(artifact.bitmap.pixelsWide == serialized.pixelsWide)
+    #expect(artifact.bitmap.pixelsHigh == serialized.pixelsHigh)
+    #expect(
+        artifact.bitmap.colorAt(x: 420, y: 620)?
+            .usingColorSpace(.deviceRGB)?.redComponent == 0
+    )
+
+    let context = try #require(NSGraphicsContext(bitmapImageRep: source))
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 840, height: 1_240).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    #expect(
+        artifact.bitmap.colorAt(x: 420, y: 620)?
+            .usingColorSpace(.deviceRGB)?.redComponent == 0
+    )
 }
 
 @Test @MainActor
@@ -135,29 +305,10 @@ func captureRunningDashboardForVisualReview() throws {
 
 @Test @MainActor
 func captureReadyDashboardForVisualReview() throws {
-    let copy = AppCopy(language: .zhHans)
-    let bitmap = try dashboardBitmap(
-        value: DashboardFixture.ready.makePresentation(
-            inboundLevel: 0,
-            outboundLevel: 0,
-            copy: copy
-        ),
-        copy: copy,
-        languagesLocked: false
+    _ = try readyDashboardCaptureArtifact(
+        language: .zhHans,
+        filename: "dashboard-ready-zh.tiff"
     )
-
-    #expect(bitmap.pixelsWide == 840)
-    #expect(bitmap.pixelsHigh == 1240)
-
-    try writeQACapture(bitmap, named: "dashboard-ready-zh.tiff")
-    if ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" {
-        #expect(
-            FileManager.default.fileExists(
-                atPath:
-                    "/tmp/emke-interface-floating-qa/dashboard-ready-zh.tiff"
-            )
-        )
-    }
 }
 
 @Test @MainActor
@@ -189,8 +340,19 @@ func readyLanguageControlsRenderWithoutFallbackPlaceholders() throws {
 
 @Test @MainActor
 func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
-    let copy = AppCopy(language: .english)
-    let bitmap = try dashboardBitmap(
+    _ = try readyDashboardCaptureArtifact(
+        language: .english,
+        filename: "dashboard-ready-en.tiff"
+    )
+}
+
+@MainActor
+private func readyDashboardCaptureArtifact(
+    language: ResolvedInterfaceLanguage,
+    filename: String
+) throws -> QACaptureArtifact {
+    let copy = AppCopy(language: language)
+    let source = try dashboardBitmap(
         value: DashboardFixture.ready.makePresentation(
             inboundLevel: 0,
             outboundLevel: 0,
@@ -199,11 +361,13 @@ func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
         copy: copy,
         languagesLocked: false
     )
-
-    #expect(bitmap.pixelsWide == 840)
-    #expect(bitmap.pixelsHigh == 1240)
-
-    try writeQACapture(bitmap, named: "dashboard-ready-en.tiff")
+    let artifact = try QACaptureArtifact(
+        bitmap: source,
+        filename: filename
+    )
+    #expect(artifact.bitmap.pixelsWide == 840)
+    #expect(artifact.bitmap.pixelsHigh == 1_240)
+    return artifact
 }
 
 @Test
@@ -218,12 +382,26 @@ func dashboardFooterUsesExactBrandCopyAcrossRenderLanguages() {
 
 @Test @MainActor
 func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
+    let artifacts = try validatedSettingsCaptureArtifacts()
+
+    #expect(artifacts.count == 2)
+}
+
+@MainActor
+private func validatedSettingsCaptureArtifacts() throws
+    -> [QACaptureArtifact]
+{
+    var artifacts: [QACaptureArtifact] = []
     for (language, filename) in [
         (AppInterfaceLanguage.zhHans, "settings-zh.tiff"),
         (AppInterfaceLanguage.english, "settings-en.tiff"),
     ] {
         let render = try settingsRender(language: language)
-        let bitmap = render.bitmap
+        let artifact = try QACaptureArtifact(
+            bitmap: render.bitmap,
+            filename: filename
+        )
+        let bitmap = artifact.bitmap
         let quitControl = quitControlEvidence(in: bitmap)
 
         #expect(bitmap.pixelsWide == 840)
@@ -247,87 +425,30 @@ func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
             """
         )
 
-        try writeQACapture(bitmap, named: filename)
+        artifacts.append(artifact)
     }
+    return artifacts
 }
 
 @Test @MainActor
 func onboardingRendersEveryStepInBothLanguages() async throws {
-    for language in [
-        AppInterfaceLanguage.zhHans,
-        AppInterfaceLanguage.english,
-    ] {
-        for step in OnboardingStep.allCases {
-            let microphoneState: MicrophonePermissionState =
-                step == .microphone ? .denied : .authorized
-            let bitmap = try await onboardingBitmap(
-                language: language,
-                step: step,
-                microphoneState: microphoneState
-            )
-            #expect(bitmap.pixelsWide == 1_120)
-            #expect(bitmap.pixelsHigh == 1_240)
-            #expect(
-                onboardingContentInkPixels(in: bitmap) > 1_250,
-                "Onboarding \(step) \(language) must render nonblank central content"
-            )
-            #expect(
-                onboardingFallbackPixels(in: bitmap) == 0,
-                "Onboarding \(step) \(language) must not contain renderer fallback controls"
-            )
-            #expect(
-                onboardingLogoInkPixels(in: bitmap) > 500,
-                "Onboarding \(step) \(language) must render the logo"
-            )
-            #expect(
-                onboardingProductNameInkPixels(in: bitmap) > 1_000,
-                "Onboarding \(step) \(language) must render the product name"
-            )
-            #expect(
-                onboardingHeaderTitleInkPixels(in: bitmap) > 2_000,
-                "Onboarding \(step) \(language) must render the header title"
-            )
-            #expect(
-                onboardingFooterInkPixels(in: bitmap) > 250,
-                "Onboarding \(step) \(language) must render footer controls"
-            )
-            #expect(
-                onboardingSkipActionInkPixels(in: bitmap) > 300,
-                "Onboarding \(step) \(language) must render the left footer action"
-            )
-            #expect(
-                onboardingDoNotShowAgainInkPixels(in: bitmap) > 300,
-                "Onboarding \(step) \(language) must render the right footer preference"
-            )
-            #expect(
-                onboardingProgressInkPixels(in: bitmap) > 20,
-                "Onboarding \(step) \(language) must render n / 4 progress"
-            )
-            #expect(
-                onboardingPrimaryActionPixels(in: bitmap) > 150,
-                "Onboarding \(step) \(language) must render its primary action"
-            )
-            #expect(
-                onboardingEdgeInkPixels(in: bitmap) == 0,
-                "Onboarding \(step) \(language) must stay inside frame bounds"
-            )
-            #expect(
-                onboardingOpaqueBoundarySamples(in: bitmap) == 12,
-                "Onboarding \(step) \(language) must render an opaque full frame"
-            )
-            if step == .audioSetup {
-                #expect(
-                    onboardingAudioDiagnosticInkPixels(in: bitmap) > 500,
-                    "Onboarding audio \(language) must render right-side diagnostic text"
-                )
-            }
-            try writeQACapture(
-                bitmap,
-                named:
-                    "onboarding-\(step.captureName)-\(language == .zhHans ? "zh" : "en").tiff"
-            )
-        }
-    }
+    let artifacts = try await validatedOnboardingCaptureArtifacts()
+
+    #expect(artifacts.count == 8)
+    #expect(
+        Set(artifacts.map(\.filename)) == Set(
+            [
+                "onboarding-overview-zh.tiff",
+                "onboarding-microphone-zh.tiff",
+                "onboarding-audio-zh.tiff",
+                "onboarding-meeting-zh.tiff",
+                "onboarding-overview-en.tiff",
+                "onboarding-microphone-en.tiff",
+                "onboarding-audio-en.tiff",
+                "onboarding-meeting-en.tiff",
+            ]
+        )
+    )
 }
 
 @Test @MainActor
@@ -364,6 +485,34 @@ func onboardingSemanticEvidenceRejectsMalformedTIFF() throws {
     #expect(onboardingDoNotShowAgainInkPixels(in: bitmap) == 0)
 }
 
+@Test @MainActor
+func hostedExportedSnapshotUsesCanonicalTopOriginCoordinates() throws {
+    let content = VStack(spacing: 0) {
+        Color.red.frame(width: 10, height: 5)
+        Color.blue.frame(width: 10, height: 5)
+    }
+    .frame(width: 10, height: 10)
+    let artifact = try hostedCaptureArtifact(
+        content: content,
+        size: NSSize(width: 10, height: 10),
+        scale: 2,
+        filename: "coordinate-probe.tiff"
+    )
+    let top = try #require(
+        artifact.bitmap.colorAt(x: 10, y: 2)?
+            .usingColorSpace(.deviceRGB)
+    )
+    let bottom = try #require(
+        artifact.bitmap.colorAt(x: 10, y: 17)?
+            .usingColorSpace(.deviceRGB)
+    )
+
+    #expect(top.redComponent > 0.9)
+    #expect(top.redComponent - top.blueComponent > 0.5)
+    #expect(bottom.blueComponent > 0.9)
+    #expect(bottom.blueComponent - bottom.redComponent > 0.5)
+}
+
 private func onboardingLogoInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
@@ -393,7 +542,29 @@ private func onboardingHeaderTitleInkPixels(
         in: bitmap,
         xRange: 140..<700,
         yRange: 70..<120,
-        luminanceRange: 0..<0.25
+        luminanceRange: 0..<0.55
+    )
+}
+
+private func onboardingStepTitleInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 50..<1_000,
+        yRange: 185..<270,
+        luminanceRange: 0..<0.7
+    )
+}
+
+private func onboardingStepBodyInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 50..<1_080,
+        yRange: 270..<370,
+        luminanceRange: 0.25..<0.9
     )
 }
 
@@ -456,7 +627,15 @@ private func onboardingPrimaryActionPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
     var count = 0
-    for y in stride(from: 1_145, to: 1_215, by: 2) {
+    let yRange = hostedSnapshotYRange(
+        forTopOrigin: 1_145..<1_215,
+        in: bitmap
+    )
+    for y in stride(
+        from: yRange.lowerBound,
+        to: yRange.upperBound,
+        by: 2
+    ) {
         for x in stride(from: 900, to: 1_085, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
@@ -535,7 +714,15 @@ private func darkPixelCount(
     strideBy: Int
 ) -> Int {
     var count = 0
-    for y in stride(from: yRange.lowerBound, to: yRange.upperBound, by: strideBy) {
+    let bitmapYRange = hostedSnapshotYRange(
+        forTopOrigin: yRange,
+        in: bitmap
+    )
+    for y in stride(
+        from: bitmapYRange.lowerBound,
+        to: bitmapYRange.upperBound,
+        by: strideBy
+    ) {
         for x in stride(from: xRange.lowerBound, to: xRange.upperBound, by: strideBy) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
@@ -558,7 +745,11 @@ private func luminancePixelCount(
     luminanceRange: Range<Double>
 ) -> Int {
     var count = 0
-    for y in yRange {
+    let bitmapYRange = hostedSnapshotYRange(
+        forTopOrigin: yRange,
+        in: bitmap
+    )
+    for y in bitmapYRange {
         for x in xRange {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
@@ -574,11 +765,67 @@ private func luminancePixelCount(
     return count
 }
 
+private func hostedSnapshotYRange(
+    forTopOrigin yRange: Range<Int>,
+    in bitmap: NSBitmapImageRep
+) -> Range<Int> {
+    precondition(yRange.lowerBound >= 0)
+    precondition(yRange.upperBound <= bitmap.pixelsHigh)
+    return yRange
+}
+
+private func canonicalTopOriginRGBAData(
+    in bitmap: NSBitmapImageRep,
+    xRange: Range<Int>,
+    yRange: Range<Int>
+) -> Data {
+    precondition(xRange.lowerBound >= 0)
+    precondition(xRange.upperBound <= bitmap.pixelsWide)
+    precondition(yRange.lowerBound >= 0)
+    precondition(yRange.upperBound <= bitmap.pixelsHigh)
+
+    var bytes: [UInt8] = []
+    bytes.reserveCapacity(xRange.count * yRange.count * 4)
+    for y in yRange {
+        for x in xRange {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                bytes.append(contentsOf: [0, 0, 0, 0])
+                continue
+            }
+            for component in [
+                color.redComponent,
+                color.greenComponent,
+                color.blueComponent,
+                color.alphaComponent,
+            ] {
+                bytes.append(
+                    UInt8(
+                        clamping: Int(
+                            (component * 255).rounded()
+                        )
+                    )
+                )
+            }
+        }
+    }
+    return Data(bytes)
+}
+
 private func onboardingFallbackPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
     var count = 0
-    for y in stride(from: 150, to: 1_100, by: 2) {
+    let yRange = hostedSnapshotYRange(
+        forTopOrigin: 150..<1_100,
+        in: bitmap
+    )
+    for y in stride(
+        from: yRange.lowerBound,
+        to: yRange.upperBound,
+        by: 2
+    ) {
         for x in stride(from: 40, to: 1_080, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
@@ -599,7 +846,15 @@ private func onboardingContentInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
     var count = 0
-    for y in stride(from: 180, to: 1_050, by: 2) {
+    let yRange = hostedSnapshotYRange(
+        forTopOrigin: 180..<1_050,
+        in: bitmap
+    )
+    for y in stride(
+        from: yRange.lowerBound,
+        to: yRange.upperBound,
+        by: 2
+    ) {
         for x in stride(from: 50, to: 1_070, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
@@ -623,11 +878,34 @@ func captureArtifactDirectoryMatchesExactExpectedSet() async throws {
         return
     }
 
-    try captureReadyDashboardForVisualReview()
-    try englishReadyDashboardKeepsApprovedRenderDimensions()
-    try settingsRenderInBothInterfaceLanguagesAtApprovedDimensions()
-    try await onboardingRendersEveryStepInBothLanguages()
-    try floatingCapsuleRendersAtRetinaDimensions()
+    try CaptureArtifacts.shared.prepare()
+    var artifacts = [
+        try readyDashboardCaptureArtifact(
+            language: .zhHans,
+            filename: "dashboard-ready-zh.tiff"
+        ),
+        try readyDashboardCaptureArtifact(
+            language: .english,
+            filename: "dashboard-ready-en.tiff"
+        ),
+    ]
+    artifacts.append(contentsOf: try validatedSettingsCaptureArtifacts())
+    artifacts.append(
+        contentsOf: try await validatedOnboardingCaptureArtifacts()
+    )
+    artifacts.append(contentsOf: try validatedFloatingCaptureArtifacts())
+    #expect(artifacts.count == CaptureArtifacts.requiredFilenames.count)
+    #expect(
+        Set(artifacts.map(\.filename))
+            == CaptureArtifacts.requiredFilenames
+    )
+
+    for artifact in artifacts {
+        try CaptureArtifacts.shared.write(
+            artifact.data,
+            named: artifact.filename
+        )
+    }
 
     let actualFilenames = try CaptureArtifacts.shared.finish()
     #expect(actualFilenames == CaptureArtifacts.requiredFilenames)
@@ -962,17 +1240,6 @@ private final class RenderSettingsStore: AppSettingsStoring {
     }
 }
 
-private func writeQACapture(
-    _ bitmap: NSBitmapImageRep,
-    named filename: String
-) throws {
-    guard CaptureArtifacts.isEnabled else {
-        return
-    }
-    let data = try #require(bitmap.tiffRepresentation)
-    try CaptureArtifacts.shared.write(data, named: filename)
-}
-
 private extension OnboardingStep {
     var captureName: String {
         switch self {
@@ -985,11 +1252,117 @@ private extension OnboardingStep {
 }
 
 @MainActor
+private func validatedOnboardingCaptureArtifacts() async throws
+    -> [QACaptureArtifact]
+{
+    var artifacts: [QACaptureArtifact] = []
+    for language in [
+        AppInterfaceLanguage.zhHans,
+        AppInterfaceLanguage.english,
+    ] {
+        var headerTemplate: Data?
+        for step in OnboardingStep.allCases {
+            let microphoneState: MicrophonePermissionState =
+                step == .microphone ? .denied : .authorized
+            let artifact = try await onboardingBitmap(
+                language: language,
+                step: step,
+                microphoneState: microphoneState
+            )
+            let bitmap = artifact.bitmap
+            #expect(bitmap.pixelsWide == 1_120)
+            #expect(bitmap.pixelsHigh == 1_240)
+            #expect(
+                onboardingContentInkPixels(in: bitmap) > 1_250,
+                "Onboarding \(step) \(language) must render central content"
+            )
+            #expect(
+                onboardingFallbackPixels(in: bitmap) == 0,
+                "Onboarding \(step) \(language) must not render fallback controls"
+            )
+            #expect(
+                onboardingLogoInkPixels(in: bitmap) > 500,
+                "Onboarding \(step) \(language) must render the logo"
+            )
+            #expect(
+                onboardingProductNameInkPixels(in: bitmap) > 1_000,
+                "Onboarding \(step) \(language) must render the product name"
+            )
+            #expect(
+                onboardingHeaderTitleInkPixels(in: bitmap) > 3_000,
+                "Onboarding \(step) \(language) must render the localized brand header"
+            )
+            #expect(
+                onboardingStepTitleInkPixels(in: bitmap) > 3_000,
+                "Onboarding \(step) \(language) must render the localized step title"
+            )
+            #expect(
+                onboardingStepBodyInkPixels(in: bitmap) > 5_000,
+                "Onboarding \(step) \(language) must render the localized step body"
+            )
+            #expect(
+                onboardingFooterInkPixels(in: bitmap) > 250,
+                "Onboarding \(step) \(language) must render footer controls"
+            )
+            #expect(
+                onboardingSkipActionInkPixels(in: bitmap) > 300,
+                "Onboarding \(step) \(language) must render the left footer action"
+            )
+            #expect(
+                onboardingDoNotShowAgainInkPixels(in: bitmap) > 300,
+                "Onboarding \(step) \(language) must render the right footer preference"
+            )
+            #expect(
+                onboardingProgressInkPixels(in: bitmap) > 20,
+                "Onboarding \(step) \(language) must render n / 4 progress"
+            )
+            #expect(
+                onboardingPrimaryActionPixels(in: bitmap) > 150,
+                "Onboarding \(step) \(language) must render its primary action"
+            )
+            #expect(
+                onboardingEdgeInkPixels(in: bitmap) == 0,
+                "Onboarding \(step) \(language) must stay inside frame bounds"
+            )
+            #expect(
+                onboardingOpaqueBoundarySamples(in: bitmap) == 12,
+                "Onboarding \(step) \(language) must render an opaque full frame"
+            )
+            if step == .audioSetup {
+                #expect(
+                    onboardingAudioDiagnosticInkPixels(in: bitmap) > 500,
+                    "Onboarding audio \(language) must render diagnostic text"
+                )
+            }
+
+            let header = canonicalTopOriginRGBAData(
+                in: bitmap,
+                xRange: 40..<800,
+                yRange: 20..<130
+            )
+            if let headerTemplate {
+                #expect(
+                    header == headerTemplate,
+                    """
+                    Onboarding \(step) \(language) must keep the exact \
+                    localized brand header crop
+                    """
+                )
+            } else {
+                headerTemplate = header
+            }
+            artifacts.append(artifact)
+        }
+    }
+    return artifacts
+}
+
+@MainActor
 private func onboardingBitmap(
     language: AppInterfaceLanguage,
     step: OnboardingStep,
     microphoneState: MicrophonePermissionState
-) async throws -> NSBitmapImageRep {
+) async throws -> QACaptureArtifact {
     var settings = AppSettings.default
     settings.interfaceLanguage = language
     settings.selectedInputUID = "onboarding.physical.input"
@@ -1014,36 +1387,20 @@ private func onboardingBitmap(
     while controller.flow.step != step {
         controller.moveForward()
     }
-    await Task.yield()
 
-    let content = OnboardingCaptureRoot(
-        content: OnboardingView(
-            model: model,
-            controller: controller,
-            refreshesStateOnStepChange: false
-        )
+    let content = OnboardingView(
+        model: model,
+        controller: controller,
+        refreshesStateOnStepChange: false
     )
         .environment(\.colorScheme, .light)
-    let renderer = ImageRenderer(content: content)
-    renderer.scale = 2
-    renderer.proposedSize = ProposedViewSize(width: 560, height: 620)
-    let data = try #require(renderer.nsImage?.tiffRepresentation)
-    return try #require(NSBitmapImageRep(data: data))
-}
-
-private struct OnboardingCaptureRoot<Content: View>: View {
-    let content: Content
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color(nsColor: .windowBackgroundColor)
-                .frame(width: 560, height: 620)
-            content
-                .frame(width: 560, height: 620, alignment: .topLeading)
-        }
-        .frame(width: 560, height: 620, alignment: .topLeading)
-        .fixedSize(horizontal: true, vertical: true)
-    }
+    return try hostedCaptureArtifact(
+        content: content,
+        size: NSSize(width: 560, height: 620),
+        scale: 2,
+        filename:
+            "onboarding-\(step.captureName)-\(language == .zhHans ? "zh" : "en").tiff"
+    )
 }
 
 @Test @MainActor

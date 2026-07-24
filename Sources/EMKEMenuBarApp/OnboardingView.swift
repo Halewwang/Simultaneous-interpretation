@@ -207,7 +207,7 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 12) {
+            VStack(spacing: 8) {
                 routingCard(
                     title: copy.text(.meetingAppSpeaker),
                     value: "EMKE Virtual Speaker",
@@ -219,6 +219,7 @@ struct OnboardingView: View {
                     systemImage: "mic.fill"
                 )
             }
+            .frame(maxWidth: .infinity)
         }
     }
 

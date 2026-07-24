@@ -255,7 +255,8 @@ func menuBarAppOwnsOnboardingWindow() throws {
     #expect(source.contains("OnboardingView("))
     #expect(source.contains("onboardingWindowController.showIfNeeded()"))
     #expect(source.contains("stopAudioInputDiagnostic:"))
-    #expect(source.contains("await model?.stopAudioInputTest()"))
+    #expect(source.contains("model?.invalidateAudioInputTest()"))
+    #expect(!source.contains("await model?.stopAudioInputTest()"))
 }
 
 @Test
@@ -338,7 +339,7 @@ func onboardingUsesExplicitMeetingEndpointLabelsAndProgressValue() throws {
 }
 
 @Test
-func onboardingCaptureUsesOneDeterministicRendererPerFixture() throws {
+func onboardingCaptureUsesOneHostingViewAndOneBitmapPerFixture() throws {
     let repositoryRoot = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
@@ -347,16 +348,51 @@ func onboardingCaptureUsesOneDeterministicRendererPerFixture() throws {
         contentsOf: repositoryRoot
             .appendingPathComponent(
                 "Tests/EMKEAudioEngineTests/TranslationDashboardRenderTests.swift"
-            ),
+        ),
         encoding: .utf8
     )
+    let capture = try #require(
+        source.components(separatedBy: "private func onboardingBitmap(")
+            .last?
+            .components(
+                separatedBy:
+                    "@Test @MainActor\nfunc englishReadyAndRunning"
+            )
+            .first
+    )
+    let host = try #require(
+        source.components(
+            separatedBy:
+                "private func hostedCaptureArtifact<Content: View>("
+        )
+        .last?
+        .components(
+            separatedBy:
+                "@Test\nfunc captureArtifactsPrepareRemovesStaleFiles"
+        )
+        .first
+    )
 
-    #expect(!source.contains("firstBitmap"))
-    #expect(!source.contains("secondBitmap"))
-    #expect(!source.contains("var candidates: [NSBitmapImageRep]"))
-    #expect(source.contains("renderer.proposedSize = ProposedViewSize("))
-    #expect(source.contains("OnboardingCaptureRoot("))
-    #expect(source.contains(".fixedSize(horizontal: true, vertical: true)"))
+    #expect(!capture.contains("ImageRenderer("))
+    #expect(!capture.contains("candidates"))
+    #expect(!capture.contains("Task.yield()"))
+    #expect(
+        capture.components(separatedBy: "hostedCaptureArtifact(")
+            .count - 1 == 1
+    )
+    #expect(
+        host.components(separatedBy: "NSHostingView(rootView: content)")
+            .count - 1 == 1
+    )
+    #expect(
+        host.components(separatedBy: "NSBitmapImageRep(").count - 1 == 1
+    )
+    #expect(
+        host.components(
+            separatedBy:
+                "hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)"
+        ).count - 1 == 1
+    )
 }
 
 @Test

@@ -16,9 +16,7 @@ struct EMKEMenuBarApp: App {
         let onboardingWindowController = OnboardingWindowController(
             progressStore: UserDefaultsOnboardingProgressStore(),
             stopAudioInputDiagnostic: { [weak model] in
-                Task { @MainActor in
-                    await model?.stopAudioInputTest()
-                }
+                model?.invalidateAudioInputTest()
             }
         )
         let onboardingWindow = OnboardingAppWindowPresenter(

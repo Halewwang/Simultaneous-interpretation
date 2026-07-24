@@ -154,6 +154,68 @@ func leavingAudioSetupInEitherDirectionStopsTheInputDiagnostic() {
 }
 
 @Test @MainActor
+func cleanupRunsBeforeAudioStepNavigationMutatesFlow() {
+    var observedSteps: [OnboardingStep] = []
+    var controller: OnboardingWindowController!
+    controller = makeOnboardingController(
+        stopAudioInputDiagnostic: {
+            observedSteps.append(controller.flow.step)
+        }
+    )
+
+    moveToAudioSetup(controller)
+    controller.moveForward()
+
+    controller.show()
+    controller.moveForward()
+    controller.moveForward()
+    controller.moveBackward()
+
+    #expect(observedSteps == [.audioSetup, .audioSetup])
+}
+
+@Test @MainActor
+func cleanupRunsBeforeDismissalMutatesVisibilityOrCompletion() {
+    var observations: [(OnboardingStep, Bool, Int)] = []
+
+    for dismissal in 0..<3 {
+        let store = OnboardingProgressStoreStub()
+        var controller: OnboardingWindowController!
+        controller = makeOnboardingController(
+            store: store,
+            stopAudioInputDiagnostic: {
+                observations.append(
+                    (
+                        controller.flow.step,
+                        controller.isVisible,
+                        store.completedVersions.count
+                    )
+                )
+            }
+        )
+        moveToAudioSetup(controller)
+
+        switch dismissal {
+        case 0:
+            controller.skipForNow()
+        case 1:
+            controller.doNotShowAgain()
+        default:
+            controller.complete()
+        }
+    }
+
+    #expect(observations.count == 3)
+    #expect(
+        observations.allSatisfy { observation in
+            observation.0 == .audioSetup
+                && observation.1
+                && observation.2 == 0
+        }
+    )
+}
+
+@Test @MainActor
 func everyAudioSetupDismissalStopsTheInputDiagnostic() {
     let cleanup = OnboardingDiagnosticCleanupSpy()
 

@@ -33,6 +33,14 @@ func floatingVisibleStatusesFitApprovedColumn() {
 
 @Test @MainActor
 func floatingCapsuleRendersAtRetinaDimensions() throws {
+    let artifacts = try validatedFloatingCaptureArtifacts()
+
+    #expect(artifacts.count == 4)
+}
+
+@MainActor
+func validatedFloatingCaptureArtifacts() throws -> [QACaptureArtifact] {
+    var artifacts: [QACaptureArtifact] = []
     for scenario in FloatingCapsuleRenderCase.allCases {
         let renderer = ImageRenderer(
             content: FloatingTranslationStatusView(
@@ -53,8 +61,11 @@ func floatingCapsuleRendersAtRetinaDimensions() throws {
         guard let filename = scenario.captureFilename else {
             continue
         }
-        try writeFloatingQACapture(data, named: filename)
+        artifacts.append(
+            try QACaptureArtifact(data: data, filename: filename)
+        )
     }
+    return artifacts
 }
 
 private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
@@ -158,14 +169,4 @@ private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
             copy: AppCopy(language: language)
         )
     }
-}
-
-private func writeFloatingQACapture(
-    _ data: Data,
-    named filename: String
-) throws {
-    guard CaptureArtifacts.isEnabled else {
-        return
-    }
-    try CaptureArtifacts.shared.write(data, named: filename)
 }

@@ -46,15 +46,13 @@ final class OnboardingWindowController: ObservableObject {
     }
 
     func moveForward() {
-        let previousStep = flow.step
+        stopDiagnosticBeforeLeavingAudioSetup()
         flow.moveForward()
-        stopDiagnosticIfLeavingAudioSetup(from: previousStep)
     }
 
     func moveBackward() {
-        let previousStep = flow.step
+        stopDiagnosticBeforeLeavingAudioSetup()
         flow.moveBackward()
-        stopDiagnosticIfLeavingAudioSetup(from: previousStep)
     }
 
     func skipForNow() {
@@ -78,13 +76,8 @@ final class OnboardingWindowController: ObservableObject {
         window?.hide()
     }
 
-    private func stopDiagnosticIfLeavingAudioSetup(
-        from previousStep: OnboardingStep
-    ) {
-        guard previousStep == .audioSetup,
-              flow.step != .audioSetup else {
-            return
-        }
+    private func stopDiagnosticBeforeLeavingAudioSetup() {
+        guard flow.step == .audioSetup else { return }
         stopAudioInputDiagnostic()
     }
 }

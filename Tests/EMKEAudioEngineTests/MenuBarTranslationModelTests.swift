@@ -536,9 +536,12 @@ private actor BlockingInputStartAudioDiagnosticsStub:
     private var startInputContinuation: CheckedContinuation<Void, Never>?
     private var startInputWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var isInputActive = false
+    private(set) var activeInputDeviceID: AudioObjectID?
+    private(set) var startInputCount = 0
     private(set) var stopInputCount = 0
 
     func startInput(deviceID: AudioObjectID) async throws {
+        startInputCount += 1
         startInputReached = true
         let waiters = startInputWaiters
         startInputWaiters.removeAll()
@@ -549,6 +552,7 @@ private actor BlockingInputStartAudioDiagnosticsStub:
             }
         }
         isInputActive = true
+        activeInputDeviceID = deviceID
     }
 
     func waitUntilStartInputIsBlocked() async {
@@ -576,6 +580,7 @@ private actor BlockingInputStartAudioDiagnosticsStub:
     func stopInput() async {
         stopInputCount += 1
         isInputActive = false
+        activeInputDeviceID = nil
     }
 
     func startOutputTest(
@@ -1277,7 +1282,7 @@ func onboardingCleanupStopsActiveInputDiagnosticAndResetsPresentation() async {
 }
 
 @Test @MainActor
-func onboardingCleanupInvalidatesInFlightAudioInputStart() async {
+func onboardingCleanupInvalidatesAudioInputStartSynchronously() async {
     let diagnostics = BlockingInputStartAudioDiagnosticsStub()
     let model = MenuBarModel(
         provider: TranslationMenuDeviceProvider(),
@@ -1297,18 +1302,79 @@ func onboardingCleanupInvalidatesInFlightAudioInputStart() async {
     }
     await diagnostics.waitUntilStartInputIsBlocked()
 
-    await model.stopAudioInputTest()
-    #expect(await diagnostics.stopInputCount == 1)
+    model.invalidateAudioInputTest()
     #expect(!model.isTestingAudioInput)
+    #expect(model.audioInputDiagnosticLevel == 0)
+    #expect(model.audioInputDiagnosticText == "未测试")
 
     await diagnostics.releaseStartInput()
     await startTask.value
 
-    #expect(await diagnostics.stopInputCount == 2)
     #expect(!(await diagnostics.isInputActive))
     #expect(!model.isTestingAudioInput)
     #expect(model.audioInputDiagnosticLevel == 0)
     #expect(model.audioInputDiagnosticText == "未测试")
+}
+
+@Test @MainActor
+func audioInputLifecycleSerializesOldStartStopAndNewStart() async throws {
+    let diagnostics = BlockingInputStartAudioDiagnosticsStub()
+    let lifecycle = AudioInputDiagnosticLifecycle(
+        audioDiagnostics: diagnostics
+    )
+
+    let oldStart = lifecycle.enqueueStartInput(deviceID: 20)
+    await diagnostics.waitUntilStartInputIsBlocked()
+    let cleanup = lifecycle.enqueueStopInput()
+    let newStart = lifecycle.enqueueStartInput(deviceID: 30)
+
+    #expect(await diagnostics.startInputCount == 1)
+    await diagnostics.releaseStartInput()
+
+    try await oldStart.value
+    await cleanup.value
+    try await newStart.value
+
+    #expect(await diagnostics.startInputCount == 2)
+    #expect(await diagnostics.stopInputCount == 1)
+    #expect(await diagnostics.activeInputDeviceID == 30)
+}
+
+@Test @MainActor
+func newAudioInputStartOwnsAdapterAfterStaleCleanup() async {
+    let diagnostics = BlockingInputStartAudioDiagnosticsStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+
+    let oldStart = Task { @MainActor in
+        await model.startAudioInputTest()
+    }
+    await diagnostics.waitUntilStartInputIsBlocked()
+    model.invalidateAudioInputTest()
+    let newStart = Task { @MainActor in
+        await model.startAudioInputTest()
+    }
+
+    await diagnostics.releaseStartInput()
+    await oldStart.value
+    await newStart.value
+
+    #expect(await diagnostics.startInputCount == 2)
+    #expect(await diagnostics.stopInputCount == 1)
+    #expect(await diagnostics.activeInputDeviceID == 20)
+    #expect(model.isTestingAudioInput)
+    #expect(model.audioInputDiagnosticLevel == 0.81)
+    #expect(model.audioInputDiagnosticText == "已检测到麦克风输入")
 
     await model.stopAudioInputTest()
 }

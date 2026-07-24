@@ -54,6 +54,42 @@ protocol AudioDiagnosticsControlling: Sendable {
 
 extension LocalAudioDiagnostics: AudioDiagnosticsControlling {}
 
+@MainActor
+final class AudioInputDiagnosticLifecycle {
+    private let audioDiagnostics: any AudioDiagnosticsControlling
+    private var tail: Task<Void, Never>?
+
+    init(audioDiagnostics: any AudioDiagnosticsControlling) {
+        self.audioDiagnostics = audioDiagnostics
+    }
+
+    func enqueueStartInput(
+        deviceID: AudioObjectID
+    ) -> Task<Void, any Error> {
+        let previous = tail
+        let audioDiagnostics = audioDiagnostics
+        let operation = Task<Void, any Error> {
+            await previous?.value
+            try await audioDiagnostics.startInput(deviceID: deviceID)
+        }
+        tail = Task {
+            _ = try? await operation.value
+        }
+        return operation
+    }
+
+    func enqueueStopInput() -> Task<Void, Never> {
+        let previous = tail
+        let audioDiagnostics = audioDiagnostics
+        let operation = Task {
+            await previous?.value
+            await audioDiagnostics.stopInput()
+        }
+        tail = operation
+        return operation
+    }
+}
+
 enum MenuBarReadiness: Equatable {
     case driverUnavailable
     case selectPhysicalInput
@@ -262,6 +298,8 @@ final class MenuBarModel: ObservableObject {
     private let microphonePermissionProvider:
         any MicrophonePermissionProviding
     private let audioDiagnostics: any AudioDiagnosticsControlling
+    private let audioInputDiagnosticLifecycle:
+        AudioInputDiagnosticLifecycle
     private let audioOutputTestDelay: @Sendable () async throws -> Void
 
     @Published var physicalInputs: [AudioDevice] = []
@@ -359,6 +397,9 @@ final class MenuBarModel: ObservableObject {
         self.settingsStore = settingsStore
         self.microphonePermissionProvider = microphonePermissionProvider
         self.audioDiagnostics = audioDiagnostics
+        self.audioInputDiagnosticLifecycle = AudioInputDiagnosticLifecycle(
+            audioDiagnostics: audioDiagnostics
+        )
         self.audioOutputTestDelay = audioOutputTestDelay
         apply(settingsStore.load())
         localeObserver = NotificationCenter.default.publisher(
@@ -839,14 +880,14 @@ final class MenuBarModel: ObservableObject {
         do {
             try await requireMicrophonePermission()
             guard generation == audioInputDiagnosticGeneration else { return }
-            try await audioDiagnostics.startInput(deviceID: device.id)
-            guard generation == audioInputDiagnosticGeneration else {
-                await audioDiagnostics.stopInput()
-                return
-            }
+            let startOperation =
+                audioInputDiagnosticLifecycle.enqueueStartInput(
+                    deviceID: device.id
+                )
+            try await startOperation.value
+            guard generation == audioInputDiagnosticGeneration else { return }
             isTestingAudioInput = true
             guard await refreshAudioInputDiagnostic(generation: generation) else {
-                await audioDiagnostics.stopInput()
                 return
             }
             audioInputDiagnosticTask = Task { @MainActor [weak self] in
@@ -865,7 +906,10 @@ final class MenuBarModel: ObservableObject {
                 }
             }
         } catch {
-            await audioDiagnostics.stopInput()
+            guard generation == audioInputDiagnosticGeneration else { return }
+            let stopOperation =
+                audioInputDiagnosticLifecycle.enqueueStopInput()
+            await stopOperation.value
             guard generation == audioInputDiagnosticGeneration else { return }
             isTestingAudioInput = false
             audioInputDiagnosticLevel = 0
@@ -875,7 +919,12 @@ final class MenuBarModel: ObservableObject {
     }
 
     func stopAudioInputTest() async {
-        await stopAudioInputTest(resetStatus: true)
+        let stopOperation = invalidateAudioInputTest(resetStatus: true)
+        await stopOperation.value
+    }
+
+    func invalidateAudioInputTest() {
+        _ = invalidateAudioInputTest(resetStatus: true)
     }
 
     func playAudioOutputTest() async {
@@ -1073,16 +1122,19 @@ final class MenuBarModel: ObservableObject {
         return .key(.waitingForAudioFrames)
     }
 
-    private func stopAudioInputTest(resetStatus: Bool) async {
+    @discardableResult
+    private func invalidateAudioInputTest(
+        resetStatus: Bool
+    ) -> Task<Void, Never> {
         audioInputDiagnosticGeneration &+= 1
         audioInputDiagnosticTask?.cancel()
         audioInputDiagnosticTask = nil
-        await audioDiagnostics.stopInput()
         isTestingAudioInput = false
         audioInputDiagnosticLevel = 0
         if resetStatus {
             audioInputDiagnosticValue = .key(.notTested)
         }
+        return audioInputDiagnosticLifecycle.enqueueStopInput()
     }
 
     private func persistDraftKeyIfNeeded() async throws {
