@@ -305,7 +305,8 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var inboundLevel = 0.0
     @Published private(set) var outboundLevel = 0.0
     @Published private(set) var translationStartedAt: Date?
-    @Published private(set) var isWindowVisible = false
+    @Published private(set) var isMenuBarVisible = false
+    @Published private(set) var isFloatingWindowVisible = false
     @Published private(set) var isTestingAudioInput = false
     @Published private(set) var isPlayingAudioOutputTest = false
     @Published private(set) var audioInputDiagnosticLevel = 0.0
@@ -321,6 +322,7 @@ final class MenuBarModel: ObservableObject {
     private var isApplyingSettings = false
     private var lastPersistedPublicSettings: AppSettings?
     private var localeObserver: AnyCancellable?
+    private var publishedAudioLevelVisibility = false
 
     init(
         provider: any AudioDeviceProviding = CoreAudioDeviceProvider(),
@@ -464,6 +466,10 @@ final class MenuBarModel: ObservableObject {
         max(inboundLevel, outboundLevel)
     }
 
+    var hasVisibleAudioLevelSurface: Bool {
+        isMenuBarVisible || isFloatingWindowVisible
+    }
+
     var apiKeyStatusText: String {
         copy.text(hasStoredAPIKey ? .keySaved : .keyNotSaved)
     }
@@ -587,14 +593,17 @@ final class MenuBarModel: ObservableObject {
         )
     }
 
-    func setWindowVisible(_ visible: Bool) async {
-        isWindowVisible = visible
-        await coordinator.setAudioLevelUpdatesEnabled(visible)
+    func setMenuBarVisible(_ visible: Bool) async {
+        isMenuBarVisible = visible
         if !visible {
             await stopAudioInputTest()
-            inboundLevel = 0
-            outboundLevel = 0
         }
+        await synchronizeAudioLevelVisibility()
+    }
+
+    func setFloatingWindowVisible(_ visible: Bool) async {
+        isFloatingWindowVisible = visible
+        await synchronizeAudioLevelVisibility()
     }
 
     func loadConfiguration() async {
@@ -1073,7 +1082,7 @@ final class MenuBarModel: ObservableObject {
                 case .stateChanged(let state):
                     coordinatorState = state
                 case .audioLevels(let levels):
-                    if isWindowVisible {
+                    if hasVisibleAudioLevelSurface {
                         inboundLevel = levels.inbound
                         outboundLevel = levels.outbound
                     }
@@ -1085,6 +1094,18 @@ final class MenuBarModel: ObservableObject {
                     return
                 }
             }
+        }
+    }
+
+    private func synchronizeAudioLevelVisibility() async {
+        let enabled = hasVisibleAudioLevelSurface
+        if enabled != publishedAudioLevelVisibility {
+            publishedAudioLevelVisibility = enabled
+            await coordinator.setAudioLevelUpdatesEnabled(enabled)
+        }
+        if !enabled {
+            inboundLevel = 0
+            outboundLevel = 0
         }
     }
 

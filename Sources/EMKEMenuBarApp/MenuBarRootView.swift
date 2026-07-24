@@ -19,13 +19,13 @@ struct MenuBarRootView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             Task {
-                await model.setWindowVisible(true)
+                await model.setMenuBarVisible(true)
                 await model.loadConfiguration()
                 await model.reloadDevicesAsync()
             }
         }
         .onDisappear {
-            Task { await model.setWindowVisible(false) }
+            Task { await model.setMenuBarVisible(false) }
         }
     }
 }

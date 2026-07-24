@@ -1035,7 +1035,7 @@ func modelConsumesLatestAudioLevelSnapshot() async {
         coordinator: coordinator
     )
     await configureAndStart(model)
-    await model.setWindowVisible(true)
+    await model.setFloatingWindowVisible(true)
 
     let levelsUpdated = Task { @MainActor in
         for await level in model.$outboundLevel.values {
@@ -1053,6 +1053,82 @@ func modelConsumesLatestAudioLevelSnapshot() async {
     #expect(model.outboundLevel == 0.75)
     #expect(model.combinedLevel == 0.75)
     #expect(await coordinator.audioLevelUpdateFlags.last == true)
+}
+
+@Test @MainActor
+func menuSurfaceConsumesLatestAudioLevelSnapshot() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.setMenuBarVisible(true)
+
+    let levelsUpdated = Task { @MainActor in
+        for await level in model.$outboundLevel.values {
+            if level == 0.75 {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.25, outbound: 0.75)
+    ))
+    await levelsUpdated.value
+
+    #expect(model.inboundLevel == 0.25)
+    #expect(model.outboundLevel == 0.75)
+    #expect(model.combinedLevel == 0.75)
+}
+
+@Test @MainActor
+func floatingSurfaceKeepsRealLevelsEnabledAfterMenuCloses() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+
+    #expect(!model.hasVisibleAudioLevelSurface)
+    #expect(await coordinator.audioLevelUpdateFlags.isEmpty)
+
+    await model.setMenuBarVisible(true)
+    #expect(model.hasVisibleAudioLevelSurface)
+    #expect(await coordinator.audioLevelUpdateFlags == [true])
+
+    await model.setFloatingWindowVisible(true)
+    #expect(await coordinator.audioLevelUpdateFlags == [true])
+
+    let levelsUpdated = Task { @MainActor in
+        for await level in model.$outboundLevel.values {
+            if level == 0.75 {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.25, outbound: 0.75)
+    ))
+    await levelsUpdated.value
+
+    await model.setMenuBarVisible(false)
+    #expect(await coordinator.audioLevelUpdateFlags.last == true)
+    #expect(await coordinator.audioLevelUpdateFlags == [true])
+    #expect(model.hasVisibleAudioLevelSurface)
+    #expect(model.inboundLevel == 0.25)
+    #expect(model.outboundLevel == 0.75)
+
+    await model.setFloatingWindowVisible(false)
+    #expect(await coordinator.audioLevelUpdateFlags.last == false)
+    #expect(await coordinator.audioLevelUpdateFlags == [true, false])
+    #expect(!model.hasVisibleAudioLevelSurface)
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+
+    await model.setFloatingWindowVisible(false)
+    #expect(await coordinator.audioLevelUpdateFlags == [true, false])
 }
 
 @Test @MainActor
@@ -1165,7 +1241,8 @@ func hidingWindowClearsLevelsWithoutStoppingTranslation() async {
         coordinator: coordinator
     )
     await configureAndStart(model)
-    await model.setWindowVisible(false)
+    await model.setMenuBarVisible(true)
+    await model.setMenuBarVisible(false)
 
     #expect(model.inboundLevel == 0)
     #expect(model.outboundLevel == 0)
@@ -1181,8 +1258,10 @@ func lateAudioLevelAfterHidingWindowDoesNotRefillLevels() async {
         coordinator: coordinator
     )
     await configureAndStart(model)
-    await model.setWindowVisible(true)
-    await model.setWindowVisible(false)
+    await model.setMenuBarVisible(true)
+    await model.setFloatingWindowVisible(true)
+    await model.setMenuBarVisible(false)
+    await model.setFloatingWindowVisible(false)
 
     let stateUpdated = Task { @MainActor in
         for await state in model.$coordinatorState.values {
@@ -1205,6 +1284,43 @@ func lateAudioLevelAfterHidingWindowDoesNotRefillLevels() async {
 
     #expect(model.inboundLevel == 0)
     #expect(model.outboundLevel == 0)
+}
+
+@Test @MainActor
+func localInputDiagnosticStopsOnlyWhenMenuCloses() async {
+    let diagnostics = AudioDiagnosticsStub(
+        inputSample: AudioInputDiagnosticSample(
+            state: .receivingAudio,
+            level: 0.72,
+            frameCount: 480,
+            rms: 0.11
+        )
+    )
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+    await model.setMenuBarVisible(true)
+    await model.setFloatingWindowVisible(true)
+    await model.startAudioInputTest()
+
+    await model.setFloatingWindowVisible(false)
+
+    #expect(model.isTestingAudioInput)
+    #expect(await diagnostics.stopInputCount == 0)
+
+    await model.setMenuBarVisible(false)
+
+    #expect(!model.isTestingAudioInput)
+    #expect(await diagnostics.stopInputCount == 1)
 }
 
 @Test @MainActor
