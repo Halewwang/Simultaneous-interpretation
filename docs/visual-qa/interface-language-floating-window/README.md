@@ -57,7 +57,7 @@ sips -s format png \
 | `swift test` | Passed | 284 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. |
 | `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 284 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
 | `swift build -c release --product EMKEMenuBarApp -Xswiftc -warnings-as-errors` | Passed | Release product build completed. |
-| `make -C Driver verify` | Passed | Repository Makefile verified arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
+| `make -C Driver clean all verify` | Passed | Fresh repository-equivalent Driver gate: the Makefile cleaned and rebuilt the bundle before verifying arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
 | `git diff --check 514ac2d...HEAD` | Passed | No whitespace errors were reported. |
 | `EMKE_CAPTURE_UI=1 swift test` | Passed | 284 tests passed with the same two opt-in skips and exactly eight required TIFFs were written. |
 
