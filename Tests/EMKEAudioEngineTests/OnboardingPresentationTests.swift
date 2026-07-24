@@ -56,3 +56,15 @@ func microphonePresentationNeverOffersRepeatPromptAfterDenial() {
             == .continueFlow
     )
 }
+
+@Test
+func staleOpenDevicePickerCannotChangeSelectionAfterLock() {
+    var selection: String? = "physical.input.old"
+
+    if OnboardingDeviceSelectionPolicy.canSelect(isLocked: true) {
+        selection = "physical.input.new"
+    }
+
+    #expect(selection == "physical.input.old")
+    #expect(OnboardingDeviceSelectionPolicy.canSelect(isLocked: false))
+}

@@ -2,6 +2,12 @@ import AppKit
 import EMKEAudioEngine
 import SwiftUI
 
+enum OnboardingDeviceSelectionPolicy {
+    static func canSelect(isLocked: Bool) -> Bool {
+        !isLocked
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var model: MenuBarModel
     @ObservedObject var controller: OnboardingWindowController
@@ -620,6 +626,11 @@ private struct OnboardingDevicePicker: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(devices) { device in
                         Button {
+                            guard OnboardingDeviceSelectionPolicy.canSelect(isLocked: isDisabled)
+                            else {
+                                isPresented = false
+                                return
+                            }
                             selection = device.uid
                             isPresented = false
                         } label: {
@@ -635,10 +646,14 @@ private struct OnboardingDevicePicker: View {
                             .padding(.vertical, 7)
                         }
                         .buttonStyle(.plain)
+                        .disabled(isDisabled)
                     }
                 }
                 .padding(4)
                 .frame(width: 280)
+            }
+            .onChange(of: isDisabled) { _, isDisabled in
+                if isDisabled { isPresented = false }
             }
             .accessibilityLabel(title)
             .accessibilityValue(selectedName)

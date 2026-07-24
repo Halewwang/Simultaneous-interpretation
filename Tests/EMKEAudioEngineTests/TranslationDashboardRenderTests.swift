@@ -276,12 +276,28 @@ func onboardingRendersEveryStepInBothLanguages() async throws {
                 "Onboarding \(step) \(language) must not contain renderer fallback controls"
             )
             #expect(
-                onboardingHeaderInkPixels(in: bitmap) > 500,
-                "Onboarding \(step) \(language) must render the complete header"
+                onboardingLogoInkPixels(in: bitmap) > 500,
+                "Onboarding \(step) \(language) must render the logo"
+            )
+            #expect(
+                onboardingProductNameInkPixels(in: bitmap) > 1_000,
+                "Onboarding \(step) \(language) must render the product name"
+            )
+            #expect(
+                onboardingHeaderTitleInkPixels(in: bitmap) > 2_000,
+                "Onboarding \(step) \(language) must render the header title"
             )
             #expect(
                 onboardingFooterInkPixels(in: bitmap) > 250,
                 "Onboarding \(step) \(language) must render footer controls"
+            )
+            #expect(
+                onboardingSkipActionInkPixels(in: bitmap) > 300,
+                "Onboarding \(step) \(language) must render the left footer action"
+            )
+            #expect(
+                onboardingDoNotShowAgainInkPixels(in: bitmap) > 300,
+                "Onboarding \(step) \(language) must render the right footer preference"
             )
             #expect(
                 onboardingProgressInkPixels(in: bitmap) > 20,
@@ -299,6 +315,12 @@ func onboardingRendersEveryStepInBothLanguages() async throws {
                 onboardingOpaqueBoundarySamples(in: bitmap) == 12,
                 "Onboarding \(step) \(language) must render an opaque full frame"
             )
+            if step == .audioSetup {
+                #expect(
+                    onboardingAudioDiagnosticInkPixels(in: bitmap) > 500,
+                    "Onboarding audio \(language) must render right-side diagnostic text"
+                )
+            }
             try writeQACapture(
                 bitmap,
                 named:
@@ -308,26 +330,71 @@ func onboardingRendersEveryStepInBothLanguages() async throws {
     }
 }
 
-private func onboardingHeaderInkPixels(
+@Test @MainActor
+func onboardingSemanticEvidenceRejectsMalformedTIFF() throws {
+    let source = try #require(
+        NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 1_120,
+            pixelsHigh: 1_240,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )
+    )
+    let context = try #require(NSGraphicsContext(bitmapImageRep: source))
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 1_120, height: 1_240).fill()
+    NSColor.black.setFill()
+    NSRect(x: 300, y: 300, width: 100, height: 100).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    let malformedTIFF = try #require(source.tiffRepresentation)
+    let bitmap = try #require(NSBitmapImageRep(data: malformedTIFF))
+
+    #expect(onboardingContentInkPixels(in: bitmap) > 1_250)
+    #expect(onboardingLogoInkPixels(in: bitmap) == 0)
+    #expect(onboardingProductNameInkPixels(in: bitmap) == 0)
+    #expect(onboardingDoNotShowAgainInkPixels(in: bitmap) == 0)
+}
+
+private func onboardingLogoInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
-    var count = 0
-    for y in stride(from: 75, to: 120, by: 1) {
-        for x in stride(from: 140, to: 520, by: 1) {
-            guard let color = bitmap.colorAt(x: x, y: y)?
-                .usingColorSpace(.deviceRGB)
-            else {
-                continue
-            }
-            let luminance = (0.2126 * color.redComponent)
-                + (0.7152 * color.greenComponent)
-                + (0.0722 * color.blueComponent)
-            if luminance < 0.25 {
-                count += 1
-            }
-        }
-    }
-    return count
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 50..<140,
+        yRange: 30..<120,
+        luminanceRange: 0..<0.25
+    )
+}
+
+private func onboardingProductNameInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 140..<400,
+        yRange: 25..<70,
+        luminanceRange: 0.35..<0.8
+    )
+}
+
+private func onboardingHeaderTitleInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 140..<700,
+        yRange: 70..<120,
+        luminanceRange: 0..<0.25
+    )
 }
 
 private func onboardingFooterInkPixels(
@@ -338,6 +405,39 @@ private func onboardingFooterInkPixels(
         xRange: 40..<1_080,
         yRange: 1_095..<1_215,
         strideBy: 2
+    )
+}
+
+private func onboardingSkipActionInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 35..<190,
+        yRange: 1_095..<1_145,
+        luminanceRange: 0.3..<0.85
+    )
+}
+
+private func onboardingDoNotShowAgainInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 900..<1_085,
+        yRange: 1_095..<1_145,
+        luminanceRange: 0.3..<0.85
+    )
+}
+
+private func onboardingAudioDiagnosticInkPixels(
+    in bitmap: NSBitmapImageRep
+) -> Int {
+    luminancePixelCount(
+        in: bitmap,
+        xRange: 900..<1_080,
+        yRange: 750..<890,
+        luminanceRange: 0.3..<0.85
     )
 }
 
@@ -446,6 +546,29 @@ private func darkPixelCount(
                 + (0.7152 * color.greenComponent)
                 + (0.0722 * color.blueComponent)
             count += luminance < 0.75 ? 1 : 0
+        }
+    }
+    return count
+}
+
+private func luminancePixelCount(
+    in bitmap: NSBitmapImageRep,
+    xRange: Range<Int>,
+    yRange: Range<Int>,
+    luminanceRange: Range<Double>
+) -> Int {
+    var count = 0
+    for y in yRange {
+        for x in xRange {
+            guard let color = bitmap.colorAt(x: x, y: y)?
+                .usingColorSpace(.deviceRGB)
+            else {
+                continue
+            }
+            let luminance = (0.2126 * color.redComponent)
+                + (0.7152 * color.greenComponent)
+                + (0.0722 * color.blueComponent)
+            count += luminanceRange.contains(luminance) ? 1 : 0
         }
     }
     return count
@@ -893,18 +1016,34 @@ private func onboardingBitmap(
     }
     await Task.yield()
 
-    let content = OnboardingView(
-        model: model,
-        controller: controller,
-        refreshesStateOnStepChange: false
+    let content = OnboardingCaptureRoot(
+        content: OnboardingView(
+            model: model,
+            controller: controller,
+            refreshesStateOnStepChange: false
+        )
     )
-        .frame(width: 560, height: 620)
         .environment(\.colorScheme, .light)
     let renderer = ImageRenderer(content: content)
     renderer.scale = 2
     renderer.proposedSize = ProposedViewSize(width: 560, height: 620)
     let data = try #require(renderer.nsImage?.tiffRepresentation)
     return try #require(NSBitmapImageRep(data: data))
+}
+
+private struct OnboardingCaptureRoot<Content: View>: View {
+    let content: Content
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color(nsColor: .windowBackgroundColor)
+                .frame(width: 560, height: 620)
+            content
+                .frame(width: 560, height: 620, alignment: .topLeading)
+        }
+        .frame(width: 560, height: 620, alignment: .topLeading)
+        .fixedSize(horizontal: true, vertical: true)
+    }
 }
 
 @Test @MainActor

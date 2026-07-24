@@ -313,6 +313,20 @@ func onboardingLocksProviderControlsWithRunningSelections() throws {
 }
 
 @Test
+func onboardingDevicePopoverRechecksLockAndDismissesWhenLockActivates() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(
+        source.contains(
+            "guard OnboardingDeviceSelectionPolicy.canSelect(isLocked: isDisabled)"
+        )
+    )
+    #expect(source.contains(".disabled(isDisabled)"))
+    #expect(source.contains(".onChange(of: isDisabled)"))
+    #expect(source.contains("if isDisabled { isPresented = false }"))
+}
+
+@Test
 func onboardingUsesExplicitMeetingEndpointLabelsAndProgressValue() throws {
     let source = try sourceFile(named: "OnboardingView.swift")
 
@@ -339,6 +353,8 @@ func onboardingCaptureUsesOneDeterministicRendererPerFixture() throws {
     #expect(!source.contains("secondBitmap"))
     #expect(!source.contains("var candidates: [NSBitmapImageRep]"))
     #expect(source.contains("renderer.proposedSize = ProposedViewSize("))
+    #expect(source.contains("OnboardingCaptureRoot("))
+    #expect(source.contains(".fixedSize(horizontal: true, vertical: true)"))
 }
 
 @Test
