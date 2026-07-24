@@ -28,6 +28,39 @@ func reduceMotionDoesNotAttachAnExplicitAnimation() throws {
 }
 
 @Test
+func floatingCapsuleUsesAccessibleRealSessionContent() throws {
+    let source = try sourceFile(named: "FloatingTranslationStatusView.swift")
+
+    #expect(source.contains("level: presentation.level"))
+    #expect(source.contains("maximumHeight: 24"))
+    #expect(source.contains("compact: true"))
+    #expect(source.contains(".environment(\\.colorScheme, .dark)"))
+    #expect(source.contains(".accessibilityHidden(true)"))
+    #expect(source.contains(".accessibilityElement(children: .combine)"))
+    #expect(
+        source.contains(
+            ".accessibilityLabel(presentation.stopAccessibilityLabel)"
+        )
+    )
+    #expect(source.contains(".disabled(!presentation.stopEnabled)"))
+}
+
+@Test
+func floatingCapsulePulseRespectsToneAndReduceMotion() throws {
+    let source = try sourceFile(named: "FloatingTranslationStatusView.swift")
+
+    #expect(
+        source.contains(
+            "presentation.tone == .neutral && !reduceMotion"
+        )
+    )
+    #expect(source.contains(".easeOut(duration: 1)"))
+    #expect(source.contains(".repeatForever(autoreverses: false)"))
+    #expect(source.contains(".onDisappear"))
+    #expect(source.contains("isPulsing = false"))
+}
+
+@Test
 func dashboardIconsAndStatusExposeAccessibleCopy() throws {
     let dashboard = try sourceFile(named: "TranslationDashboardView.swift")
     let channel = try sourceFile(named: "TranslationChannelRow.swift")

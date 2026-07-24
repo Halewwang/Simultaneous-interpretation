@@ -69,6 +69,15 @@ enum EMKEDashboardMetrics {
     static let privacyTopPadding: CGFloat = 12
 }
 
+enum EMKEFloatingMetrics {
+    static let width: CGFloat = 264
+    static let height: CGFloat = 52
+    static let cornerRadius: CGFloat = 26
+    static let statusWidth: CGFloat = 72
+    static let waveformWidth: CGFloat = 99
+    static let stopTarget: CGFloat = 32
+}
+
 enum EMKEChannelMetrics {
     static let iconSize: CGFloat = 35
     static let iconWidth: CGFloat = 48
