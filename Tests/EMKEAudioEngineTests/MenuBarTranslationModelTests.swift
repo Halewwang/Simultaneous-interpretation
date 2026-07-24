@@ -360,7 +360,7 @@ private actor ReloadFailingTranslationSecretStoreStub: SecretStore {
 }
 
 private actor MicrophonePermissionStub: MicrophonePermissionProviding {
-    let state: MicrophonePermissionState
+    private var state: MicrophonePermissionState
     let requestResult: Bool
     private(set) var requestCount = 0
 
@@ -378,6 +378,7 @@ private actor MicrophonePermissionStub: MicrophonePermissionProviding {
 
     func requestAccess() async -> Bool {
         requestCount += 1
+        state = requestResult ? .authorized : .denied
         return requestResult
     }
 }
@@ -464,7 +465,9 @@ private func makeTranslationMenuModel(
     secret: String? = nil,
     coordinator: TranslationCoordinatorStub = TranslationCoordinatorStub(),
     settings: TranslationSettingsStoreStub = TranslationSettingsStoreStub(),
-    provider: TranslationMenuDeviceProvider = TranslationMenuDeviceProvider()
+    provider: TranslationMenuDeviceProvider = TranslationMenuDeviceProvider(),
+    microphonePermissionProvider: MicrophonePermissionStub =
+        MicrophonePermissionStub(state: .authorized)
 ) -> MenuBarModel {
     MenuBarModel(
         provider: provider,
@@ -474,9 +477,7 @@ private func makeTranslationMenuModel(
         ),
         secretStore: TranslationSecretStoreStub(value: secret),
         settingsStore: settings,
-        microphonePermissionProvider: MicrophonePermissionStub(
-            state: .authorized
-        )
+        microphonePermissionProvider: microphonePermissionProvider
     )
 }
 
@@ -881,6 +882,36 @@ func interfaceLanguageChangeDoesNotRestartOrStopTranslation() async {
 }
 
 @Test @MainActor
+func onboardingRefreshesMicrophoneStateWithoutRequestingPermission() async {
+    let permission = MicrophonePermissionStub(state: .notDetermined)
+    let model = makeTranslationMenuModel(
+        microphonePermissionProvider: permission
+    )
+
+    await model.refreshMicrophonePermissionState()
+
+    #expect(model.microphonePermissionState == .notDetermined)
+    #expect(await permission.requestCount == 0)
+}
+
+@Test @MainActor
+func onboardingPermissionActionRequestsOnceAndPublishesResult() async {
+    let permission = MicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true
+    )
+    let model = makeTranslationMenuModel(
+        microphonePermissionProvider: permission
+    )
+
+    await model.requestMicrophonePermissionForOnboarding()
+    await model.requestMicrophonePermissionForOnboarding()
+
+    #expect(model.microphonePermissionState == .authorized)
+    #expect(await permission.requestCount == 1)
+}
+
+@Test @MainActor
 func startRequestsUndeterminedMicrophonePermissionBeforeAudio() async {
     let permission = MicrophonePermissionStub(
         state: .notDetermined,
@@ -904,6 +935,7 @@ func startRequestsUndeterminedMicrophonePermissionBeforeAudio() async {
     await model.start()
 
     #expect(await permission.requestCount == 1)
+    #expect(model.microphonePermissionState == .authorized)
     #expect(await coordinator.configurations.count == 1)
 }
 
@@ -927,6 +959,7 @@ func startStopsBeforeAudioWhenMicrophonePermissionIsDenied() async {
     await model.start()
 
     #expect(await coordinator.configurations.isEmpty)
+    #expect(model.microphonePermissionState == .denied)
     #expect(model.configurationError?.contains("麦克风权限未开启") == true)
 }
 

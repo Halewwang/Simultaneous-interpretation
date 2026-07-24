@@ -311,6 +311,8 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var isFloatingWindowVisible = false
     @Published private(set) var isTestingAudioInput = false
     @Published private(set) var isPlayingAudioOutputTest = false
+    @Published private(set) var microphonePermissionState:
+        MicrophonePermissionState = .notDetermined
     @Published private(set) var audioInputDiagnosticLevel = 0.0
     @Published private var audioInputDiagnosticValue: AppMessage = .key(.notTested)
     @Published private var audioOutputDiagnosticValue: AppMessage = .key(.notTested)
@@ -367,6 +369,18 @@ final class MenuBarModel: ObservableObject {
         if !deferInitialDeviceReload {
             reloadDevices()
         }
+    }
+
+    func refreshMicrophonePermissionState() async {
+        microphonePermissionState =
+            await microphonePermissionProvider.authorizationStatus()
+    }
+
+    func requestMicrophonePermissionForOnboarding() async {
+        await refreshMicrophonePermissionState()
+        guard microphonePermissionState == .notDetermined else { return }
+        let granted = await microphonePermissionProvider.requestAccess()
+        microphonePermissionState = granted ? .authorized : .denied
     }
 
     var resolvedInterfaceLanguage: ResolvedInterfaceLanguage {
@@ -951,11 +965,14 @@ final class MenuBarModel: ObservableObject {
     }
 
     private func requireMicrophonePermission() async throws {
-        switch await microphonePermissionProvider.authorizationStatus() {
+        await refreshMicrophonePermissionState()
+        switch microphonePermissionState {
         case .authorized:
             return
         case .notDetermined:
-            guard await microphonePermissionProvider.requestAccess() else {
+            let granted = await microphonePermissionProvider.requestAccess()
+            microphonePermissionState = granted ? .authorized : .denied
+            guard granted else {
                 throw MenuBarConfigurationError.microphoneAccessDenied
             }
         case .denied:
