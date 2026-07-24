@@ -32,7 +32,7 @@ func floatingVisibleStatusesFitApprovedColumn() {
 }
 
 @Test @MainActor
-private func floatingCapsuleRendersAtRetinaDimensions() throws {
+func floatingCapsuleRendersAtRetinaDimensions() throws {
     for scenario in FloatingCapsuleRenderCase.allCases {
         let renderer = ImageRenderer(
             content: FloatingTranslationStatusView(
@@ -164,16 +164,8 @@ private func writeFloatingQACapture(
     _ data: Data,
     named filename: String
 ) throws {
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
+    guard CaptureArtifacts.isEnabled else {
         return
     }
-    let directory = URL(
-        fileURLWithPath: "/tmp/emke-interface-floating-qa",
-        isDirectory: true
-    )
-    try FileManager.default.createDirectory(
-        at: directory,
-        withIntermediateDirectories: true
-    )
-    try data.write(to: directory.appendingPathComponent(filename))
+    try CaptureArtifacts.shared.write(data, named: filename)
 }

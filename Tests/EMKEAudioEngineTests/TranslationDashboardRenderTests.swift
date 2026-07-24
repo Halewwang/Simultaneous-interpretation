@@ -8,6 +8,106 @@ import SwiftUI
 import Testing
 @testable import EMKEMenuBarApp
 
+final class CaptureArtifacts: @unchecked Sendable {
+    static let requiredFilenames: Set<String> = [
+        "dashboard-ready-zh.tiff",
+        "dashboard-ready-en.tiff",
+        "settings-zh.tiff",
+        "settings-en.tiff",
+        "floating-connecting.tiff",
+        "floating-running.tiff",
+        "floating-degraded.tiff",
+        "floating-stopping.tiff",
+    ]
+    static let shared = CaptureArtifacts(
+        directory: URL(
+            fileURLWithPath: "/tmp/emke-interface-floating-qa",
+            isDirectory: true
+        )
+    )
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1"
+    }
+
+    private let directory: URL
+    private let lock = NSLock()
+    private var isPrepared = false
+
+    init(directory: URL) {
+        self.directory = directory
+    }
+
+    func prepare() throws {
+        try lock.withLock {
+            try prepareWhileLocked()
+        }
+    }
+
+    func write(_ data: Data, named filename: String) throws {
+        try lock.withLock {
+            guard Self.requiredFilenames.contains(filename) else {
+                throw CocoaError(.fileWriteInvalidFileName)
+            }
+            try prepareWhileLocked()
+            try data.write(
+                to: directory.appendingPathComponent(filename),
+                options: .atomic
+            )
+        }
+    }
+
+    func finish() throws -> Set<String> {
+        try lock.withLock {
+            try prepareWhileLocked()
+            return Set(
+                try FileManager.default.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: nil,
+                    options: []
+                )
+                .map(\.lastPathComponent)
+            )
+        }
+    }
+
+    private func prepareWhileLocked() throws {
+        guard !isPrepared else {
+            return
+        }
+
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        isPrepared = true
+    }
+}
+
+@Test
+func captureArtifactsPrepareRemovesStaleFiles() throws {
+    let fileManager = FileManager.default
+    let directory = fileManager.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? fileManager.removeItem(at: directory) }
+
+    try fileManager.createDirectory(
+        at: directory,
+        withIntermediateDirectories: true
+    )
+    let staleArtifact = directory.appendingPathComponent("stale.tiff")
+    try Data("stale".utf8).write(to: staleArtifact)
+
+    let artifacts = CaptureArtifacts(directory: directory)
+    try artifacts.prepare()
+
+    #expect(!fileManager.fileExists(atPath: staleArtifact.path))
+}
+
 @Test @MainActor
 func captureRunningDashboardForVisualReview() throws {
     let copy = AppCopy(language: .zhHans)
@@ -104,63 +204,168 @@ func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
         (AppInterfaceLanguage.zhHans, "settings-zh.tiff"),
         (AppInterfaceLanguage.english, "settings-en.tiff"),
     ] {
-        let bitmap = try settingsBitmap(language: language)
+        let render = try settingsRender(language: language)
+        let bitmap = render.bitmap
+        let quitControl = quitControlEvidence(in: bitmap)
 
         #expect(bitmap.pixelsWide == 840)
         #expect(bitmap.pixelsHigh == 1240)
         #expect(
-            visibleSettingsPixelCount(bitmap) > 100,
-            "Settings content below the header must be visible for \(language)"
+            render.scrollGeometry.expectedBottomOffset > 0,
+            "Settings must have enough content to require bottom scrolling"
         )
         #expect(
-            visibleQuitControlPixelCount(bitmap) > 20,
-            "The bottom-centered quit control must be visible for \(language)"
+            render.scrollGeometry.reachedBottom,
+            "The real settings scroll view must reach its bottom for \(language)"
+        )
+        #expect(
+            quitControl.isVisible,
+            """
+            The quit control must have a light local background, its expected \
+            border, and locally contrasting glyph/text for \(language); \
+            background=\(quitControl.background), \
+            border=\(quitControl.borderPixels), \
+            foreground=\(quitControl.foregroundPixels)
+            """
         )
 
         try writeQACapture(bitmap, named: filename)
     }
 }
 
-private func visibleSettingsPixelCount(
-    _ bitmap: NSBitmapImageRep
-) -> Int {
-    var count = 0
-    for y in stride(from: 80, to: 1_000, by: 4) {
-        for x in stride(from: 40, to: 800, by: 4) {
-            guard let color = bitmap.colorAt(x: x, y: y) else { continue }
-            if color.redComponent < 0.92
-                || color.greenComponent < 0.92
-                || color.blueComponent < 0.92
-            {
-                count += 1
-            }
-        }
+@Test @MainActor
+func captureArtifactDirectoryMatchesExactExpectedSet() throws {
+    guard CaptureArtifacts.isEnabled else {
+        return
     }
-    return count
+
+    try captureReadyDashboardForVisualReview()
+    try englishReadyDashboardKeepsApprovedRenderDimensions()
+    try settingsRenderInBothInterfaceLanguagesAtApprovedDimensions()
+    try floatingCapsuleRendersAtRetinaDimensions()
+
+    let actualFilenames = try CaptureArtifacts.shared.finish()
+    #expect(actualFilenames == CaptureArtifacts.requiredFilenames)
 }
 
-private func visibleQuitControlPixelCount(
-    _ bitmap: NSBitmapImageRep
-) -> Int {
-    var count = 0
-    for y in stride(from: 40, to: 180, by: 2) {
-        for x in stride(from: 240, to: 600, by: 2) {
-            guard let color = bitmap.colorAt(x: x, y: y) else { continue }
-            if color.redComponent < 0.72
-                || color.greenComponent < 0.72
-                || color.blueComponent < 0.72
-            {
-                count += 1
-            }
+private struct QuitControlEvidence {
+    let background: CGFloat
+    let borderPixels: Int
+    let foregroundPixels: Int
+
+    var isVisible: Bool {
+        background > 0.9 && borderPixels > 300 && foregroundPixels > 300
+    }
+}
+
+private func quitControlEvidence(
+    in bitmap: NSBitmapImageRep
+) -> QuitControlEvidence {
+    func luminance(x: Int, y: Int) -> CGFloat? {
+        guard let color = bitmap.colorAt(x: x, y: y)?
+            .usingColorSpace(.deviceRGB)
+        else {
+            return nil
+        }
+        return 0.2126 * color.redComponent
+            + 0.7152 * color.greenComponent
+            + 0.0722 * color.blueComponent
+    }
+
+    var backgroundTotal: CGFloat = 0
+    var backgroundCount = 0
+    for y in 150..<158 {
+        for x in 100..<740 {
+            guard let value = luminance(x: x, y: y) else { continue }
+            backgroundTotal += value
+            backgroundCount += 1
         }
     }
-    return count
+    let background = backgroundCount == 0
+        ? 0
+        : backgroundTotal / CGFloat(backgroundCount)
+
+    func contrastingPixels(
+        xRange: Range<Int>,
+        yRange: Range<Int>,
+        difference: CGFloat
+    ) -> Int {
+        var count = 0
+        for y in yRange {
+            for x in xRange {
+                guard let value = luminance(x: x, y: y) else { continue }
+                count += background - value >= difference ? 1 : 0
+            }
+        }
+        return count
+    }
+
+    return QuitControlEvidence(
+        background: background,
+        borderPixels: contrastingPixels(
+            xRange: 54..<786,
+            yRange: 140..<146,
+            difference: 0.05
+        ),
+        foregroundPixels: contrastingPixels(
+            xRange: 60..<330,
+            yRange: 44..<82,
+            difference: 0.25
+        )
+    )
+}
+
+@Test
+func quitControlEvidenceRejectsUniformDarkBackground() throws {
+    for color in [NSColor.black, NSColor.white] {
+        let bitmap = try solidBitmap(color: color)
+        #expect(!quitControlEvidence(in: bitmap).isVisible)
+    }
+}
+
+@Test
+func settingsScrollGeometryRejectsAnUnscrolledDocument() {
+    let geometry = SettingsScrollGeometry(
+        documentHeight: 1_800,
+        viewportHeight: 1_000,
+        expectedBottomOffset: 800,
+        actualBottomOffset: 0
+    )
+
+    #expect(!geometry.reachedBottom)
+}
+
+private func solidBitmap(color: NSColor) throws -> NSBitmapImageRep {
+    let bitmap = try #require(
+        NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 840,
+            pixelsHigh: 1240,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bitmapFormat: [],
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )
+    )
+    NSGraphicsContext.saveGraphicsState()
+    let context = try #require(NSGraphicsContext(bitmapImageRep: bitmap))
+    NSGraphicsContext.current = context
+    color.setFill()
+    NSRect(x: 0, y: 0, width: 840, height: 1240).fill()
+    context.flushGraphics()
+    NSGraphicsContext.restoreGraphicsState()
+
+    return bitmap
 }
 
 @MainActor
-private func settingsBitmap(
+private func settingsRender(
     language: AppInterfaceLanguage
-) throws -> NSBitmapImageRep {
+) throws -> SettingsRender {
     var settings = AppSettings.default
     settings.interfaceLanguage = language
     let model = MenuBarModel(
@@ -176,7 +381,10 @@ private func settingsBitmap(
             height: EMKEVisualStyle.panelHeight
         )
         .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.colorScheme, .light)
     let hostingView = NSHostingView(rootView: content)
+    let aquaAppearance = try #require(NSAppearance(named: .aqua))
+    hostingView.appearance = aquaAppearance
     let bounds = NSRect(
         x: 0,
         y: 0,
@@ -190,6 +398,7 @@ private func settingsBitmap(
         backing: .buffered,
         defer: false
     )
+    window.appearance = aquaAppearance
     window.contentView = hostingView
     window.contentView?.layoutSubtreeIfNeeded()
     let scrollView = try #require(firstScrollView(in: hostingView))
@@ -200,6 +409,7 @@ private func settingsBitmap(
     scrollView.contentView.scroll(to: NSPoint(x: 0, y: bottomY))
     scrollView.reflectScrolledClipView(scrollView.contentView)
     hostingView.layoutSubtreeIfNeeded()
+    let actualBottomOffset = scrollView.contentView.bounds.origin.y
     let bitmap = try #require(
         NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -221,7 +431,32 @@ private func settingsBitmap(
     )
     bitmap.size = bounds.size
     hostingView.cacheDisplay(in: bounds, to: bitmap)
-    return bitmap
+    return SettingsRender(
+        bitmap: bitmap,
+        scrollGeometry: SettingsScrollGeometry(
+            documentHeight: documentView.bounds.height,
+            viewportHeight: scrollView.contentView.bounds.height,
+            expectedBottomOffset: bottomY,
+            actualBottomOffset: actualBottomOffset
+        )
+    )
+}
+
+private struct SettingsRender {
+    let bitmap: NSBitmapImageRep
+    let scrollGeometry: SettingsScrollGeometry
+}
+
+private struct SettingsScrollGeometry {
+    let documentHeight: CGFloat
+    let viewportHeight: CGFloat
+    let expectedBottomOffset: CGFloat
+    let actualBottomOffset: CGFloat
+
+    var reachedBottom: Bool {
+        documentHeight > viewportHeight
+            && abs(actualBottomOffset - expectedBottomOffset) < 0.5
+    }
 }
 
 @MainActor
@@ -282,19 +517,11 @@ private func writeQACapture(
     _ bitmap: NSBitmapImageRep,
     named filename: String
 ) throws {
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
+    guard CaptureArtifacts.isEnabled else {
         return
     }
-    let directory = URL(
-        fileURLWithPath: "/tmp/emke-interface-floating-qa",
-        isDirectory: true
-    )
-    try FileManager.default.createDirectory(
-        at: directory,
-        withIntermediateDirectories: true
-    )
     let data = try #require(bitmap.tiffRepresentation)
-    try data.write(to: directory.appendingPathComponent(filename))
+    try CaptureArtifacts.shared.write(data, named: filename)
 }
 
 @Test @MainActor

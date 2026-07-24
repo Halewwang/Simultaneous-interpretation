@@ -10,7 +10,7 @@ images use pure presentations. Settings images use an in-memory
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Automated regression and build gates | Passed | 284 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
+| Automated regression and build gates | Passed | 288 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
 | Deterministic static visual inspection | Passed | All eight TIFFs were inspected at original pixel size after temporary PNG conversion. |
 | Real macOS runtime acceptance | Not verified | Computer Use reported that the Mac was locked. The already-running `/Applications` build was not touched, and opening the current app menu was also avoided because it automatically reads the shared Keychain service. |
 
@@ -23,8 +23,11 @@ EMKE_CAPTURE_UI=1 swift test
 ```
 
 The command creates `/tmp/emke-interface-floating-qa` only when
-`EMKE_CAPTURE_UI=1` is present. A normal `swift test` does not write captures.
-The directory contains exactly these files:
+`EMKE_CAPTURE_UI=1` is present. On the first capture write in each test
+process, one shared locked capture session removes and recreates only that
+dedicated directory; later writes use the same session and atomic replacement.
+A normal `swift test` does not write captures. The capture test also compares
+the final directory entries with the exact expected filename set below:
 
 | File | Pixel size |
 | --- | --- |
@@ -39,8 +42,12 @@ The directory contains exactly these files:
 
 The settings renderer hosts the real `TranslationSettingsView`, finds its
 actual `NSScrollView`, scrolls it to the bottom, and only then caches the
-display. This makes the real full-width quit control reproducible without a
-composite image or production-code change.
+display. The host view and window use deterministic Aqua/light appearance.
+Tests require the real scroll geometry to reach its bottom and verify the quit
+control with narrow border and glyph/text regions relative to their local
+background. Uniform dark and light backgrounds are rejected. This makes the
+real full-width quit control reproducible without a composite image or
+production-code change.
 
 For 1:1 inspection, convert a TIFF to a temporary PNG without resizing:
 
@@ -54,12 +61,12 @@ sips -s format png \
 
 | Command | Status | Evidence |
 | --- | --- | --- |
-| `swift test` | Passed | 284 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. |
-| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 284 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
+| `swift test` | Passed | 288 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
+| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 288 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
 | `swift build -c release --product EMKEMenuBarApp -Xswiftc -warnings-as-errors` | Passed | Release product build completed. |
 | `make -C Driver clean all verify` | Passed | Fresh repository-equivalent Driver gate: the Makefile cleaned and rebuilt the bundle before verifying arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
 | `git diff --check 514ac2d...HEAD` | Passed | No whitespace errors were reported. |
-| `EMKE_CAPTURE_UI=1 swift test` | Passed | 284 tests passed with the same two opt-in skips and exactly eight required TIFFs were written. |
+| `EMKE_CAPTURE_UI=1 swift test` | Passed | 288 tests passed with the same two opt-in skips; an injected stale sentinel was removed, and the in-test exact-set assertion accepted only the eight required TIFFs. |
 
 ## Static visual inspection
 
