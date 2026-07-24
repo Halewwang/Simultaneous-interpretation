@@ -487,7 +487,7 @@ struct AppCopy: Equatable, Sendable {
         case .zhHans:
             "其他语言 → \(languageName(target))"
         case .english:
-            "Other languages → \(languageName(target))"
+            "Other → \(languageName(target))"
         }
     }
 

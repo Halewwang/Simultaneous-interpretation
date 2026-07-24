@@ -250,7 +250,7 @@ func dashboardPresentationRendersCompleteEnglishCopy() {
     #expect(value.primaryActionTitle == "Stop translation")
     #expect(value.inputLanguageName == "Chinese")
     #expect(value.outputLanguageName == "German")
-    #expect(value.inboundDirection == "Other languages → Chinese")
+    #expect(value.inboundDirection == "Other → Chinese")
     #expect(value.outboundDirection == "Chinese → German")
     #expect(value.privacyText == "Audio connects directly to your provider")
 }

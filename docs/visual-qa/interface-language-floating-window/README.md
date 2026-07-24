@@ -73,7 +73,7 @@ sips -s format png \
 | Check | Status | Evidence |
 | --- | --- | --- |
 | Chinese dashboard keeps the pre-84 production geometry | Passed | `dashboard-ready-zh.tiff` preserves the header, waveform/status, language hierarchy, two compact channel rows, primary action, and privacy footer. Its separator rows are exactly `[436, 597, 782, 1143]`, matching a direct `ca2c2b2` pre-84 production-renderer capture. Every Chinese dashboard fixture remains outside the English equal-slot policy. |
-| English dashboard channel rows are aligned | Passed | `dashboard-ready-en.tiff` shows complete copy in two equal-height channel slots. Each expanded row is vertically centered, and each compact waveform is centered on the full 374 pt dashboard content width instead of the post-icon column. |
+| English dashboard channel rows are aligned | Passed | `dashboard-ready-en.tiff` shows `Other → Chinese` and the remaining complete copy in two equal-height channel slots. Each expanded row is vertically centered, and each compact waveform is centered on the full 374 pt dashboard content width instead of the post-icon column. |
 | English stress copy has no overflow | Passed | Seven deterministic English ready/running/bypass/reconnecting/failure fixtures render real 840 x 1240 px bitmaps. Separator-derived row bounds contain the scanned visible ink, trailing actions remain right-aligned, and independent AppKit measurements for title, direction, status, status symbol, and action fit within two lines and the actual slot height. |
 | Settings language selector contract is localized | Passed | Automated tests verify the real interface-language menu, all three stable preferences, and non-empty Chinese/English copy; the two dashboard captures verify both resolved interface languages. |
 | Chinese settings quit control is clear | Passed | Bottom-scrolled `settings-zh.tiff` shows the real full-width bordered/background control, power icon, and complete `退出 EMKE` label. |
@@ -106,7 +106,7 @@ Static render evidence is not used to mark any runtime item as Passed.
 | --- | --- | --- |
 | Endpoint, realtime transport, Keychain/security, routing, conversion, and driver source remain unchanged | Passed | `git diff --name-only 514ac2d...HEAD` contains no files under `EMKECore`, `EMKESecurity`, `EMKERealtime`, `EMKERouting`, `EMKEAudioEngine`, `EMKEAudioHAL`, `EMKEAudioBridge`, or `Driver`. |
 | Public settings change is limited to interface-language persistence | Passed | `AppSettingsStore.swift` only adds the `emke.interfaceLanguage` UserDefaults value and does not change API-key storage or Keychain code. |
-| English alignment follow-up is tightly scoped | Passed | The follow-up changes only shared dashboard/channel layout geometry, the focused render tests, this README, and the root `design-qa.md`; font sizes, copy, icons, panel dimensions, provider configuration, Keychain, audio routing, and driver code remain unchanged. |
+| English alignment and copy follow-ups are tightly scoped | Passed | The layout follow-up changes shared dashboard/channel geometry and focused render evidence. The later copy follow-up changes only the English `inboundDirection` value from `Other languages → {target}` to `Other → {target}`, exact-copy expectations, refreshed Pass 8 evidence, this README, and the root `design-qa.md`; action widths, font sizes, icons, panel dimensions, provider configuration, Keychain, audio routing, and driver code remain unchanged. |
 | Unrelated `internal-pkg-installer` worktree remains untouched | Passed | Its pre-existing dirty files were observed read-only and were not modified by this task. |
 
 ## Pass 8 tracked evidence
@@ -114,6 +114,7 @@ Static render evidence is not used to mark any runtime item as Passed.
 | Evidence | Path |
 | --- | --- |
 | User-reported defect | `docs/visual-qa/interface-language-floating-window/pass-8/source-defect.jpg` |
+| User copy follow-up | `docs/visual-qa/interface-language-floating-window/pass-8/source-copy-followup.jpg` |
 | English before / after | `docs/visual-qa/interface-language-floating-window/pass-8/before-en.png` / `docs/visual-qa/interface-language-floating-window/pass-8/after-en.png` |
 | English 1:1 comparison | `docs/visual-qa/interface-language-floating-window/pass-8/comparison-en.png` |
 | Chinese pre-84 production baseline / current | `docs/visual-qa/interface-language-floating-window/pass-8/baseline-zh-pre84.png` / `docs/visual-qa/interface-language-floating-window/pass-8/after-zh.png` |

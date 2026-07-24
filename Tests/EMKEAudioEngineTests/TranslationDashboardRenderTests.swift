@@ -558,7 +558,7 @@ func englishChannelCopyChoosesExpandedLayoutWhenCompactColumnsCannotFit() {
         copy: copy
     )
 
-    #expect(ready.inboundDirection == "Other languages → Chinese")
+    #expect(ready.inboundDirection == "Other → Chinese")
     #expect(ready.outboundDirection == "Chinese → German")
     #expect(running.inbound.actionTitle == "Play original")
     #expect(running.outbound.actionTitle == "Send original")

@@ -77,7 +77,7 @@ func dynamicCopyUsesLocalizedLanguageNamesAndDirections() {
     #expect(chineseCopy.translating(elapsed: "00:42") == "翻译中 · 00:42")
     #expect(englishCopy.translating(elapsed: "00:42") == "Translating · 00:42")
     #expect(chineseCopy.inboundDirection(to: .chinese) == "其他语言 → 中文")
-    #expect(englishCopy.inboundDirection(to: .german) == "Other languages → German")
+    #expect(englishCopy.inboundDirection(to: .german) == "Other → German")
     #expect(chineseCopy.outboundDirection(from: .chinese, to: .german) == "中文 → 德语")
     #expect(englishCopy.outboundDirection(from: .english, to: .chinese) == "English → Chinese")
 }
