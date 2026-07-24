@@ -9,14 +9,20 @@ private actor FakeSocket: TranslationSocket {
     private(set) var receivedCount = 0
     private var incoming: [Data]
     private var receiveWaiters: [CheckedContinuation<Data, any Error>] = []
+    private let acknowledgesClose: Bool
 
-    init(incoming: [Data] = []) {
+    init(
+        incoming: [Data] = [],
+        acknowledgesClose: Bool = true
+    ) {
         self.incoming = incoming
+        self.acknowledgesClose = acknowledgesClose
     }
 
     func send(_ data: Data) async throws {
         sent.append(data)
-        if String(decoding: data, as: UTF8.self).contains("session.close") {
+        if acknowledgesClose,
+           String(decoding: data, as: UTF8.self).contains("session.close") {
             enqueue(Data(#"{"type":"session.closed"}"#.utf8))
         }
     }
@@ -59,6 +65,69 @@ private struct FakeFactory: TranslationSocketFactory {
     ) async throws -> any TranslationSocket {
         socket
     }
+}
+
+private actor CloseDeadlineGate {
+    private var fired = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !fired else { return }
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func fire() {
+        guard !fired else { return }
+        fired = true
+        waiter?.resume()
+        waiter = nil
+    }
+}
+
+private let handshakeEvents = [
+    Data(
+        #"{"type":"session.created","session":{"model":"gpt-realtime-translate"}}"#.utf8
+    ),
+    Data(#"{"type":"session.updated"}"#.utf8),
+]
+
+private let tailAudioEvent = Data(
+    #"{"type":"session.output_audio.delta","delta":"AAEC","sample_rate":24000,"channels":1,"format":"pcm16"}"#.utf8
+)
+
+private let expectedTailAudio = TranslationServerEvent.outputAudio(
+    TranslationAudioDelta(
+        data: Data([0, 1, 2]),
+        sampleRate: 24_000,
+        channels: 1,
+        format: "pcm16",
+        elapsedMilliseconds: nil
+    )
+)
+
+private func makeSession(
+    socket: FakeSocket,
+    closeDeadline: @escaping TranslationSession.CloseDeadline
+) -> TranslationSession {
+    TranslationSession(
+        configuration: .default,
+        sessionConfiguration: TranslationSessionConfiguration(
+            targetLanguage: .chinese
+        ),
+        apiKey: "secret",
+        factory: FakeFactory(socket: socket),
+        closeDeadline: closeDeadline
+    )
+}
+
+private func eventually(
+    _ condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    for _ in 0..<100 {
+        if await condition() { return true }
+        await Task.yield()
+    }
+    return false
 }
 
 @Test
@@ -135,6 +204,45 @@ func closeLetsTheSingleReaderDeliverTailAudioBeforeClosed() async throws {
     let sent = await socket.sent
     #expect(String(decoding: sent.last!, as: UTF8.self).contains("session.close"))
     #expect(await socket.wasCancelled)
+}
+
+@Test
+func closeCancelsSocketWhenServerDoesNotAcknowledgeDeadline() async throws {
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(
+        incoming: handshakeEvents,
+        acknowledgesClose: false
+    )
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    let closeTask = Task { try await session.close() }
+    #expect(await eventually { await socket.sent.count == 2 })
+    await deadline.fire()
+    try await closeTask.value
+
+    #expect(await eventually { await socket.wasCancelled })
+}
+
+@Test
+func serverCloseBeforeDeadlineKeepsTailAudioAndDoesNotWaitForDeadline()
+    async throws
+{
+    let deadline = CloseDeadlineGate()
+    let socket = FakeSocket(incoming: handshakeEvents + [tailAudioEvent])
+    let session = makeSession(socket: socket) {
+        await deadline.wait()
+    }
+    try await session.connect()
+
+    async let event = session.nextEvent()
+    try await session.close()
+
+    #expect(try await event == expectedTailAudio)
+    #expect(await socket.wasCancelled)
+    await deadline.fire()
 }
 
 @Test

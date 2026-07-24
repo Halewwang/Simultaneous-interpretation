@@ -9,16 +9,20 @@ public enum TranslationSessionError: Error, Equatable, Sendable {
 }
 
 public actor TranslationSession {
+    public typealias CloseDeadline = @Sendable () async -> Void
+
     private static let maximumQueuedEvents = 128
 
     private let configuration: APIConfiguration
     private let sessionConfiguration: TranslationSessionConfiguration
     private let apiKey: String
     private let factory: any TranslationSocketFactory
+    private let closeDeadline: CloseDeadline
 
     private var socket: (any TranslationSocket)?
     private var connectionID: UUID?
     private var readerTask: Task<Void, Never>?
+    private var closeDeadlineTask: Task<Void, Never>?
     private var queuedEvents: [TranslationServerEvent] = []
     private var eventWaiters: [
         CheckedContinuation<TranslationServerEvent, any Error>
@@ -31,12 +35,16 @@ public actor TranslationSession {
         configuration: APIConfiguration,
         sessionConfiguration: TranslationSessionConfiguration,
         apiKey: String,
-        factory: any TranslationSocketFactory
+        factory: any TranslationSocketFactory,
+        closeDeadline: @escaping CloseDeadline = {
+            try? await Task.sleep(for: .seconds(1))
+        }
     ) {
         self.configuration = configuration
         self.sessionConfiguration = sessionConfiguration
         self.apiKey = apiKey
         self.factory = factory
+        self.closeDeadline = closeDeadline
     }
 
     public func connect() async throws {
@@ -120,6 +128,13 @@ public actor TranslationSession {
                 finishConnection(connectionID: id, error: error)
                 throw error
             }
+
+            let deadline = closeDeadline
+            closeDeadlineTask = Task { [weak self] in
+                await deadline()
+                guard !Task.isCancelled else { return }
+                await self?.forceFinishClose(connectionID: id, socket: socket)
+            }
         }
 
         if connectionID != id {
@@ -166,6 +181,15 @@ public actor TranslationSession {
         }
     }
 
+    private func forceFinishClose(
+        connectionID id: UUID,
+        socket: any TranslationSocket
+    ) async {
+        guard connectionID == id, isClosing else { return }
+        finishConnection(connectionID: id, error: nil)
+        await socket.cancel()
+    }
+
     private func emit(_ event: TranslationServerEvent) {
         if !eventWaiters.isEmpty {
             eventWaiters.removeFirst().resume(returning: event)
@@ -184,6 +208,8 @@ public actor TranslationSession {
         error: (any Error)?
     ) {
         guard connectionID == id else { return }
+        closeDeadlineTask?.cancel()
+        closeDeadlineTask = nil
         terminalError = error
         socket = nil
         connectionID = nil
