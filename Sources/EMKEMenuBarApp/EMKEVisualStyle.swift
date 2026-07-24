@@ -96,6 +96,7 @@ enum EMKEChannelMetrics {
     static let actionOffsetY: CGFloat = 14
     static let expandedHorizontalSpacing: CGFloat = 8
     static let expandedCopySpacing: CGFloat = 6
+    static let expandedMultilineCopySpacing: CGFloat = 3
     static let expandedContentWidth: CGFloat =
         EMKEVisualStyle.panelWidth
         - EMKEDashboardMetrics.leadingPadding
@@ -150,6 +151,19 @@ struct EMKEDashboardVerticalLayoutGeometry: Equatable {
             panelHeight - fixedHeightOutsideChannelSection(
                 hasErrorText: hasErrorText
             ),
+            0
+        )
+    }
+
+    func channelRowSlotHeight(
+        hasErrorText: Bool
+    ) -> CGFloat {
+        max(
+            (
+                channelSectionHeightBudget(
+                    hasErrorText: hasErrorText
+                ) - EMKEVisualStyle.separatorThickness
+            ) / 2,
             0
         )
     }

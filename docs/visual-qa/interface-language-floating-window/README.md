@@ -10,7 +10,7 @@ images use pure presentations. Settings images use an in-memory
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Automated regression and build gates | Passed | 288 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
+| Automated regression and build gates | Passed | 297 tests passed; two live, opt-in hardware tests skipped; strict concurrency, Release app build, and driver verification passed. |
 | Deterministic static visual inspection | Passed | All eight TIFFs were inspected at original pixel size after temporary PNG conversion. |
 | Real macOS runtime acceptance | Not verified | Computer Use reported that the Mac was locked. The already-running `/Applications` build was not touched, and opening the current app menu was also avoided because it automatically reads the shared Keychain service. |
 
@@ -61,19 +61,20 @@ sips -s format png \
 
 | Command | Status | Evidence |
 | --- | --- | --- |
-| `swift test` | Passed | 288 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
-| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 288 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
+| `swift test` | Passed | 297 tests passed; `liveVirtualEndpointsStartAndStop` and `installedDriverMatchesExpectedState` were skipped because their opt-in environment variables were not set. A clean ordinary run left the dedicated capture directory absent. |
+| `swift test -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors` | Passed | 297 tests passed with the same two documented opt-in skips and no warning-as-error failure. |
 | `swift build -c release --product EMKEMenuBarApp -Xswiftc -warnings-as-errors` | Passed | Release product build completed. |
 | `make -C Driver clean all verify` | Passed | Fresh repository-equivalent Driver gate: the Makefile cleaned and rebuilt the bundle before verifying arm64, bundle id, factory symbol, and factory smoke cases, ending in `PASS`. |
 | `git diff --check 514ac2d...HEAD` | Passed | No whitespace errors were reported. |
-| `EMKE_CAPTURE_UI=1 swift test` | Passed | 288 tests passed with the same two opt-in skips; an injected stale sentinel was removed, and the in-test exact-set assertion accepted only the eight required TIFFs. |
+| `EMKE_CAPTURE_UI=1 swift test` | Passed | 297 tests passed with the same two opt-in skips; the in-test exact-set assertion accepted only the eight required TIFFs. |
 
 ## Static visual inspection
 
 | Check | Status | Evidence |
 | --- | --- | --- |
 | Chinese dashboard keeps the approved Pass 6 hierarchy | Passed | `dashboard-ready-zh.tiff` preserves the header, waveform/status, language hierarchy, two channel rows, primary action, and privacy footer. |
-| English dashboard has no clipped copy | Passed | `dashboard-ready-en.tiff` shows complete language names, directions, channel actions, primary action, and footer at 1:1 pixels. |
+| English dashboard channel rows are aligned | Passed | `dashboard-ready-en.tiff` shows complete copy in two equal-height channel slots. Each expanded row is vertically centered, and each compact waveform is centered on the full 374 pt dashboard content width instead of the post-icon column. |
+| English stress copy has no overflow | Passed | Seven deterministic English ready/running/bypass/reconnecting/failure fixtures render at 840 x 1240 px. Measured expanded content stays inside its row slot, including the multiline same-language pass-through state. |
 | Settings language selector contract is localized | Passed | Automated tests verify the real interface-language menu, all three stable preferences, and non-empty Chinese/English copy; the two dashboard captures verify both resolved interface languages. |
 | Chinese settings quit control is clear | Passed | Bottom-scrolled `settings-zh.tiff` shows the real full-width bordered/background control, power icon, and complete `退出 EMKE` label. |
 | English settings quit control is clear | Passed | Bottom-scrolled `settings-en.tiff` shows the real full-width bordered/background control, power icon, and complete `Quit EMKE` label without clipping. |
@@ -105,5 +106,5 @@ Static render evidence is not used to mark any runtime item as Passed.
 | --- | --- | --- |
 | Endpoint, realtime transport, Keychain/security, routing, conversion, and driver source remain unchanged | Passed | `git diff --name-only 514ac2d...HEAD` contains no files under `EMKECore`, `EMKESecurity`, `EMKERealtime`, `EMKERouting`, `EMKEAudioEngine`, `EMKEAudioHAL`, `EMKEAudioBridge`, or `Driver`. |
 | Public settings change is limited to interface-language persistence | Passed | `AppSettingsStore.swift` only adds the `emke.interfaceLanguage` UserDefaults value and does not change API-key storage or Keychain code. |
-| Task 10 edits are limited to the approved files | Passed | Only the two render-test files and this README are changed for this task. |
+| English alignment follow-up is tightly scoped | Passed | The follow-up changes only shared dashboard/channel layout geometry, the focused render tests, this README, and the root `design-qa.md`; font sizes, copy, icons, panel dimensions, provider configuration, Keychain, audio routing, and driver code remain unchanged. |
 | Unrelated `internal-pkg-installer` worktree remains untouched | Passed | Its pre-existing dirty files were observed read-only and were not modified by this task. |

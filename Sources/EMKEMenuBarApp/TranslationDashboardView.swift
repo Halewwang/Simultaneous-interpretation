@@ -122,11 +122,10 @@ struct TranslationDashboardContent: View {
             EMKEDashboardSeparator()
             channelRows
                 .frame(
-                    maxHeight: verticalGeometry.channelSectionHeightBudget(
+                    height: verticalGeometry.channelSectionHeightBudget(
                         hasErrorText: value.errorText != nil
-                    ),
-                    alignment: .top
-            )
+                    )
+                )
             Spacer(
                 minLength: EMKEDashboardMetrics
                     .channelToPrimarySpacerMinimum
@@ -248,7 +247,11 @@ struct TranslationDashboardContent: View {
     }
 
     private var channelRows: some View {
-        VStack(spacing: 0) {
+        let slotHeight = verticalGeometry.channelRowSlotHeight(
+            hasErrorText: value.errorText != nil
+        )
+
+        return VStack(spacing: 0) {
             TranslationChannelRow(
                 copy: copy,
                 title: copy.text(.heardByMe),
@@ -257,6 +260,7 @@ struct TranslationDashboardContent: View {
                 presentation: value.inbound,
                 action: inboundAction
             )
+            .frame(height: slotHeight, alignment: .center)
             EMKEDashboardSeparator()
             TranslationChannelRow(
                 copy: copy,
@@ -266,6 +270,7 @@ struct TranslationDashboardContent: View {
                 presentation: value.outbound,
                 action: outboundAction
             )
+            .frame(height: slotHeight, alignment: .center)
         }
     }
 

@@ -256,6 +256,7 @@ struct EMKEExpandedChannelLayoutGeometry: Equatable {
     let statusContentHeight: CGFloat
     let actionContentHeight: CGFloat
     let descriptionHeight: CGFloat
+    let verticalCopySpacing: CGFloat
     let requiredHeight: CGFloat
 
     static func resolve(
@@ -321,15 +322,38 @@ struct EMKEExpandedChannelLayoutGeometry: Equatable {
             font: actionFont,
             width: actionWidth
         )
+        let singleLineStatusHeight = EMKEChannelContentMeasurement.textHeight(
+            "Hg",
+            font: statusFont,
+            width: .greatestFiniteMagnitude
+        )
+        let singleLineActionHeight = EMKEChannelContentMeasurement.textHeight(
+            "Hg",
+            font: actionFont,
+            width: .greatestFiniteMagnitude
+        )
+        let verticalCopySpacing = (
+            statusContentHeight > max(
+                statusSymbolSize.height,
+                singleLineStatusHeight
+            )
+                || actionContentHeight > singleLineActionHeight
+        )
+            ? EMKEChannelMetrics.expandedMultilineCopySpacing
+            : EMKEChannelMetrics.expandedCopySpacing
         let statusActionHeight = max(
             statusContentHeight,
             actionContentHeight
         )
         let statusActionY = descriptionHeight
-            + EMKEChannelMetrics.expandedCopySpacing
+            + verticalCopySpacing
         let waveformY = statusActionY
             + statusActionHeight
-            + EMKEChannelMetrics.expandedCopySpacing
+            + verticalCopySpacing
+        let waveformOffsetX = -(
+            EMKEChannelMetrics.iconWidth
+                + EMKEChannelMetrics.expandedHorizontalSpacing
+        ) / 2
         let requiredHeight = waveformY
             + EMKEChannelMetrics.expandedWaveformHeight
 
@@ -360,7 +384,7 @@ struct EMKEExpandedChannelLayoutGeometry: Equatable {
                 height: statusActionHeight
             ),
             waveformFrame: CGRect(
-                x: 0,
+                x: waveformOffsetX,
                 y: waveformY,
                 width: contentWidth,
                 height: EMKEChannelMetrics.expandedWaveformHeight
@@ -368,6 +392,7 @@ struct EMKEExpandedChannelLayoutGeometry: Equatable {
             statusContentHeight: statusContentHeight,
             actionContentHeight: actionContentHeight,
             descriptionHeight: descriptionHeight,
+            verticalCopySpacing: verticalCopySpacing,
             requiredHeight: requiredHeight
         )
     }
@@ -423,7 +448,10 @@ struct TranslationChannelRow: View {
     private var expandedBody: some View {
         HStack(spacing: EMKEChannelMetrics.expandedHorizontalSpacing) {
             channelIcon
-            VStack(alignment: .leading, spacing: EMKEChannelMetrics.expandedCopySpacing) {
+            VStack(
+                alignment: .leading,
+                spacing: expandedGeometry.verticalCopySpacing
+            ) {
                 channelDescription
                     .frame(
                         width: expandedGeometry.contentBounds.width,
@@ -455,6 +483,7 @@ struct TranslationChannelRow: View {
                     alignment: .topLeading
                 )
                 channelWaveform
+                    .offset(x: expandedGeometry.waveformFrame.minX)
             }
             .frame(
                 width: expandedGeometry.contentBounds.width,

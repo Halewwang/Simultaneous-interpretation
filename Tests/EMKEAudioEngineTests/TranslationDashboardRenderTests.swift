@@ -670,6 +670,49 @@ func dashboardChannelBudgetTracksPanelHeightAndErrorAllocation() {
     )
 }
 
+@Test @MainActor
+func dashboardChannelBudgetSplitsIntoTwoEqualRowSlots() {
+    let panel = EMKEDashboardVerticalLayoutGeometry(
+        panelHeight: EMKEVisualStyle.panelHeight
+    )
+
+    for hasErrorText in [false, true] {
+        let budget = panel.channelSectionHeightBudget(
+            hasErrorText: hasErrorText
+        )
+        let slotHeight = panel.channelRowSlotHeight(
+            hasErrorText: hasErrorText
+        )
+
+        #expect(slotHeight > 0)
+        #expect(
+            (slotHeight * 2) + EMKEVisualStyle.separatorThickness
+                == budget
+        )
+    }
+}
+
+@Test @MainActor
+func expandedWaveformMapsToFullDashboardContentCenter() {
+    let copy = AppCopy(language: .english)
+    let ready = DashboardFixture.ready.makePresentation(copy: copy)
+    let layout = EMKEExpandedChannelLayoutGeometry.resolve(
+        title: copy.text(.heardByMe),
+        direction: ready.inboundDirection,
+        status: ready.inbound.status,
+        statusSymbol: ready.inbound.statusSymbol,
+        actionTitle: ready.inbound.actionTitle
+    )
+    let availableRowWidth = EMKEVisualStyle.panelWidth
+        - EMKEDashboardMetrics.leadingPadding
+        - EMKEDashboardMetrics.trailingPadding
+    let waveformCenterInRow = EMKEChannelMetrics.iconWidth
+        + EMKEChannelMetrics.expandedHorizontalSpacing
+        + layout.waveformFrame.midX
+
+    #expect(waveformCenterInRow == availableRowWidth / 2)
+}
+
 @Test(arguments: EnglishDashboardStressCase.allCases)
 @MainActor
 private func englishStressDashboardsRenderWithinSharedGeometry(
@@ -710,12 +753,28 @@ private func englishStressDashboardsRenderWithinSharedGeometry(
     let dashboardGeometry = EMKEDashboardVerticalLayoutGeometry(
         panelHeight: EMKEVisualStyle.panelHeight
     )
+    let availableRowBounds = CGRect(
+        x: 0,
+        y: 0,
+        width: EMKEVisualStyle.panelWidth
+            - EMKEDashboardMetrics.leadingPadding
+            - EMKEDashboardMetrics.trailingPadding,
+        height: dashboardGeometry.channelRowSlotHeight(
+            hasErrorText: hasErrorText
+        )
+    )
 
     for layout in layouts {
         #expect(layout.contentBounds.contains(layout.directionFrame))
         #expect(layout.contentBounds.contains(layout.statusFrame))
         #expect(layout.contentBounds.contains(layout.actionFrame))
-        #expect(layout.contentBounds.contains(layout.waveformFrame))
+        let waveformFrameInRow = layout.waveformFrame.offsetBy(
+            dx: EMKEChannelMetrics.iconWidth
+                + EMKEChannelMetrics.expandedHorizontalSpacing,
+            dy: 0
+        )
+        #expect(availableRowBounds.contains(waveformFrameInRow))
+        #expect(waveformFrameInRow.midX == availableRowBounds.midX)
         #expect(!layout.directionFrame.intersects(layout.statusFrame))
         #expect(!layout.directionFrame.intersects(layout.actionFrame))
         #expect(!layout.statusFrame.intersects(layout.actionFrame))
@@ -725,7 +784,9 @@ private func englishStressDashboardsRenderWithinSharedGeometry(
         #expect(layout.actionFrame.height >= layout.actionContentHeight)
         #expect(
             layout.requiredHeight
-                <= EMKEChannelMetrics.expandedMaximumRowHeight
+                <= dashboardGeometry.channelRowSlotHeight(
+                    hasErrorText: hasErrorText
+                )
         )
     }
 

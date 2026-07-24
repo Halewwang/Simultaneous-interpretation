@@ -19,6 +19,10 @@
 - prior focused channel comparison: `.superpowers/artifacts/task-7/channels-focus-final.png`
 - native dashboard capture: `.superpowers/artifacts/task-7/native-dashboard-window.png`
 - native settings capture: `.superpowers/artifacts/task-7/native-settings-window.png`
+- Pass 8 source defect screenshot: `/var/folders/0_/46h2btb55jn23xnsb8gksj1h0000gn/T/codex-clipboard-d7440373-dcab-4755-8323-3e926b3e5269.jpg`
+- Pass 8 same-state before: `/tmp/emke-channel-alignment-before.png`
+- Pass 8 same-state after: `/tmp/emke-channel-alignment-after.png`
+- Pass 8 mechanical 1:1 comparison: `/tmp/emke-channel-alignment-comparison.png`
 - viewport: 420 × 620 pt；ImageRenderer 以 2× 输出 840 × 1240 px。Pass 6 将批准稿表面以单一等比缩放 + 居中裁切规范化为 840 × 1240 px；实现 raw 保持 840 × 1240 px 原样。两者分别以 1:1 嵌入 888 × 1288 px 验收面板，再组成 1776 × 1288 px surface comparison。原生窗口截图另含系统 32 pt 窗口栏。
 - state: 浅色运行态 fixture（中文母语、德语会议输出、双通道 active、伪电平 0.42/0.68、无凭据、无服务商连接）；Pass 7 另增同视口浅色就绪态，专门验证可编辑语言控件。
 
@@ -31,6 +35,8 @@
 - Pass 7 的运行态 raw capture SHA-256 仍为 `5c92aee42f7f6e64284a9a04dcc94c9a35e36903afcaf36464fd73cf926196a2`，与 Pass 6 完全一致，证明修复未改动已批准运行态。Pass 7 的语言槽对照以 1:1 像素左右并排，实现态没有默认控件底色、裁切、错位或替代字形。
 
 - Pass 6 修复了两项 P2：验收包装器不再缩放实现内容；语言区上方、语言区下方、入站/出站通道之间、CTA/隐私区之间四个边界改用 `NSColor.separatorColor` 和 0.5 pt 厚度，在 2× 捕获中稳定为 1 physical pixel。深浅系统外观的合成对比度均由测试约束在 1.15–1.5，保持可见且克制。
+
+- Pass 8 修复了英文 expanded 通道区域的两项 P1 与一项 P2：两个频道改为从 dashboard budget 精确等分槽位并各自垂直居中；波形从 post-icon 内容列中心移到完整内容行中心；最长的 same-language 多行副本通过仅对多行 expanded copy 收紧纵向间距避免溢出。字体、文案、图标、面板尺寸与中文 compact metrics 均保持不变。
 
 - [P3] 确认稿入站示例写“德语 → 中文”；实现保留真实的未知入站语种语义“其他语言 → 中文”，不伪造服务商尚未识别出的具体语言。其他可见语言名已本地化为“中文／英语／德语”，底层存储值仍为 `zh/en/de`。
 - [P3] 实现比确认稿多出极小的全局状态、通道状态和隐私锁 SF Symbols。它们是已确认的文字 + 语义符号可访问性冗余，尺寸和颜色均从属于正文，没有形成第二视觉焦点。
@@ -121,5 +127,32 @@ Package 验收要求 `EMKE-MenuBarIcon.png` 必须是 36 × 36 px RGBA，运行�
 - `xcrun xctrace` 在当前 Command Line Tools 环境不可用，因此无法生成 SwiftUI/Time Profiler trace。自动化测试已验证电平事件最高 30 Hz、隐藏窗口禁用并清空排队快照、晚到电平不回填，以及关闭窗口不停止翻译；这不等同于 Instruments 实测。
 - 未输入真实凭据，也未连接生产服务商；第三方服务商端到端体验未验证。
 - Computer Use 已直接打开安装版 MenuBarExtra 面板并验收两个语言 popover。在显示系统菜单栏后，状态栏入口也以真实系统表面截图复核：显示已批准的阶梯式四向结构 Logo，没有回退为音波 SF Symbol。安装包内资源哈希、36 × 36 px RGBA 合同、18 × 18 pt Template Image 运行时测试和安装版像素证据相互一致。
+
+### Pass 8 — English channel alignment
+
+Evidence: source defect screenshot `/var/folders/0_/46h2btb55jn23xnsb8gksj1h0000gn/T/codex-clipboard-d7440373-dcab-4755-8323-3e926b3e5269.jpg`; same-state before `/tmp/emke-channel-alignment-before.png`; same-state after `/tmp/emke-channel-alignment-after.png`; mechanical 1:1 comparison `/tmp/emke-channel-alignment-comparison.png`.
+
+视口与状态保持一致：Aqua/light，420 × 620 pt，2× 输出 840 × 1240 px，English ready/stopped，中文母语、德语会议输出。before 与 after 均以 1:1 像素放入 1680 × 1240 px 对照图，并已用 original detail 打开复核；source defect screenshot 的红框覆盖本轮验收的两个通道行与三条边界线。
+
+- 字体与排版：passed。系统字体、字号、字重、层级与普通 ready 的 92 pt expanded 固有高度未变。
+- 间距与布局：passed。频道预算精确分为两个等高槽位和中间 0.5 pt 分隔线；每个完整频道行在自己的槽位垂直居中。波形从 post-icon 内容列中心移到完整 374 pt dashboard content row 中心。
+- 颜色与令牌：passed。背景、正文、次要文字、禁用动作、分隔线与波形语义色未变。
+- 图标与图片资产：passed。耳机、麦克风、状态与齿轮 SF Symbols 未变；两个源图保持 840 × 1240 px，机械对照保持 1:1，不含重采样。
+- 文案与状态：passed。英文标题、方向、状态、动作、语言值、主动作和 footer 文案完整且未改；7 个 English stress fixtures 无裁切或重叠。
+
+Pass 8 comparison history:
+
+- P0: none.
+- P1（before / blocked）：两个 expanded channel 使用顶部对齐的不同固有高度；首行标题贴近上分隔线，两个频道没有稳定共享的槽位中心。
+- P1（before / blocked）：波形在 318 pt post-icon 内容列内居中，映射到 374 pt 行后的中心是 215 pt，而真实行中心是 187 pt，右偏 28 pt。
+- P2（before / blocked）：最长的 same-language 多行状态固有高度 107 pt，超过 ready 槽位 101.5 pt。
+- P0/P1/P2（after / passed）：两行等分且垂直居中，两个波形共同对齐完整行中心；same-language 多行副本仅使用 3 pt expanded 纵向间距并完整落入槽位。中文 compact 捕获保持原列宽、动作对齐与波形尺度。
+
+自动证据：
+
+- RED 命中等分槽位 `407.5 != 203.5`、`373.5 != 186.5`，以及波形中心 `215 != 187`。
+- focused GREEN 覆盖 equal slots、waveform center、English ready 840 × 1240，以及 7-case English stress。
+- `EMKE_CAPTURE_UI=1 swift test` 与 strict-concurrency/warnings-as-errors gate 均为 297 tests passed；两个 opt-in live hardware tests 按预期跳过。
+- capture set 精确为 8 个 TIFF：dashboard/settings 840 × 1240 px，floating 528 × 104 px；Release warnings-as-errors build passed；`git diff --check` passed。
 
 final result: passed
