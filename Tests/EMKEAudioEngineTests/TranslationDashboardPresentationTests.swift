@@ -111,7 +111,8 @@ struct DashboardFixture: Sendable {
 
     func makePresentation(
         inboundLevel: Double = 0.35,
-        outboundLevel: Double = 0.72
+        outboundLevel: Double = 0.72,
+        copy: AppCopy = AppCopy(language: .zhHans)
     ) -> TranslationDashboardPresentation {
         TranslationDashboardPresentation.make(
             readiness: readiness,
@@ -126,7 +127,8 @@ struct DashboardFixture: Sendable {
             motherLanguage: .chinese,
             meetingOutputLanguage: .german,
             now: Self.now,
-            errorText: errorText
+            errorText: errorText,
+            copy: copy
         )
     }
 }
@@ -238,6 +240,19 @@ func dashboardDirectionsUseProductLanguageContract() {
     #expect(value.outboundDirection == "中文 → 德语")
     #expect(value.inputLanguageName == "中文")
     #expect(value.outputLanguageName == "德语")
+}
+
+@Test
+func dashboardPresentationRendersCompleteEnglishCopy() {
+    let copy = AppCopy(language: .english)
+    let value = DashboardFixture.running.makePresentation(copy: copy)
+    #expect(value.primaryStatus == "Translating · 01:05")
+    #expect(value.primaryActionTitle == "Stop translation")
+    #expect(value.inputLanguageName == "Chinese")
+    #expect(value.outputLanguageName == "German")
+    #expect(value.inboundDirection == "Other languages → Chinese")
+    #expect(value.outboundDirection == "Chinese → German")
+    #expect(value.privacyText == "Audio connects directly to your provider")
 }
 
 @Test

@@ -106,7 +106,8 @@ struct TranslationDashboardPresentation: Equatable {
         motherLanguage: SupportedLanguage,
         meetingOutputLanguage: SupportedLanguage,
         now: Date,
-        errorText: String?
+        errorText: String?,
+        copy: AppCopy
     ) -> TranslationDashboardPresentation {
         let running = coordinatorState.isRunning
         let effectiveInboundState: TranslationChannelState =
@@ -116,7 +117,8 @@ struct TranslationDashboardPresentation: Equatable {
         let inbound = TranslationChannelPresentation.make(
             channel: .inbound,
             state: effectiveInboundState,
-            bypassEnabled: inboundBypassEnabled
+            bypassEnabled: inboundBypassEnabled,
+            copy: copy
         )
         let usesAutomaticOutboundBypass = running
             && motherLanguage == meetingOutputLanguage
@@ -125,7 +127,8 @@ struct TranslationDashboardPresentation: Equatable {
             channel: .outbound,
             state: effectiveOutboundState,
             bypassEnabled: outboundBypassEnabled,
-            automaticBypass: usesAutomaticOutboundBypass
+            automaticBypass: usesAutomaticOutboundBypass,
+            copy: copy
         )
         let hasChannelFailure: Bool
         if case .failed = effectiveInboundState {
@@ -144,13 +147,13 @@ struct TranslationDashboardPresentation: Equatable {
         }
         let action: (title: String, enabled: Bool)
         if isStopping {
-            action = ("正在停止…", false)
+            action = (copy.text(.stopping), false)
         } else if running {
-            action = ("停止翻译", true)
+            action = (copy.text(.stopTranslation), true)
         } else if isStarting {
-            action = ("正在连接…", false)
+            action = (copy.text(.starting), false)
         } else {
-            action = ("开始翻译", readiness == .ready)
+            action = (copy.text(.startTranslation), readiness == .ready)
         }
 
         return TranslationDashboardPresentation(
@@ -162,7 +165,8 @@ struct TranslationDashboardPresentation: Equatable {
                 inboundState: effectiveInboundState,
                 outboundState: effectiveOutboundState,
                 translationStartedAt: translationStartedAt,
-                now: now
+                now: now,
+                copy: copy
             ),
             primaryStatusSymbol: primaryStatusSymbol(
                 readiness: readiness,
@@ -176,15 +180,16 @@ struct TranslationDashboardPresentation: Equatable {
             outboundLevel: safeOutboundLevel,
             primaryActionTitle: action.title,
             primaryActionEnabled: action.enabled,
-            inputLanguageName: motherLanguage.displayName,
-            outputLanguageName: meetingOutputLanguage.displayName,
-            inboundDirection: "其他语言 → \(motherLanguage.displayName)",
-            outboundDirection:
-                "\(motherLanguage.displayName) → "
-                + meetingOutputLanguage.displayName,
+            inputLanguageName: copy.languageName(motherLanguage),
+            outputLanguageName: copy.languageName(meetingOutputLanguage),
+            inboundDirection: copy.inboundDirection(to: motherLanguage),
+            outboundDirection: copy.outboundDirection(
+                from: motherLanguage,
+                to: meetingOutputLanguage
+            ),
             inbound: inbound,
             outbound: outbound,
-            privacyText: "音频直连你的服务商",
+            privacyText: copy.text(.audioDirectToProvider),
             errorText: errorText
         )
     }
@@ -197,30 +202,35 @@ struct TranslationDashboardPresentation: Equatable {
         inboundState: TranslationChannelState,
         outboundState: TranslationChannelState,
         translationStartedAt: Date?,
-        now: Date
+        now: Date,
+        copy: AppCopy
     ) -> String {
-        if isStopping { return "正在停止" }
-        if isStarting { return "正在连接" }
+        if isStopping { return copy.text(.stopping) }
+        if isStarting { return copy.text(.connecting) }
         if isRunning {
-            if case .failed = outboundState { return "出站已静音" }
-            if case .failed = inboundState { return "入站播放原音" }
+            if case .failed = outboundState {
+                return copy.text(.outboundMuted)
+            }
+            if case .failed = inboundState {
+                return copy.text(.inboundOriginal)
+            }
             let elapsed = translationStartedAt.map {
                 MenuBarModel.formatElapsed(
                     seconds: now.timeIntervalSince($0)
                 )
             } ?? "00:00"
-            return "翻译中 · \(elapsed)"
+            return copy.translating(elapsed: elapsed)
         }
         return switch readiness {
-        case .driverUnavailable: "未检测到 EMKE 虚拟音频驱动"
-        case .selectPhysicalInput: "请选择真实麦克风"
-        case .selectPhysicalOutput: "请选择真实耳机或扬声器"
-        case .invalidBaseURL: "请输入安全有效的 Base URL"
-        case .modelRequired: "请输入模型名称"
-        case .apiKeyRequired: "请输入 API Key"
-        case .ready: "准备开始"
-        case .active: "翻译中 · 00:00"
-        case .error: "配置或连接不可用"
+        case .driverUnavailable: copy.text(.driverMissing)
+        case .selectPhysicalInput: copy.text(.selectPhysicalInput)
+        case .selectPhysicalOutput: copy.text(.selectPhysicalOutput)
+        case .invalidBaseURL: copy.text(.invalidBaseURLPrompt)
+        case .modelRequired: copy.text(.modelRequiredPrompt)
+        case .apiKeyRequired: copy.text(.apiKeyRequiredPrompt)
+        case .ready: copy.text(.ready)
+        case .active: copy.translating(elapsed: "00:00")
+        case .error: copy.text(.configurationUnavailable)
         }
     }
 
@@ -428,32 +438,32 @@ final class MenuBarModel: ObservableObject {
 
     var repairMessage: String? {
         readiness == .driverUnavailable
-            ? "未检测到 EMKE 虚拟音频驱动"
+            ? copy.text(.driverMissing)
             : nil
     }
 
     var statusText: String {
-        if isStarting { return "正在启动同声传译" }
-        if coordinatorState.isRunning { return "同声传译运行中" }
+        if isStarting { return copy.text(.connecting) }
+        if coordinatorState.isRunning { return copy.text(.translating) }
         switch readiness {
         case .driverUnavailable:
-            return repairMessage ?? "虚拟音频驱动不可用"
+            return repairMessage ?? copy.text(.driverMissing)
         case .selectPhysicalInput:
-            return "请选择真实麦克风"
+            return copy.text(.selectPhysicalInput)
         case .selectPhysicalOutput:
-            return "请选择真实耳机或扬声器"
+            return copy.text(.selectPhysicalOutput)
         case .invalidBaseURL:
-            return "请输入安全有效的 Base URL"
+            return copy.text(.invalidBaseURLPrompt)
         case .modelRequired:
-            return "请输入模型名称"
+            return copy.text(.modelRequiredPrompt)
         case .apiKeyRequired:
-            return "请输入 API Key"
+            return copy.text(.apiKeyRequiredPrompt)
         case .ready:
-            return "同声传译准备就绪"
+            return copy.text(.ready)
         case .active:
-            return "同声传译运行中"
+            return copy.text(.translating)
         case .error:
-            return "配置或连接不可用"
+            return copy.text(.configurationUnavailable)
         }
     }
 
@@ -465,11 +475,19 @@ final class MenuBarModel: ObservableObject {
     }
 
     var inboundStatusText: String {
-        Self.text(for: coordinatorState.inbound, channel: .inbound)
+        Self.text(
+            for: coordinatorState.inbound,
+            channel: .inbound,
+            copy: copy
+        )
     }
 
     var outboundStatusText: String {
-        Self.text(for: coordinatorState.outbound, channel: .outbound)
+        Self.text(
+            for: coordinatorState.outbound,
+            channel: .outbound,
+            copy: copy
+        )
     }
 
     func showSettings() {
@@ -497,11 +515,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     func dashboardStatusText(at now: Date) -> String {
-        if isStarting { return "正在连接" }
-        if coordinatorState.isRunning {
-            return "翻译中 · \(elapsedText(at: now))"
-        }
-        return readiness == .ready ? "准备开始" : statusText
+        dashboardPresentation(at: now).primaryStatus
     }
 
     func dashboardPresentation(
@@ -520,7 +534,8 @@ final class MenuBarModel: ObservableObject {
             motherLanguage: motherLanguage,
             meetingOutputLanguage: meetingOutputLanguage,
             now: now,
-            errorText: configurationError ?? inventoryError
+            errorText: configurationError ?? inventoryError,
+            copy: copy
         )
     }
 
@@ -1054,16 +1069,20 @@ final class MenuBarModel: ObservableObject {
 
     static func text(
         for state: TranslationChannelState,
-        channel: MenuBarChannel
+        channel: MenuBarChannel,
+        copy: AppCopy = AppCopy(language: .zhHans)
     ) -> String {
         switch state {
-        case .stopped: "已停止"
-        case .connecting: "连接中"
-        case .active: "翻译中"
-        case .bypassed: "原音旁路"
-        case .reconnecting(let attempt): "重连中（第 \(attempt) 次）"
+        case .stopped: copy.text(.stopped)
+        case .connecting: copy.text(.channelConnecting)
+        case .active: copy.text(.translating)
+        case .bypassed: copy.text(.originalBypass)
+        case .reconnecting(let attempt):
+            copy.reconnecting(attempt: attempt)
         case .failed:
-            channel == .inbound ? "播放原音" : "已静音"
+            channel == .inbound
+                ? copy.text(.playOriginal)
+                : copy.text(.muted)
         }
     }
 }

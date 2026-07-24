@@ -15,28 +15,31 @@ struct TranslationChannelPresentation: Equatable {
         channel: MenuBarChannel,
         state: TranslationChannelState,
         bypassEnabled: Bool,
-        automaticBypass: Bool = false
+        automaticBypass: Bool = false,
+        copy: AppCopy
     ) -> TranslationChannelPresentation {
         let channelSymbol = channel == .inbound ? "headphones" : "mic"
         let actionTitle: String
         let actionAccessibilityLabel: String
 
         if bypassEnabled {
-            actionTitle = "恢复翻译"
+            actionTitle = copy.text(.restoreTranslation)
             actionAccessibilityLabel = channel == .inbound
-                ? "恢复入站翻译"
-                : "恢复出站翻译"
+                ? copy.text(.restoreInbound)
+                : copy.text(.restoreOutbound)
         } else {
-            actionTitle = channel == .inbound ? "播放原音" : "发送原音"
+            actionTitle = channel == .inbound
+                ? copy.text(.playOriginal)
+                : copy.text(.sendOriginal)
             actionAccessibilityLabel = channel == .inbound
-                ? "播放入站原音"
-                : "发送出站原音"
+                ? copy.text(.playInboundOriginal)
+                : copy.text(.sendOutboundOriginal)
         }
 
         switch state {
         case .stopped:
             return makeValue(
-                status: "已停止",
+                status: copy.text(.stopped),
                 statusSymbol: "stop.circle",
                 statusColor: EMKEVisualStyle.secondaryText,
                 symbol: channelSymbol,
@@ -46,7 +49,7 @@ struct TranslationChannelPresentation: Equatable {
             )
         case .connecting:
             return makeValue(
-                status: "连接中",
+                status: copy.text(.channelConnecting),
                 statusSymbol: "arrow.triangle.2.circlepath",
                 statusColor: EMKEVisualStyle.secondaryText,
                 symbol: channelSymbol,
@@ -57,7 +60,7 @@ struct TranslationChannelPresentation: Equatable {
         case .active:
             if bypassEnabled {
                 return makeValue(
-                    status: "原音旁路",
+                    status: copy.text(.originalBypass),
                     statusSymbol: "speaker.wave.2",
                     statusColor: EMKEVisualStyle.secondaryText,
                     symbol: channelSymbol,
@@ -67,7 +70,7 @@ struct TranslationChannelPresentation: Equatable {
                 )
             }
             return makeValue(
-                status: "稳定",
+                status: copy.text(.stable),
                 statusSymbol: "checkmark.circle",
                 statusColor: EMKEVisualStyle.secondaryText,
                 symbol: channelSymbol,
@@ -78,17 +81,19 @@ struct TranslationChannelPresentation: Equatable {
         case .bypassed:
             if automaticBypass {
                 return makeValue(
-                    status: "同语言直通",
+                    status: copy.text(.sameLanguagePassThrough),
                     statusSymbol: "arrow.left.arrow.right",
                     statusColor: EMKEVisualStyle.secondaryText,
                     symbol: channelSymbol,
-                    actionTitle: "无需翻译",
-                    actionAccessibilityLabel: "出站同语言无需翻译",
+                    actionTitle: copy.text(.noTranslationNeeded),
+                    actionAccessibilityLabel: copy.text(
+                        .outboundSameLanguageNoTranslation
+                    ),
                     actionEnabled: false
                 )
             }
             return makeValue(
-                status: "原音旁路",
+                status: copy.text(.originalBypass),
                 statusSymbol: "speaker.wave.2",
                 statusColor: EMKEVisualStyle.secondaryText,
                 symbol: channelSymbol,
@@ -98,7 +103,7 @@ struct TranslationChannelPresentation: Equatable {
             )
         case .reconnecting(let attempt):
             return makeValue(
-                status: "重连中（第 \(attempt) 次）",
+                status: copy.reconnecting(attempt: attempt),
                 statusSymbol: "arrow.triangle.2.circlepath",
                 statusColor: EMKEVisualStyle.warning,
                 symbol: channelSymbol,
@@ -108,7 +113,9 @@ struct TranslationChannelPresentation: Equatable {
             )
         case .failed:
             return makeValue(
-                status: channel == .inbound ? "播放原音" : "已静音",
+                status: channel == .inbound
+                    ? copy.text(.playOriginal)
+                    : copy.text(.muted),
                 statusSymbol: "exclamationmark.triangle",
                 statusColor: EMKEVisualStyle.failure,
                 symbol: channel == .inbound ? "headphones" : "mic.slash",
