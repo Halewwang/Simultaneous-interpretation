@@ -16,7 +16,7 @@ private struct DeviceInventorySnapshot: Sendable {
 
 private enum DeviceInventoryLoadResult: Sendable {
     case success(DeviceInventorySnapshot)
-    case failure(String)
+    case failure(AppMessage)
 }
 
 protocol TranslationCoordinatorControlling: Sendable {
@@ -292,9 +292,9 @@ final class MenuBarModel: ObservableObject {
     @Published var apiKeyDraft = ""
     @Published private(set) var coordinatorState = TranslationCoordinatorState()
     @Published private(set) var compatibilityReport: TranslationCompatibilityReport?
-    @Published private(set) var connectionTestMessage = ""
-    @Published private(set) var inventoryError: String?
-    @Published private(set) var configurationError: String?
+    @Published private var connectionTestMessageValue: AppMessage?
+    @Published private var inventoryErrorValue: AppMessage?
+    @Published private var configurationErrorValue: AppMessage?
     @Published private(set) var isTestingConnection = false
     @Published private(set) var isReloadingDevices = false
     @Published private(set) var isStarting = false
@@ -309,9 +309,9 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var isTestingAudioInput = false
     @Published private(set) var isPlayingAudioOutputTest = false
     @Published private(set) var audioInputDiagnosticLevel = 0.0
-    @Published private(set) var audioInputDiagnosticText = "未测试"
-    @Published private(set) var audioOutputDiagnosticText = "未测试"
-    @Published private(set) var audioDiagnosticError: String?
+    @Published private var audioInputDiagnosticValue: AppMessage = .key(.notTested)
+    @Published private var audioOutputDiagnosticValue: AppMessage = .key(.notTested)
+    @Published private var audioDiagnosticErrorValue: AppMessage?
 
     private var driverAvailable = false
     private var hasStoredAPIKey = false
@@ -374,6 +374,38 @@ final class MenuBarModel: ObservableObject {
         AppCopy(language: resolvedInterfaceLanguage)
     }
 
+    var connectionTestMessage: String {
+        connectionTestMessageValue?.text(using: copy) ?? ""
+    }
+
+    var inventoryError: String? {
+        inventoryErrorValue?.text(using: copy)
+    }
+
+    var configurationError: String? {
+        configurationErrorValue?.text(using: copy)
+    }
+
+    var audioInputDiagnosticText: String {
+        audioInputDiagnosticValue.text(using: copy)
+    }
+
+    var audioOutputDiagnosticText: String {
+        audioOutputDiagnosticValue.text(using: copy)
+    }
+
+    var audioDiagnosticError: String? {
+        audioDiagnosticErrorValue?.text(using: copy)
+    }
+
+    var audioInputDiagnosticSucceeded: Bool {
+        audioInputDiagnosticValue == .key(.microphoneDetected)
+    }
+
+    var audioOutputDiagnosticSucceeded: Bool {
+        audioOutputDiagnosticValue == .key(.testTonePlayed)
+    }
+
     var readiness: MenuBarReadiness {
         guard driverAvailable else { return .driverUnavailable }
         if coordinatorState.isRunning || isStarting { return .active }
@@ -392,7 +424,7 @@ final class MenuBarModel: ObservableObject {
         guard hasStoredAPIKey || !trimmedDraftKey.isEmpty else {
             return .apiKeyRequired
         }
-        if configurationError != nil { return .error }
+        if configurationErrorValue != nil { return .error }
         return .ready
     }
 
@@ -433,7 +465,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     var apiKeyStatusText: String {
-        hasStoredAPIKey ? "已存入 Keychain" : "尚未保存"
+        copy.text(hasStoredAPIKey ? .keySaved : .keyNotSaved)
     }
 
     var repairMessage: String? {
@@ -555,10 +587,13 @@ final class MenuBarModel: ObservableObject {
             hasStoredAPIKey = try await secretStore.loadAPIKey()
                 .map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 ?? false
-            configurationError = nil
+            configurationErrorValue = nil
         } catch {
             hasStoredAPIKey = false
-            configurationError = "无法读取 Keychain：\(error)"
+            configurationErrorValue = .detail(
+                .keychainReadFailed,
+                String(describing: error)
+            )
         }
     }
 
@@ -654,7 +689,7 @@ final class MenuBarModel: ObservableObject {
                 )
             )
         } catch {
-            return .failure(String(describing: error))
+            return .failure(.raw(String(describing: error)))
         }
     }
 
@@ -676,12 +711,12 @@ final class MenuBarModel: ObservableObject {
                     $0.uid == snapshot.defaultOutputUID
                 })?.uid
             }
-            inventoryError = nil
+            inventoryErrorValue = nil
         case let .failure(message):
             driverAvailable = false
             physicalInputs = []
             physicalOutputs = []
-            inventoryError = message
+            inventoryErrorValue = message
         }
     }
 
@@ -693,7 +728,7 @@ final class MenuBarModel: ObservableObject {
               let selectedOutputUID else { return }
         isStarting = true
         defer { isStarting = false }
-        configurationError = nil
+        configurationErrorValue = nil
         do {
             try await requireMicrophonePermission()
             try await persistDraftKeyIfNeeded()
@@ -724,7 +759,7 @@ final class MenuBarModel: ObservableObject {
             }
             startObservingCoordinator()
         } catch {
-            configurationError = String(describing: error)
+            configurationErrorValue = Self.configurationMessage(for: error)
             coordinatorState = TranslationCoordinatorState()
             resetRuntimePresentation()
         }
@@ -743,7 +778,7 @@ final class MenuBarModel: ObservableObject {
     func startAudioInputTest() async {
         await reloadDevicesAsync()
         guard canTestAudioInput, let device = selectedPhysicalInput else { return }
-        audioDiagnosticError = nil
+        audioDiagnosticErrorValue = nil
         do {
             try await requireMicrophonePermission()
             try await audioDiagnostics.startInput(deviceID: device.id)
@@ -764,8 +799,8 @@ final class MenuBarModel: ObservableObject {
             await audioDiagnostics.stopInput()
             isTestingAudioInput = false
             audioInputDiagnosticLevel = 0
-            audioInputDiagnosticText = "麦克风测试失败"
-            audioDiagnosticError = String(describing: error)
+            audioInputDiagnosticValue = .key(.microphoneTestFailed)
+            audioDiagnosticErrorValue = Self.audioDiagnosticMessage(for: error)
         }
     }
 
@@ -777,8 +812,8 @@ final class MenuBarModel: ObservableObject {
         await reloadDevicesAsync()
         guard canTestAudioOutput, let device = selectedPhysicalOutput else { return }
         isPlayingAudioOutputTest = true
-        audioDiagnosticError = nil
-        audioOutputDiagnosticText = "正在播放测试音…"
+        audioDiagnosticErrorValue = nil
+        audioOutputDiagnosticValue = .key(.testTonePlaying)
         do {
             let result = try await audioDiagnostics.startOutputTest(
                 deviceID: device.id
@@ -788,11 +823,11 @@ final class MenuBarModel: ObservableObject {
             }
             try await audioOutputTestDelay()
             await audioDiagnostics.stopOutputTest()
-            audioOutputDiagnosticText = "测试音已播放"
+            audioOutputDiagnosticValue = .key(.testTonePlayed)
         } catch {
             await audioDiagnostics.stopOutputTest()
-            audioOutputDiagnosticText = "扬声器测试失败"
-            audioDiagnosticError = String(describing: error)
+            audioOutputDiagnosticValue = .key(.speakerTestFailed)
+            audioDiagnosticErrorValue = Self.audioDiagnosticMessage(for: error)
         }
         isPlayingAudioOutputTest = false
     }
@@ -801,8 +836,8 @@ final class MenuBarModel: ObservableObject {
         guard !isTestingConnection else { return }
         isTestingConnection = true
         compatibilityReport = nil
-        connectionTestMessage = "正在测试 Translation 协议"
-        configurationError = nil
+        connectionTestMessageValue = .key(.testingTranslationProtocol)
+        configurationErrorValue = nil
         defer { isTestingConnection = false }
 
         do {
@@ -822,10 +857,10 @@ final class MenuBarModel: ObservableObject {
                 speechSample: nil
             )
             compatibilityReport = report
-            connectionTestMessage = Self.message(for: report)
+            connectionTestMessageValue = Self.message(for: report)
         } catch {
-            configurationError = String(describing: error)
-            connectionTestMessage = "连接测试失败：\(error)"
+            configurationErrorValue = Self.configurationMessage(for: error)
+            connectionTestMessageValue = Self.connectionFailureMessage(for: error)
         }
     }
 
@@ -906,38 +941,38 @@ final class MenuBarModel: ObservableObject {
     private func refreshAudioInputDiagnostic() async {
         let sample = await audioDiagnostics.sampleInput()
         audioInputDiagnosticLevel = sample.level
-        audioInputDiagnosticText = switch sample.state {
+        audioInputDiagnosticValue = switch sample.state {
         case .stopped:
-            "未测试"
+            .key(.notTested)
         case .waitingForFrames:
             Self.inputTransportStatus(sample.transportDiagnostics)
         case .receivingSilence:
-            "设备已连接，等待声音"
+            .key(.microphoneConnectedWaiting)
         case .receivingAudio:
-            "已检测到麦克风输入"
+            .key(.microphoneDetected)
         }
     }
 
     private static func inputTransportStatus(
         _ diagnostics: AudioInputTransportDiagnostics
-    ) -> String {
-        guard diagnostics.isAvailable else { return "未收到音频帧" }
+    ) -> AppMessage {
+        guard diagnostics.isAvailable else { return .key(.noAudioFrames) }
         if diagnostics.oversizedCallbackCount > 0 {
-            return "输入帧超过缓冲区（"
-                + "\(diagnostics.lastCallbackFrameCount) > "
-                + "\(diagnostics.scratchCapacityFrames)）"
+            return .inputOversized(
+                callbackFrames: Int(diagnostics.lastCallbackFrameCount),
+                capacityFrames: Int(diagnostics.scratchCapacityFrames)
+            )
         }
         if diagnostics.renderErrorCount > 0 {
-            return "读取音频失败（OSStatus "
-                + "\(diagnostics.lastRenderStatus)）"
+            return .audioReadFailed(status: diagnostics.lastRenderStatus)
         }
         if diagnostics.callbackCount == 0 {
-            return "设备未触发输入回调"
+            return .key(.inputCallbackMissing)
         }
         if diagnostics.writtenFrameCount == 0 {
-            return "输入回调未写入音频"
+            return .key(.inputCallbackDidNotWrite)
         }
-        return "等待下一批音频帧"
+        return .key(.waitingForAudioFrames)
     }
 
     private func stopAudioInputTest(resetStatus: Bool) async {
@@ -947,7 +982,7 @@ final class MenuBarModel: ObservableObject {
         isTestingAudioInput = false
         audioInputDiagnosticLevel = 0
         if resetStatus {
-            audioInputDiagnosticText = "未测试"
+            audioInputDiagnosticValue = .key(.notTested)
         }
     }
 
@@ -1022,7 +1057,7 @@ final class MenuBarModel: ObservableObject {
                         outboundLevel = levels.outbound
                     }
                 case .audioBackpressure(let droppedFrames):
-                    inventoryError = "音频输出繁忙，已丢弃 \(droppedFrames) 帧"
+                    inventoryErrorValue = .droppedFrames(droppedFrames)
                 case .stopped:
                     coordinatorState = TranslationCoordinatorState()
                     resetRuntimePresentation()
@@ -1041,11 +1076,38 @@ final class MenuBarModel: ObservableObject {
         isStopping = false
     }
 
+    private static func configurationMessage(for error: Error) -> AppMessage {
+        if let error = error as? MenuBarConfigurationError {
+            return error.appMessage
+        }
+        if let error = error as? AudioDiagnosticPresentationError {
+            return error.appMessage
+        }
+        return .raw(String(describing: error))
+    }
+
+    private static func audioDiagnosticMessage(for error: Error) -> AppMessage {
+        if let error = error as? MenuBarConfigurationError {
+            return error.appMessage
+        }
+        if let error = error as? AudioDiagnosticPresentationError {
+            return error.appMessage
+        }
+        return .detail(.audioDiagnosticFailed, String(describing: error))
+    }
+
+    private static func connectionFailureMessage(for error: Error) -> AppMessage {
+        if error is MenuBarConfigurationError {
+            return .key(.connectionTestFailed)
+        }
+        return .detail(.connectionTestFailed, String(describing: error))
+    }
+
     private static func message(
         for report: TranslationCompatibilityReport
-    ) -> String {
+    ) -> AppMessage {
         if report.isFullyCompatible {
-            return "Translation 协议与音频能力均兼容"
+            return .key(.protocolFullyCompatible)
         }
         let statuses = [
             report.authentication,
@@ -1062,15 +1124,15 @@ final class MenuBarModel: ObservableObject {
         }
         let needsAudio = statuses.contains(.requiresInteractiveAudio)
         if !hasFailure && needsAudio {
-            return "Translation 协议连接通过，需要音频测试"
+            return .key(.protocolNeedsAudioTest)
         }
-        return "Translation 协议不兼容"
+        return .key(.protocolIncompatible)
     }
 
     static func text(
         for state: TranslationChannelState,
         channel: MenuBarChannel,
-        copy: AppCopy = AppCopy(language: .zhHans)
+        copy: AppCopy
     ) -> String {
         switch state {
         case .stopped: copy.text(.stopped)
@@ -1087,33 +1149,36 @@ final class MenuBarModel: ObservableObject {
     }
 }
 
-private enum MenuBarConfigurationError: Error, CustomStringConvertible {
+private enum MenuBarConfigurationError: Error {
     case invalidBaseURL
     case modelRequired
     case apiKeyRequired
     case microphoneAccessDenied
     case microphoneAccessRestricted
 
-    var description: String {
+    var appMessage: AppMessage {
         switch self {
-        case .invalidBaseURL: "Base URL 必须是有效的 HTTPS 或 WSS 地址"
-        case .modelRequired: "模型名称不能为空"
-        case .apiKeyRequired: "API Key 未写入 Keychain"
+        case .invalidBaseURL:
+            .key(.invalidBaseURLError)
+        case .modelRequired:
+            .key(.modelRequiredError)
+        case .apiKeyRequired:
+            .key(.apiKeyRequiredError)
         case .microphoneAccessDenied:
-            "麦克风权限未开启，请在系统设置的隐私与安全性中允许 EMKE Translation"
+            .key(.microphonePermissionDenied)
         case .microphoneAccessRestricted:
-            "当前系统策略限制了麦克风访问"
+            .key(.microphonePermissionRestricted)
         }
     }
 }
 
-private enum AudioDiagnosticPresentationError: Error, CustomStringConvertible {
+private enum AudioDiagnosticPresentationError: Error {
     case outputBackpressure
 
-    var description: String {
+    var appMessage: AppMessage {
         switch self {
         case .outputBackpressure:
-            "测试音未完整写入所选输出设备"
+            .key(.outputTestBackpressure)
         }
     }
 }

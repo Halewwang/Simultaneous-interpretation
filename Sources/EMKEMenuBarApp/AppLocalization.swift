@@ -80,6 +80,33 @@ enum AppCopyKey: CaseIterable, Sendable {
     case noTranslationNeeded
     case outboundSameLanguageNoTranslation
     case muted
+    case keySaved
+    case keyNotSaved
+    case keychainReadFailed
+    case microphoneTestFailed
+    case speakerTestFailed
+    case testTonePlaying
+    case testTonePlayed
+    case notTested
+    case microphoneConnectedWaiting
+    case microphoneDetected
+    case noAudioFrames
+    case inputCallbackMissing
+    case inputCallbackDidNotWrite
+    case waitingForAudioFrames
+    case testingTranslationProtocol
+    case connectionTestFailed
+    case protocolFullyCompatible
+    case protocolNeedsAudioTest
+    case protocolIncompatible
+    case audioOutputBusy
+    case invalidBaseURLError
+    case modelRequiredError
+    case apiKeyRequiredError
+    case microphonePermissionDenied
+    case microphonePermissionRestricted
+    case outputTestBackpressure
+    case audioDiagnosticFailed
 }
 
 struct AppCopy: Equatable, Sendable {
@@ -209,6 +236,117 @@ struct AppCopy: Equatable, Sendable {
             )
         case .muted:
             localized(zhHans: "已静音", english: "Muted")
+        case .keySaved:
+            localized(zhHans: "已存入 Keychain", english: "Saved in Keychain")
+        case .keyNotSaved:
+            localized(zhHans: "尚未保存", english: "Not saved")
+        case .keychainReadFailed:
+            localized(
+                zhHans: "无法读取 Keychain",
+                english: "Could not read Keychain"
+            )
+        case .microphoneTestFailed:
+            localized(zhHans: "麦克风测试失败", english: "Microphone test failed")
+        case .speakerTestFailed:
+            localized(zhHans: "扬声器测试失败", english: "Speaker test failed")
+        case .testTonePlaying:
+            localized(zhHans: "正在播放测试音…", english: "Playing test tone…")
+        case .testTonePlayed:
+            localized(zhHans: "测试音已播放", english: "Test tone played")
+        case .notTested:
+            localized(zhHans: "未测试", english: "Not tested")
+        case .microphoneConnectedWaiting:
+            localized(
+                zhHans: "设备已连接，等待声音",
+                english: "Device connected; waiting for sound"
+            )
+        case .microphoneDetected:
+            localized(
+                zhHans: "已检测到麦克风输入",
+                english: "Microphone input detected"
+            )
+        case .noAudioFrames:
+            localized(
+                zhHans: "未收到音频帧",
+                english: "No audio frames received"
+            )
+        case .inputCallbackMissing:
+            localized(
+                zhHans: "设备未触发输入回调",
+                english: "Device did not trigger an input callback"
+            )
+        case .inputCallbackDidNotWrite:
+            localized(
+                zhHans: "输入回调未写入音频",
+                english: "Input callback did not write audio"
+            )
+        case .waitingForAudioFrames:
+            localized(
+                zhHans: "等待下一批音频帧",
+                english: "Waiting for the next audio frames"
+            )
+        case .testingTranslationProtocol:
+            localized(
+                zhHans: "正在测试 Translation 协议",
+                english: "Testing Translation protocol"
+            )
+        case .connectionTestFailed:
+            localized(
+                zhHans: "连接测试失败",
+                english: "Connection test failed"
+            )
+        case .protocolFullyCompatible:
+            localized(
+                zhHans: "Translation 协议与音频能力均兼容",
+                english: "Translation protocol and audio capabilities are compatible"
+            )
+        case .protocolNeedsAudioTest:
+            localized(
+                zhHans: "Translation 协议连接通过，需要音频测试",
+                english: "Translation protocol connected; audio test required"
+            )
+        case .protocolIncompatible:
+            localized(
+                zhHans: "Translation 协议不兼容",
+                english: "Translation protocol is incompatible"
+            )
+        case .audioOutputBusy:
+            localized(zhHans: "音频输出繁忙", english: "Audio output busy")
+        case .invalidBaseURLError:
+            localized(
+                zhHans: "Base URL 必须是有效的 HTTPS 或 WSS 地址",
+                english: "Base URL must be a valid HTTPS or WSS address"
+            )
+        case .modelRequiredError:
+            localized(
+                zhHans: "模型名称不能为空",
+                english: "Model name cannot be empty"
+            )
+        case .apiKeyRequiredError:
+            localized(
+                zhHans: "API Key 未写入 Keychain",
+                english: "API key is not stored in Keychain"
+            )
+        case .microphonePermissionDenied:
+            localized(
+                zhHans: "麦克风权限未开启，请在系统设置的隐私与安全性中允许 EMKE Translation",
+                english: "Allow EMKE Translation to use the microphone in Privacy & Security settings"
+            )
+        case .microphonePermissionRestricted:
+            localized(
+                zhHans: "当前系统策略限制了麦克风访问",
+                english: "The current system policy restricts microphone access"
+            )
+        case .outputTestBackpressure:
+            localized(
+                zhHans: "测试音未完整写入所选输出设备",
+                english: "The test tone was not fully written to the selected output device"
+            )
+        case .audioDiagnosticFailed:
+            localized(
+                zhHans: "本地音频诊断失败",
+                english: "Local audio diagnostic failed"
+            )
         }
     }
 

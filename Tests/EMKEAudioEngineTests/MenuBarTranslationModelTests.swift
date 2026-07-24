@@ -937,6 +937,27 @@ func localOutputDiagnosticTargetsSelectedPhysicalDevice() async {
 }
 
 @Test @MainActor
+func diagnosticAndConnectionMessagesReRenderAfterLanguageChange() async {
+    let diagnostics = AudioDiagnosticsStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(state: .authorized),
+        audioDiagnostics: diagnostics,
+        audioOutputTestDelay: {}
+    )
+    model.selectedOutputUID = "physical.output"
+    model.interfaceLanguage = .zhHans
+    await model.playAudioOutputTest()
+    #expect(model.audioOutputDiagnosticText == "测试音已播放")
+    model.interfaceLanguage = .english
+    #expect(model.audioOutputDiagnosticText == "Test tone played")
+}
+
+@Test @MainActor
 func connectionTestPreservesPartialCompatibilityResult() async {
     let model = makeTranslationMenuModel(secret: "stored-key")
     await model.loadConfiguration()
@@ -1084,7 +1105,8 @@ func outboundFailureIsPresentedAsMuted() {
     #expect(
         MenuBarModel.text(
             for: .failed(message: "offline"),
-            channel: .outbound
+            channel: .outbound,
+            copy: AppCopy(language: .zhHans)
         ) == "已静音"
     )
 }
@@ -1094,9 +1116,31 @@ func inboundFailureIsPresentedAsOriginalAudio() {
     #expect(
         MenuBarModel.text(
             for: .failed(message: "offline"),
-            channel: .inbound
+            channel: .inbound,
+            copy: AppCopy(language: .zhHans)
         ) == "播放原音"
     )
+}
+
+@Test @MainActor
+func modelStatusHelpersReRenderAfterLanguageChange() async throws {
+    let model = makeTranslationMenuModel(secret: "test-key")
+    await configureAndStart(model)
+    let startedAt = try #require(model.translationStartedAt)
+
+    model.interfaceLanguage = .zhHans
+    #expect(model.statusText == "翻译中")
+    #expect(model.inboundStatusText == "翻译中")
+    #expect(model.outboundStatusText == "翻译中")
+    #expect(model.dashboardStatusText(at: startedAt) == "翻译中 · 00:00")
+
+    model.interfaceLanguage = .english
+    #expect(model.statusText == "Translating")
+    #expect(model.inboundStatusText == "Translating")
+    #expect(model.outboundStatusText == "Translating")
+    #expect(model.dashboardStatusText(at: startedAt) == "Translating · 00:00")
+
+    await model.stop()
 }
 
 @Test @MainActor

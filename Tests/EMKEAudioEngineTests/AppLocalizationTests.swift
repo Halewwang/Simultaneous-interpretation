@@ -68,3 +68,10 @@ func dynamicCopyUsesLocalizedLanguageNamesAndDirections() {
     #expect(chineseCopy.outboundDirection(from: .chinese, to: .german) == "中文 → 德语")
     #expect(englishCopy.outboundDirection(from: .english, to: .chinese) == "English → Chinese")
 }
+
+@Test
+func semanticMessageKeepsRawDetailButLocalizesItsPrefix() {
+    let message = AppMessage.detail(.keychainReadFailed, "OSStatus -50")
+    #expect(message.text(using: AppCopy(language: .zhHans)) == "无法读取 Keychain：OSStatus -50")
+    #expect(message.text(using: AppCopy(language: .english)) == "Could not read Keychain: OSStatus -50")
+}
