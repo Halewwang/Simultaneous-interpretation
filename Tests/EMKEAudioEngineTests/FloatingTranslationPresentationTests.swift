@@ -89,6 +89,68 @@ func idleFloatingPresentationIsHidden() {
     #expect(!value.stopEnabled)
 }
 
+@Test(arguments: [
+    TranslationChannelState.connecting,
+    TranslationChannelState.active,
+    TranslationChannelState.bypassed,
+    TranslationChannelState.reconnecting(attempt: 1),
+    TranslationChannelState.failed(message: "offline"),
+])
+func nonRunningNonStoppedChannelKeepsFloatingPresentationActive(
+    channelState: TranslationChannelState
+) {
+    let states = [
+        TranslationCoordinatorState(
+            isRunning: false,
+            inbound: channelState,
+            outbound: .stopped
+        ),
+        TranslationCoordinatorState(
+            isRunning: false,
+            inbound: .stopped,
+            outbound: channelState
+        ),
+    ]
+
+    for state in states {
+        let value = makeFloatingPresentation(
+            coordinatorState: state,
+            translationStartedAt: floatingNow.addingTimeInterval(-65)
+        )
+
+        #expect(value.isVisible)
+        #expect(value.elapsed == "01:05")
+        #expect(value.stopEnabled)
+    }
+}
+
+@Test
+func nonRunningFailedSessionUsesDegradedStatus() {
+    let inboundFailure = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: false,
+            inbound: .failed(message: "inbound offline"),
+            outbound: .stopped
+        )
+    )
+    let outboundFailure = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: false,
+            inbound: .stopped,
+            outbound: .failed(message: "outbound offline")
+        )
+    )
+
+    #expect(inboundFailure.isVisible)
+    #expect(inboundFailure.status == "Original")
+    #expect(inboundFailure.tone == .degraded)
+    #expect(inboundFailure.stopEnabled)
+    #expect(outboundFailure.isVisible)
+    #expect(outboundFailure.status == "Muted")
+    #expect(outboundFailure.tone == .degraded)
+    #expect(outboundFailure.stopEnabled)
+}
+
 @Test
 func startingFloatingPresentationIsVisibleNeutralAndCannotStop() {
     let value = makeFloatingPresentation(

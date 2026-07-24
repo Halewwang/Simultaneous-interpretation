@@ -795,10 +795,12 @@ final class MenuBarModel: ObservableObject {
         isStopping = true
         defer { isStopping = false }
         await coordinator.stop()
-        eventTask?.cancel()
-        eventTask = nil
-        coordinatorState = TranslationCoordinatorState()
-        resetRuntimePresentation()
+        let state = await coordinator.currentState()
+        coordinatorState = state
+        guard !state.hasActivePresentation else {
+            return
+        }
+        finishCoordinatorSession()
     }
 
     func startAudioInputTest() async {
@@ -1082,6 +1084,10 @@ final class MenuBarModel: ObservableObject {
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
+                    if !state.hasActivePresentation {
+                        finishCoordinatorSession()
+                        return
+                    }
                 case .audioLevels(let levels):
                     if hasVisibleAudioLevelSurface {
                         inboundLevel = levels.inbound
@@ -1090,12 +1096,19 @@ final class MenuBarModel: ObservableObject {
                 case .audioBackpressure(let droppedFrames):
                     inventoryErrorValue = .droppedFrames(droppedFrames)
                 case .stopped:
-                    coordinatorState = TranslationCoordinatorState()
-                    resetRuntimePresentation()
+                    finishCoordinatorSession()
                     return
                 }
             }
         }
+    }
+
+    private func finishCoordinatorSession() {
+        let task = eventTask
+        eventTask = nil
+        task?.cancel()
+        coordinatorState = TranslationCoordinatorState()
+        resetRuntimePresentation()
     }
 
     private func synchronizeAudioLevelVisibility() async {

@@ -178,9 +178,14 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private(set) var maximumConcurrentAudioLevelWrites = 0
     private var audioLevelWritesInFlight = 0
     private let audioLevelVisibilityGate: AudioLevelVisibilityGate?
+    private let stopResultState: TranslationCoordinatorState?
 
-    init(audioLevelVisibilityGate: AudioLevelVisibilityGate? = nil) {
+    init(
+        audioLevelVisibilityGate: AudioLevelVisibilityGate? = nil,
+        stopResultState: TranslationCoordinatorState? = nil
+    ) {
         self.audioLevelVisibilityGate = audioLevelVisibilityGate
+        self.stopResultState = stopResultState
     }
 
     func start(
@@ -198,6 +203,10 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     }
 
     func stop() async {
+        if let stopResultState {
+            current = stopResultState
+            return
+        }
         current = TranslationCoordinatorState()
         let waiters = eventWaiters
         eventWaiters.removeAll()
@@ -216,6 +225,14 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     }
 
     func emit(_ event: TranslationCoordinatorEvent) {
+        switch event {
+        case .stateChanged(let state):
+            current = state
+        case .stopped:
+            current = TranslationCoordinatorState()
+        case .audioLevels, .audioBackpressure:
+            break
+        }
         if eventWaiters.isEmpty {
             queuedEvents.append(event)
         } else {
@@ -1359,6 +1376,110 @@ func stoppingClearsLevelsAndRunStartDate() async {
     #expect(model.inboundLevel == 0)
     #expect(model.outboundLevel == 0)
     #expect(model.translationStartedAt == nil)
+    #expect(!model.coordinatorState.isRunning)
+    #expect(!model.floatingPresentation(at: .now).isVisible)
+}
+
+@Test @MainActor
+func stopPreservesRunningFailureUntilStoppedEvent() async throws {
+    let retainedState = TranslationCoordinatorState(
+        isRunning: true,
+        inbound: .active,
+        outbound: .failed(message: "stop incomplete")
+    )
+    let coordinator = TranslationCoordinatorStub(
+        stopResultState: retainedState
+    )
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    model.interfaceLanguage = .english
+    let startedAt = try #require(model.translationStartedAt)
+
+    await model.stop()
+
+    try #require(model.coordinatorState == retainedState)
+    #expect(model.translationStartedAt == startedAt)
+    var presentation = model.floatingPresentation(at: startedAt)
+    #expect(presentation.isVisible)
+    #expect(presentation.status == "Muted")
+    #expect(presentation.stopEnabled)
+
+    let followUpState = TranslationCoordinatorState(
+        isRunning: true,
+        inbound: .reconnecting(attempt: 1),
+        outbound: .failed(message: "still stopping")
+    )
+    let stateChangedObserved = Task { @MainActor in
+        for await state in model.$coordinatorState.values {
+            if state == followUpState {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.stateChanged(followUpState))
+    await stateChangedObserved.value
+    #expect(model.coordinatorState == followUpState)
+
+    let runtimeCleared = Task { @MainActor in
+        for await value in model.$translationStartedAt.values {
+            if value == nil {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.stopped)
+    await runtimeCleared.value
+
+    presentation = model.floatingPresentation(at: startedAt)
+    #expect(!model.coordinatorState.isRunning)
+    #expect(model.translationStartedAt == nil)
+    #expect(!presentation.isVisible)
+}
+
+@Test @MainActor
+func stopPreservesNonRunningFailureUntilInactiveStateEvent() async throws {
+    let retainedState = TranslationCoordinatorState(
+        isRunning: false,
+        inbound: .failed(message: "stop incomplete"),
+        outbound: .stopped
+    )
+    let coordinator = TranslationCoordinatorStub(
+        stopResultState: retainedState
+    )
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    model.interfaceLanguage = .english
+    let startedAt = try #require(model.translationStartedAt)
+
+    await model.stop()
+
+    try #require(model.coordinatorState == retainedState)
+    #expect(model.translationStartedAt == startedAt)
+    var presentation = model.floatingPresentation(at: startedAt)
+    #expect(presentation.isVisible)
+    #expect(presentation.status == "Original")
+    #expect(presentation.stopEnabled)
+
+    let runtimeCleared = Task { @MainActor in
+        for await value in model.$translationStartedAt.values {
+            if value == nil {
+                return
+            }
+        }
+    }
+    await coordinator.emit(.stateChanged(TranslationCoordinatorState()))
+    await runtimeCleared.value
+
+    presentation = model.floatingPresentation(at: startedAt)
+    #expect(model.coordinatorState == TranslationCoordinatorState())
+    #expect(model.translationStartedAt == nil)
+    #expect(!presentation.isVisible)
 }
 
 @Test @MainActor

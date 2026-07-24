@@ -263,7 +263,12 @@ func floatingPanelLifecycleCoalescesRefreshAndPlacesOnlyOnce() throws {
     #expect(!source.contains("model.objectWillChange"))
     #expect(source.contains("model.$isStarting"))
     #expect(source.contains("model.$isStopping"))
-    #expect(source.contains("model.$coordinatorState.map(\\.isRunning)"))
+    #expect(
+        source.contains(
+            "coordinatorState: model.$coordinatorState.eraseToAnyPublisher()"
+        )
+    )
+    #expect(source.contains("state.hasActivePresentation"))
     #expect(source.contains(".removeDuplicates()"))
     #expect(source.contains("await Task.yield()"))
     #expect(source.contains("refreshTask?.cancel()"))

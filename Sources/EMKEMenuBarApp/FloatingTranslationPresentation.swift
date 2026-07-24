@@ -1,6 +1,12 @@
 import EMKECoordinator
 import Foundation
 
+extension TranslationCoordinatorState {
+    var hasActivePresentation: Bool {
+        isRunning || inbound != .stopped || outbound != .stopped
+    }
+}
+
 enum FloatingTranslationTone: Equatable, Sendable {
     case neutral
     case healthy
@@ -30,11 +36,11 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
         hasFatalSessionError: Bool,
         copy: AppCopy
     ) -> Self {
-        let running = coordinatorState.isRunning
-        let visible = isStarting || running || isStopping
+        let active = coordinatorState.hasActivePresentation
+        let visible = isStarting || active || isStopping
         let safeInboundLevel = inboundLevel.isFinite ? inboundLevel : 0
         let safeOutboundLevel = outboundLevel.isFinite ? outboundLevel : 0
-        let elapsed = running
+        let elapsed = active
             ? MenuBarModel.formatElapsed(
                 seconds: now.timeIntervalSince(translationStartedAt ?? now)
             )
@@ -47,22 +53,22 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
         if isStopping {
             let status = copy.text(.stopping)
             statusAndTone = (status, status, .neutral)
-        } else if isStarting && !running {
+        } else if isStarting && !active {
             let status = copy.text(.connecting)
             statusAndTone = (status, status, .neutral)
-        } else if running, hasFatalSessionError {
+        } else if active, hasFatalSessionError {
             statusAndTone = (
                 copy.text(.floatingTranslationError),
                 copy.text(.translationError),
                 .failure
             )
-        } else if running, case .failed = coordinatorState.outbound {
+        } else if active, case .failed = coordinatorState.outbound {
             statusAndTone = (
                 copy.text(.floatingOutboundMuted),
                 copy.text(.outboundMuted),
                 .degraded
             )
-        } else if running, case .failed = coordinatorState.inbound {
+        } else if active, case .failed = coordinatorState.inbound {
             statusAndTone = (
                 copy.text(.floatingInboundOriginal),
                 copy.text(.inboundOriginal),
@@ -77,10 +83,10 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
             tone: statusAndTone.tone,
             status: statusAndTone.visible,
             statusAccessibilityLabel: statusAndTone.accessible,
-            showsActivityPulse: isStarting && !running && !isStopping,
+            showsActivityPulse: isStarting && !active && !isStopping,
             elapsed: elapsed,
             level: min(max(max(safeInboundLevel, safeOutboundLevel), 0), 1),
-            stopEnabled: running && !isStopping,
+            stopEnabled: active && !isStopping,
             stopAccessibilityLabel: copy.text(.stopTranslation)
         )
     }

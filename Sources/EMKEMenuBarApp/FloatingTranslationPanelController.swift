@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import EMKECoordinator
 import SwiftUI
 
 enum FloatingTranslationPanelPlacement {
@@ -29,11 +30,11 @@ enum FloatingTranslationPanelVisibilityPublisher {
     static func make(
         isStarting: AnyPublisher<Bool, Never>,
         isStopping: AnyPublisher<Bool, Never>,
-        isRunning: AnyPublisher<Bool, Never>
+        coordinatorState: AnyPublisher<TranslationCoordinatorState, Never>
     ) -> AnyPublisher<Bool, Never> {
-        Publishers.CombineLatest3(isStarting, isStopping, isRunning)
-            .map { starting, stopping, running in
-                starting || stopping || running
+        Publishers.CombineLatest3(isStarting, isStopping, coordinatorState)
+            .map { starting, stopping, state in
+                starting || stopping || state.hasActivePresentation
             }
             .removeDuplicates()
             .eraseToAnyPublisher()
@@ -101,7 +102,9 @@ final class FloatingTranslationPanelController: ObservableObject {
         panel.collectionBehavior = [
             .canJoinAllSpaces,
             .fullScreenAuxiliary,
+            .ignoresCycle,
         ]
+        panel.isExcludedFromWindowsMenu = true
         panel.isMovableByWindowBackground = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -116,8 +119,7 @@ final class FloatingTranslationPanelController: ObservableObject {
             .make(
                 isStarting: model.$isStarting.eraseToAnyPublisher(),
                 isStopping: model.$isStopping.eraseToAnyPublisher(),
-                isRunning: model.$coordinatorState.map(\.isRunning)
-                    .eraseToAnyPublisher()
+                coordinatorState: model.$coordinatorState.eraseToAnyPublisher()
             )
             .sink { [weak self] desiredVisibility in
                 MainActor.assumeIsolated {

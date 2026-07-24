@@ -15,6 +15,8 @@ func floatingPanelUsesNonActivatingCrossSpaceContract() {
     #expect(panel.level == .floating)
     #expect(panel.collectionBehavior.contains(.canJoinAllSpaces))
     #expect(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+    #expect(panel.collectionBehavior.contains(.ignoresCycle))
+    #expect(panel.isExcludedFromWindowsMenu)
     #expect(panel.isMovableByWindowBackground)
     #expect(!panel.canBecomeKey)
     #expect(!panel.canBecomeMain)
@@ -79,23 +81,34 @@ func floatingPanelContentModeKeepsOnlyActiveLifecycleStatesLive() {
 func floatingVisibilityPublisherEmitsOnlyLifecycleBoundaries() {
     let isStarting = CurrentValueSubject<Bool, Never>(false)
     let isStopping = CurrentValueSubject<Bool, Never>(false)
-    let isRunning = CurrentValueSubject<Bool, Never>(false)
+    let coordinatorState = CurrentValueSubject<
+        TranslationCoordinatorState,
+        Never
+    >(TranslationCoordinatorState())
     var values: [Bool] = []
     let observation = FloatingTranslationPanelVisibilityPublisher.make(
         isStarting: isStarting.eraseToAnyPublisher(),
         isStopping: isStopping.eraseToAnyPublisher(),
-        isRunning: isRunning.eraseToAnyPublisher()
+        coordinatorState: coordinatorState.eraseToAnyPublisher()
     )
     .sink { values.append($0) }
 
+    coordinatorState.send(
+        TranslationCoordinatorState(
+            isRunning: false,
+            inbound: .failed(message: "stop incomplete"),
+            outbound: .stopped
+        )
+    )
+    coordinatorState.send(TranslationCoordinatorState())
     isStarting.send(true)
-    isRunning.send(true)
+    coordinatorState.send(TranslationCoordinatorState(isRunning: true))
     isStarting.send(false)
     isStopping.send(true)
-    isRunning.send(false)
+    coordinatorState.send(TranslationCoordinatorState())
     isStopping.send(false)
 
-    #expect(values == [false, true, false])
+    #expect(values == [false, true, false, true, false])
     withExtendedLifetime(observation) {}
 }
 
