@@ -211,6 +211,56 @@ func menuBarUsesTheApprovedLogoInsteadOfAStatusSymbol() throws {
     #expect(!source.contains("systemImage: model.systemImage"))
 }
 
+@Test
+func menuBarAppSharesOneModelWithFloatingPanel() throws {
+    let source = try sourceFile(named: "EMKEMenuBarApp.swift")
+
+    #expect(
+        source.components(
+            separatedBy: "let model = MenuBarModel("
+        ).count - 1 == 1
+    )
+    #expect(source.contains("deferInitialDeviceReload: true"))
+    #expect(source.contains("_model = StateObject(wrappedValue: model)"))
+    #expect(
+        source.contains(
+            "FloatingTranslationPanelController(model: model)"
+        )
+    )
+    #expect(source.contains("MenuBarRootView(model: model)"))
+}
+
+@Test
+func floatingPanelHostsTheSharedModelAndWiresStop() throws {
+    let source = try sourceFile(
+        named: "FloatingTranslationPanelController.swift"
+    )
+
+    #expect(source.contains("@ObservedObject var model: MenuBarModel"))
+    #expect(source.contains("TimelineView(.periodic(from: .now, by: 1))"))
+    #expect(
+        source.contains(
+            "model.floatingPresentation(at: context.date)"
+        )
+    )
+    #expect(source.contains("Task { await model.stop() }"))
+}
+
+@Test
+func floatingPanelLifecycleCoalescesRefreshAndPlacesOnlyOnce() throws {
+    let source = try sourceFile(
+        named: "FloatingTranslationPanelController.swift"
+    )
+
+    #expect(source.contains("model.objectWillChange"))
+    #expect(source.contains("await Task.yield()"))
+    #expect(source.contains("refreshTask?.cancel()"))
+    #expect(source.contains("guard !hasPlacedPanel"))
+    #expect(source.contains("orderFrontRegardless()"))
+    #expect(source.contains("orderOut(nil)"))
+    #expect(source.contains("setFloatingWindowVisible(desiredVisibility)"))
+}
+
 @Test @MainActor
 func approvedMenuBarLogoUsesTemplateImageSizing() {
     #expect(MenuBarLogo.image.size == NSSize(width: 18, height: 18))
