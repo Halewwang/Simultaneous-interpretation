@@ -273,7 +273,14 @@ func floatingPanelLifecycleCoalescesRefreshAndPlacesOnlyOnce() throws {
     #expect(source.contains("orderOut(nil)"))
     #expect(source.contains("setFloatingWindowVisible(desiredVisibility)"))
     #expect(source.contains("deinit"))
+    #expect(source.contains("visibilityObservation?.cancel()"))
     #expect(source.contains("visibilitySyncTask?.cancel()"))
+    #expect(
+        source.contains(
+            "resetFloatingVisibilityAfterTeardown(model: model)"
+        )
+    )
+    #expect(!source.contains("nonisolated(unsafe)"))
 }
 
 @Test @MainActor

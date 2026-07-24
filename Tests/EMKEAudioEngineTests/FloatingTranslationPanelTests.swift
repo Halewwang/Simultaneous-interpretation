@@ -115,6 +115,34 @@ func unrelatedModelChangesDoNotSchedulePanelVisibilityRefresh() async {
     #expect(!controller.panelForTesting.isVisible)
 }
 
+@Test @MainActor
+func floatingPanelControllerTeardownResetsSharedModelVisibility() async {
+    let model = MenuBarModel(deferInitialDeviceReload: true)
+    await model.setFloatingWindowVisible(true)
+    var observedReset = false
+    let observation = model.$isFloatingWindowVisible
+        .dropFirst()
+        .filter { !$0 }
+        .prefix(1)
+        .sink { _ in observedReset = true }
+    var controller: FloatingTranslationPanelController? =
+        FloatingTranslationPanelController(model: model)
+    weak let weakController = controller
+
+    controller = nil
+    for _ in 0..<100 where !observedReset {
+        await Task.yield()
+    }
+
+    #expect(weakController == nil)
+    #expect(observedReset)
+    #expect(!model.isFloatingWindowVisible)
+    #expect(!model.hasVisibleAudioLevelSurface)
+    #expect(model.inboundLevel == 0)
+    #expect(model.outboundLevel == 0)
+    withExtendedLifetime(observation) {}
+}
+
 private func panelPresentation(
     coordinatorState: TranslationCoordinatorState =
         TranslationCoordinatorState(),

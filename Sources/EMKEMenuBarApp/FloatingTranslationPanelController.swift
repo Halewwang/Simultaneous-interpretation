@@ -126,13 +126,23 @@ final class FloatingTranslationPanelController: ObservableObject {
             }
     }
 
-    deinit {
+    isolated deinit {
+        visibilityObservation?.cancel()
         refreshTask?.cancel()
         visibilitySyncTask?.cancel()
+        Self.resetFloatingVisibilityAfterTeardown(model: model)
     }
 
     var panelForTesting: NSPanel {
         panel
+    }
+
+    nonisolated static func resetFloatingVisibilityAfterTeardown(
+        model: MenuBarModel
+    ) {
+        Task { @MainActor [model] in
+            await model.setFloatingWindowVisible(false)
+        }
     }
 
     private func scheduleRefresh(to desiredVisibility: Bool) {
