@@ -198,6 +198,16 @@ func englishReadyDashboardKeepsApprovedRenderDimensions() throws {
     try writeQACapture(bitmap, named: "dashboard-ready-en.tiff")
 }
 
+@Test
+func dashboardFooterUsesExactBrandCopyAcrossRenderLanguages() {
+    for language in [ResolvedInterfaceLanguage.zhHans, .english] {
+        let copy = AppCopy(language: language)
+        let presentation = DashboardFixture.ready.makePresentation(copy: copy)
+
+        #expect(presentation.privacyText == "Powered by Eager")
+    }
+}
+
 @Test @MainActor
 func settingsRenderInBothInterfaceLanguagesAtApprovedDimensions() throws {
     for (language, filename) in [

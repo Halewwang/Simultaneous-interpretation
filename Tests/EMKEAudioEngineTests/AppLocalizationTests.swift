@@ -45,6 +45,18 @@ func everyStaticCopyKeyHasChineseAndEnglishText() {
 }
 
 @Test
+func dashboardBrandFooterIsExactInBothLanguages() {
+    #expect(
+        AppCopy(language: .zhHans).text(.audioDirectToProvider)
+            == "Powered by Eager"
+    )
+    #expect(
+        AppCopy(language: .english).text(.audioDirectToProvider)
+            == "Powered by Eager"
+    )
+}
+
+@Test
 func floatingStatusCopyUsesExactCompactChineseAndEnglishLabels() {
     let chinese = AppCopy(language: .zhHans)
     let english = AppCopy(language: .english)

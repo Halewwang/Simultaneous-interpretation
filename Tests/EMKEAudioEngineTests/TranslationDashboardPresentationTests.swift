@@ -252,7 +252,7 @@ func dashboardPresentationRendersCompleteEnglishCopy() {
     #expect(value.outputLanguageName == "German")
     #expect(value.inboundDirection == "Other → Chinese")
     #expect(value.outboundDirection == "Chinese → German")
-    #expect(value.privacyText == "Audio connects directly to your provider")
+    #expect(value.privacyText == "Powered by Eager")
 }
 
 @Test

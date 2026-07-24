@@ -181,8 +181,11 @@ struct TranslationSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             Divider().opacity(EMKEVisualStyle.dividerOpacity)
             VStack(alignment: .leading, spacing: 4) {
-                Text(copy.text(.localAudioDiagnostics))
-                    .font(.system(size: 13, weight: .semibold))
+                Label(
+                    copy.text(.localAudioDiagnostics),
+                    systemImage: "waveform.badge.magnifyingglass"
+                )
+                .font(.system(size: 13, weight: .semibold))
                 Text(copy.text(.localAudioOnly))
                     .font(.system(size: 11))
                     .foregroundStyle(EMKEVisualStyle.secondaryText)

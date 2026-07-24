@@ -162,7 +162,11 @@ struct TranslationDashboardContent: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 7) {
+            Image(nsImage: MenuBarLogo.image)
+                .resizable()
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
             Text("EMKE Translation")
                 .font(
                     .system(

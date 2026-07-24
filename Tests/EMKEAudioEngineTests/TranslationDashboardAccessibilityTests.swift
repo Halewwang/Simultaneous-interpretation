@@ -102,6 +102,22 @@ func dashboardIconsAndStatusExposeAccessibleCopy() throws {
 }
 
 @Test
+func dashboardHeaderUsesApprovedProductLogo() throws {
+    let source = try sourceFile(named: "TranslationDashboardView.swift")
+
+    #expect(source.contains("Image(nsImage: MenuBarLogo.image)"))
+    #expect(source.contains(".accessibilityHidden(true)"))
+}
+
+@Test
+func localAudioDiagnosticsUsesRequestedTitleIcon() throws {
+    let source = try sourceFile(named: "TranslationSettingsView.swift")
+
+    #expect(source.contains("waveform.badge.magnifyingglass"))
+    #expect(source.contains("copy.text(.localAudioDiagnostics)"))
+}
+
+@Test
 func channelRowsUseMeasuredExpandedFallbackForLongCopy() throws {
     let channel = try sourceFile(named: "TranslationChannelRow.swift")
 

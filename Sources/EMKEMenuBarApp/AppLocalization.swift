@@ -249,10 +249,7 @@ struct AppCopy: Equatable, Sendable {
                 english: "Cannot be changed while translation is running"
             )
         case .audioDirectToProvider:
-            localized(
-                zhHans: "音频直连你的服务商",
-                english: "Audio connects directly to your provider"
-            )
+            "Powered by Eager"
         case .starting:
             localized(zhHans: "正在连接…", english: "Connecting…")
         case .startTranslation:
