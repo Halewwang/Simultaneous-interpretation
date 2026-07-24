@@ -243,7 +243,11 @@ func menuBarAppSharesOneModelWithFloatingPanel() throws {
             "FloatingTranslationPanelController(model: model)"
         )
     )
-    #expect(source.contains("MenuBarRootView(model: model)"))
+    #expect(
+        source.contains(
+            "MenuBarRootView(\n                model: model,\n                updateController: updateController"
+        )
+    )
 }
 
 @Test
@@ -264,6 +268,37 @@ func settingsCanReopenGettingStarted() throws {
     let settings = try sourceFile(named: "TranslationSettingsView.swift")
 
     #expect(settings.contains("copy.text(.openGettingStarted)"))
+}
+
+@Test
+func settingsWiresManualUpdateCheck() throws {
+    let settings = try sourceFile(named: "TranslationSettingsView.swift")
+    let root = try sourceFile(named: "MenuBarRootView.swift")
+    let app = try sourceFile(named: "EMKEMenuBarApp.swift")
+
+    #expect(settings.contains("copy.text(.checkForUpdates)"))
+    #expect(settings.contains("updateController.checkForUpdates()"))
+    #expect(
+        settings.contains(
+            ".disabled(!updateController.canCheckForUpdates)"
+        )
+    )
+    #expect(root.contains("updateController: AppUpdateController"))
+    #expect(
+        root.contains(
+            "TranslationSettingsView(\n                    model: model,\n                    updateController: updateController,"
+        )
+    )
+    #expect(
+        app.components(
+            separatedBy: "StateObject(wrappedValue: AppUpdateController())"
+        ).count - 1 == 1
+    )
+    #expect(
+        app.contains(
+            "MenuBarRootView(\n                model: model,\n                updateController: updateController"
+        )
+    )
 }
 
 @Test

@@ -2,13 +2,16 @@ import SwiftUI
 
 struct MenuBarRootView: View {
     @ObservedObject var model: MenuBarModel
+    @ObservedObject var updateController: AppUpdateController
     let openOnboarding: () -> Void
 
     init(
         model: MenuBarModel,
+        updateController: AppUpdateController,
         openOnboarding: @escaping () -> Void = {}
     ) {
         self.model = model
+        self.updateController = updateController
         self.openOnboarding = openOnboarding
     }
 
@@ -20,6 +23,7 @@ struct MenuBarRootView: View {
             case .settings:
                 TranslationSettingsView(
                     model: model,
+                    updateController: updateController,
                     openOnboarding: openOnboarding
                 )
             }

@@ -45,6 +45,18 @@ func everyStaticCopyKeyHasChineseAndEnglishText() {
 }
 
 @Test
+func manualUpdateCheckCopyIsLocalizedInBothLanguages() {
+    #expect(
+        AppCopy(language: .zhHans).text(.checkForUpdates)
+            == "检查更新…"
+    )
+    #expect(
+        AppCopy(language: .english).text(.checkForUpdates)
+            == "Check for Updates…"
+    )
+}
+
+@Test
 func onboardingCopyIsCompleteInBothLanguages() {
     let keys: [AppCopyKey] = [
         .gettingStarted,

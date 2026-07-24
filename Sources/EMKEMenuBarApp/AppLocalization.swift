@@ -60,6 +60,7 @@ enum AppCopyKey: CaseIterable, Sendable {
     case translationSettingsLocked
     case interface
     case interfaceLanguage
+    case checkForUpdates
     case followSystem
     case quitEMKE
     case selected
@@ -257,6 +258,8 @@ struct AppCopy: Equatable, Sendable {
             localized(zhHans: "界面", english: "Interface")
         case .interfaceLanguage:
             localized(zhHans: "界面语言", english: "Interface language")
+        case .checkForUpdates:
+            localized(zhHans: "检查更新…", english: "Check for Updates…")
         case .followSystem:
             localized(zhHans: "跟随系统", english: "Follow System")
         case .quitEMKE:

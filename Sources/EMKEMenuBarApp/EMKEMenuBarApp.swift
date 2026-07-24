@@ -5,6 +5,7 @@ import AppKit
 @MainActor
 struct EMKEMenuBarApp: App {
     @StateObject private var model: MenuBarModel
+    @StateObject private var updateController: AppUpdateController
     @StateObject private var floatingPanelController:
         FloatingTranslationPanelController
     @StateObject private var onboardingWindowController:
@@ -33,6 +34,7 @@ struct EMKEMenuBarApp: App {
         onboardingWindowController.attachWindow(onboardingWindow)
 
         _model = StateObject(wrappedValue: model)
+        _updateController = StateObject(wrappedValue: AppUpdateController())
         _floatingPanelController = StateObject(
             wrappedValue: FloatingTranslationPanelController(model: model)
         )
@@ -58,7 +60,10 @@ struct EMKEMenuBarApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarRootView(model: model) {
+            MenuBarRootView(
+                model: model,
+                updateController: updateController
+            ) {
                 onboardingWindowController.show()
             }
         } label: {

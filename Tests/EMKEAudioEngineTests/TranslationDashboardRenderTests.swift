@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import EMKEAudioEngine
 import EMKECoordinator
 import EMKECore
@@ -7,6 +8,17 @@ import Foundation
 import SwiftUI
 import Testing
 @testable import EMKEMenuBarApp
+
+@MainActor
+private final class RenderUpdaterDriverStub: AppUpdateDriving {
+    var canCheckForUpdates: Bool { false }
+
+    var canCheckForUpdatesPublisher: AnyPublisher<Bool, Never> {
+        Just(false).eraseToAnyPublisher()
+    }
+
+    func checkForUpdates() {}
+}
 
 final class CaptureArtifacts: @unchecked Sendable {
     static let requiredFilenames: Set<String> = [
@@ -1038,7 +1050,12 @@ private func settingsRender(
         microphonePermissionProvider: RenderMicrophonePermissionProvider(),
         deferInitialDeviceReload: true
     )
-    let content = TranslationSettingsView(model: model)
+    let content = TranslationSettingsView(
+        model: model,
+        updateController: AppUpdateController(
+            driver: RenderUpdaterDriverStub()
+        )
+    )
         .frame(
             width: EMKEVisualStyle.panelWidth,
             height: EMKEVisualStyle.panelHeight

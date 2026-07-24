@@ -16,6 +16,10 @@ let package = Package(
         .executable(name: "EMKEMenuBarApp", targets: ["EMKEMenuBarApp"]),
     ],
     dependencies: [
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            exact: "2.9.2"
+        ),
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "6.2.3"),
     ],
     targets: [
@@ -59,6 +63,7 @@ let package = Package(
                 "EMKECoordinator",
                 "EMKECore",
                 "EMKESecurity",
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             resources: [.process("Resources")]
         ),
