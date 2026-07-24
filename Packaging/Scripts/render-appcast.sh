@@ -68,13 +68,12 @@ else
 fi
 
 xml_escape() {
-  local value="$1"
-  value="${value//&/&amp;}"
-  value="${value//</&lt;}"
-  value="${value//>/&gt;}"
-  value="${value//\"/&quot;}"
-  value="${value//\'/&apos;}"
-  /usr/bin/printf '%s' "$value"
+  /usr/bin/printf '%s\n' "$1" | LC_ALL=C /usr/bin/sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\\&apos;/g"
 }
 
 VERSION_XML="$(xml_escape "$VERSION")"
