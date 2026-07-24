@@ -49,6 +49,17 @@ func dashboardIconsAndStatusExposeAccessibleCopy() throws {
 }
 
 @Test
+func channelRowsUseMeasuredExpandedFallbackForLongCopy() throws {
+    let channel = try sourceFile(named: "TranslationChannelRow.swift")
+
+    #expect(channel.contains("EMKEChannelRowLayoutDecision.resolve("))
+    #expect(channel.contains("expandedBody"))
+    #expect(!channel.contains(".lineLimit(1)"))
+    #expect(!channel.contains(".minimumScaleFactor("))
+    #expect(!channel.contains(".scaleEffect("))
+}
+
+@Test
 func settingsShowsVisibleLockedState() throws {
     let source = try sourceFile(named: "TranslationSettingsView.swift")
 

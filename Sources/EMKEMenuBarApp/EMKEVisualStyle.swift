@@ -60,13 +60,18 @@ enum EMKEChannelMetrics {
     static let iconOffsetX: CGFloat = -5
     static let titleSize: CGFloat = 17
     static let directionSize: CGFloat = 14
+    static let directionWidth: CGFloat = 112
     static let statusIconSize: CGFloat = 9
+    static let statusIconSpacing: CGFloat = 4
     static let statusWidth: CGFloat = 105
     static let statusOffsetX: CGFloat = -18
     static let statusOffsetY: CGFloat = 6
     static let meterOffsetX: CGFloat = -10
     static let actionSize: CGFloat = 12.5
+    static let actionWidth: CGFloat = 64
     static let actionOffsetY: CGFloat = 14
+    static let expandedHorizontalSpacing: CGFloat = 8
+    static let expandedCopySpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 23.5
 }
 
