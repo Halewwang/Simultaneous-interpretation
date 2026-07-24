@@ -528,6 +528,68 @@ private actor AudioDiagnosticsStub: AudioDiagnosticsControlling {
     }
 }
 
+private actor BlockingInputStartAudioDiagnosticsStub:
+    AudioDiagnosticsControlling
+{
+    private var startInputReached = false
+    private var startInputReleased = false
+    private var startInputContinuation: CheckedContinuation<Void, Never>?
+    private var startInputWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var isInputActive = false
+    private(set) var stopInputCount = 0
+
+    func startInput(deviceID: AudioObjectID) async throws {
+        startInputReached = true
+        let waiters = startInputWaiters
+        startInputWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        if !startInputReleased {
+            await withCheckedContinuation { continuation in
+                startInputContinuation = continuation
+            }
+        }
+        isInputActive = true
+    }
+
+    func waitUntilStartInputIsBlocked() async {
+        guard !startInputReached else { return }
+        await withCheckedContinuation { continuation in
+            startInputWaiters.append(continuation)
+        }
+    }
+
+    func releaseStartInput() {
+        startInputReleased = true
+        startInputContinuation?.resume()
+        startInputContinuation = nil
+    }
+
+    func sampleInput() async -> AudioInputDiagnosticSample {
+        AudioInputDiagnosticSample(
+            state: .receivingAudio,
+            level: 0.81,
+            frameCount: 480,
+            rms: 0.12
+        )
+    }
+
+    func stopInput() async {
+        stopInputCount += 1
+        isInputActive = false
+    }
+
+    func startOutputTest(
+        deviceID: AudioObjectID
+    ) async throws -> AudioOutputDiagnosticResult {
+        AudioOutputDiagnosticResult(
+            requestedFrames: 16_800,
+            writtenFrames: 16_800
+        )
+    }
+
+    func stopOutputTest() async {}
+}
+
 @MainActor
 private final class TranslationSettingsStoreStub: AppSettingsStoring {
     var value: AppSettings
@@ -1212,6 +1274,43 @@ func onboardingCleanupStopsActiveInputDiagnosticAndResetsPresentation() async {
     #expect(model.audioInputDiagnosticLevel == 0)
     #expect(model.audioInputDiagnosticText == "未测试")
     #expect(await diagnostics.stopInputCount == 1)
+}
+
+@Test @MainActor
+func onboardingCleanupInvalidatesInFlightAudioInputStart() async {
+    let diagnostics = BlockingInputStartAudioDiagnosticsStub()
+    let model = MenuBarModel(
+        provider: TranslationMenuDeviceProvider(),
+        coordinator: TranslationCoordinatorStub(),
+        connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
+        secretStore: TranslationSecretStoreStub(value: "stored-key"),
+        settingsStore: TranslationSettingsStoreStub(),
+        microphonePermissionProvider: MicrophonePermissionStub(
+            state: .authorized
+        ),
+        audioDiagnostics: diagnostics
+    )
+    model.selectedInputUID = "physical.input"
+
+    let startTask = Task { @MainActor in
+        await model.startAudioInputTest()
+    }
+    await diagnostics.waitUntilStartInputIsBlocked()
+
+    await model.stopAudioInputTest()
+    #expect(await diagnostics.stopInputCount == 1)
+    #expect(!model.isTestingAudioInput)
+
+    await diagnostics.releaseStartInput()
+    await startTask.value
+
+    #expect(await diagnostics.stopInputCount == 2)
+    #expect(!(await diagnostics.isInputActive))
+    #expect(!model.isTestingAudioInput)
+    #expect(model.audioInputDiagnosticLevel == 0)
+    #expect(model.audioInputDiagnosticText == "未测试")
+
+    await model.stopAudioInputTest()
 }
 
 @Test @MainActor

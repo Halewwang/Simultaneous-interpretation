@@ -323,6 +323,7 @@ final class MenuBarModel: ObservableObject {
     private var coordinatorLifecycleRevision: UInt = 0
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
+    private var audioInputDiagnosticGeneration: UInt = 0
     private var deviceReloadTask: Task<DeviceInventoryLoadResult, Never>?
     private var microphonePermissionOperationTask:
         Task<MicrophonePermissionState, Never>?
@@ -830,14 +831,24 @@ final class MenuBarModel: ObservableObject {
     }
 
     func startAudioInputTest() async {
+        let generation = audioInputDiagnosticGeneration
         await reloadDevicesAsync()
+        guard generation == audioInputDiagnosticGeneration else { return }
         guard canTestAudioInput, let device = selectedPhysicalInput else { return }
         audioDiagnosticErrorValue = nil
         do {
             try await requireMicrophonePermission()
+            guard generation == audioInputDiagnosticGeneration else { return }
             try await audioDiagnostics.startInput(deviceID: device.id)
+            guard generation == audioInputDiagnosticGeneration else {
+                await audioDiagnostics.stopInput()
+                return
+            }
             isTestingAudioInput = true
-            await refreshAudioInputDiagnostic()
+            guard await refreshAudioInputDiagnostic(generation: generation) else {
+                await audioDiagnostics.stopInput()
+                return
+            }
             audioInputDiagnosticTask = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
                     do {
@@ -846,11 +857,16 @@ final class MenuBarModel: ObservableObject {
                         return
                     }
                     guard let self else { return }
-                    await self.refreshAudioInputDiagnostic()
+                    guard await self.refreshAudioInputDiagnostic(
+                        generation: generation
+                    ) else {
+                        return
+                    }
                 }
             }
         } catch {
             await audioDiagnostics.stopInput()
+            guard generation == audioInputDiagnosticGeneration else { return }
             isTestingAudioInput = false
             audioInputDiagnosticLevel = 0
             audioInputDiagnosticValue = .key(.microphoneTestFailed)
@@ -1015,8 +1031,12 @@ final class MenuBarModel: ObservableObject {
         return physicalOutputs.first { $0.uid == selectedOutputUID }
     }
 
-    private func refreshAudioInputDiagnostic() async {
+    private func refreshAudioInputDiagnostic(
+        generation: UInt
+    ) async -> Bool {
+        guard generation == audioInputDiagnosticGeneration else { return false }
         let sample = await audioDiagnostics.sampleInput()
+        guard generation == audioInputDiagnosticGeneration else { return false }
         audioInputDiagnosticLevel = sample.level
         audioInputDiagnosticValue = switch sample.state {
         case .stopped:
@@ -1028,6 +1048,7 @@ final class MenuBarModel: ObservableObject {
         case .receivingAudio:
             .key(.microphoneDetected)
         }
+        return true
     }
 
     private static func inputTransportStatus(
@@ -1053,6 +1074,7 @@ final class MenuBarModel: ObservableObject {
     }
 
     private func stopAudioInputTest(resetStatus: Bool) async {
+        audioInputDiagnosticGeneration &+= 1
         audioInputDiagnosticTask?.cancel()
         audioInputDiagnosticTask = nil
         await audioDiagnostics.stopInput()
