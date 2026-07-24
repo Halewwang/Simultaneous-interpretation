@@ -30,7 +30,7 @@ assert_absent_regex() {
   local forbidden="$1"
   local label="$2"
   shift 2
-  if /usr/bin/grep -RIEq -- "$forbidden" "$@"; then
+  if /usr/bin/grep -REq -- "$forbidden" "$@"; then
     echo "$label was present" >&2
     return 1
   else
@@ -173,11 +173,42 @@ expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
   "$TEMP/linked-parent/escape.xml"
 
 PRIVATE_MATERIAL_REGEX="-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|SPARKLE_PRIVATE_KEY[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9+/]{32,}={0,2}"
+
+REGEX_PEM_FIXTURE="$TEMP/private-material-pem"
+/usr/bin/printf '%s\n' '-----BEGIN ''PRIVATE KEY-----' > "$REGEX_PEM_FIXTURE"
+if (assert_absent_regex "$PRIVATE_MATERIAL_REGEX" "injected PEM material" \
+  "$REGEX_PEM_FIXTURE") > "$TEMP/assert-regex-pem.stdout" \
+  2> "$TEMP/assert-regex-pem.stderr"; then
+  echo "assert_absent_regex accepted an injected PEM header" >&2
+  exit 1
+fi
+/usr/bin/grep -Fq 'injected PEM material was present' \
+  "$TEMP/assert-regex-pem.stderr"
+
+REGEX_ASSIGNMENT_FIXTURE="$TEMP/private-material-assignment"
+/usr/bin/printf '%s\n' \
+  'SPARKLE_PRIVATE_''KEY=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef' \
+  > "$REGEX_ASSIGNMENT_FIXTURE"
+if (assert_absent_regex "$PRIVATE_MATERIAL_REGEX" \
+  "injected long secret assignment" "$REGEX_ASSIGNMENT_FIXTURE") \
+  > "$TEMP/assert-regex-assignment.stdout" \
+  2> "$TEMP/assert-regex-assignment.stderr"; then
+  echo "assert_absent_regex accepted an injected long secret assignment" >&2
+  exit 1
+fi
+/usr/bin/grep -Fq 'injected long secret assignment was present' \
+  "$TEMP/assert-regex-assignment.stderr"
+
+REGEX_LEGAL_MENTION_FIXTURE="$TEMP/private-material-legal-mention"
+/usr/bin/printf '%s\n' \
+  'Read SPARKLE_PRIVATE_''KEY from repository secrets.' \
+  > "$REGEX_LEGAL_MENTION_FIXTURE"
+assert_absent_regex "$PRIVATE_MATERIAL_REGEX" \
+  "legal private-key variable mention" "$REGEX_LEGAL_MENTION_FIXTURE"
+
 assert_absent_regex "$PRIVATE_MATERIAL_REGEX" "private key material" \
-  "$ROOT/.github/workflows/release.yml" \
-  "$ROOT/Packaging/App" \
-  "$ROOT/Packaging/Scripts" \
-  "$ROOT/Packaging/build-internal-pkg.sh"
+  "$ROOT/.github" \
+  "$ROOT/Packaging"
 test -z "$(/usr/bin/find "$ROOT/Packaging" -type f \
   \( -iname '*private*key*' -o -iname '*sparkle*secret*' \) -print)"
 assert_absent_regex \
