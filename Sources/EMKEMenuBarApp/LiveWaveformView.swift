@@ -3,7 +3,11 @@ import SwiftUI
 enum WaveformBarLayout {
     static let barCount = 24
     static let compactBarWidth: CGFloat = 1.5
-    static let compactSpacing: CGFloat = 2.75
+    private static let compactTargetWidth: CGFloat = 99
+    static var compactSpacing: CGFloat {
+        (compactTargetWidth - (CGFloat(barCount) * compactBarWidth))
+            / CGFloat(barCount - 1)
+    }
     static var compactRequiredWidth: CGFloat {
         (CGFloat(barCount) * compactBarWidth)
             + (CGFloat(barCount - 1) * compactSpacing)
@@ -47,6 +51,7 @@ struct LiveWaveformView: View {
     let level: Double
     let maximumHeight: CGFloat
     var compact = false
+    var minimumBarHeight: CGFloat = 4
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -73,6 +78,7 @@ struct LiveWaveformView: View {
                 Array(
                     WaveformBarLayout.heights(
                         level: level,
+                        minimum: Double(minimumBarHeight),
                         maximum: Double(maximumHeight)
                     ).enumerated()
                 ),

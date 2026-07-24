@@ -34,9 +34,20 @@ func floatingCapsuleUsesAccessibleRealSessionContent() throws {
     #expect(source.contains("level: presentation.level"))
     #expect(source.contains("maximumHeight: 24"))
     #expect(source.contains("compact: true"))
+    #expect(source.contains("minimumBarHeight: 0.5"))
     #expect(source.contains(".environment(\\.colorScheme, .dark)"))
     #expect(source.contains(".accessibilityHidden(true)"))
     #expect(source.contains(".accessibilityElement(children: .combine)"))
+    #expect(
+        source.contains(
+            ".accessibilityLabel(presentation.statusAccessibilityLabel)"
+        )
+    )
+    #expect(
+        source.contains(
+            ".accessibilityValue(presentation.elapsed ?? \"\")"
+        )
+    )
     #expect(
         source.contains(
             ".accessibilityLabel(presentation.stopAccessibilityLabel)"
@@ -46,14 +57,23 @@ func floatingCapsuleUsesAccessibleRealSessionContent() throws {
 }
 
 @Test
-func floatingCapsulePulseRespectsToneAndReduceMotion() throws {
+func floatingWaveformUsesASeparateNearFlatSilenceBaseline() throws {
+    let source = try sourceFile(named: "LiveWaveformView.swift")
+
+    #expect(source.contains("var minimumBarHeight: CGFloat = 4"))
+    #expect(source.contains("minimum: Double(minimumBarHeight)"))
+}
+
+@Test
+func floatingCapsulePulseRespectsPresentationAndReduceMotion() throws {
     let source = try sourceFile(named: "FloatingTranslationStatusView.swift")
 
     #expect(
         source.contains(
-            "presentation.tone == .neutral && !reduceMotion"
+            "presentation.showsActivityPulse && !reduceMotion"
         )
     )
+    #expect(!source.contains("presentation.tone == .neutral"))
     #expect(source.contains(".easeOut(duration: 1)"))
     #expect(source.contains(".repeatForever(autoreverses: false)"))
     #expect(source.contains(".onDisappear"))

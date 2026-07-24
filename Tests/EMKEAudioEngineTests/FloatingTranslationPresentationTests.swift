@@ -62,6 +62,8 @@ func runningFloatingPresentationUsesCombinedRealLevelAndTimer() {
     #expect(value.isVisible)
     #expect(value.tone == .healthy)
     #expect(value.status == "Translating")
+    #expect(value.statusAccessibilityLabel == "Translating")
+    #expect(!value.showsActivityPulse)
     #expect(value.elapsed == "01:05")
     #expect(value.level == 0.72)
     #expect(value.stopEnabled)
@@ -98,6 +100,8 @@ func startingFloatingPresentationIsVisibleNeutralAndCannotStop() {
     #expect(value.isVisible)
     #expect(value.tone == .neutral)
     #expect(value.status == "Connecting")
+    #expect(value.statusAccessibilityLabel == "Connecting")
+    #expect(value.showsActivityPulse)
     #expect(value.elapsed == nil)
     #expect(value.level == 0.4)
     #expect(!value.stopEnabled)
@@ -105,7 +109,7 @@ func startingFloatingPresentationIsVisibleNeutralAndCannotStop() {
 
 @Test
 func inboundFailureFloatingPresentationUsesFailOpenChineseCopy() {
-    let value = makeFloatingPresentation(
+    let chinese = makeFloatingPresentation(
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
             inbound: .failed(message: "inbound offline"),
@@ -114,18 +118,33 @@ func inboundFailureFloatingPresentationUsesFailOpenChineseCopy() {
         translationStartedAt: floatingNow,
         language: .zhHans
     )
+    let english = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .failed(message: "inbound offline"),
+            outbound: .active
+        ),
+        translationStartedAt: floatingNow
+    )
 
-    #expect(value.isVisible)
-    #expect(value.tone == .degraded)
-    #expect(value.status == "入站播放原音")
-    #expect(value.elapsed == "00:00")
-    #expect(value.stopEnabled)
-    #expect(value.stopAccessibilityLabel == "停止翻译")
+    #expect(chinese.isVisible)
+    #expect(chinese.tone == .degraded)
+    #expect(chinese.status == "播放原音")
+    #expect(chinese.statusAccessibilityLabel == "入站播放原音")
+    #expect(!chinese.showsActivityPulse)
+    #expect(chinese.elapsed == "00:00")
+    #expect(chinese.stopEnabled)
+    #expect(chinese.stopAccessibilityLabel == "停止翻译")
+    #expect(english.status == "Original")
+    #expect(
+        english.statusAccessibilityLabel
+            == "Playing original incoming audio"
+    )
 }
 
 @Test
 func outboundFailureFloatingPresentationPrioritizesFailClosed() {
-    let value = makeFloatingPresentation(
+    let english = makeFloatingPresentation(
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
             inbound: .failed(message: "inbound offline"),
@@ -133,10 +152,23 @@ func outboundFailureFloatingPresentationPrioritizesFailClosed() {
         ),
         translationStartedAt: floatingNow
     )
+    let chinese = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .failed(message: "outbound offline")
+        ),
+        translationStartedAt: floatingNow,
+        language: .zhHans
+    )
 
-    #expect(value.tone == .degraded)
-    #expect(value.status == "Outbound muted")
-    #expect(value.stopEnabled)
+    #expect(english.tone == .degraded)
+    #expect(english.status == "Muted")
+    #expect(english.statusAccessibilityLabel == "Outbound muted")
+    #expect(!english.showsActivityPulse)
+    #expect(english.stopEnabled)
+    #expect(chinese.status == "出站静音")
+    #expect(chinese.statusAccessibilityLabel == "出站已静音")
 }
 
 @Test
@@ -154,7 +186,9 @@ func fatalRunningErrorFloatingPresentationTakesPriority() {
 
     #expect(value.isVisible)
     #expect(value.tone == .failure)
-    #expect(value.status == "翻译异常")
+    #expect(value.status == "异常")
+    #expect(value.statusAccessibilityLabel == "翻译异常")
+    #expect(!value.showsActivityPulse)
     #expect(value.elapsed == "00:00")
     #expect(value.stopEnabled)
 }
@@ -176,6 +210,8 @@ func stoppingFloatingPresentationTakesPriorityAndDisablesStop() {
     #expect(value.isVisible)
     #expect(value.tone == .neutral)
     #expect(value.status == "Stopping…")
+    #expect(value.statusAccessibilityLabel == "Stopping…")
+    #expect(!value.showsActivityPulse)
     #expect(value.elapsed == "01:05")
     #expect(!value.stopEnabled)
 }
@@ -189,6 +225,8 @@ func stoppingWithoutRunningFloatingPresentationRemainsVisible() {
 
     #expect(value.isVisible)
     #expect(value.status == "正在停止…")
+    #expect(value.statusAccessibilityLabel == "正在停止…")
+    #expect(!value.showsActivityPulse)
     #expect(value.elapsed == nil)
     #expect(!value.stopEnabled)
 }
@@ -268,7 +306,9 @@ func menuBarModelFloatingPresentationIsAPureCurrentStateProjection() {
 
     #expect(!value.isVisible)
     #expect(value.status == "Translating")
+    #expect(value.statusAccessibilityLabel == "Translating")
     #expect(value.tone == .healthy)
+    #expect(!value.showsActivityPulse)
     #expect(value.elapsed == nil)
     #expect(value.level == 0)
     #expect(!value.stopEnabled)
@@ -278,4 +318,66 @@ func menuBarModelFloatingPresentationIsAPureCurrentStateProjection() {
     #expect(model.inboundLevel == before.inboundLevel)
     #expect(model.outboundLevel == before.outboundLevel)
     #expect(model.translationStartedAt == before.startedAt)
+}
+
+@Test
+func englishFloatingErrorStaysDistinctFromHealthyVisibleStatus() {
+    let healthy = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        )
+    )
+    let failure = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        ),
+        hasFatalSessionError: true
+    )
+
+    #expect(healthy.status == "Translating")
+    #expect(failure.status == "Error")
+    #expect(failure.statusAccessibilityLabel == "Translation error")
+    #expect(failure.status != healthy.status)
+}
+
+@Test
+func floatingActivityPulseIsLimitedToPreRunStartup() {
+    let starting = makeFloatingPresentation(isStarting: true)
+    let startingButRunning = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        ),
+        isStarting: true
+    )
+    let stopping = makeFloatingPresentation(
+        isStarting: true,
+        isStopping: true
+    )
+    let degraded = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .failed(message: "offline")
+        )
+    )
+    let failure = makeFloatingPresentation(
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            inbound: .active,
+            outbound: .active
+        ),
+        hasFatalSessionError: true
+    )
+
+    #expect(starting.showsActivityPulse)
+    #expect(!startingButRunning.showsActivityPulse)
+    #expect(!stopping.showsActivityPulse)
+    #expect(!degraded.showsActivityPulse)
+    #expect(!failure.showsActivityPulse)
 }

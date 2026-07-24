@@ -1311,7 +1311,8 @@ func floatingPresentationTreatsBackpressureAsWarningNotFatal() async {
 
     value = model.floatingPresentation(at: Date())
     #expect(value.tone == .degraded)
-    #expect(value.status == "Outbound muted")
+    #expect(value.status == "Muted")
+    #expect(value.statusAccessibilityLabel == "Outbound muted")
 
     await model.stop()
 }

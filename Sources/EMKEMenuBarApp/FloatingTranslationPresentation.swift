@@ -12,6 +12,8 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
     let isVisible: Bool
     let tone: FloatingTranslationTone
     let status: String
+    let statusAccessibilityLabel: String
+    let showsActivityPulse: Bool
     let elapsed: String?
     let level: Double
     let stopEnabled: Bool
@@ -37,24 +39,45 @@ struct FloatingTranslationPresentation: Equatable, Sendable {
                 seconds: now.timeIntervalSince(translationStartedAt ?? now)
             )
             : nil
-        let statusAndTone: (String, FloatingTranslationTone)
+        let statusAndTone: (
+            visible: String,
+            accessible: String,
+            tone: FloatingTranslationTone
+        )
         if isStopping {
-            statusAndTone = (copy.text(.stopping), .neutral)
+            let status = copy.text(.stopping)
+            statusAndTone = (status, status, .neutral)
         } else if isStarting && !running {
-            statusAndTone = (copy.text(.connecting), .neutral)
+            let status = copy.text(.connecting)
+            statusAndTone = (status, status, .neutral)
         } else if running, hasFatalSessionError {
-            statusAndTone = (copy.text(.translationError), .failure)
+            statusAndTone = (
+                copy.text(.floatingTranslationError),
+                copy.text(.translationError),
+                .failure
+            )
         } else if running, case .failed = coordinatorState.outbound {
-            statusAndTone = (copy.text(.outboundMuted), .degraded)
+            statusAndTone = (
+                copy.text(.floatingOutboundMuted),
+                copy.text(.outboundMuted),
+                .degraded
+            )
         } else if running, case .failed = coordinatorState.inbound {
-            statusAndTone = (copy.text(.inboundOriginal), .degraded)
+            statusAndTone = (
+                copy.text(.floatingInboundOriginal),
+                copy.text(.inboundOriginal),
+                .degraded
+            )
         } else {
-            statusAndTone = (copy.text(.translating), .healthy)
+            let status = copy.text(.translating)
+            statusAndTone = (status, status, .healthy)
         }
         return Self(
             isVisible: visible,
-            tone: statusAndTone.1,
-            status: statusAndTone.0,
+            tone: statusAndTone.tone,
+            status: statusAndTone.visible,
+            statusAccessibilityLabel: statusAndTone.accessible,
+            showsActivityPulse: isStarting && !running && !isStopping,
             elapsed: elapsed,
             level: min(max(max(safeInboundLevel, safeOutboundLevel), 0), 1),
             stopEnabled: running && !isStopping,

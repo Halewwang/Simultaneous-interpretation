@@ -86,6 +86,9 @@ enum AppCopyKey: CaseIterable, Sendable {
     case outboundMuted
     case inboundOriginal
     case translationError
+    case floatingOutboundMuted
+    case floatingInboundOriginal
+    case floatingTranslationError
     case driverMissing
     case selectPhysicalInput
     case selectPhysicalOutput
@@ -268,6 +271,12 @@ struct AppCopy: Equatable, Sendable {
             localized(zhHans: "入站播放原音", english: "Playing original incoming audio")
         case .translationError:
             localized(zhHans: "翻译异常", english: "Translation error")
+        case .floatingOutboundMuted:
+            localized(zhHans: "出站静音", english: "Muted")
+        case .floatingInboundOriginal:
+            localized(zhHans: "播放原音", english: "Original")
+        case .floatingTranslationError:
+            localized(zhHans: "异常", english: "Error")
         case .driverMissing:
             localized(
                 zhHans: "未检测到 EMKE 虚拟音频驱动",

@@ -15,35 +15,52 @@ func floatingCapsuleMetricsMatchApprovedDirectionA() {
     #expect(EMKEFloatingMetrics.stopTarget == 32)
 }
 
-@Test(arguments: FloatingCapsuleRenderCase.allCases)
-@MainActor
-private func floatingCapsuleRendersAtRetinaDimensions(
-    scenario: FloatingCapsuleRenderCase
-) throws {
-    let renderer = ImageRenderer(
-        content: FloatingTranslationStatusView(
-            presentation: scenario.presentation,
-            stopAction: {}
+@Test @MainActor
+func floatingVisibleStatusesFitApprovedColumn() {
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+    ]
+
+    for scenario in FloatingCapsuleRenderCase.allCases {
+        let status = scenario.presentation.status
+        let width = (status as NSString).size(withAttributes: attributes).width
+        #expect(
+            width <= EMKEFloatingMetrics.statusWidth,
+            "Visible status '\(status)' is \(width)pt wide"
         )
-        .transaction { transaction in
-            transaction.disablesAnimations = true
-        }
-    )
-    renderer.scale = EMKEVisualStyle.captureScale
-    let data = try #require(renderer.nsImage?.tiffRepresentation)
-    let bitmap = try #require(NSBitmapImageRep(data: data))
-
-    #expect(bitmap.pixelsWide == 528)
-    #expect(bitmap.pixelsHigh == 104)
-
-    guard ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1" else {
-        return
     }
-    try data.write(
-        to: URL(
-            fileURLWithPath: "/tmp/emke-floating-\(scenario.rawValue).tiff"
+}
+
+@Test @MainActor
+private func floatingCapsuleRendersAtRetinaDimensions() throws {
+    for scenario in FloatingCapsuleRenderCase.allCases {
+        let renderer = ImageRenderer(
+            content: FloatingTranslationStatusView(
+                presentation: scenario.presentation,
+                stopAction: {}
+            )
+            .transaction { transaction in
+                transaction.disablesAnimations = true
+            }
         )
-    )
+        renderer.scale = EMKEVisualStyle.captureScale
+        let data = try #require(renderer.nsImage?.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+
+        #expect(bitmap.pixelsWide == 528, "Unexpected width for \(scenario)")
+        #expect(bitmap.pixelsHigh == 104, "Unexpected height for \(scenario)")
+
+        guard
+            ProcessInfo.processInfo.environment["EMKE_CAPTURE_UI"] == "1"
+        else {
+            continue
+        }
+        try data.write(
+            to: URL(
+                fileURLWithPath: "/tmp/emke-floating-\(scenario.rawValue).tiff"
+            )
+        )
+    }
 }
 
 private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
@@ -53,8 +70,10 @@ private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
     case healthyEnglish
     case stoppingChinese
     case stoppingEnglish
-    case degradedChinese
-    case degradedEnglish
+    case outboundDegradedChinese
+    case outboundDegradedEnglish
+    case inboundDegradedChinese
+    case inboundDegradedEnglish
     case failureChinese
     case failureEnglish
 
@@ -90,11 +109,20 @@ private enum FloatingCapsuleRenderCase: String, CaseIterable, Sendable {
             isStarting = false
             isStopping = true
             fatal = false
-        case .degradedChinese, .degradedEnglish:
+        case .outboundDegradedChinese, .outboundDegradedEnglish:
             state = TranslationCoordinatorState(
                 isRunning: true,
                 inbound: .active,
                 outbound: .failed(message: "offline")
+            )
+            isStarting = false
+            isStopping = false
+            fatal = false
+        case .inboundDegradedChinese, .inboundDegradedEnglish:
+            state = TranslationCoordinatorState(
+                isRunning: true,
+                inbound: .failed(message: "offline"),
+                outbound: .active
             )
             isStarting = false
             isStopping = false

@@ -16,6 +16,32 @@ func silenceUsesLowStaticBaseline() {
 }
 
 @Test
+func floatingWaveformSilenceIsNearFlatAndActiveAudioRemainsVisible() {
+    let silence = WaveformBarLayout.heights(
+        level: 0,
+        minimum: 0.5,
+        maximum: 24
+    )
+    let active = WaveformBarLayout.heights(
+        level: 0.68,
+        minimum: 0.5,
+        maximum: 24
+    )
+
+    #expect(silence.max() ?? .infinity <= 2.5)
+    #expect(active.max() ?? 0 >= 16)
+    #expect((active.max() ?? 0) - (silence.max() ?? 0) >= 13)
+}
+
+@Test
+func compactWaveformMatchesFloatingColumnExactly() {
+    #expect(
+        WaveformBarLayout.compactRequiredWidth
+            == EMKEFloatingMetrics.waveformWidth
+    )
+}
+
+@Test
 func waveformClampsOutOfRangeLevels() {
     #expect(
         WaveformBarLayout.heights(level: -1)

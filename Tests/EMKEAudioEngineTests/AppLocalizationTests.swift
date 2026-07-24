@@ -45,6 +45,19 @@ func everyStaticCopyKeyHasChineseAndEnglishText() {
 }
 
 @Test
+func floatingStatusCopyUsesExactCompactChineseAndEnglishLabels() {
+    let chinese = AppCopy(language: .zhHans)
+    let english = AppCopy(language: .english)
+
+    #expect(chinese.text(.floatingOutboundMuted) == "出站静音")
+    #expect(english.text(.floatingOutboundMuted) == "Muted")
+    #expect(chinese.text(.floatingInboundOriginal) == "播放原音")
+    #expect(english.text(.floatingInboundOriginal) == "Original")
+    #expect(chinese.text(.floatingTranslationError) == "异常")
+    #expect(english.text(.floatingTranslationError) == "Error")
+}
+
+@Test
 func supportedLanguageNamesFollowTheInterfaceLanguage() {
     #expect(AppCopy(language: .zhHans).languageName(.german) == "德语")
     #expect(AppCopy(language: .english).languageName(.german) == "German")

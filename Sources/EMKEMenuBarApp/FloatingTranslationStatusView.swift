@@ -13,7 +13,7 @@ struct FloatingTranslationStatusView: View {
                 .fill(toneColor)
                 .frame(width: 7, height: 7)
                 .overlay {
-                    if presentation.tone == .neutral && !reduceMotion {
+                    if presentation.showsActivityPulse && !reduceMotion {
                         Circle()
                             .stroke(toneColor.opacity(0.55), lineWidth: 1)
                             .scaleEffect(isPulsing ? 1.9 : 1)
@@ -46,11 +46,14 @@ struct FloatingTranslationStatusView: View {
                 alignment: .leading
             )
             .accessibilityElement(children: .combine)
+            .accessibilityLabel(presentation.statusAccessibilityLabel)
+            .accessibilityValue(presentation.elapsed ?? "")
 
             LiveWaveformView(
                 level: presentation.level,
                 maximumHeight: 24,
-                compact: true
+                compact: true,
+                minimumBarHeight: 0.5
             )
             .frame(width: EMKEFloatingMetrics.waveformWidth)
             .environment(\.colorScheme, .dark)
