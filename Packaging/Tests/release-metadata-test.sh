@@ -167,6 +167,12 @@ require_workflow_text 'EMKE_BUILD_NUMBER="$EMKE_BUILD_NUMBER"'
 require_workflow_text 'sign_update'
 require_workflow_text 'render-appcast.sh'
 require_workflow_text 'gh release create'
+require_workflow_text 'gh release view'
+require_workflow_text 'gh release upload "$GITHUB_REF_NAME" "$pkg" --clobber'
+require_workflow_text '--verify-tag'
+require_workflow_text '--json assets'
+require_workflow_text 'asset_name="$(basename "$pkg")"'
+require_workflow_text 'test "$published_size" = "$local_size"'
 require_workflow_text 'gh-pages'
 require_workflow_text 'secrets.SPARKLE_PRIVATE_KEY'
 require_workflow_text 'github.token'
@@ -269,4 +275,171 @@ assert_tag_rejected "v1000.0.0"
 assert_tag_rejected "v0.1000.0"
 assert_tag_rejected "v0.0.1000"
 assert_tag_rejected "v9223372036854775807.0.0"
+
+RELEASE_BLOCK="$TEMP/release-publication.sh"
+/usr/bin/awk '
+  $0 == "      - name: Create GitHub Release" {
+    found_step = 1
+    next
+  }
+  found_step && $0 == "        run: |" {
+    in_block = 1
+    next
+  }
+  in_block && $0 ~ /^      - name:/ {
+    exit
+  }
+  in_block {
+    if ($0 == "") {
+      print
+      next
+    }
+    if (substr($0, 1, 10) != "          ") {
+      exit 65
+    }
+    print substr($0, 11)
+  }
+' "$WORKFLOW" > "$RELEASE_BLOCK"
+test -s "$RELEASE_BLOCK"
+/bin/bash -n "$RELEASE_BLOCK"
+
+MOCK_BIN="$TEMP/mock-bin"
+MOCK_GH_LOG="$TEMP/mock-gh.log"
+MOCK_GH_STATE="$TEMP/mock-gh.state"
+RELEASE_WORKSPACE="$TEMP/release-workspace"
+/bin/mkdir -p "$MOCK_BIN" "$RELEASE_WORKSPACE/.build/distribution"
+RELEASE_PKG="$RELEASE_WORKSPACE/.build/distribution/EMKE-Translation-1.2.3-internal.pkg"
+/usr/bin/printf '%s' 'release-fixture-pkg' > "$RELEASE_PKG"
+EXPECTED_ASSET_NAME="${RELEASE_PKG##*/}"
+EXPECTED_ASSET_SIZE="$(/usr/bin/stat -f '%z' "$RELEASE_PKG")"
+
+/bin/cat > "$MOCK_BIN/gh" <<'MOCK_GH'
+#!/bin/bash
+set -euo pipefail
+/usr/bin/printf '%s\n' "$*" >> "$MOCK_GH_LOG"
+has_arg() {
+  local expected="$1"
+  shift
+  local argument
+  for argument in "$@"; do
+    test "$argument" = "$expected" && return 0
+  done
+  return 1
+}
+if test "${1:-}" = release && test "${2:-}" = view; then
+  if has_arg assets "$@"; then
+    case "$MOCK_RELEASE_MODE" in
+      asset-missing)
+        /usr/bin/printf 'other.pkg\t%s\n' "$EXPECTED_ASSET_SIZE"
+        ;;
+      asset-size-mismatch)
+        /usr/bin/printf '%s\t%s\n' \
+          "$EXPECTED_ASSET_NAME" "$((EXPECTED_ASSET_SIZE + 1))"
+        ;;
+      *)
+        /usr/bin/printf '%s\t%s\n' \
+          "$EXPECTED_ASSET_NAME" "$EXPECTED_ASSET_SIZE"
+        ;;
+    esac
+    exit 0
+  fi
+  view_count=0
+  test ! -s "$MOCK_GH_STATE" || read -r view_count < "$MOCK_GH_STATE"
+  view_count="$((view_count + 1))"
+  /usr/bin/printf '%s\n' "$view_count" > "$MOCK_GH_STATE"
+  case "$MOCK_RELEASE_MODE" in
+    absent|asset-missing|asset-size-mismatch)
+      exit 1
+      ;;
+    existing)
+      /usr/bin/printf '%s\n' 'release-id'
+      exit 0
+      ;;
+    create-race)
+      test "$view_count" -gt 1
+      /usr/bin/printf '%s\n' 'release-id'
+      exit 0
+      ;;
+    create-failure)
+      exit 1
+      ;;
+  esac
+fi
+if test "${1:-}" = release && test "${2:-}" = create; then
+  has_arg --verify-tag "$@" || exit 96
+  case "$MOCK_RELEASE_MODE" in
+    absent|asset-missing|asset-size-mismatch) exit 0 ;;
+    existing) exit 99 ;;
+    create-race|create-failure) exit 1 ;;
+  esac
+fi
+if test "${1:-}" = release && test "${2:-}" = upload; then
+  has_arg --clobber "$@" || exit 98
+  exit 0
+fi
+exit 97
+MOCK_GH
+/bin/chmod 755 "$MOCK_BIN/gh"
+
+run_release_fixture() {
+  local mode="$1"
+  local expected_result="$2"
+  : > "$MOCK_GH_LOG"
+  : > "$MOCK_GH_STATE"
+  if (
+    cd "$RELEASE_WORKSPACE"
+    PATH="$MOCK_BIN:/usr/bin:/bin" \
+      MOCK_RELEASE_MODE="$mode" \
+      MOCK_GH_LOG="$MOCK_GH_LOG" \
+      MOCK_GH_STATE="$MOCK_GH_STATE" \
+      EXPECTED_ASSET_NAME="$EXPECTED_ASSET_NAME" \
+      EXPECTED_ASSET_SIZE="$EXPECTED_ASSET_SIZE" \
+      GITHUB_REF_NAME="v1.2.3" \
+      EMKE_VERSION="1.2.3" \
+      /bin/bash "$RELEASE_BLOCK"
+  ) > "$TEMP/release-$mode.stdout" 2> "$TEMP/release-$mode.stderr"; then
+    if test "$expected_result" != pass; then
+      echo "unsafe release publication fixture passed: $mode" >&2
+      exit 1
+    fi
+  elif test "$expected_result" = pass; then
+    echo "release publication fixture failed: $mode" >&2
+    /bin/cat "$TEMP/release-$mode.stderr" >&2
+    exit 1
+  fi
+}
+
+assert_log_order() {
+  local first
+  local second
+  first="$(/usr/bin/grep -nF -- "$1" "$MOCK_GH_LOG" | /usr/bin/head -n 1)"
+  second="$(/usr/bin/grep -nF -- "$2" "$MOCK_GH_LOG" | /usr/bin/head -n 1)"
+  test -n "$first" && test -n "$second"
+  test "${first%%:*}" -lt "${second%%:*}"
+}
+
+run_release_fixture absent pass
+/usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
+/usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+assert_log_order 'release create v1.2.3' 'release upload v1.2.3'
+assert_log_order 'release upload v1.2.3' '--json assets'
+
+run_release_fixture existing pass
+! /usr/bin/grep -Fq 'release create v1.2.3' "$MOCK_GH_LOG"
+/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+assert_log_order '--json id' 'release upload v1.2.3'
+assert_log_order 'release upload v1.2.3' '--json assets'
+
+run_release_fixture create-race pass
+test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
+assert_log_order 'release create v1.2.3' 'release upload v1.2.3'
+/usr/bin/grep -Fq -- '--clobber' "$MOCK_GH_LOG"
+
+run_release_fixture create-failure fail
+test "$(/usr/bin/grep -Fc -- '--json id' "$MOCK_GH_LOG")" -eq 2
+! /usr/bin/grep -Fq 'release upload v1.2.3' "$MOCK_GH_LOG"
+
+run_release_fixture asset-missing fail
+run_release_fixture asset-size-mismatch fail
 echo "PASS: release metadata"

@@ -114,9 +114,44 @@ jobs:
           set -euo pipefail
           pkg=".build/distribution/EMKE-Translation-${EMKE_VERSION}-internal.pkg"
           test -s "$pkg"
-          gh release create "$GITHUB_REF_NAME" "$pkg" \
-            --title "EMKE Translation ${EMKE_VERSION}" \
-            --generate-notes
+          asset_name="$(basename "$pkg")"
+          local_size="$(/usr/bin/stat -f '%z' "$pkg")"
+          [[ "$local_size" =~ ^[0-9]+$ ]]
+          test "$local_size" -gt 0
+          if gh release view "$GITHUB_REF_NAME" \
+            --json id --jq '.id' >/dev/null 2>&1; then
+            echo "GitHub Release already exists; refreshing its PKG asset."
+          else
+            if ! gh release create "$GITHUB_REF_NAME" \
+              --title "EMKE Translation ${EMKE_VERSION}" \
+              --generate-notes \
+              --verify-tag; then
+              echo "Release creation failed; checking for a concurrent or partial creation." >&2
+              gh release view "$GITHUB_REF_NAME" \
+                --json id --jq '.id' >/dev/null
+            fi
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$pkg" --clobber
+          asset_rows="$(gh release view "$GITHUB_REF_NAME" \
+            --json assets \
+            --jq '.assets[] | [.name, (.size | tostring)] | @tsv')"
+          published_size="$(
+            /usr/bin/awk -F '	' -v expected="$asset_name" '
+              $1 == expected {
+                matches += 1
+                size = $2
+              }
+              END {
+                if (matches != 1) {
+                  exit 64
+                }
+                print size
+              }
+            ' <<< "$asset_rows"
+          )"
+          [[ "$published_size" =~ ^[0-9]+$ ]]
+          test "$published_size" = "$local_size"
+          echo "Verified GitHub Release asset: ${asset_name} (${published_size} bytes)."
 
       - name: Publish Appcast to gh-pages
         env:
