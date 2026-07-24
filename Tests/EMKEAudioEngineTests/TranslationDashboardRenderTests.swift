@@ -211,6 +211,48 @@ func compactStatusMeasurementUsesRenderedSymbolWidthAtBoundary() {
     )
 }
 
+@Test
+func dashboardChannelBudgetTracksPanelHeightAndErrorAllocation() {
+    let panel = EMKEDashboardVerticalLayoutGeometry(
+        panelHeight: EMKEVisualStyle.panelHeight
+    )
+    let shorterPanel = EMKEDashboardVerticalLayoutGeometry(
+        panelHeight: EMKEVisualStyle.panelHeight - 20
+    )
+
+    #expect(
+        panel.channelSectionHeightBudget(hasErrorText: false)
+            - shorterPanel.channelSectionHeightBudget(hasErrorText: false)
+            == 20
+    )
+    #expect(
+        panel.channelSectionHeightBudget(hasErrorText: false)
+            - panel.channelSectionHeightBudget(hasErrorText: true)
+            == panel.errorTextAllocationHeight
+    )
+
+    let rowHeights: [CGFloat] = [82, 87]
+    let requiredWithError = panel.totalRequiredHeight(
+        channelRowHeights: rowHeights,
+        hasErrorText: true
+    )
+    #expect(
+        requiredWithError
+            - panel.totalRequiredHeight(
+                channelRowHeights: [rowHeights[0], 0],
+                hasErrorText: true
+            )
+            == rowHeights[1]
+    )
+    #expect(
+        requiredWithError
+            == EMKEVisualStyle.panelHeight
+                - panel.channelSectionHeightBudget(hasErrorText: true)
+                + rowHeights.reduce(0, +)
+                + EMKEVisualStyle.separatorThickness
+    )
+}
+
 @Test(arguments: EnglishDashboardStressCase.allCases)
 @MainActor
 private func englishStressDashboardsRenderWithinSharedGeometry(
@@ -244,6 +286,13 @@ private func englishStressDashboardsRenderWithinSharedGeometry(
             actionTitle: fixture.value.outbound.actionTitle
         ),
     ]
+    let hasErrorText = fixture.value.errorText != nil
+    let expectsErrorText = scenario == .inboundFailed
+        || scenario == .outboundFailed
+    #expect(hasErrorText == expectsErrorText)
+    let dashboardGeometry = EMKEDashboardVerticalLayoutGeometry(
+        panelHeight: EMKEVisualStyle.panelHeight
+    )
 
     for layout in layouts {
         #expect(layout.contentBounds.contains(layout.directionFrame))
@@ -263,9 +312,20 @@ private func englishStressDashboardsRenderWithinSharedGeometry(
         )
     }
 
+    let rowHeights = layouts.map(\.requiredHeight)
+    let channelSectionRequiredHeight = rowHeights.reduce(0, +)
+        + EMKEVisualStyle.separatorThickness
     #expect(
-        layouts.reduce(0) { $0 + $1.requiredHeight }
-            <= EMKEChannelMetrics.expandedChannelSectionHeightBudget
+        channelSectionRequiredHeight
+            <= dashboardGeometry.channelSectionHeightBudget(
+                hasErrorText: hasErrorText
+            )
+    )
+    #expect(
+        dashboardGeometry.totalRequiredHeight(
+            channelRowHeights: rowHeights,
+            hasErrorText: hasErrorText
+        ) <= EMKEVisualStyle.panelHeight
     )
 }
 

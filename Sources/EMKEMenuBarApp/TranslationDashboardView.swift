@@ -64,22 +64,37 @@ struct TranslationDashboardContent: View {
     let outboundAction: () -> Void
     let primaryAction: () -> Void
 
+    private var verticalGeometry: EMKEDashboardVerticalLayoutGeometry {
+        EMKEDashboardVerticalLayoutGeometry(
+            panelHeight: EMKEVisualStyle.panelHeight
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
-            Spacer(minLength: EMKEDashboardMetrics.topSpacer)
+            Spacer(
+                minLength: EMKEDashboardMetrics.topSpacerMinimum
+            )
             LiveWaveformView(
                 level: value.primaryLevel,
                 maximumHeight: EMKEDashboardMetrics.waveformMaximumHeight
             )
+            .frame(height: EMKEDashboardMetrics.waveformMaximumHeight)
             .offset(y: EMKEDashboardMetrics.waveformOffsetY)
             HStack(spacing: 5) {
                 Image(systemName: value.primaryStatusSymbol)
                     .font(.system(size: 10, weight: .medium))
                     .accessibilityHidden(true)
                 Text(value.primaryStatus)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(
+                        .system(
+                            size: EMKEDashboardMetrics.primaryStatusSize,
+                            weight: .medium
+                        )
+                    )
             }
+            .frame(height: verticalGeometry.primaryStatusLineHeight)
             .foregroundStyle(EMKEVisualStyle.secondaryText)
             .padding(.top, EMKEDashboardMetrics.statusTopPadding)
             .offset(x: -5)
@@ -88,17 +103,34 @@ struct TranslationDashboardContent: View {
             .accessibilityLabel(copy.translationStatus(value.primaryStatus))
             if let errorText = value.errorText {
                 Text(errorText)
-                    .font(.system(size: 11))
+                    .font(
+                        .system(size: EMKEDashboardMetrics.errorTextSize)
+                    )
                     .foregroundStyle(EMKEVisualStyle.failure)
                     .lineLimit(1)
-                    .padding(.top, 4)
+                    .frame(height: verticalGeometry.errorTextLineHeight)
+                    .padding(
+                        .top,
+                        EMKEDashboardMetrics.errorTextTopPadding
+                    )
             }
-            Spacer(minLength: EMKEDashboardMetrics.lowerSpacer)
+            Spacer(
+                minLength: EMKEDashboardMetrics.lowerSpacerMinimum
+            )
             EMKEDashboardSeparator()
             languageDirection
             EMKEDashboardSeparator()
             channelRows
-            Spacer(minLength: 16)
+                .frame(
+                    maxHeight: verticalGeometry.channelSectionHeightBudget(
+                        hasErrorText: value.errorText != nil
+                    ),
+                    alignment: .top
+            )
+            Spacer(
+                minLength: EMKEDashboardMetrics
+                    .channelToPrimarySpacerMinimum
+            )
             primaryActionButton
             EMKEDashboardSeparator()
                 .padding(.top, EMKEDashboardMetrics.footerDividerTopPadding)
@@ -133,12 +165,16 @@ struct TranslationDashboardContent: View {
                             weight: .light
                         )
                     )
-                    .frame(width: 32, height: 32)
+                    .frame(
+                        width: EMKEDashboardMetrics.headerHeight,
+                        height: EMKEDashboardMetrics.headerHeight
+                    )
                     .offset(x: EMKEDashboardMetrics.gearOffsetX)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(copy.text(.openSettings))
         }
+        .frame(height: EMKEDashboardMetrics.headerHeight)
         .offset(y: EMKEDashboardMetrics.headerOffsetY)
     }
 
@@ -166,6 +202,7 @@ struct TranslationDashboardContent: View {
             )
         }
         .padding(.vertical, EMKEDashboardMetrics.languageVerticalPadding)
+        .frame(height: verticalGeometry.languageDirectionHeight)
     }
 
     private func languagePicker(
@@ -173,9 +210,14 @@ struct TranslationDashboardContent: View {
         selection: Binding<SupportedLanguage>,
         leadingInset: CGFloat
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(
+            alignment: .leading,
+            spacing: EMKEDashboardMetrics.languageContentSpacing
+        ) {
             Text(title)
-                .font(.system(size: 12))
+                .font(
+                    .system(size: EMKEDashboardMetrics.languageTitleSize)
+                )
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
             if languagesLocked {
                 lockedLanguageValue(
@@ -260,6 +302,7 @@ struct TranslationDashboardContent: View {
             Text(value.privacyText)
                 .font(.system(size: EMKEDashboardMetrics.privacyTextSize))
         }
+        .frame(height: verticalGeometry.privacyTextLineHeight)
         .foregroundStyle(EMKEVisualStyle.secondaryText)
         .frame(maxWidth: .infinity)
         .offset(x: EMKEDashboardMetrics.privacyOffsetX)
@@ -281,7 +324,12 @@ private struct LanguageValueLabel: View {
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .accessibilityHidden(true)
         }
-        .font(.system(size: 22, weight: .semibold))
+        .font(
+            .system(
+                size: EMKEDashboardMetrics.languageValueSize,
+                weight: .semibold
+            )
+        )
         .contentShape(Rectangle())
     }
 }
