@@ -237,6 +237,14 @@ func floatingPanelHostsTheSharedModelAndWiresStop() throws {
     )
 
     #expect(source.contains("@ObservedObject var model: MenuBarModel"))
+    #expect(
+        source.contains(
+            "FloatingTranslationPanelContentMode.resolve(presentation)"
+        )
+    )
+    #expect(source.contains("case .static:"))
+    #expect(source.contains("Color.clear"))
+    #expect(source.contains("case .live:"))
     #expect(source.contains("TimelineView(.periodic(from: .now, by: 1))"))
     #expect(
         source.contains(
@@ -252,13 +260,20 @@ func floatingPanelLifecycleCoalescesRefreshAndPlacesOnlyOnce() throws {
         named: "FloatingTranslationPanelController.swift"
     )
 
-    #expect(source.contains("model.objectWillChange"))
+    #expect(!source.contains("model.objectWillChange"))
+    #expect(source.contains("model.$isStarting"))
+    #expect(source.contains("model.$isStopping"))
+    #expect(source.contains("model.$coordinatorState.map(\\.isRunning)"))
+    #expect(source.contains(".removeDuplicates()"))
     #expect(source.contains("await Task.yield()"))
     #expect(source.contains("refreshTask?.cancel()"))
+    #expect(source.contains("scheduleRefresh(to desiredVisibility: Bool)"))
     #expect(source.contains("guard !hasPlacedPanel"))
     #expect(source.contains("orderFrontRegardless()"))
     #expect(source.contains("orderOut(nil)"))
     #expect(source.contains("setFloatingWindowVisible(desiredVisibility)"))
+    #expect(source.contains("deinit"))
+    #expect(source.contains("visibilitySyncTask?.cancel()"))
 }
 
 @Test @MainActor

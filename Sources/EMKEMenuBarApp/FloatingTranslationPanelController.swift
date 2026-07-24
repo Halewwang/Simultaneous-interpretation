@@ -14,6 +14,32 @@ enum FloatingTranslationPanelPlacement {
     }
 }
 
+enum FloatingTranslationPanelContentMode: Equatable {
+    case `static`
+    case live
+
+    static func resolve(
+        _ presentation: FloatingTranslationPresentation
+    ) -> Self {
+        presentation.isVisible ? .live : .static
+    }
+}
+
+enum FloatingTranslationPanelVisibilityPublisher {
+    static func make(
+        isStarting: AnyPublisher<Bool, Never>,
+        isStopping: AnyPublisher<Bool, Never>,
+        isRunning: AnyPublisher<Bool, Never>
+    ) -> AnyPublisher<Bool, Never> {
+        Publishers.CombineLatest3(isStarting, isStopping, isRunning)
+            .map { starting, stopping, running in
+                starting || stopping || running
+            }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
+}
+
 private final class FloatingTranslationPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -23,13 +49,22 @@ private struct FloatingTranslationPanelRoot: View {
     @ObservedObject var model: MenuBarModel
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            FloatingTranslationStatusView(
-                presentation: model.floatingPresentation(at: context.date),
-                stopAction: {
-                    Task { await model.stop() }
-                }
+        let presentation = model.floatingPresentation(at: .now)
+        switch FloatingTranslationPanelContentMode.resolve(presentation) {
+        case .static:
+            Color.clear.frame(
+                width: EMKEFloatingMetrics.width,
+                height: EMKEFloatingMetrics.height
             )
+        case .live:
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                FloatingTranslationStatusView(
+                    presentation: model.floatingPresentation(at: context.date),
+                    stopAction: {
+                        Task { await model.stop() }
+                    }
+                )
+            }
         }
     }
 }
@@ -38,7 +73,7 @@ private struct FloatingTranslationPanelRoot: View {
 final class FloatingTranslationPanelController: ObservableObject {
     private let model: MenuBarModel
     private let panel: FloatingTranslationPanel
-    private var modelObservation: AnyCancellable?
+    private var visibilityObservation: AnyCancellable?
     private var refreshTask: Task<Void, Never>?
     private var visibilitySyncTask: Task<Void, Never>?
     private var refreshGeneration = 0
@@ -46,6 +81,7 @@ final class FloatingTranslationPanelController: ObservableObject {
     private var hasPlacedPanel = false
     private var desiredModelVisibility: Bool?
     private var appliedModelVisibility = false
+    private(set) var visibilityRefreshScheduleCountForTesting = 0
 
     init(model: MenuBarModel) {
         self.model = model
@@ -76,18 +112,31 @@ final class FloatingTranslationPanelController: ObservableObject {
         )
         self.panel = panel
 
-        modelObservation = model.objectWillChange.sink { [weak self] in
-            MainActor.assumeIsolated {
-                self?.scheduleRefresh()
+        visibilityObservation = FloatingTranslationPanelVisibilityPublisher
+            .make(
+                isStarting: model.$isStarting.eraseToAnyPublisher(),
+                isStopping: model.$isStopping.eraseToAnyPublisher(),
+                isRunning: model.$coordinatorState.map(\.isRunning)
+                    .eraseToAnyPublisher()
+            )
+            .sink { [weak self] desiredVisibility in
+                MainActor.assumeIsolated {
+                    self?.scheduleRefresh(to: desiredVisibility)
+                }
             }
-        }
+    }
+
+    deinit {
+        refreshTask?.cancel()
+        visibilitySyncTask?.cancel()
     }
 
     var panelForTesting: NSPanel {
         panel
     }
 
-    private func scheduleRefresh() {
+    private func scheduleRefresh(to desiredVisibility: Bool) {
+        visibilityRefreshScheduleCountForTesting += 1
         refreshGeneration += 1
         let generation = refreshGeneration
         refreshTask?.cancel()
@@ -101,12 +150,11 @@ final class FloatingTranslationPanelController: ObservableObject {
                 return
             }
             self.refreshTask = nil
-            self.refreshPanelVisibility()
+            self.refreshPanelVisibility(to: desiredVisibility)
         }
     }
 
-    private func refreshPanelVisibility() {
-        let desiredVisibility = model.floatingPresentation(at: .now).isVisible
+    private func refreshPanelVisibility(to desiredVisibility: Bool) {
         guard desiredVisibility != panelIsVisible else { return }
 
         panelIsVisible = desiredVisibility
