@@ -161,8 +161,8 @@ public actor TranslationSession {
                 guard connectionID == id else { return }
                 emit(event)
                 if case .closed = event {
-                    await socket.cancel()
                     finishConnection(connectionID: id, error: nil)
+                    await socket.cancel()
                     return
                 }
                 if case .serverError(let code, let message) = event {

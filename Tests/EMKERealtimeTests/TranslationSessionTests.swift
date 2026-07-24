@@ -10,18 +10,20 @@ private actor FakeSocket: TranslationSocket {
     private var incoming: [Data]
     private var receiveWaiters: [CheckedContinuation<Data, any Error>] = []
     private var closeSendWaiter: CheckedContinuation<Void, Never>?
+    private var cancellationStarted = false
+    private var cancellationStartWaiter: CheckedContinuation<Void, Never>?
+    private var cancellationFinishWaiter: CheckedContinuation<Void, Never>?
     private let acknowledgesClose: Bool
-    private let waitsForCancellationBeforeCloseSendReturns: Bool
+    private let waitsForCancellationToFinish: Bool
 
     init(
         incoming: [Data] = [],
         acknowledgesClose: Bool = true,
-        waitsForCancellationBeforeCloseSendReturns: Bool = false
+        waitsForCancellationToFinish: Bool = false
     ) {
         self.incoming = incoming
         self.acknowledgesClose = acknowledgesClose
-        self.waitsForCancellationBeforeCloseSendReturns =
-            waitsForCancellationBeforeCloseSendReturns
+        self.waitsForCancellationToFinish = waitsForCancellationToFinish
     }
 
     func send(_ data: Data) async throws {
@@ -29,7 +31,7 @@ private actor FakeSocket: TranslationSocket {
         if acknowledgesClose,
            String(decoding: data, as: UTF8.self).contains("session.close") {
             enqueue(Data(#"{"type":"session.closed"}"#.utf8))
-            if waitsForCancellationBeforeCloseSendReturns {
+            if waitsForCancellationToFinish {
                 await withCheckedContinuation { closeSendWaiter = $0 }
             }
         }
@@ -47,6 +49,12 @@ private actor FakeSocket: TranslationSocket {
 
     func cancel() async {
         wasCancelled = true
+        cancellationStarted = true
+        cancellationStartWaiter?.resume()
+        cancellationStartWaiter = nil
+        if waitsForCancellationToFinish {
+            await withCheckedContinuation { cancellationFinishWaiter = $0 }
+        }
         closeSendWaiter?.resume()
         closeSendWaiter = nil
         let waiters = receiveWaiters
@@ -54,6 +62,16 @@ private actor FakeSocket: TranslationSocket {
         for waiter in waiters {
             waiter.resume(throwing: TranslationSocketError.disconnected)
         }
+    }
+
+    func waitForCancellationStart() async {
+        guard !cancellationStarted else { return }
+        await withCheckedContinuation { cancellationStartWaiter = $0 }
+    }
+
+    func finishCancellation() {
+        cancellationFinishWaiter?.resume()
+        cancellationFinishWaiter = nil
     }
 
     private func enqueue(_ data: Data) {
@@ -258,21 +276,27 @@ func serverCloseBeforeDeadlineKeepsTailAudioAndDoesNotWaitForDeadline()
 }
 
 @Test
-func fastServerCloseDuringSendDoesNotArmDeadline() async throws {
+func fastServerCloseDuringSendFinishesBeforeDeadlineCanArm() async throws {
     let deadline = CloseDeadlineGate()
     let socket = FakeSocket(
         incoming: handshakeEvents,
-        waitsForCancellationBeforeCloseSendReturns: true
+        waitsForCancellationToFinish: true
     )
     let session = makeSession(socket: socket) {
         await deadline.wait()
     }
     try await session.connect()
 
-    try await session.close()
+    let closeTask = Task { try await session.close() }
+    await socket.waitForCancellationStart()
 
-    #expect(await socket.wasCancelled)
-    #expect(!(await eventually { await deadline.waitCount > 0 }))
+    await #expect(throws: TranslationSocketError.self) {
+        try await session.appendAudio(Data([0, 1]))
+    }
+    await socket.finishCancellation()
+    try await closeTask.value
+
+    #expect(await deadline.waitCount == 0)
 }
 
 @Test
