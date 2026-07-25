@@ -144,8 +144,39 @@ SOURCE_DATE_EPOCH=0 /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
 /usr/bin/cmp "$OUTPUT" "$COPY"
 
 expect_rejected() {
+  local status
   if "$@" > "$TEMP/rejected.stdout" 2> "$TEMP/rejected.stderr"; then
+    status=0
+  else
+    status="$?"
+  fi
+  if test "$status" -eq 0; then
     echo "unsafe release metadata input was accepted: $*" >&2
+    exit 1
+  fi
+  if test "$status" -ne 64; then
+    echo "unsafe release metadata input returned $status instead of 64: $*" >&2
+    exit 1
+  fi
+}
+
+expect_rejected_preserving_output() {
+  local protected_output="$1"
+  shift
+  local snapshot="$TEMP/rejected-output.snapshot"
+  local output_existed=0
+  if test -e "$protected_output"; then
+    /bin/cp "$protected_output" "$snapshot"
+    output_existed=1
+  fi
+  expect_rejected "$@"
+  if test "$output_existed" -eq 1; then
+    if ! /usr/bin/cmp "$snapshot" "$protected_output"; then
+      echo "rejected release metadata overwrote output: $protected_output" >&2
+      exit 1
+    fi
+  elif test -e "$protected_output"; then
+    echo "rejected release metadata created output: $protected_output" >&2
     exit 1
   fi
 }
@@ -158,8 +189,32 @@ expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
   "1.2.3" "123" "http://example.com/update.pkg" "$SIGNATURE" "4567" "$OUTPUT"
 expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
   "1.2.3" "123" "$URL" "" "4567" "$OUTPUT"
-expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
-  "1.2.3" "123" "$URL" $'signature\ninjection' "4567" "$OUTPUT"
+
+assert_control_byte_rejected() {
+  local control_code="$1"
+  local control_octal
+  local control_byte
+  local controlled_output
+  printf -v control_octal '%03o' "$control_code"
+  printf -v control_byte "\\$control_octal"
+
+  expect_rejected_preserving_output "$OUTPUT" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "${URL}${control_byte}" "$SIGNATURE" "4567" "$OUTPUT"
+  expect_rejected_preserving_output "$OUTPUT" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "$URL" "signature${control_byte}" "4567" "$OUTPUT"
+  controlled_output="$TEMP/appcast-control-$control_code.xml${control_byte}"
+  expect_rejected_preserving_output "$controlled_output" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "$URL" "$SIGNATURE" "4567" "$controlled_output"
+}
+
+for ((control_code = 1; control_code <= 31; control_code += 1)); do
+  assert_control_byte_rejected "$control_code"
+done
+assert_control_byte_rejected 127
+
 expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
   "1.2.3" "123" "$URL" "$SIGNATURE" "-1" "$OUTPUT"
 expect_rejected /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \

@@ -18,6 +18,25 @@ fail() {
   exit 64
 }
 
+has_forbidden_control_byte() {
+  local value="$1"
+  local index
+  local byte
+  local LC_ALL=C
+
+  # Bash variables and argv cannot contain NUL. Inspect every remaining byte
+  # directly so matching does not depend on locale-specific glob ranges.
+  for ((index = 0; index < ${#value}; index += 1)); do
+    if ! printf -v byte '%d' "'${value:index:1}"; then
+      return 0
+    fi
+    if (( (byte >= 1 && byte <= 31) || byte == 127 )); then
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \
   [[ "${#VERSION}" -gt 64 ]]; then
   fail "invalid version"
@@ -29,18 +48,18 @@ if [[ ! "$LENGTH" =~ ^[0-9]+$ ]] || [[ "${#LENGTH}" -gt 20 ]]; then
   fail "invalid length"
 fi
 if [[ ! "$URL" =~ ^https://[^[:space:]]+$ ]] || \
-  [[ "$URL" == *[$'\001'-$'\037'$'\177']* ]]; then
+  has_forbidden_control_byte "$URL"; then
   fail "invalid update URL"
 fi
 if test -z "$SIGNATURE" || \
-  [[ "$SIGNATURE" == *[$'\001'-$'\037'$'\177']* ]]; then
+  has_forbidden_control_byte "$SIGNATURE"; then
   fail "invalid signature"
 fi
 if [[ "$OUTPUT" != /* ]] || [[ "$OUTPUT" == *'//'* ]] || \
   [[ "$OUTPUT" == *'/./'* ]] || [[ "$OUTPUT" == *'/../'* ]] || \
   [[ "$OUTPUT" == */. ]] || [[ "$OUTPUT" == */.. ]] || \
   [[ "$OUTPUT" == */ ]] || \
-  [[ "$OUTPUT" == *[$'\001'-$'\037'$'\177']* ]]; then
+  has_forbidden_control_byte "$OUTPUT"; then
   fail "unsafe output path"
 fi
 
