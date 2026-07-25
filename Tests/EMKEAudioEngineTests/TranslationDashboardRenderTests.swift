@@ -536,6 +536,47 @@ private func onboardingLogoInkPixels(
     )
 }
 
+@MainActor
+private func onboardingApprovedLogoIntersectionOverUnion(
+    in bitmap: NSBitmapImageRep
+) throws -> Double {
+    let approvedData = try #require(MenuBarLogo.image.tiffRepresentation)
+    let approved = try #require(NSBitmapImageRep(data: approvedData))
+    var bestMatch = 0.0
+
+    for captureX in 50...90 {
+        var intersection = 0
+        var union = 0
+
+        for y in 0..<36 {
+            for x in 0..<36 {
+                let expectedInk =
+                    (approved.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5
+                let actualColor = try #require(
+                    bitmap.colorAt(
+                        x: captureX + x,
+                        y: 56 + y
+                    )?.usingColorSpace(.deviceRGB)
+                )
+                let luminance =
+                    (0.2126 * actualColor.redComponent)
+                    + (0.7152 * actualColor.greenComponent)
+                    + (0.0722 * actualColor.blueComponent)
+                let actualInk = luminance > 0.65
+                intersection += expectedInk && actualInk ? 1 : 0
+                union += expectedInk || actualInk ? 1 : 0
+            }
+        }
+
+        bestMatch = max(
+            bestMatch,
+            Double(intersection) / Double(union)
+        )
+    }
+
+    return bestMatch
+}
+
 private func onboardingProductNameInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
@@ -1288,6 +1329,12 @@ private func validatedOnboardingCaptureArtifacts() async throws
             #expect(
                 onboardingLogoInkPixels(in: bitmap) > 500,
                 "Onboarding \(step) \(language) must render the logo"
+            )
+            #expect(
+                try onboardingApprovedLogoIntersectionOverUnion(
+                    in: bitmap
+                ) > 0.8,
+                "Onboarding \(step) \(language) must render the approved EMKE mark"
             )
             #expect(
                 onboardingProductNameInkPixels(in: bitmap) > 800,

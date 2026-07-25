@@ -84,8 +84,10 @@ struct OnboardingView: View {
     private var stepRail: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "waveform.path")
-                    .font(.system(size: 18, weight: .semibold))
+                Image(nsImage: MenuBarLogo.image)
+                    .resizable()
+                    .renderingMode(.template)
+                    .frame(width: 18, height: 18)
                     .frame(width: 30, height: 30)
                     .background(
                         RoundedRectangle(cornerRadius: 9)
