@@ -1,10 +1,15 @@
 # EMKE GitHub README Refresh
 
-**Status:** Approved in conversation on 2026-07-25  
-**Implementation baseline:** `30a7bb8` (`test: make permission gate release sticky`)  
-**Target repository:** `https://github.com/Halewwang/Simultaneous-interpretation.git`  
-**Approved audience:** Public visitors and prospective users  
-**Approved languages:** Separate Chinese and English README files  
+**Status:** Approved in conversation on 2026-07-25
+
+**Implementation baseline:** `30a7bb8` (`test: make permission gate release sticky`)
+
+**Target repository:** `https://github.com/Halewwang/Simultaneous-interpretation.git`
+
+**Approved audience:** Public visitors and prospective users
+
+**Approved languages:** Separate Chinese and English README files
+
 **Approved visual direction:** Product-story layout
 
 ## 1. Context
