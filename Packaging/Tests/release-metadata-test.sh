@@ -194,17 +194,52 @@ assert_control_byte_rejected() {
   local control_code="$1"
   local control_octal
   local control_byte
+  local url_absent_output
+  local url_existing_output
+  local signature_absent_output
+  local signature_existing_output
   local controlled_output
   printf -v control_octal '%03o' "$control_code"
   printf -v control_byte "\\$control_octal"
 
-  expect_rejected_preserving_output "$OUTPUT" \
+  url_absent_output="$TEMP/appcast-url-absent-$control_code.xml"
+  test ! -e "$url_absent_output"
+  expect_rejected_preserving_output "$url_absent_output" \
     /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
-    "1.2.3" "123" "${URL}${control_byte}" "$SIGNATURE" "4567" "$OUTPUT"
-  expect_rejected_preserving_output "$OUTPUT" \
+    "1.2.3" "123" "${URL}${control_byte}" "$SIGNATURE" "4567" \
+    "$url_absent_output"
+  url_existing_output="$TEMP/appcast-url-existing-$control_code.xml"
+  test ! -e "$url_existing_output"
+  /usr/bin/printf 'url sentinel %s' "$control_code" > "$url_existing_output"
+  test -f "$url_existing_output" && test ! -L "$url_existing_output"
+  expect_rejected_preserving_output "$url_existing_output" \
     /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
-    "1.2.3" "123" "$URL" "signature${control_byte}" "4567" "$OUTPUT"
+    "1.2.3" "123" "${URL}${control_byte}" "$SIGNATURE" "4567" \
+    "$url_existing_output"
+
+  signature_absent_output="$TEMP/appcast-signature-absent-$control_code.xml"
+  test ! -e "$signature_absent_output"
+  expect_rejected_preserving_output "$signature_absent_output" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "$URL" "signature${control_byte}" "4567" \
+    "$signature_absent_output"
+  signature_existing_output="$TEMP/appcast-signature-existing-$control_code.xml"
+  test ! -e "$signature_existing_output"
+  /usr/bin/printf 'signature sentinel %s' "$control_code" \
+    > "$signature_existing_output"
+  test -f "$signature_existing_output" && test ! -L "$signature_existing_output"
+  expect_rejected_preserving_output "$signature_existing_output" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "$URL" "signature${control_byte}" "4567" \
+    "$signature_existing_output"
+
   controlled_output="$TEMP/appcast-control-$control_code.xml${control_byte}"
+  test ! -e "$controlled_output"
+  expect_rejected_preserving_output "$controlled_output" \
+    /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
+    "1.2.3" "123" "$URL" "$SIGNATURE" "4567" "$controlled_output"
+  /usr/bin/printf 'output sentinel %s' "$control_code" > "$controlled_output"
+  test -f "$controlled_output" && test ! -L "$controlled_output"
   expect_rejected_preserving_output "$controlled_output" \
     /bin/bash "$ROOT/Packaging/Scripts/render-appcast.sh" \
     "1.2.3" "123" "$URL" "$SIGNATURE" "4567" "$controlled_output"
