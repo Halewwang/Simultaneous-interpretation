@@ -537,14 +537,15 @@ private func onboardingLogoInkPixels(
 }
 
 @MainActor
-private func onboardingApprovedLogoIntersectionOverUnion(
+private func onboardingApprovedLogoMatch(
     in bitmap: NSBitmapImageRep
-) throws -> Double {
+) throws -> (intersectionOverUnion: Double, x: Int) {
     let approvedData = try #require(MenuBarLogo.image.tiffRepresentation)
     let approved = try #require(NSBitmapImageRep(data: approvedData))
     var bestMatch = 0.0
+    var bestX = 0
 
-    for captureX in 50...90 {
+    for captureX in 35...90 {
         var intersection = 0
         var union = 0
 
@@ -568,13 +569,43 @@ private func onboardingApprovedLogoIntersectionOverUnion(
             }
         }
 
-        bestMatch = max(
-            bestMatch,
-            Double(intersection) / Double(union)
-        )
+        let candidate = Double(intersection) / Double(union)
+        if candidate > bestMatch {
+            bestMatch = candidate
+            bestX = captureX
+        }
     }
 
-    return bestMatch
+    return (bestMatch, bestX)
+}
+
+private func onboardingInkVerticalSpan(
+    in bitmap: NSBitmapImageRep,
+    xRange: Range<Int>,
+    yRange: Range<Int>,
+    maximumLuminance: Double
+) -> Int {
+    var minimumY: Int?
+    var maximumY: Int?
+
+    for y in yRange {
+        for x in xRange {
+            guard
+                let color = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.deviceRGB)
+            else { continue }
+            let luminance =
+                (0.2126 * color.redComponent)
+                + (0.7152 * color.greenComponent)
+                + (0.0722 * color.blueComponent)
+            guard luminance < maximumLuminance else { continue }
+            minimumY = min(minimumY ?? y, y)
+            maximumY = max(maximumY ?? y, y)
+        }
+    }
+
+    guard let minimumY, let maximumY else { return 0 }
+    return maximumY - minimumY + 1
 }
 
 private func onboardingProductNameInkPixels(
@@ -1303,6 +1334,7 @@ private func validatedOnboardingCaptureArtifacts() async throws
     -> [QACaptureArtifact]
 {
     var artifacts: [QACaptureArtifact] = []
+    var logoPositions: Set<Int> = []
     for language in [
         AppInterfaceLanguage.zhHans,
         AppInterfaceLanguage.english,
@@ -1330,23 +1362,32 @@ private func validatedOnboardingCaptureArtifacts() async throws
                 onboardingLogoInkPixels(in: bitmap) > 500,
                 "Onboarding \(step) \(language) must render the logo"
             )
+            let logoMatch = try onboardingApprovedLogoMatch(in: bitmap)
             #expect(
-                try onboardingApprovedLogoIntersectionOverUnion(
-                    in: bitmap
-                ) > 0.8,
+                logoMatch.intersectionOverUnion > 0.8,
                 "Onboarding \(step) \(language) must render the approved EMKE mark"
             )
+            logoPositions.insert(logoMatch.x)
             #expect(
                 onboardingProductNameInkPixels(in: bitmap) > 800,
                 "Onboarding \(step) \(language) must render the product name"
             )
             #expect(
-                onboardingStepTitleInkPixels(in: bitmap) > 3_000,
+                onboardingStepTitleInkPixels(in: bitmap) > 2_500,
                 "Onboarding \(step) \(language) must render the localized step title"
             )
             #expect(
-                onboardingStepBodyInkPixels(in: bitmap) > 5_000,
+                onboardingStepBodyInkPixels(in: bitmap) > 3_500,
                 "Onboarding \(step) \(language) must render the localized step body"
+            )
+            #expect(
+                onboardingInkVerticalSpan(
+                    in: bitmap,
+                    xRange: 360..<1_300,
+                    yRange: 110..<170,
+                    maximumLuminance: 0.7
+                ) <= 40,
+                "Onboarding \(step) \(language) title must use compact typography"
             )
             #expect(
                 onboardingFooterInkPixels(in: bitmap) > 250,
@@ -1386,6 +1427,10 @@ private func validatedOnboardingCaptureArtifacts() async throws
             artifacts.append(artifact)
         }
     }
+    #expect(
+        logoPositions.count == 1,
+        "Onboarding must keep the brand mark aligned across languages and steps"
+    )
     return artifacts
 }
 

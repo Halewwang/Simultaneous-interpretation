@@ -129,7 +129,11 @@ struct OnboardingView: View {
         .padding(.horizontal, 18)
         .padding(.top, 22)
         .padding(.bottom, 18)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
         .background(Color(nsColor: .underPageBackgroundColor))
     }
 
@@ -195,16 +199,26 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(copy.text(.gettingStarted))
-                    .font(.system(size: 10, weight: .bold))
+                    .font(
+                        .system(
+                            size: OnboardingTypographyMetrics.eyebrow,
+                            weight: .bold
+                        )
+                    )
                     .foregroundStyle(EMKEVisualStyle.activityBlue)
                 Spacer()
                 let progressText =
                     "\(controller.flow.step.rawValue + 1) / \(OnboardingStep.allCases.count)"
                 Text(progressText)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(
+                        .system(
+                            size: OnboardingTypographyMetrics.eyebrow,
+                            weight: .semibold
+                        )
+                    )
                     .foregroundStyle(EMKEVisualStyle.secondaryText)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(
                         Capsule().fill(EMKEVisualStyle.surfaceBackground)
                     )
@@ -218,7 +232,7 @@ struct OnboardingView: View {
                     maxHeight: .infinity,
                     alignment: .topLeading
                 )
-                .padding(.top, 14)
+                .padding(.top, 12)
 
             footer
                 .frame(height: OnboardingLayoutMetrics.footerHeight)
@@ -229,6 +243,7 @@ struct OnboardingView: View {
         )
         .padding(.top, OnboardingLayoutMetrics.mainVerticalPadding)
         .padding(.bottom, 16)
+        .controlSize(.small)
     }
 
     @ViewBuilder
@@ -331,7 +346,7 @@ struct OnboardingView: View {
                     model.connectionTestMessage,
                     systemImage: "network.badge.shield.half.filled"
                 )
-                .font(.system(size: 11))
+                .font(.system(size: OnboardingTypographyMetrics.label))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -359,12 +374,17 @@ struct OnboardingView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 21, weight: .semibold))
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.title,
+                        weight: .semibold
+                    )
+                )
             Text(body)
-                .font(.system(size: 12))
+                .font(.system(size: OnboardingTypographyMetrics.body))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(1.5)
+                .lineSpacing(1)
         }
     }
 
@@ -379,11 +399,16 @@ struct OnboardingView: View {
                 .frame(width: 22)
                 .foregroundStyle(EMKEVisualStyle.activityBlue)
             Text("\(from)  →  \(through)  →  \(to)")
-                .font(.system(size: 12, weight: .medium))
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.value,
+                        weight: .medium
+                    )
+                )
                 .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
+                .lineSpacing(1.5)
         }
-        .padding(11)
+        .padding(OnboardingTypographyMetrics.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 11)
@@ -473,19 +498,24 @@ struct OnboardingView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: systemImage)
                 .foregroundStyle(tone)
-                .font(.system(size: 17))
+                .font(.system(size: OnboardingTypographyMetrics.statusIcon))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(
+                        .system(
+                            size: OnboardingTypographyMetrics.value,
+                            weight: .medium
+                        )
+                    )
                 Text(value)
-                    .font(.system(size: 12))
+                    .font(.system(size: OnboardingTypographyMetrics.value))
                     .foregroundStyle(EMKEVisualStyle.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
-        .padding(11)
+        .padding(OnboardingTypographyMetrics.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 11)
@@ -571,7 +601,7 @@ struct OnboardingView: View {
                 ? "checkmark.circle.fill"
                 : "circle.dotted"
         )
-        .font(.system(size: 11))
+        .font(.system(size: OnboardingTypographyMetrics.label))
         .foregroundStyle(EMKEVisualStyle.secondaryText)
     }
 
@@ -584,7 +614,7 @@ struct OnboardingView: View {
                 providerSummaryRow("Base URL", value: model.baseURLString)
                 providerSummaryRow(copy.text(.modelID), value: model.modelID)
             }
-            .padding(12)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10)
@@ -599,9 +629,14 @@ struct OnboardingView: View {
             )
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "pencil")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(
+                        .system(
+                            size: OnboardingTypographyMetrics.label,
+                            weight: .semibold
+                        )
+                    )
                     .foregroundStyle(EMKEVisualStyle.secondaryText)
-                    .padding(12)
+                    .padding(10)
                     .accessibilityHidden(true)
             }
         }
@@ -622,11 +657,16 @@ struct OnboardingView: View {
     ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(title)
-                .font(.system(size: 11))
+                .font(.system(size: OnboardingTypographyMetrics.label))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .frame(width: 70, alignment: .leading)
             Text(value)
-                .font(.system(size: 11, weight: .medium))
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.value,
+                        weight: .medium
+                    )
+                )
                 .lineLimit(1)
             Spacer(minLength: 18)
         }
@@ -660,13 +700,23 @@ struct OnboardingView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 11, weight: .medium))
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.label,
+                        weight: .medium
+                    )
+                )
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
             Text(value)
-                .font(.system(size: 12, weight: .semibold))
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.value,
+                        weight: .semibold
+                    )
+                )
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10)
@@ -713,7 +763,12 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
             }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(
+            .system(
+                size: OnboardingTypographyMetrics.footer,
+                weight: .medium
+            )
+        )
     }
 
     private func refreshCurrentStep() async {
@@ -755,7 +810,7 @@ private struct OnboardingDevicePicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.system(size: 11))
+                .font(.system(size: OnboardingTypographyMetrics.label))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
             Button {
                 isPresented.toggle()
@@ -765,13 +820,23 @@ private struct OnboardingDevicePicker: View {
                         .lineLimit(1)
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(
+                            .system(
+                                size: OnboardingTypographyMetrics.label,
+                                weight: .semibold
+                            )
+                        )
                         .foregroundStyle(EMKEVisualStyle.secondaryText)
                         .accessibilityHidden(true)
                 }
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 10)
-                .frame(height: 30)
+                .font(
+                    .system(
+                        size: OnboardingTypographyMetrics.value,
+                        weight: .medium
+                    )
+                )
+                .padding(.horizontal, 9)
+                .frame(height: OnboardingTypographyMetrics.pickerHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
                         .fill(EMKEVisualStyle.surfaceBackground)
