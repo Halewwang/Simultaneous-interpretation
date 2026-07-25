@@ -614,6 +614,15 @@ private final class TranslationSettingsStoreStub: AppSettingsStoring {
     }
 }
 
+@MainActor
+private func translationSettingsStore(
+    interfaceLanguage: AppInterfaceLanguage
+) -> TranslationSettingsStoreStub {
+    var settings = AppSettings.default
+    settings.interfaceLanguage = interfaceLanguage
+    return TranslationSettingsStoreStub(value: settings)
+}
+
 private let protocolOnlyReport = TranslationCompatibilityReport(
     authentication: .passed,
     handshake: .passed,
@@ -659,6 +668,7 @@ private func configureAndStart(_ model: MenuBarModel) async {
 func missingDriverAndPhysicalSelectionsBlockStartInOrder() async {
     let withoutDriver = makeTranslationMenuModel(
         secret: "stored-key",
+        settings: translationSettingsStore(interfaceLanguage: .zhHans),
         provider: TranslationMenuDeviceProvider(includeDriver: false)
     )
     await withoutDriver.loadConfiguration()
@@ -1197,7 +1207,7 @@ func startStopsBeforeAudioWhenMicrophonePermissionIsDenied() async {
         coordinator: coordinator,
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(state: .denied)
     )
     await model.loadConfiguration()
@@ -1228,7 +1238,7 @@ func localInputDiagnosticPublishesCapturedPCMState() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1263,7 +1273,7 @@ func onboardingCleanupStopsActiveInputDiagnosticAndResetsPresentation() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1289,7 +1299,7 @@ func onboardingCleanupInvalidatesAudioInputStartSynchronously() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1348,7 +1358,7 @@ func newAudioInputStartOwnsAdapterAfterStaleCleanup() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1406,7 +1416,7 @@ func localInputDiagnosticPublishesHALRenderFailure() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1468,7 +1478,7 @@ func localOutputDiagnosticTargetsSelectedPhysicalDevice() async {
         coordinator: TranslationCoordinatorStub(),
         connectionProbe: TranslationProbeStub(report: protocolOnlyReport),
         secretStore: TranslationSecretStoreStub(value: "stored-key"),
-        settingsStore: TranslationSettingsStoreStub(),
+        settingsStore: translationSettingsStore(interfaceLanguage: .zhHans),
         microphonePermissionProvider: MicrophonePermissionStub(
             state: .authorized
         ),
@@ -1507,7 +1517,10 @@ func diagnosticAndConnectionMessagesReRenderAfterLanguageChange() async {
 
 @Test @MainActor
 func connectionTestPreservesPartialCompatibilityResult() async {
-    let model = makeTranslationMenuModel(secret: "stored-key")
+    let model = makeTranslationMenuModel(
+        secret: "stored-key",
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
+    )
     await model.loadConfiguration()
 
     await model.testConnection()
@@ -2119,7 +2132,10 @@ func modelStatusHelpersReRenderAfterLanguageChange() async throws {
 
 @Test @MainActor
 func dashboardStatusUsesReadinessAndElapsedRuntime() async throws {
-    let model = makeTranslationMenuModel(secret: "test-key")
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
+    )
     await model.loadConfiguration()
     model.selectedInputUID = "physical.input"
     model.selectedOutputUID = "physical.output"
@@ -2140,11 +2156,16 @@ func dashboardStatusUsesReadinessAndElapsedRuntime() async throws {
 
 @Test @MainActor
 func apiKeyStatusReflectsKeychainAvailability() async {
-    let missingKey = makeTranslationMenuModel()
+    let missingKey = makeTranslationMenuModel(
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
+    )
     await missingKey.loadConfiguration()
     #expect(missingKey.apiKeyStatusText == "尚未保存")
 
-    let storedKey = makeTranslationMenuModel(secret: "test-key")
+    let storedKey = makeTranslationMenuModel(
+        secret: "test-key",
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
+    )
     await storedKey.loadConfiguration()
     #expect(storedKey.apiKeyStatusText == "已存入 Keychain")
 }
@@ -2154,7 +2175,8 @@ func activeManualBypassPresentationTracksModelActionAndRestore() async {
     let coordinator = TranslationCoordinatorStub()
     let model = makeTranslationMenuModel(
         secret: "test-key",
-        coordinator: coordinator
+        coordinator: coordinator,
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
     )
     await configureAndStart(model)
 
@@ -2191,7 +2213,8 @@ func sameLanguageOutboundDirectPathCannotOfferOrInvokeRestore() async {
     let coordinator = TranslationCoordinatorStub()
     let model = makeTranslationMenuModel(
         secret: "test-key",
-        coordinator: coordinator
+        coordinator: coordinator,
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
     )
     await model.loadConfiguration()
     model.selectedInputUID = "physical.input"
@@ -2218,7 +2241,8 @@ func manualBypassPresentationStaysAlignedAcrossFailureAndRecovery() async {
     let coordinator = TranslationCoordinatorStub()
     let model = makeTranslationMenuModel(
         secret: "test-key",
-        coordinator: coordinator
+        coordinator: coordinator,
+        settings: translationSettingsStore(interfaceLanguage: .zhHans)
     )
     await configureAndStart(model)
     await model.setOutboundBypass(true)
