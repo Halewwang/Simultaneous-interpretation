@@ -66,9 +66,13 @@ struct OnboardingView: View {
                 alignment: .topLeading
             )
         }
-        .frame(width: 560, height: 620)
+        .frame(
+            width: OnboardingLayoutMetrics.windowWidth,
+            height: OnboardingLayoutMetrics.windowHeight
+        )
         .clipped()
         .background(EMKEVisualStyle.panelBackground)
+        .ignoresSafeArea()
         .task(id: controller.flow.step) {
             guard refreshesStateOnStepChange else { return }
             await refreshCurrentStep()

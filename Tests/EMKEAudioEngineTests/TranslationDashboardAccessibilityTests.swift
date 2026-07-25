@@ -461,6 +461,40 @@ func onboardingPinsChromeToTheFixedWindowCoordinateSpace() throws {
 }
 
 @Test
+func onboardingUsesApprovedUnifiedWindowGeometry() {
+    #expect(OnboardingLayoutMetrics.windowWidth == 680)
+    #expect(OnboardingLayoutMetrics.windowHeight == 560)
+    #expect(OnboardingLayoutMetrics.stepRailWidth == 156)
+}
+
+@Test
+func onboardingWindowHidesSystemChromeWithoutBecomingBorderless() throws {
+    let source = try sourceFile(named: "OnboardingWindowController.swift")
+
+    #expect(source.contains(".titled"))
+    #expect(source.contains(".fullSizeContentView"))
+    #expect(source.contains("window.titleVisibility = .hidden"))
+    #expect(source.contains("window.titlebarAppearsTransparent = true"))
+    #expect(
+        source.contains(
+            "window.standardWindowButton(.closeButton)?.isHidden = true"
+        )
+    )
+    #expect(
+        source.contains(
+            "window.standardWindowButton(.miniaturizeButton)?.isHidden = true"
+        )
+    )
+    #expect(
+        source.contains(
+            "window.standardWindowButton(.zoomButton)?.isHidden = true"
+        )
+    )
+    #expect(source.contains("window.isMovableByWindowBackground = true"))
+    #expect(!source.contains("styleMask: [.borderless]"))
+}
+
+@Test
 func floatingPanelHostsTheSharedModelAndWiresStop() throws {
     let source = try sourceFile(
         named: "FloatingTranslationPanelController.swift"
