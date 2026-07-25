@@ -3,8 +3,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 APP="${1:?missing output app path}"
 ICON_OUTPUT="$(dirname "$APP")/icon-build"
-EMKE_VERSION="${EMKE_VERSION:-0.2.0}"
-EMKE_BUILD_NUMBER="${EMKE_BUILD_NUMBER:-2000}"
+EMKE_VERSION="${EMKE_VERSION:-0.2.1}"
+EMKE_BUILD_NUMBER="${EMKE_BUILD_NUMBER:-2001}"
 
 case "$APP" in *.app) ;; *) echo "output must end in .app" >&2; exit 64;; esac
 if [[ ! "$EMKE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \

@@ -5,8 +5,8 @@ DIST="$ROOT/.build/distribution"
 STAGE="$DIST/staging-root"
 COMPONENTS="$DIST/components"
 APP="$COMPONENTS/EMKE Translation.app"
-EMKE_VERSION="${EMKE_VERSION:-0.2.0}"
-EMKE_BUILD_NUMBER="${EMKE_BUILD_NUMBER:-2000}"
+EMKE_VERSION="${EMKE_VERSION:-0.2.1}"
+EMKE_BUILD_NUMBER="${EMKE_BUILD_NUMBER:-2001}"
 if [[ ! "$EMKE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \
   [[ "${#EMKE_VERSION}" -gt 64 ]]; then
   echo "invalid EMKE_VERSION" >&2

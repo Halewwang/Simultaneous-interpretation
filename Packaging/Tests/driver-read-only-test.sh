@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
-PKG="$ROOT/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
+PKG="$ROOT/.build/distribution/EMKE-Translation-0.2.1-internal.pkg"
 test -s "$PKG" || bash "$ROOT/Packaging/build-internal-pkg.sh"
 TEMP="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/emke-driver-read-only.XXXXXX")"
 trap '/usr/bin/find "$TEMP" -depth -delete 2>/dev/null || true' EXIT

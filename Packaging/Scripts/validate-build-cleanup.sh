@@ -34,7 +34,7 @@ GIT_ROOT="$(cd "$GIT_ROOT" 2>/dev/null && pwd -P)" || \
 DIST="$ROOT/.build/distribution"
 EXPECTED_STAGE="$DIST/staging-root"
 EXPECTED_COMPONENTS="$DIST/components"
-EMKE_VERSION="${EMKE_VERSION:-0.2.0}"
+EMKE_VERSION="${EMKE_VERSION:-0.2.1}"
 [[ "$EMKE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || \
   fail "invalid EMKE_VERSION"
 [[ "${#EMKE_VERSION}" -le 64 ]] || fail "invalid EMKE_VERSION"
