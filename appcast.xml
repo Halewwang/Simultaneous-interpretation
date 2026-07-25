@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>EMKE Translation Updates</title>
+    <link>https://github.com/Halewwang/Simultaneous-interpretation</link>
+    <description>Signed EMKE Translation updates</description>
+    <language>en</language>
+    <item>
+      <title>EMKE Translation 0.2.0</title>
+      <pubDate>Sat, 25 Jul 2026 04:14:54 +0000</pubDate>
+      <enclosure
+        url="https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v0.2.0/EMKE-Translation-0.2.0-internal.pkg"
+        sparkle:version="2000"
+        sparkle:shortVersionString="0.2.0"
+        sparkle:edSignature="L/Z5FlNf66DIZR3AI3uDhAFq3hId3lCI/nSIRvBSyvD/o8H5gH1AJ/fAtlRAjn5eMiZRNhiyUpSauO/fuO8tDQ=="
+        length="2100837"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>
