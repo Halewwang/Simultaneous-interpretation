@@ -21,6 +21,7 @@ struct OnboardingView: View {
     @ObservedObject var controller: OnboardingWindowController
     let refreshesStateOnStepChange: Bool
     @State private var isProviderEditorPresented = false
+    @State private var isRequestingMicrophonePermission = false
 
     init(
         model: MenuBarModel,
@@ -304,11 +305,16 @@ struct OnboardingView: View {
         switch presentation.action {
         case .requestAccess:
             Button(copy.text(.onboardingAllowMicrophone)) {
+                guard !isRequestingMicrophonePermission else { return }
+                isRequestingMicrophonePermission = true
                 Task {
                     await model.requestMicrophonePermissionForOnboarding()
+                    isRequestingMicrophonePermission = false
+                    controller.restoreAfterExternalPrompt()
                 }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(isRequestingMicrophonePermission)
         case .openSystemSettings:
             Button(copy.text(.onboardingOpenSystemSettings)) {
                 openMicrophoneSystemSettings()

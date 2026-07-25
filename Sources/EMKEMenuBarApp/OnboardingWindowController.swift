@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 protocol OnboardingWindowPresenting: AnyObject {
     func show()
+    func bringToFront()
     func hide()
 }
 
@@ -43,6 +44,11 @@ final class OnboardingWindowController: ObservableObject {
         flow.restart()
         isVisible = true
         window?.show()
+    }
+
+    func restoreAfterExternalPrompt() {
+        guard isVisible else { return }
+        window?.bringToFront()
     }
 
     func moveForward() {
@@ -108,8 +114,13 @@ final class OnboardingAppWindowPresenter:
     }
 
     func show() {
+        bringToFront()
+    }
+
+    func bringToFront() {
         NSApplication.shared.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        window.makeKey()
     }
 
     func hide() {

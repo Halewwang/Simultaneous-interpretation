@@ -316,6 +316,25 @@ func onboardingPermissionRequestStaysBehindTheExplainedAction() throws {
     )
     #expect(source.contains("case .continueFlow:"))
     #expect(source.contains("model.refreshMicrophonePermissionState()"))
+    let permissionRequest = try #require(
+        source.range(
+            of: "await model.requestMicrophonePermissionForOnboarding()"
+        )
+    )
+    let restore = try #require(
+        source.range(of: "controller.restoreAfterExternalPrompt()")
+    )
+
+    #expect(permissionRequest.upperBound <= restore.lowerBound)
+}
+
+@Test
+func onboardingPresenterCanRestoreAfterExternalPrompts() throws {
+    let source = try sourceFile(named: "OnboardingWindowController.swift")
+
+    #expect(source.contains("func bringToFront()"))
+    #expect(source.contains("window.orderFrontRegardless()"))
+    #expect(source.contains("window.makeKey()"))
 }
 
 @Test
