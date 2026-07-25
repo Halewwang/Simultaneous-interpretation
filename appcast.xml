@@ -7,14 +7,14 @@
     <description>Signed EMKE Translation updates</description>
     <language>en</language>
     <item>
-      <title>EMKE Translation 0.2.0</title>
-      <pubDate>Sat, 25 Jul 2026 04:14:54 +0000</pubDate>
+      <title>EMKE Translation 0.2.2</title>
+      <pubDate>Sat, 25 Jul 2026 13:22:49 +0000</pubDate>
       <enclosure
-        url="https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v0.2.0/EMKE-Translation-0.2.0-internal.pkg"
-        sparkle:version="2000"
-        sparkle:shortVersionString="0.2.0"
-        sparkle:edSignature="L/Z5FlNf66DIZR3AI3uDhAFq3hId3lCI/nSIRvBSyvD/o8H5gH1AJ/fAtlRAjn5eMiZRNhiyUpSauO/fuO8tDQ=="
-        length="2100837"
+        url="https://github.com/Halewwang/Simultaneous-interpretation/releases/download/v0.2.2/EMKE-Translation-0.2.2-internal.pkg"
+        sparkle:version="2002"
+        sparkle:shortVersionString="0.2.2"
+        sparkle:edSignature="AvDF2sYybvGrsQQ0Siiocm/KHb1RknK+E+rUUatPoy9tPStoLEHk+jHPYD/rPCOG3iRczVX/fFEgLQL2D0hUCQ=="
+        length="2119158"
         type="application/octet-stream" />
     </item>
   </channel>
