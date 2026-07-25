@@ -18,7 +18,7 @@
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple">
   <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-arm64-black?logo=apple">
   <img alt="Swift 6.2" src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white">
-  <img alt="v0.2.1 Internal Preview" src="https://img.shields.io/badge/v0.2.1-Internal%20Preview-E67E22">
+  <img alt="v0.2.2 Internal Preview" src="https://img.shields.io/badge/v0.2.2-Internal%20Preview-E67E22">
 </p>
 
 ## 产品预览
@@ -82,7 +82,7 @@ EMKE Translation 是面向 macOS 14+ 的菜单栏双向实时翻译客户端。�
 - Apple Silicon（arm64）
 - 安装应用和虚拟音频驱动时需要管理员授权
 
-> [v0.2.1](https://github.com/Halewwang/Simultaneous-interpretation/releases/tag/v0.2.1) 当前仅供内部评估：应用与驱动 payload 使用 ad-hoc 签名，PKG 本身未签名、未经 Apple 公证，也不是可用于生产环境的公开安装包。
+> [v0.2.2](https://github.com/Halewwang/Simultaneous-interpretation/releases/tag/v0.2.2) 当前仅供内部评估：应用与驱动 payload 使用 ad-hoc 签名，PKG 本身未签名、未经 Apple 公证，也不是可用于生产环境的公开安装包。
 
 Sparkle 可以在应用内检查更新，但包含虚拟音频驱动的 PKG 仍需要 macOS 管理员授权。构建、验证、安装与卸载方式请参阅[内部安装包说明](Packaging/README.md)。
 

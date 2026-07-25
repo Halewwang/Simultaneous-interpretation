@@ -728,31 +728,81 @@ private func onboardingPrimaryActionPixels(
 private func onboardingEdgeInkPixels(
     in bitmap: NSBitmapImageRep
 ) -> Int {
-    let horizontalTop = darkPixelCount(
-        in: bitmap,
-        xRange: 0..<bitmap.pixelsWide,
-        yRange: 0..<30,
-        strideBy: 1
+    let railReferenceX = min(16, bitmap.pixelsWide - 1)
+    let mainReferenceX = max(0, bitmap.pixelsWide - 17)
+    let referenceY = bitmap.pixelsHigh / 2
+    guard let railBackground = bitmap.colorAt(
+        x: railReferenceX,
+        y: referenceY
+    )?.usingColorSpace(.deviceRGB),
+    let mainBackground = bitmap.colorAt(
+        x: mainReferenceX,
+        y: referenceY
+    )?.usingColorSpace(.deviceRGB) else {
+        return Int.max
+    }
+    let captureScale = CGFloat(bitmap.pixelsWide)
+        / OnboardingLayoutMetrics.windowWidth
+    let railPixelWidth = Int(
+        (OnboardingLayoutMetrics.stepRailWidth * captureScale).rounded()
     )
-    let horizontalBottom = darkPixelCount(
-        in: bitmap,
-        xRange: 0..<bitmap.pixelsWide,
-        yRange: (bitmap.pixelsHigh - 30)..<bitmap.pixelsHigh,
-        strideBy: 1
-    )
-    let verticalLeft = darkPixelCount(
-        in: bitmap,
-        xRange: 0..<8,
-        yRange: 0..<bitmap.pixelsHigh,
-        strideBy: 1
-    )
-    let verticalRight = darkPixelCount(
-        in: bitmap,
-        xRange: (bitmap.pixelsWide - 8)..<bitmap.pixelsWide,
-        yRange: 0..<bitmap.pixelsHigh,
-        strideBy: 1
-    )
-    return horizontalTop + horizontalBottom + verticalLeft + verticalRight
+
+    func differsFromBackground(
+        x: Int,
+        y: Int,
+        background: NSColor
+    ) -> Bool {
+        guard let color = bitmap.colorAt(x: x, y: y)?
+            .usingColorSpace(.deviceRGB)
+        else {
+            return true
+        }
+        let threshold = 0.08
+        return abs(color.redComponent - background.redComponent) > threshold
+            || abs(color.greenComponent - background.greenComponent)
+                > threshold
+            || abs(color.blueComponent - background.blueComponent) > threshold
+            || abs(color.alphaComponent - background.alphaComponent) > threshold
+    }
+
+    var count = 0
+    for topOriginRange in [
+        0..<30,
+        (bitmap.pixelsHigh - 30)..<bitmap.pixelsHigh,
+    ] {
+        let bitmapYRange = hostedSnapshotYRange(
+            forTopOrigin: topOriginRange,
+            in: bitmap
+        )
+        for y in bitmapYRange {
+            for x in 0..<bitmap.pixelsWide {
+                let background =
+                    x < railPixelWidth ? railBackground : mainBackground
+                count += differsFromBackground(
+                    x: x,
+                    y: y,
+                    background: background
+                ) ? 1 : 0
+            }
+        }
+    }
+    for y in 0..<bitmap.pixelsHigh {
+        for x in 0..<8 {
+            count += differsFromBackground(
+                x: x,
+                y: y,
+                background: railBackground
+            ) ? 1 : 0
+        }
+        for x in (bitmap.pixelsWide - 8)..<bitmap.pixelsWide {
+            count += differsFromBackground(
+                x: x,
+                y: y,
+                background: mainBackground
+            ) ? 1 : 0
+        }
+    }
+    return count
 }
 
 private func onboardingOpaqueBoundarySamples(
@@ -778,6 +828,54 @@ private func onboardingOpaqueBoundarySamples(
         }
         count += color.alphaComponent > 0.99 ? 1 : 0
     }
+}
+
+@MainActor
+private func onboardingBoundaryFixture() throws -> NSBitmapImageRep {
+    let bitmap = try #require(
+        NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 1_360,
+            pixelsHigh: 1_120,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )
+    )
+    bitmap.size = NSSize(width: 680, height: 560)
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 680, height: 560).fill()
+    NSColor(deviceWhite: 0.70, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: 156, height: 560).fill()
+    NSGraphicsContext.current?.flushGraphics()
+    return bitmap
+}
+
+@Test @MainActor
+func onboardingEdgeDetectionIgnoresUniformDarkRailBackground() throws {
+    let bitmap = try onboardingBoundaryFixture()
+
+    #expect(onboardingEdgeInkPixels(in: bitmap) == 0)
+}
+
+@Test @MainActor
+func onboardingEdgeDetectionFindsForegroundAtBoundary() throws {
+    let bitmap = try onboardingBoundaryFixture()
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSColor.black.setFill()
+    NSRect(x: 400, y: 0, width: 20, height: 4).fill()
+    NSGraphicsContext.current?.flushGraphics()
+
+    #expect(onboardingEdgeInkPixels(in: bitmap) > 0)
 }
 
 private func darkPixelCount(
