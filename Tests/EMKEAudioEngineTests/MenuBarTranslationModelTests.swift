@@ -388,6 +388,7 @@ private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
     private let requestResult: Bool
     private let heldAuthorizationStatusReadIndices: Set<Int>
     private var requestGateOpen = false
+    private var preReleasedAuthorizationStatusReadIndices: Set<Int> = []
     private var heldAuthorizationStatusReadWaiters:
         [Int: CheckedContinuation<Void, Never>] = [:]
     private var authorizationStatusReadCountWaiters:
@@ -426,6 +427,9 @@ private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
         guard heldAuthorizationStatusReadIndices.contains(readIndex) else {
             return status
         }
+        if preReleasedAuthorizationStatusReadIndices.remove(readIndex) != nil {
+            return status
+        }
         await withCheckedContinuation { continuation in
             heldAuthorizationStatusReadWaiters[readIndex] = continuation
         }
@@ -462,7 +466,19 @@ private actor BlockingMicrophonePermissionStub: MicrophonePermissionProviding {
     }
 
     func releaseAuthorizationStatusRead(_ index: Int) {
-        heldAuthorizationStatusReadWaiters.removeValue(forKey: index)?.resume()
+        if let waiter = heldAuthorizationStatusReadWaiters.removeValue(
+            forKey: index
+        ) {
+            waiter.resume()
+            return
+        }
+        guard heldAuthorizationStatusReadIndices.contains(index),
+              authorizationStatusReadCount < index else { return }
+        preReleasedAuthorizationStatusReadIndices.insert(index)
+    }
+
+    func hasHeldAuthorizationStatusReadWaiter(_ index: Int) -> Bool {
+        heldAuthorizationStatusReadWaiters[index] != nil
     }
 
     func waitForRequestCount(_ count: Int) async {
@@ -1053,6 +1069,34 @@ func interfaceLanguageChangeDoesNotRestartOrStopTranslation() async {
     #expect(model.coordinatorState.isRunning)
     #expect(model.motherLanguage == .chinese)
     #expect(model.meetingOutputLanguage == .german)
+}
+
+@Test @MainActor
+func blockingPermissionStubPreReleaseOpensOnlyTargetHeldRead() async {
+    let permission = BlockingMicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true,
+        heldAuthorizationStatusReadIndices: [1, 2]
+    )
+
+    await permission.releaseAuthorizationStatusRead(2)
+    let first = Task {
+        await permission.authorizationStatus()
+    }
+    await permission.waitForAuthorizationStatusReadCount(1)
+    let second = Task {
+        await permission.authorizationStatus()
+    }
+    await permission.waitForAuthorizationStatusReadCount(2)
+
+    #expect(await permission.hasHeldAuthorizationStatusReadWaiter(1))
+    #expect(!(await permission.hasHeldAuthorizationStatusReadWaiter(2)))
+
+    await permission.releaseAuthorizationStatusRead(1)
+    await permission.releaseAuthorizationStatusRead(2)
+    #expect(await first.value == .notDetermined)
+    #expect(await second.value == .notDetermined)
+    #expect(await permission.authorizationStatusReadCount == 2)
 }
 
 @Test @MainActor
