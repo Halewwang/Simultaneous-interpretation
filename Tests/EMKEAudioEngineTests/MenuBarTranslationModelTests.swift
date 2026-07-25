@@ -1111,11 +1111,11 @@ func concurrentOnboardingPermissionActionsShareOneProviderRequest() async {
 }
 
 @Test @MainActor
-func onboardingAndStartShareOneInFlightPermissionRequest() async {
+func startReusesOnboardingInFlightPermissionRequest() async {
     let permission = BlockingMicrophonePermissionStub(
         state: .notDetermined,
         requestResult: true,
-        heldAuthorizationStatusReadIndices: [1]
+        heldAuthorizationStatusReadIndices: [1, 2]
     )
     let coordinator = TranslationCoordinatorStub()
     let model = makeTranslationMenuModel(
@@ -1129,15 +1129,82 @@ func onboardingAndStartShareOneInFlightPermissionRequest() async {
     model.baseURLString = "https://api.openai.com/v1"
     model.modelID = "gpt-realtime-translate"
 
-    async let onboarding: Void =
-        model.requestMicrophonePermissionForOnboarding()
-    async let start: Void = model.start()
+    let onboarding = Task { @MainActor in
+        await model.requestMicrophonePermissionForOnboarding()
+    }
     await permission.waitForAuthorizationStatusReadCount(1)
+    let startBecameActive = Task { @MainActor in
+        for await isStarting in model.$isStarting.values {
+            if isStarting { return }
+        }
+    }
+    let start = Task { @MainActor in
+        await model.start()
+    }
+    await startBecameActive.value
+
+    #expect(model.isStarting)
+    #expect(await permission.authorizationStatusReadCount == 1)
+
     await permission.releaseAuthorizationStatusRead(1)
+    await permission.releaseAuthorizationStatusRead(2)
     await permission.waitForRequestCount(1)
     await permission.completeRequests()
-    await onboarding
-    await start
+    await onboarding.value
+    await start.value
+
+    #expect(await permission.authorizationStatusReadCount == 1)
+    #expect(await permission.requestCount == 1)
+    #expect(model.microphonePermissionState == .authorized)
+    #expect(await coordinator.configurations.count == 1)
+}
+
+@Test @MainActor
+func onboardingReusesStartInFlightPermissionRequest() async {
+    let permission = BlockingMicrophonePermissionStub(
+        state: .notDetermined,
+        requestResult: true,
+        heldAuthorizationStatusReadIndices: [1, 2]
+    )
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "stored-key",
+        coordinator: coordinator,
+        microphonePermissionProvider: permission
+    )
+    await model.loadConfiguration()
+    model.selectedInputUID = "physical.input"
+    model.selectedOutputUID = "physical.output"
+    model.baseURLString = "https://api.openai.com/v1"
+    model.modelID = "gpt-realtime-translate"
+
+    let start = Task { @MainActor in
+        await model.start()
+    }
+    await permission.waitForAuthorizationStatusReadCount(1)
+    #expect(model.isStarting)
+
+    let onboardingInvocation = AsyncStream<Void>.makeStream(
+        bufferingPolicy: .bufferingNewest(1)
+    )
+    let onboarding = Task { @MainActor in
+        onboardingInvocation.continuation.yield(())
+        onboardingInvocation.continuation.finish()
+        await model.requestMicrophonePermissionForOnboarding()
+    }
+    var invocationIterator = onboardingInvocation.stream.makeAsyncIterator()
+    #expect(await invocationIterator.next() != nil)
+
+    // A MainActor task is not preempted by the synchronous signal above.
+    // Observing it means the onboarding call reached its first suspension.
+    #expect(await permission.authorizationStatusReadCount == 1)
+
+    await permission.releaseAuthorizationStatusRead(1)
+    await permission.releaseAuthorizationStatusRead(2)
+    await permission.waitForRequestCount(1)
+    await permission.completeRequests()
+    await start.value
+    await onboarding.value
 
     #expect(await permission.authorizationStatusReadCount == 1)
     #expect(await permission.requestCount == 1)
