@@ -308,7 +308,11 @@ struct OnboardingView: View {
         )
         switch presentation.action {
         case .requestAccess:
-            Button(copy.text(.onboardingAllowMicrophone)) {
+            Button(
+                isRequestingMicrophonePermission
+                    ? copy.text(.onboardingWaitingForMicrophone)
+                    : copy.text(.onboardingAllowMicrophone)
+            ) {
                 guard !isRequestingMicrophonePermission else { return }
                 isRequestingMicrophonePermission = true
                 Task {
