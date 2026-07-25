@@ -450,14 +450,27 @@ func onboardingCaptureUsesOneHostingViewAndOneBitmapPerFixture() throws {
 }
 
 @Test
-func onboardingPinsChromeToTheFixedWindowCoordinateSpace() throws {
+func onboardingUsesUnifiedStepRailWithoutHeaderDividers() throws {
     let source = try sourceFile(named: "OnboardingView.swift")
 
-    #expect(source.contains("GeometryReader"))
-    #expect(source.contains("ZStack(alignment: .topLeading)"))
-    #expect(source.contains(".position(x: 280, y: 38)"))
-    #expect(source.contains(".position(x: 280, y: 310)"))
-    #expect(source.contains(".position(x: 280, y: 582)"))
+    #expect(source.contains("HStack(spacing: 0)"))
+    #expect(source.contains("private var stepRail: some View"))
+    #expect(source.contains("private var mainContent: some View"))
+    #expect(source.contains("OnboardingLayoutMetrics.stepRailWidth"))
+    #expect(source.contains("copy.text(.onboardingDoNotShowAgain)"))
+    #expect(source.contains("copy.text(.audioDirectToProvider)"))
+    #expect(!source.contains("private var header: some View"))
+    #expect(!source.contains("Divider()"))
+}
+
+@Test
+func onboardingStepRailUsesLocalizedLabelsAndCurrentStepSemantics() throws {
+    let source = try sourceFile(named: "OnboardingView.swift")
+
+    #expect(source.contains("copy.text(step.copyKey)"))
+    #expect(source.contains("step == controller.flow.step"))
+    #expect(source.contains("isCurrent ? .isSelected : []"))
+    #expect(source.contains("copy.text(.onboardingProgress)"))
 }
 
 @Test

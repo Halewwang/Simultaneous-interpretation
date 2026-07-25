@@ -16,6 +16,34 @@ enum OnboardingDeviceSelectionPolicy {
     }
 }
 
+private extension OnboardingStep {
+    var copyKey: AppCopyKey {
+        switch self {
+        case .overview:
+            .onboardingStepOverview
+        case .microphone:
+            .onboardingStepMicrophone
+        case .audioSetup:
+            .onboardingStepAudio
+        case .meetingSetup:
+            .onboardingStepMeeting
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview:
+            "arrow.triangle.branch"
+        case .microphone:
+            "mic.fill"
+        case .audioSetup:
+            "waveform"
+        case .meetingSetup:
+            "person.2.fill"
+        }
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var model: MenuBarModel
     @ObservedObject var controller: OnboardingWindowController
@@ -36,41 +64,15 @@ struct OnboardingView: View {
     private var copy: AppCopy { model.copy }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .topLeading) {
-                header
-                    .position(x: 280, y: 38)
-                Divider()
-                    .opacity(EMKEVisualStyle.dividerOpacity)
-                    .frame(width: 560, height: 1)
-                    .position(x: 280, y: 76.5)
-                stepContent
-                    .frame(
-                        width: 492,
-                        height: 418,
-                        alignment: .topLeading
-                    )
-                    .clipped()
-                    .position(x: 280, y: 310)
-                Divider()
-                    .opacity(EMKEVisualStyle.dividerOpacity)
-                    .frame(width: 560, height: 1)
-                    .position(x: 280, y: 543.5)
-                footer
-                    .clipped()
-                    .position(x: 280, y: 582)
-            }
-            .frame(
-                width: geometry.size.width,
-                height: geometry.size.height,
-                alignment: .topLeading
-            )
+        HStack(spacing: 0) {
+            stepRail
+                .frame(width: OnboardingLayoutMetrics.stepRailWidth)
+            mainContent
         }
         .frame(
             width: OnboardingLayoutMetrics.windowWidth,
             height: OnboardingLayoutMetrics.windowHeight
         )
-        .clipped()
         .background(EMKEVisualStyle.panelBackground)
         .ignoresSafeArea()
         .task(id: controller.flow.step) {
@@ -79,26 +81,152 @@ struct OnboardingView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "waveform.path")
-                .font(.system(size: 24, weight: .semibold))
-                .frame(width: 28, height: 28)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("EMKE Translation")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(EMKEVisualStyle.secondaryText)
-                Text(copy.text(.gettingStarted))
-                    .font(.system(size: 20, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+    private var stepRail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "waveform.path")
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(EMKEVisualStyle.primaryText)
+                    )
+                    .foregroundStyle(Color.white)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("EMKE")
+                        .font(.system(size: 13, weight: .bold))
+                    Text("Translation")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(EMKEVisualStyle.secondaryText)
+                }
             }
-            Spacer()
+
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(OnboardingStep.allCases, id: \.rawValue) { step in
+                    stepRailItem(step)
+                }
+            }
+            .padding(.top, 34)
+
+            Spacer(minLength: 16)
+
+            Text(copy.text(.audioDirectToProvider))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(EMKEVisualStyle.secondaryText)
+
+            Button(
+                copy.text(.onboardingDoNotShowAgain),
+                action: controller.doNotShowAgain
+            )
+            .buttonStyle(.plain)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(EMKEVisualStyle.secondaryText)
+            .padding(.top, 10)
         }
-        .frame(width: 492, height: 76, alignment: .leading)
-        .padding(.horizontal, 34)
-        .clipped()
+        .padding(.horizontal, 18)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    private func stepRailItem(_ step: OnboardingStep) -> some View {
+        let isCurrent = step == controller.flow.step
+        let isComplete = step.rawValue < controller.flow.step.rawValue
+
+        return HStack(spacing: 9) {
+            ZStack {
+                Circle()
+                    .fill(
+                        isCurrent
+                            ? EMKEVisualStyle.activityBlue
+                            : Color.white.opacity(0.75)
+                    )
+                    .overlay(
+                        Circle().stroke(
+                            isComplete || isCurrent
+                                ? EMKEVisualStyle.activityBlue
+                                : EMKEVisualStyle.separator,
+                            lineWidth: 1
+                        )
+                    )
+                Image(
+                    systemName: isComplete
+                        ? "checkmark"
+                        : step.systemImage
+                )
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(
+                    isCurrent
+                        ? Color.white
+                        : isComplete
+                            ? EMKEVisualStyle.activityBlue
+                            : EMKEVisualStyle.secondaryText
+                )
+            }
+            .frame(width: 23, height: 23)
+
+            Text(copy.text(step.copyKey))
+                .font(
+                    .system(
+                        size: 11,
+                        weight: isCurrent ? .semibold : .medium
+                    )
+                )
+                .foregroundStyle(
+                    isCurrent
+                        ? EMKEVisualStyle.primaryText
+                        : EMKEVisualStyle.secondaryText
+                )
+                .lineLimit(2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(copy.text(step.copyKey))
+        .accessibilityValue(
+            "\(step.rawValue + 1) / \(OnboardingStep.allCases.count)"
+        )
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+    }
+
+    private var mainContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(copy.text(.gettingStarted))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(EMKEVisualStyle.activityBlue)
+                Spacer()
+                let progressText =
+                    "\(controller.flow.step.rawValue + 1) / \(OnboardingStep.allCases.count)"
+                Text(progressText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(EMKEVisualStyle.secondaryText)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(EMKEVisualStyle.surfaceBackground)
+                    )
+                    .accessibilityLabel(copy.text(.onboardingProgress))
+                    .accessibilityValue(progressText)
+            }
+
+            stepContent
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: .topLeading
+                )
+                .padding(.top, 14)
+
+            footer
+                .frame(height: OnboardingLayoutMetrics.footerHeight)
+        }
+        .padding(
+            .horizontal,
+            OnboardingLayoutMetrics.mainHorizontalPadding
+        )
+        .padding(.top, OnboardingLayoutMetrics.mainVerticalPadding)
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder
@@ -116,7 +244,7 @@ struct OnboardingView: View {
     }
 
     private var overviewStep: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 14) {
             stepHeading(
                 copy.text(.onboardingOverviewTitle),
                 body: copy.text(.onboardingOverviewBody),
@@ -134,17 +262,11 @@ struct OnboardingView: View {
                 to: copy.text(.physicalOutput),
                 systemImage: "headphones"
             )
-            Label(
-                copy.text(.audioDirectToProvider),
-                systemImage: "lock.shield"
-            )
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(EMKEVisualStyle.secondaryText)
         }
     }
 
     private var microphoneStep: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 16) {
             stepHeading(
                 copy.text(.onboardingMicrophoneTitle),
                 body: copy.text(.onboardingMicrophoneBody),
@@ -156,7 +278,7 @@ struct OnboardingView: View {
     }
 
     private var audioStep: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             stepHeading(
                 copy.text(.onboardingAudioTitle),
                 body: copy.text(.onboardingAudioBody),
@@ -186,7 +308,7 @@ struct OnboardingView: View {
     }
 
     private var meetingStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             stepHeading(
                 copy.text(.onboardingMeetingTitle),
                 body: copy.text(.onboardingMeetingBody),
@@ -233,14 +355,14 @@ struct OnboardingView: View {
         body: String,
         systemImage: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 7) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.system(size: 21, weight: .semibold))
             Text(body)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundStyle(EMKEVisualStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
+                .lineSpacing(1.5)
         }
     }
 
@@ -259,11 +381,18 @@ struct OnboardingView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(2)
         }
-        .padding(14)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(EMKEVisualStyle.surfaceBackground)
+            RoundedRectangle(cornerRadius: 11)
+                .fill(Color.white.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11)
+                        .stroke(
+                            EMKEVisualStyle.separator,
+                            lineWidth: 1
+                        )
+                )
         )
     }
 
@@ -354,11 +483,18 @@ struct OnboardingView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(EMKEVisualStyle.surfaceBackground)
+            RoundedRectangle(cornerRadius: 11)
+                .fill(Color.white.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11)
+                        .stroke(
+                            EMKEVisualStyle.separator,
+                            lineWidth: 1
+                        )
+                )
         )
     }
 
@@ -450,7 +586,14 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(EMKEVisualStyle.surfaceBackground)
+                    .fill(Color.white.opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(
+                                EMKEVisualStyle.separator,
+                                lineWidth: 1
+                            )
+                    )
             )
             .overlay(alignment: .topTrailing) {
                 Image(systemName: "pencil")
@@ -525,61 +668,50 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(EMKEVisualStyle.surfaceBackground)
+                .fill(Color.white.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            EMKEVisualStyle.separator,
+                            lineWidth: 1
+                        )
+                )
         )
     }
 
     private var footer: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Button(
-                    copy.text(.onboardingSkipForNow),
-                    action: controller.skipForNow
-                )
-                .buttonStyle(.plain)
-                Spacer()
-                Button(
-                    copy.text(.onboardingDoNotShowAgain),
-                    action: controller.doNotShowAgain
-                )
-                .buttonStyle(.plain)
-            }
-            .font(.system(size: 11))
+        HStack(spacing: 12) {
+            Button(
+                copy.text(.onboardingSkipForNow),
+                action: controller.skipForNow
+            )
+            .buttonStyle(.plain)
             .foregroundStyle(EMKEVisualStyle.secondaryText)
 
-            HStack(spacing: 12) {
-                if controller.flow.canMoveBackward {
-                    Button(
-                        copy.text(.onboardingBack),
-                        action: controller.moveBackward
-                    )
-                }
-                let progressText =
-                    "\(controller.flow.step.rawValue + 1) / \(OnboardingStep.allCases.count)"
-                Text(progressText)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(EMKEVisualStyle.secondaryText)
-                .accessibilityLabel(copy.text(.onboardingProgress))
-                .accessibilityValue(progressText)
-                Spacer()
-                if controller.flow.canMoveForward {
-                    Button(
-                        copy.text(.onboardingContinue),
-                        action: controller.moveForward
-                    )
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button(
-                        copy.text(.onboardingFinish),
-                        action: controller.complete
-                    )
-                    .buttonStyle(.borderedProminent)
-                }
+            if controller.flow.canMoveBackward {
+                Button(
+                    copy.text(.onboardingBack),
+                    action: controller.moveBackward
+                )
+            }
+
+            Spacer()
+
+            if controller.flow.canMoveForward {
+                Button(
+                    copy.text(.onboardingContinue),
+                    action: controller.moveForward
+                )
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button(
+                    copy.text(.onboardingFinish),
+                    action: controller.complete
+                )
+                .buttonStyle(.borderedProminent)
             }
         }
-        .frame(width: 512, height: 56, alignment: .topLeading)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
+        .font(.system(size: 11, weight: .medium))
     }
 
     private func refreshCurrentStep() async {

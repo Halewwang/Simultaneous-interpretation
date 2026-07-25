@@ -468,8 +468,8 @@ func onboardingSemanticEvidenceRejectsMalformedTIFF() throws {
     let source = try #require(
         NSBitmapImageRep(
             bitmapDataPlanes: nil,
-            pixelsWide: 1_120,
-            pixelsHigh: 1_240,
+            pixelsWide: 1_360,
+            pixelsHigh: 1_120,
             bitsPerSample: 8,
             samplesPerPixel: 4,
             hasAlpha: true,
@@ -483,7 +483,7 @@ func onboardingSemanticEvidenceRejectsMalformedTIFF() throws {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     NSColor.white.setFill()
-    NSRect(x: 0, y: 0, width: 1_120, height: 1_240).fill()
+    NSRect(x: 0, y: 0, width: 1_360, height: 1_120).fill()
     NSColor.black.setFill()
     NSRect(x: 300, y: 300, width: 100, height: 100).fill()
     NSGraphicsContext.restoreGraphicsState()
@@ -530,8 +530,8 @@ private func onboardingLogoInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 50..<140,
-        yRange: 30..<120,
+        xRange: 28..<96,
+        yRange: 28..<104,
         luminanceRange: 0..<0.25
     )
 }
@@ -541,20 +541,9 @@ private func onboardingProductNameInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 140..<400,
-        yRange: 25..<70,
+        xRange: 88..<286,
+        yRange: 24..<104,
         luminanceRange: 0.35..<0.8
-    )
-}
-
-private func onboardingHeaderTitleInkPixels(
-    in bitmap: NSBitmapImageRep
-) -> Int {
-    luminancePixelCount(
-        in: bitmap,
-        xRange: 140..<700,
-        yRange: 70..<120,
-        luminanceRange: 0..<0.55
     )
 }
 
@@ -563,8 +552,8 @@ private func onboardingStepTitleInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 50..<1_000,
-        yRange: 185..<270,
+        xRange: 360..<1_300,
+        yRange: 70..<175,
         luminanceRange: 0..<0.7
     )
 }
@@ -574,8 +563,8 @@ private func onboardingStepBodyInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 50..<1_080,
-        yRange: 270..<370,
+        xRange: 360..<1_310,
+        yRange: 150..<290,
         luminanceRange: 0.25..<0.9
     )
 }
@@ -585,8 +574,8 @@ private func onboardingFooterInkPixels(
 ) -> Int {
     darkPixelCount(
         in: bitmap,
-        xRange: 40..<1_080,
-        yRange: 1_095..<1_215,
+        xRange: 320..<1_330,
+        yRange: 1_000..<1_105,
         strideBy: 2
     )
 }
@@ -596,8 +585,8 @@ private func onboardingSkipActionInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 35..<190,
-        yRange: 1_095..<1_145,
+        xRange: 340..<530,
+        yRange: 1_015..<1_100,
         luminanceRange: 0.3..<0.85
     )
 }
@@ -607,8 +596,8 @@ private func onboardingDoNotShowAgainInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 900..<1_085,
-        yRange: 1_095..<1_145,
+        xRange: 26..<290,
+        yRange: 980..<1_095,
         luminanceRange: 0.3..<0.85
     )
 }
@@ -618,8 +607,8 @@ private func onboardingAudioDiagnosticInkPixels(
 ) -> Int {
     luminancePixelCount(
         in: bitmap,
-        xRange: 900..<1_080,
-        yRange: 750..<890,
+        xRange: 760..<1_310,
+        yRange: 620..<925,
         luminanceRange: 0.3..<0.85
     )
 }
@@ -629,8 +618,8 @@ private func onboardingProgressInkPixels(
 ) -> Int {
     darkPixelCount(
         in: bitmap,
-        xRange: 40..<260,
-        yRange: 1_155..<1_215,
+        xRange: 1_150..<1_325,
+        yRange: 32..<105,
         strideBy: 1
     )
 }
@@ -640,7 +629,7 @@ private func onboardingPrimaryActionPixels(
 ) -> Int {
     var count = 0
     let yRange = hostedSnapshotYRange(
-        forTopOrigin: 1_145..<1_215,
+        forTopOrigin: 1_000..<1_105,
         in: bitmap
     )
     for y in stride(
@@ -648,7 +637,7 @@ private func onboardingPrimaryActionPixels(
         to: yRange.upperBound,
         by: 2
     ) {
-        for x in stride(from: 900, to: 1_085, by: 2) {
+        for x in stride(from: 1_100, to: 1_330, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
             else {
@@ -830,7 +819,7 @@ private func onboardingFallbackPixels(
 ) -> Int {
     var count = 0
     let yRange = hostedSnapshotYRange(
-        forTopOrigin: 150..<1_100,
+        forTopOrigin: 40..<1_000,
         in: bitmap
     )
     for y in stride(
@@ -838,7 +827,7 @@ private func onboardingFallbackPixels(
         to: yRange.upperBound,
         by: 2
     ) {
-        for x in stride(from: 40, to: 1_080, by: 2) {
+        for x in stride(from: 320, to: 1_340, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
             else {
@@ -859,7 +848,7 @@ private func onboardingContentInkPixels(
 ) -> Int {
     var count = 0
     let yRange = hostedSnapshotYRange(
-        forTopOrigin: 180..<1_050,
+        forTopOrigin: 55..<990,
         in: bitmap
     )
     for y in stride(
@@ -867,7 +856,7 @@ private func onboardingContentInkPixels(
         to: yRange.upperBound,
         by: 2
     ) {
-        for x in stride(from: 50, to: 1_070, by: 2) {
+        for x in stride(from: 330, to: 1_330, by: 2) {
             guard let color = bitmap.colorAt(x: x, y: y)?
                 .usingColorSpace(.deviceRGB)
             else {
@@ -1277,7 +1266,6 @@ private func validatedOnboardingCaptureArtifacts() async throws
         AppInterfaceLanguage.zhHans,
         AppInterfaceLanguage.english,
     ] {
-        var headerTemplate: Data?
         for step in OnboardingStep.allCases {
             let microphoneState: MicrophonePermissionState =
                 step == .microphone ? .denied : .authorized
@@ -1287,8 +1275,8 @@ private func validatedOnboardingCaptureArtifacts() async throws
                 microphoneState: microphoneState
             )
             let bitmap = artifact.bitmap
-            #expect(bitmap.pixelsWide == 1_120)
-            #expect(bitmap.pixelsHigh == 1_240)
+            #expect(bitmap.pixelsWide == 1_360)
+            #expect(bitmap.pixelsHigh == 1_120)
             #expect(
                 onboardingContentInkPixels(in: bitmap) > 1_250,
                 "Onboarding \(step) \(language) must render central content"
@@ -1302,12 +1290,8 @@ private func validatedOnboardingCaptureArtifacts() async throws
                 "Onboarding \(step) \(language) must render the logo"
             )
             #expect(
-                onboardingProductNameInkPixels(in: bitmap) > 1_000,
+                onboardingProductNameInkPixels(in: bitmap) > 800,
                 "Onboarding \(step) \(language) must render the product name"
-            )
-            #expect(
-                onboardingHeaderTitleInkPixels(in: bitmap) > 3_000,
-                "Onboarding \(step) \(language) must render the localized brand header"
             )
             #expect(
                 onboardingStepTitleInkPixels(in: bitmap) > 3_000,
@@ -1352,22 +1336,6 @@ private func validatedOnboardingCaptureArtifacts() async throws
                 )
             }
 
-            let header = canonicalTopOriginRGBAData(
-                in: bitmap,
-                xRange: 40..<800,
-                yRange: 20..<130
-            )
-            if let headerTemplate {
-                #expect(
-                    header == headerTemplate,
-                    """
-                    Onboarding \(step) \(language) must keep the exact \
-                    localized brand header crop
-                    """
-                )
-            } else {
-                headerTemplate = header
-            }
             artifacts.append(artifact)
         }
     }
@@ -1413,7 +1381,10 @@ private func onboardingBitmap(
         .environment(\.colorScheme, .light)
     return try hostedCaptureArtifact(
         content: content,
-        size: NSSize(width: 560, height: 620),
+        size: NSSize(
+            width: OnboardingLayoutMetrics.windowWidth,
+            height: OnboardingLayoutMetrics.windowHeight
+        ),
         scale: 2,
         filename:
             "onboarding-\(step.captureName)-\(language == .zhHans ? "zh" : "en").tiff"
