@@ -15,6 +15,12 @@ The user selected the visual direction with a persistent left-hand step rail and
 asked for the title bar and horizontal separator to be removed so the window
 reads as one continuous surface.
 
+After reviewing the implemented screen, the user identified two visual
+corrections: the temporary waveform mark in the upper-left brand lockup is not
+the EMKE product logo, and the main content typography is oversized and visually
+crowded. The user selected a proportional compact-type revision while retaining
+the existing `680 × 560` window.
+
 The user also reported that clicking the microphone-permission action causes the
 onboarding page to disappear.
 
@@ -24,6 +30,10 @@ onboarding page to disappear.
 - Keep the selected left-hand step navigation visible throughout the flow.
 - Remove visible system title-bar chrome and all full-width header/footer
   separators.
+- Use the approved EMKE mark in the upper-left brand lockup without redrawing or
+  reinterpreting it.
+- Reduce the main content typography and control density by one proportional
+  level while keeping the left step rail and window geometry stable.
 - Preserve Chinese and English localization without clipping.
 - Keep the onboarding window visible and frontmost after the macOS microphone
   permission prompt resolves.
@@ -70,7 +80,8 @@ divider:
 
 The left rail contains:
 
-1. compact EMKE brand lockup;
+1. compact EMKE brand lockup using the approved
+   `EMKE-MenuBarIcon.png` mark on the existing black rounded tile;
 2. four persistent numbered steps;
 3. completed, current, and future visual states;
 4. `Powered by Eager`;
@@ -91,6 +102,16 @@ There is no duplicate `Start Using EMKE` header above the step content.
 - Continue using the system font and the existing EMKE neutral palette.
 - Use the existing activity blue only for the current step, primary action, and
   active informational icons.
+- Apply a compact typography scale to the main content only:
+  - step title: `18 pt` semibold;
+  - supporting body: `11 pt` regular with compact line spacing;
+  - route and card values: `11 pt`;
+  - labels and secondary status: `10–11 pt`;
+  - footer actions: approximately `10.5–11 pt`.
+- Use the macOS small control size in the main content and reduce picker height
+  from `30` to `28` points.
+- Reduce card padding and control insets proportionally; do not shrink the
+  clickable area below the small native macOS control contract.
 - Use soft filled cards with subtle one-pixel borders instead of large empty
   vertical gaps.
 - Use green, warning, and failure tones only for explicit status, always paired
@@ -258,7 +279,11 @@ ordering, followed by the existing application activation/key-window behavior.
 Capture Chinese and English renders for all four steps at `680 × 560`, checking:
 
 - no visible title bar or full-width horizontal chrome divider;
+- the upper-left tile uses the approved four-direction EMKE mark rather than an
+  SF Symbol waveform;
 - stable sidebar and footer alignment across steps;
+- the right-side hierarchy is visibly compact, with an `18 pt` title and
+  `10–11 pt` supporting/control copy;
 - Chinese and English text fits without clipping;
 - permission states and primary actions remain visible;
 - device and meeting controls do not overflow;
@@ -288,5 +313,10 @@ fresh or reset microphone-permission state:
 6. A guide dismissed while permission is pending is not reopened.
 7. Existing audio, provider, routing, persistence, update, and translation
    behavior remains unchanged.
-8. Focused tests, the full Swift test suite, release build, and visual captures
-   pass.
+8. The upper-left brand lockup uses the existing approved EMKE logo resource and
+   contains no waveform SF Symbol.
+9. The right-side title, body, card, selector, diagnostic, and footer typography
+   follows the compact scale without changing the left rail width or window
+   geometry.
+10. Focused tests, the full Swift test suite, release build, and visual captures
+    pass.
