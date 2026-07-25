@@ -18,7 +18,7 @@
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple">
   <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-arm64-black?logo=apple">
   <img alt="Swift 6.2" src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white">
-  <img alt="v0.2.1 Internal Preview" src="https://img.shields.io/badge/v0.2.1-Internal%20Preview-E67E22">
+  <img alt="v0.2.2 Internal Preview" src="https://img.shields.io/badge/v0.2.2-Internal%20Preview-E67E22">
 </p>
 
 ## Product Preview
@@ -82,7 +82,7 @@ The meeting app must select both EMKE virtual endpoints, while EMKE itself keeps
 - Apple Silicon (arm64)
 - Administrator authorization to install the app and virtual audio driver
 
-> [v0.2.1](https://github.com/Halewwang/Simultaneous-interpretation/releases/tag/v0.2.1) is currently for internal evaluation only. The app and driver payloads are ad-hoc signed; the PKG itself is unsigned, not notarized by Apple, and is not a production public installer.
+> [v0.2.2](https://github.com/Halewwang/Simultaneous-interpretation/releases/tag/v0.2.2) is currently for internal evaluation only. The app and driver payloads are ad-hoc signed; the PKG itself is unsigned, not notarized by Apple, and is not a production public installer.
 
 Sparkle can check for updates in the app, but a PKG containing the virtual audio driver still requires macOS administrator authorization. See the [internal package guide](Packaging/README.md) for build, verification, installation, and removal instructions.
 
