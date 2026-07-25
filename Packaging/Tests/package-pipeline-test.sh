@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
-PKG="$ROOT/.build/distribution/EMKE-Translation-0.2.0-internal.pkg"
+PKG="$ROOT/.build/distribution/EMKE-Translation-0.2.1-internal.pkg"
 bash "$ROOT/Packaging/build-internal-pkg.sh"
 test -s "$PKG"
 VERIFY_OUTPUT="$(bash "$ROOT/Packaging/verify-internal-pkg.sh" "$PKG" 2>&1)"
@@ -15,7 +15,7 @@ TEMP="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/emke-pkg-test.XXXXXX")"
 trap '/usr/bin/find "$TEMP" -depth -delete 2>/dev/null || true' EXIT
 /usr/sbin/pkgutil --expand-full "$PKG" "$TEMP/expanded"
 test "$(/usr/bin/stat -f '%Lp' "$TEMP/expanded/Payload")" = 755
-/usr/bin/grep -Fq 'version="0.2.0"' "$TEMP/expanded/PackageInfo"
+/usr/bin/grep -Fq 'version="0.2.1"' "$TEMP/expanded/PackageInfo"
 /usr/bin/grep -Fq 'auth="root"' "$TEMP/expanded/PackageInfo"
 /usr/sbin/pkgutil --payload-files "$PKG" > "$TEMP/payload-files"
 /usr/bin/grep -q 'Applications/EMKE Translation.app/Contents/Info.plist' \

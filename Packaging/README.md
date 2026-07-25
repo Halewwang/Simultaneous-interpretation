@@ -13,11 +13,11 @@ recorders, and other active audio apps because Core Audio will restart.
 
 `bash Packaging/build-internal-pkg.sh`
 
-The shared default release inputs are app version `0.2.0` and build number
-`2000`. Override them for a release without editing source metadata:
+The shared default release inputs are app version `0.2.1` and build number
+`2001`. Override them for a release without editing source metadata:
 
 ```bash
-EMKE_VERSION=0.2.0 EMKE_BUILD_NUMBER=2000 \
+EMKE_VERSION=0.2.1 EMKE_BUILD_NUMBER=2001 \
   bash Packaging/build-internal-pkg.sh
 ```
 
@@ -27,7 +27,7 @@ version. The versioned delivery artifact is
 `.build/distribution/EMKE-Translation-$EMKE_VERSION-internal.pkg`.
 
 The only delivery artifact is
-`.build/distribution/EMKE-Translation-0.2.0-internal.pkg` after the default
+`.build/distribution/EMKE-Translation-0.2.1-internal.pkg` after the default
 command's
 verifier passes. `.build/distribution/components` and `staging-root` are local
 scratch/intermediate trees, not handoff artifacts; FileProvider may add xattrs
@@ -107,7 +107,7 @@ public-release approval.
 
 ```bash
 sudo installer \
-  -pkg .build/distribution/EMKE-Translation-0.2.0-internal.pkg \
+  -pkg .build/distribution/EMKE-Translation-0.2.1-internal.pkg \
   -target /
 ```
 

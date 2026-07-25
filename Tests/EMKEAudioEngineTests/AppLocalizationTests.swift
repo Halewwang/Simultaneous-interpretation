@@ -82,6 +82,11 @@ func onboardingCopyIsCompleteInBothLanguages() {
         .meetingAppSpeaker,
         .meetingAppMicrophone,
         .onboardingProgress,
+        .onboardingStepOverview,
+        .onboardingStepMicrophone,
+        .onboardingStepAudio,
+        .onboardingStepMeeting,
+        .onboardingWaitingForMicrophone,
     ]
 
     for language in [
@@ -93,6 +98,29 @@ func onboardingCopyIsCompleteInBothLanguages() {
             #expect(!copy.text(key).isEmpty)
         }
     }
+}
+
+@Test
+func onboardingStepRailAndPermissionWaitingCopyIsExact() {
+    let chinese = AppCopy(language: .zhHans)
+    let english = AppCopy(language: .english)
+
+    #expect(chinese.text(.onboardingStepOverview) == "工作方式")
+    #expect(english.text(.onboardingStepOverview) == "How It Works")
+    #expect(chinese.text(.onboardingStepMicrophone) == "麦克风权限")
+    #expect(english.text(.onboardingStepMicrophone) == "Microphone")
+    #expect(chinese.text(.onboardingStepAudio) == "音频设备")
+    #expect(english.text(.onboardingStepAudio) == "Audio Devices")
+    #expect(chinese.text(.onboardingStepMeeting) == "会议设置")
+    #expect(english.text(.onboardingStepMeeting) == "Meeting Setup")
+    #expect(
+        chinese.text(.onboardingWaitingForMicrophone)
+            == "等待 macOS 授权…"
+    )
+    #expect(
+        english.text(.onboardingWaitingForMicrophone)
+            == "Waiting for macOS…"
+    )
 }
 
 @Test

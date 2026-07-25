@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 protocol OnboardingWindowPresenting: AnyObject {
     func show()
+    func bringToFront()
     func hide()
 }
 
@@ -43,6 +44,11 @@ final class OnboardingWindowController: ObservableObject {
         flow.restart()
         isVisible = true
         window?.show()
+    }
+
+    func restoreAfterExternalPrompt() {
+        guard isVisible else { return }
+        window?.bringToFront()
     }
 
     func moveForward() {
@@ -94,13 +100,24 @@ final class OnboardingAppWindowPresenter:
     init(rootView: AnyView, closeAction: @escaping () -> Void) {
         self.closeAction = closeAction
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: OnboardingLayoutMetrics.windowWidth,
+                height: OnboardingLayoutMetrics.windowHeight
+            ),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         super.init()
         window.title = "EMKE Translation"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.isMovableByWindowBackground = true
         window.contentViewController = NSHostingController(rootView: rootView)
         window.isReleasedWhenClosed = false
         window.center()
@@ -108,8 +125,13 @@ final class OnboardingAppWindowPresenter:
     }
 
     func show() {
+        bringToFront()
+    }
+
+    func bringToFront() {
         NSApplication.shared.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        window.makeKey()
     }
 
     func hide() {

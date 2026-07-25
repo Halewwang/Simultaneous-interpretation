@@ -27,10 +27,15 @@ private final class OnboardingWindowPresenterStub:
     OnboardingWindowPresenting
 {
     private(set) var showCount = 0
+    private(set) var bringToFrontCount = 0
     private(set) var hideCount = 0
 
     func show() {
         showCount += 1
+    }
+
+    func bringToFront() {
+        bringToFrontCount += 1
     }
 
     func hide() {
@@ -252,4 +257,41 @@ func reopeningFromAudioSetupStopsTheInputDiagnosticBeforeRestarting() {
 
     #expect(cleanup.callCount == 1)
     #expect(controller.flow.step == .overview)
+}
+
+@Test @MainActor
+func permissionPromptRestoresVisibleWindowWithoutRestartingFlow() {
+    let presenter = OnboardingWindowPresenterStub()
+    let controller = OnboardingWindowController(
+        progressStore: OnboardingProgressStoreStub()
+    )
+    controller.attachWindow(presenter)
+    controller.show()
+    controller.moveForward()
+
+    controller.restoreAfterExternalPrompt()
+
+    #expect(controller.isVisible)
+    #expect(controller.flow.step == .microphone)
+    #expect(presenter.bringToFrontCount == 1)
+    #expect(presenter.showCount == 1)
+}
+
+@Test @MainActor
+func latePermissionResultDoesNotReopenDismissedOnboarding() {
+    let presenter = OnboardingWindowPresenterStub()
+    let controller = OnboardingWindowController(
+        progressStore: OnboardingProgressStoreStub()
+    )
+    controller.attachWindow(presenter)
+    controller.show()
+    controller.moveForward()
+    controller.skipForNow()
+
+    controller.restoreAfterExternalPrompt()
+
+    #expect(!controller.isVisible)
+    #expect(controller.flow.step == .microphone)
+    #expect(presenter.bringToFrontCount == 0)
+    #expect(presenter.showCount == 1)
 }

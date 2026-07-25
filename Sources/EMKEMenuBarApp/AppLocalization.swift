@@ -57,6 +57,11 @@ enum AppCopyKey: CaseIterable, Sendable {
     case meetingAppSpeaker
     case meetingAppMicrophone
     case onboardingProgress
+    case onboardingStepOverview
+    case onboardingStepMicrophone
+    case onboardingStepAudio
+    case onboardingStepMeeting
+    case onboardingWaitingForMicrophone
     case translationSettingsLocked
     case interface
     case interfaceLanguage
@@ -249,6 +254,19 @@ struct AppCopy: Equatable, Sendable {
             )
         case .onboardingProgress:
             localized(zhHans: "引导进度", english: "Onboarding progress")
+        case .onboardingStepOverview:
+            localized(zhHans: "工作方式", english: "How It Works")
+        case .onboardingStepMicrophone:
+            localized(zhHans: "麦克风权限", english: "Microphone")
+        case .onboardingStepAudio:
+            localized(zhHans: "音频设备", english: "Audio Devices")
+        case .onboardingStepMeeting:
+            localized(zhHans: "会议设置", english: "Meeting Setup")
+        case .onboardingWaitingForMicrophone:
+            localized(
+                zhHans: "等待 macOS 授权…",
+                english: "Waiting for macOS…"
+            )
         case .translationSettingsLocked:
             localized(
                 zhHans: "翻译运行期间设置已锁定",
