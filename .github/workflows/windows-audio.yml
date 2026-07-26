@@ -81,19 +81,24 @@ jobs:
             throw "Windows toolchain verifier failed."
           }
 
-          cmake --preset windows-x64-release -S Windows/native
-          if ($LASTEXITCODE -ne 0) {
-            throw "Native CMake configuration failed."
-          }
+          Push-Location Windows/native
+          try {
+            cmake --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake configuration failed."
+            }
 
-          cmake --build --preset windows-x64-release
-          if ($LASTEXITCODE -ne 0) {
-            throw "Native CMake build failed."
-          }
+            cmake --build --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake build failed."
+            }
 
-          ctest --preset windows-x64-release
-          if ($LASTEXITCODE -ne 0) {
-            throw "Native CTest run failed."
+            ctest --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CTest run failed."
+            }
+          } finally {
+            Pop-Location
           }
 
           $windowsVersion = (Get-CimInstance -ClassName Win32_OperatingSystem).Version
