@@ -125,9 +125,6 @@ let package = Package(
         .testTarget(
             name: "EMKEContractTests",
             dependencies: [
-                "EMKECore",
-                "EMKERealtime",
-                "EMKERouting",
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),
