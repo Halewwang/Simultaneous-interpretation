@@ -21,6 +21,8 @@ struct AudioEvent {
   emke_audio_status status = EMKE_AUDIO_OK;
   emke_audio_route route = EMKE_AUDIO_ROUTE_STOPPED;
   std::uint64_t sequence = 0;
+  std::uint32_t endpoint_role = 0u;
+  std::int32_t native_code = 0;
   std::vector<std::int16_t> pcm16;
 };
 

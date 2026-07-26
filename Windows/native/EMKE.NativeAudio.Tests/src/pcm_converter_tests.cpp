@@ -760,6 +760,28 @@ void test_encoder_insufficient_output_preserves_pending_frame_and_destination(
   EXPECT(context, retry_output == std::vector<std::uint8_t>({0x00u, 0x20u}));
 }
 
+void test_encoder_reset_clears_pending_downsample_frame(
+    TestContext& context) {
+  const std::vector<float> first_frame = {0.25f, 0.25f};
+  const std::vector<float> second_frame = {0.75f, 0.75f};
+  std::vector<std::uint8_t> output(2u, 0xa5u);
+  emke::audio::PcmEncoder encoder;
+
+  const auto before_reset = encoder.process(first_frame, output);
+  encoder.reset();
+  const auto after_reset = encoder.process(second_frame, output);
+
+  EXPECT(
+      context,
+      before_reset.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, before_reset.output_count == 0u);
+  EXPECT(
+      context,
+      after_reset.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, after_reset.output_count == 0u);
+  EXPECT(context, output == std::vector<std::uint8_t>({0xa5u, 0xa5u}));
+}
+
 void test_decoder_insufficient_output_preserves_history_and_destination(
     TestContext& context) {
   const std::vector<std::uint8_t> input = {
@@ -1025,6 +1047,7 @@ int run_pcm_converter_tests() {
     test_encoder_odd_frame_chunks_match_contiguous_output(context);
     test_encoder_insufficient_output_preserves_pending_frame_and_destination(
         context);
+    test_encoder_reset_clears_pending_downsample_frame(context);
     test_decoder_insufficient_output_preserves_history_and_destination(
         context);
     test_decoder_frame_count_pairs_and_odd_input(context, conversion);

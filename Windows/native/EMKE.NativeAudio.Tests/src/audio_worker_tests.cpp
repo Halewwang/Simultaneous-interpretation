@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -249,6 +251,55 @@ void test_virtual_format_contract(TestContext& context) {
   wrong = expected;
   wrong.sample_type = emke::audio::NativeSampleType::pcm32;
   EXPECT(context, !emke::audio::is_exact_virtual_format(wrong));
+}
+
+void test_fixed_packet_storage_rejects_oversized_negotiated_formats(
+    TestContext& context) {
+  const auto normal = float_stereo_format();
+  EXPECT(
+      context,
+      emke::audio::stream_format_fits_fixed_storage(
+          normal, 480u, emke::audio::StreamDirection::capture));
+  EXPECT(
+      context,
+      emke::audio::stream_format_fits_fixed_storage(
+          normal, 480u, emke::audio::StreamDirection::render));
+  EXPECT(
+      context,
+      emke::audio::stream_format_fits_fixed_storage(
+          normal, 4'800u, emke::audio::StreamDirection::render));
+  EXPECT(
+      context,
+      !emke::audio::stream_format_fits_fixed_storage(
+          normal, 1'921u, emke::audio::StreamDirection::capture));
+
+  const emke::audio::AudioFormat wide_192khz{
+      .sample_rate_hz = 192'000u,
+      .channel_count = 32u,
+      .sample_type = emke::audio::NativeSampleType::pcm32,
+      .bits_per_sample = 32u,
+      .valid_bits_per_sample = 32u,
+      .block_align = 128u,
+  };
+  EXPECT(
+      context,
+      emke::audio::stream_format_fits_fixed_storage(
+          wide_192khz, 480u, emke::audio::StreamDirection::capture));
+  EXPECT(
+      context,
+      !emke::audio::stream_format_fits_fixed_storage(
+          wide_192khz, 480u, emke::audio::StreamDirection::render));
+  EXPECT(
+      context,
+      !emke::audio::stream_format_fits_fixed_storage(
+          wide_192khz, 1'920u, emke::audio::StreamDirection::capture));
+
+  emke::audio::RawPacketQueue queue;
+  const std::vector<std::byte> oversized(
+      1'921u * emke::audio::bytes_per_frame(normal));
+  EXPECT(
+      context,
+      !queue.push(normal, 1'921u, 1u, oversized));
 }
 
 void test_native_converter_supports_common_formats_and_chunk_continuity(
@@ -513,6 +564,104 @@ void test_routes_apply_once_per_block_and_outbound_fails_closed(
           EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN);
 }
 
+void test_route_priming_commits_at_block_boundary_without_dropping_new_data(
+    TestContext& context) {
+  WorkerHarness harness;
+  emke_audio_diagnostics diagnostics{};
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.inbound_route == EMKE_AUDIO_ROUTE_STOPPED);
+
+  const std::vector<std::int16_t> canceled(240u, 1'000);
+  EXPECT(
+      context,
+      harness.worker.enqueue_translation(
+          emke::audio::Direction::Inbound, canceled) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      harness.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK);
+
+  const std::vector<std::int16_t> primed(240u, 12'000);
+  EXPECT(
+      context,
+      harness.worker.enqueue_translation(
+          emke::audio::Direction::Inbound, primed) == EMKE_AUDIO_OK);
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.inbound_route == EMKE_AUDIO_ROUTE_STOPPED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 240u);
+  EXPECT(context, diagnostics.dropped_frames == 240u);
+
+  EXPECT(
+      context,
+      harness.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+  const auto original = float_packet(480u, -0.75f, -0.75f);
+  feed_inbound(harness, original);
+
+  emke::audio::RawAudioPacket rendered;
+  EXPECT(context, harness.physical_output.output_packets().pop(rendered));
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(
+      context,
+      diagnostics.inbound_route == EMKE_AUDIO_ROUTE_TRANSLATED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 0u);
+  EXPECT(context, diagnostics.consumed_inbound_translation_frames == 240u);
+  EXPECT(context, diagnostics.inbound_translation_failures == 0u);
+
+  WorkerHarness started;
+  EXPECT(
+      context,
+      started.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      started.worker.enqueue_translation(
+          emke::audio::Direction::Inbound, primed) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      started.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+  EXPECT(context, started.worker.start() == EMKE_AUDIO_OK);
+  started.worker.write_diagnostics(diagnostics);
+  EXPECT(
+      context,
+      diagnostics.inbound_route == EMKE_AUDIO_ROUTE_TRANSLATED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 240u);
+  EXPECT(context, started.worker.stop() == EMKE_AUDIO_OK);
+}
+
+void test_native_backend_accepts_explicit_prestart_priming(
+    TestContext& context) {
+  emke_audio_config config{};
+  emke::audio::NativeAudioBackend backend{config};
+  const std::vector<std::int16_t> primed(240u, 9'000);
+
+  EXPECT(
+      context,
+      backend.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      backend.enqueue_translation(
+          emke::audio::Direction::Inbound, primed) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      backend.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+
+  emke_audio_diagnostics diagnostics{};
+  backend.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.is_running == 0u);
+  EXPECT(context, diagnostics.inbound_route == EMKE_AUDIO_ROUTE_STOPPED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 240u);
+}
+
 void test_translation_capacity_is_atomic(TestContext& context) {
   WorkerHarness harness;
   std::vector<std::int16_t> maximum(48'000u, 1'000);
@@ -533,6 +682,100 @@ void test_translation_capacity_is_atomic(TestContext& context) {
       diagnostics.queued_outbound_translation_frames == 48'000u);
   EXPECT(context, diagnostics.queue_full_events == 1u);
   EXPECT(context, diagnostics.dropped_frames == 1u);
+
+  WorkerHarness oversized;
+  const std::vector<std::int16_t> too_large(48'001u, 3'000);
+  EXPECT(
+      context,
+      oversized.worker.enqueue_translation(
+          emke::audio::Direction::Inbound, too_large) ==
+          EMKE_AUDIO_QUEUE_FULL);
+  oversized.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 0u);
+  EXPECT(context, diagnostics.queue_full_events == 1u);
+  EXPECT(context, diagnostics.dropped_frames == too_large.size());
+}
+
+void test_stop_resets_partial_capture_batch(TestContext& context) {
+  WorkerHarness harness;
+  EXPECT(
+      context,
+      harness.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK);
+  const auto packet = float_packet(480u, 0.25f, 0.25f);
+  for (std::size_t block = 0u; block < 10u; ++block) {
+    feed_inbound(harness, packet, block);
+    drain_output(harness.physical_output);
+  }
+
+  EXPECT(context, harness.worker.stop() == EMKE_AUDIO_OK);
+  for (std::size_t block = 0u; block < 10u; ++block) {
+    feed_inbound(harness, packet, 10u + block);
+    drain_output(harness.physical_output);
+  }
+  emke::audio::AudioEvent event;
+  EXPECT(
+      context,
+      harness.worker.poll_event(event, 4'800u) ==
+          EMKE_AUDIO_NOT_RUNNING);
+  EXPECT(context, event.kind == EMKE_AUDIO_EVENT_NONE);
+
+  for (std::size_t block = 0u; block < 10u; ++block) {
+    feed_inbound(harness, packet, 20u + block);
+    drain_output(harness.physical_output);
+  }
+  EXPECT(
+      context,
+      harness.worker.poll_event(event, 4'800u) == EMKE_AUDIO_OK);
+  EXPECT(context, event.kind == EMKE_AUDIO_EVENT_INBOUND_PCM16);
+  EXPECT(context, event.pcm16.size() == 4'800u);
+}
+
+void test_async_stream_failure_is_bounded_and_restartable(
+    TestContext& context) {
+  WorkerHarness harness;
+  EXPECT(context, harness.worker.start() == EMKE_AUDIO_OK);
+  harness.app_speaker.inject_async_failure(
+      emke::audio::StreamFailure::Operation::getBuffer, -1'234);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (harness.worker.running() &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  EXPECT(context, !harness.worker.running());
+
+  emke::audio::AudioEvent event;
+  EXPECT(context, harness.worker.poll_event(event, 0u) == EMKE_AUDIO_OK);
+  EXPECT(context, event.kind == EMKE_AUDIO_EVENT_STREAM_ERROR);
+  EXPECT(context, event.status == EMKE_AUDIO_INTERNAL_ERROR);
+  EXPECT(
+      context,
+      event.endpoint_role ==
+          static_cast<std::uint32_t>(
+              emke::audio::StreamRole::appSpeakerCapture));
+  EXPECT(context, event.native_code == -1'234);
+
+  emke_audio_diagnostics diagnostics{};
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.is_running == 0u);
+  EXPECT(context, diagnostics.device_failures == 1u);
+  EXPECT(context, harness.worker.process_once());
+  EXPECT(
+      context,
+      harness.worker.poll_event(event, 0u) == EMKE_AUDIO_NOT_RUNNING);
+  EXPECT(context, event.kind == EMKE_AUDIO_EVENT_NONE);
+
+  EXPECT(context, harness.worker.stop() == EMKE_AUDIO_OK);
+  EXPECT(context, harness.app_speaker.start() == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      harness.app_speaker.last_failure().operation ==
+          emke::audio::StreamFailure::Operation::none);
+  EXPECT(context, harness.worker.start() == EMKE_AUDIO_OK);
+  EXPECT(context, harness.worker.running());
+  EXPECT(context, harness.worker.stop() == EMKE_AUDIO_OK);
 }
 
 void test_event_queue_is_fixed_at_64(TestContext& context) {
@@ -575,7 +818,8 @@ void test_raw_callbacks_are_bounded_and_silent_safe(TestContext& context) {
   const auto packet = float_packet(480u, 0.5f, 0.5f);
   EXPECT(context, capture.emit_capture(packet, 480u, 1u));
   EXPECT(context, !capture.emit_capture(packet, 480u, 2u));
-  EXPECT(context, capture.dropped_packets() == 1u);
+  EXPECT(context, capture.dropped_network_frames() == 240u);
+  EXPECT(context, capture.queue_full_events() == 1u);
 
   emke::audio::RawAudioPacket captured;
   EXPECT(context, capture.input_packets().pop(captured));
@@ -754,20 +998,28 @@ void test_realtime_scope_covers_actual_fake_callback(
       context,
       emke::audio::RealtimeInstrumentation::blocking_violations() == 0u);
 
-  {
-    emke::audio::RealtimeInstrumentation::Scope scope;
-    EXPECT(
-        context,
-        emke::audio::RealtimeInstrumentation::in_realtime_scope());
-    emke::audio::RealtimeInstrumentation::project_allocation_hook();
-    emke::audio::RealtimeInstrumentation::project_blocking_lock_hook();
-  }
+  stream.set_realtime_test_probe(true, true);
+  EXPECT(context, stream.emit_capture(packet, 480u, 2u));
   EXPECT(
       context,
       emke::audio::RealtimeInstrumentation::allocation_violations() == 1u);
   EXPECT(
       context,
       emke::audio::RealtimeInstrumentation::blocking_violations() == 1u);
+
+  emke::audio::FakeAudioStream render{
+      emke::audio::StreamRole::physicalOutput,
+      emke::audio::StreamDirection::render,
+      float_stereo_format()};
+  render.set_realtime_test_probe(true, true);
+  std::vector<std::byte> destination(packet.size());
+  EXPECT(context, render.render(destination, 480u));
+  EXPECT(
+      context,
+      emke::audio::RealtimeInstrumentation::allocation_violations() == 2u);
+  EXPECT(
+      context,
+      emke::audio::RealtimeInstrumentation::blocking_violations() == 2u);
 }
 
 }  // namespace
@@ -782,12 +1034,18 @@ int run_audio_lifecycle_tests() {
 int run_audio_worker_tests() {
   TestContext context;
   test_virtual_format_contract(context);
+  test_fixed_packet_storage_rejects_oversized_negotiated_formats(context);
   test_native_converter_supports_common_formats_and_chunk_continuity(context);
   test_converter_rejects_without_partial_state_mutation(context);
   test_worker_batches_exactly_9600_bytes_and_keeps_remainder(context);
   test_worker_preserves_complete_400ms_translation(context);
   test_routes_apply_once_per_block_and_outbound_fails_closed(context);
+  test_route_priming_commits_at_block_boundary_without_dropping_new_data(
+      context);
+  test_native_backend_accepts_explicit_prestart_priming(context);
   test_translation_capacity_is_atomic(context);
+  test_stop_resets_partial_capture_batch(context);
+  test_async_stream_failure_is_bounded_and_restartable(context);
   test_event_queue_is_fixed_at_64(context);
   test_raw_callbacks_are_bounded_and_silent_safe(context);
   test_wasapi_adapter_enforces_initialization_order(context);

@@ -33,6 +33,7 @@ class PcmEncoder {
   [[nodiscard]] PcmConversionResult process(
       std::span<const float> interleaved_stereo_48khz,
       std::span<std::uint8_t> mono_pcm16_24khz_little_endian) noexcept;
+  void reset() noexcept;
 
  private:
   bool has_pending_mono_frame_ = false;

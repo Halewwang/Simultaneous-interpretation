@@ -30,6 +30,10 @@ namespace {
 thread_local bool realtime_scope_active = false;
 std::atomic<std::uint64_t> allocation_violation_count{0u};
 std::atomic<std::uint64_t> blocking_violation_count{0u};
+#define EMKE_REALTIME_CALLBACK_SCOPE(name) \
+  RealtimeInstrumentation::Scope name
+#else
+#define EMKE_REALTIME_CALLBACK_SCOPE(name) static_cast<void>(0)
 #endif
 
 StreamFailure::Operation operation_for_step(std::size_t step) noexcept {
@@ -68,6 +72,54 @@ std::size_t bytes_per_frame(const AudioFormat& format) noexcept {
   return format.block_align;
 }
 
+bool stream_format_fits_fixed_storage(
+    const AudioFormat& format,
+    std::uint32_t native_buffer_frames,
+    StreamDirection direction) noexcept {
+  const std::size_t frame_bytes = bytes_per_frame(format);
+  if (format.sample_rate_hz < 8'000u ||
+      format.sample_rate_hz > 192'000u || frame_bytes == 0u ||
+      native_buffer_frames == 0u) {
+    return false;
+  }
+
+  if (direction == StreamDirection::capture) {
+    if (native_buffer_frames > nativePacketFrameCapacity ||
+        native_buffer_frames >
+            rawPacketByteCapacity / frame_bytes) {
+      return false;
+    }
+    const std::uint64_t normalized_frames =
+        (static_cast<std::uint64_t>(native_buffer_frames) *
+             EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ +
+         format.sample_rate_hz - 1u) /
+        format.sample_rate_hz;
+    return normalized_frames <= normalizedPacketFrameCapacity;
+  }
+
+  const std::uint64_t rendered_native_frames =
+      (EMKE_AUDIO_LOCAL_CYCLE_FRAMES *
+           static_cast<std::uint64_t>(format.sample_rate_hz) +
+       EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ - 1u) /
+      EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ;
+  return rendered_native_frames <= nativePacketFrameCapacity &&
+         rendered_native_frames <=
+             rawPacketByteCapacity / frame_bytes;
+}
+
+std::uint64_t network_frames_for_native(
+    std::uint32_t native_frames,
+    std::uint32_t native_sample_rate_hz) noexcept {
+  if (native_frames == 0u || native_sample_rate_hz == 0u) {
+    return 0u;
+  }
+  return (
+             static_cast<std::uint64_t>(native_frames) *
+                 EMKE_AUDIO_NETWORK_SAMPLE_RATE_HZ +
+             native_sample_rate_hz - 1u) /
+         native_sample_rate_hz;
+}
+
 RawPacketQueue::RawPacketQueue(std::size_t capacity) : storage_(capacity) {}
 
 bool RawPacketQueue::reserve_push(
@@ -78,7 +130,8 @@ bool RawPacketQueue::reserve_push(
     RawAudioPacket*& packet) noexcept {
   packet = nullptr;
   const std::size_t frame_bytes = bytes_per_frame(format);
-  if (frame_count == 0u || frame_bytes == 0u ||
+  if (frame_count == 0u ||
+      frame_count > nativePacketFrameCapacity || frame_bytes == 0u ||
       frame_count > std::numeric_limits<std::size_t>::max() / frame_bytes ||
       static_cast<std::size_t>(frame_count) * frame_bytes != byte_count ||
       byte_count > rawPacketByteCapacity) {
@@ -241,24 +294,30 @@ FakeAudioStream::FakeAudioStream(
       output_packets_(output_capacity) {}
 
 emke_audio_status FakeAudioStream::start() {
-  if (running_) {
+  if (running_.load(std::memory_order_acquire)) {
     return EMKE_AUDIO_OK;
   }
   const emke_audio_status result = next_start_status_;
   next_start_status_ = EMKE_AUDIO_OK;
-  running_ = result == EMKE_AUDIO_OK;
+  const bool running = result == EMKE_AUDIO_OK;
+  running_.store(running, std::memory_order_release);
+  if (running) {
+    failure_code_.store(0, std::memory_order_relaxed);
+    failure_operation_.store(
+        StreamFailure::Operation::none, std::memory_order_release);
+  }
   return result;
 }
 
 emke_audio_status FakeAudioStream::stop() {
-  running_ = false;
+  running_.store(false, std::memory_order_release);
   input_packets_.clear();
   output_packets_.clear();
   return EMKE_AUDIO_OK;
 }
 
 bool FakeAudioStream::running() const noexcept {
-  return running_;
+  return running_.load(std::memory_order_acquire);
 }
 
 StreamRole FakeAudioStream::role() const noexcept {
@@ -282,15 +341,38 @@ RawPacketQueue& FakeAudioStream::output_packets() noexcept {
 }
 
 StreamFailure FakeAudioStream::last_failure() const noexcept {
-  return {};
+  return {
+      .operation = failure_operation_.load(std::memory_order_acquire),
+      .role = role_,
+      .native_code = failure_code_.load(std::memory_order_acquire),
+  };
 }
 
-std::uint64_t FakeAudioStream::dropped_packets() const noexcept {
-  return dropped_packets_;
+std::uint64_t FakeAudioStream::dropped_network_frames() const noexcept {
+  return dropped_network_frames_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t FakeAudioStream::queue_full_events() const noexcept {
+  return queue_full_events_.load(std::memory_order_relaxed);
 }
 
 void FakeAudioStream::fail_next_start(emke_audio_status status) noexcept {
   next_start_status_ = status;
+}
+
+void FakeAudioStream::inject_async_failure(
+    StreamFailure::Operation operation,
+    std::int32_t native_code) noexcept {
+  failure_code_.store(native_code, std::memory_order_relaxed);
+  failure_operation_.store(operation, std::memory_order_release);
+  running_.store(false, std::memory_order_release);
+}
+
+void FakeAudioStream::set_realtime_test_probe(
+    bool allocation,
+    bool blocking_lock) noexcept {
+  probe_allocation_ = allocation;
+  probe_blocking_lock_ = blocking_lock;
 }
 
 bool FakeAudioStream::emit_capture(
@@ -298,14 +380,25 @@ bool FakeAudioStream::emit_capture(
     std::uint32_t frame_count,
     std::uint64_t timestamp,
     bool silent) noexcept {
-  RealtimeInstrumentation::Scope scope;
+  EMKE_REALTIME_CALLBACK_SCOPE(realtime_scope);
+#if defined(EMKE_NATIVE_AUDIO_REALTIME_INSTRUMENTATION) || !defined(NDEBUG)
+  if (probe_allocation_) {
+    RealtimeInstrumentation::project_allocation_hook();
+  }
+  if (probe_blocking_lock_) {
+    RealtimeInstrumentation::project_blocking_lock_hook();
+  }
+#endif
   const bool pushed = silent
                           ? input_packets_.push_silence(
                                 format_, frame_count, timestamp)
                           : input_packets_.push(
                                 format_, frame_count, timestamp, bytes);
   if (!pushed) {
-    ++dropped_packets_;
+    dropped_network_frames_.fetch_add(
+        network_frames_for_native(frame_count, format_.sample_rate_hz),
+        std::memory_order_relaxed);
+    queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
   }
   return pushed;
 }
@@ -313,7 +406,15 @@ bool FakeAudioStream::emit_capture(
 bool FakeAudioStream::render(
     std::span<std::byte> destination,
     std::uint32_t frame_count) noexcept {
-  RealtimeInstrumentation::Scope scope;
+  EMKE_REALTIME_CALLBACK_SCOPE(realtime_scope);
+#if defined(EMKE_NATIVE_AUDIO_REALTIME_INSTRUMENTATION) || !defined(NDEBUG)
+  if (probe_allocation_) {
+    RealtimeInstrumentation::project_allocation_hook();
+  }
+  if (probe_blocking_lock_) {
+    RealtimeInstrumentation::project_blocking_lock_hook();
+  }
+#endif
   const std::size_t required =
       static_cast<std::size_t>(frame_count) * bytes_per_frame(format_);
   if (required != destination.size()) {
@@ -600,6 +701,19 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
     if (running_.load(std::memory_order_acquire)) {
       return EMKE_AUDIO_OK;
     }
+#if defined(_WIN32)
+    stop_event_loop();
+    if (audio_client() != nullptr && client_started_) {
+      static_cast<void>(audio_client()->Stop());
+      client_started_ = false;
+    }
+    release_platform_resources();
+#endif
+    failure_cache_ = {};
+    failure_cache_.role = role_;
+    async_failure_operation_.store(
+        StreamFailure::Operation::none, std::memory_order_release);
+    async_failure_code_.store(0, std::memory_order_release);
     return initialize_wasapi_stream(
         *this, role_, exact_virtual_, failure_cache_);
   }
@@ -840,6 +954,12 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
     if (FAILED(result)) {
       return hresult(result);
     }
+    if (!stream_format_fits_fixed_storage(
+            format_, buffer_frames_, direction_)) {
+      return hresult(
+          AUDCLNT_E_UNSUPPORTED_FORMAT,
+          EMKE_AUDIO_FORMAT_UNSUPPORTED);
+    }
     try {
       loop_thread_ = std::thread([this] { event_loop(); });
     } catch (...) {
@@ -897,7 +1017,8 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   RawPacketQueue input_packets_;
   RawPacketQueue output_packets_;
   std::atomic<bool> running_{false};
-  std::atomic<std::uint64_t> dropped_packets_{0u};
+  std::atomic<std::uint64_t> dropped_network_frames_{0u};
+  std::atomic<std::uint64_t> queue_full_events_{0u};
   StreamFailure failure_cache_{};
   std::atomic<StreamFailure::Operation> async_failure_operation_{
       StreamFailure::Operation::none};
@@ -972,6 +1093,7 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   }
 
   void capture_event() noexcept {
+    EMKE_REALTIME_CALLBACK_SCOPE(realtime_scope);
     UINT32 packet_frames = 0u;
     HRESULT result = capture_client_->GetNextPacketSize(&packet_frames);
     if (FAILED(result)) {
@@ -980,7 +1102,6 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
       return;
     }
     while (packet_frames > 0u) {
-      RealtimeInstrumentation::Scope realtime_scope;
       BYTE* data = nullptr;
       UINT32 frame_count = 0u;
       DWORD flags = 0u;
@@ -1012,7 +1133,10 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
             {reinterpret_cast<const std::byte*>(data), byte_count});
       }
       if (!queued) {
-        dropped_packets_.fetch_add(1u, std::memory_order_relaxed);
+        dropped_network_frames_.fetch_add(
+            network_frames_for_native(frame_count, format_.sample_rate_hz),
+            std::memory_order_relaxed);
+        queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
       }
 
       result = capture_client_->ReleaseBuffer(frame_count);
@@ -1030,7 +1154,7 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   }
 
   void render_event() noexcept {
-    RealtimeInstrumentation::Scope realtime_scope;
+    EMKE_REALTIME_CALLBACK_SCOPE(realtime_scope);
     UINT32 padding = 0u;
     HRESULT result = audio_client()->GetCurrentPadding(&padding);
     if (FAILED(result) || padding > buffer_frames_) {
@@ -1067,7 +1191,11 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
             render_packet_.format.sample_type != format_.sample_type ||
             render_packet_.format.block_align != format_.block_align) {
           has_render_packet_ = false;
-          dropped_packets_.fetch_add(1u, std::memory_order_relaxed);
+          dropped_network_frames_.fetch_add(
+              network_frames_for_native(
+                  render_packet_.frame_count,
+                  render_packet_.format.sample_rate_hz),
+              std::memory_order_relaxed);
           continue;
         }
       }
@@ -1185,8 +1313,12 @@ StreamFailure WasapiStream::last_failure() const noexcept {
   return impl_->last_failure();
 }
 
-std::uint64_t WasapiStream::dropped_packets() const noexcept {
-  return impl_->dropped_packets_.load(std::memory_order_relaxed);
+std::uint64_t WasapiStream::dropped_network_frames() const noexcept {
+  return impl_->dropped_network_frames_.load(std::memory_order_relaxed);
+}
+
+std::uint64_t WasapiStream::queue_full_events() const noexcept {
+  return impl_->queue_full_events_.load(std::memory_order_relaxed);
 }
 
 }  // namespace emke::audio

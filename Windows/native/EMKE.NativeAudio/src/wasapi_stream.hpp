@@ -50,7 +50,17 @@ struct AudioFormat {
     const AudioFormat& format) noexcept;
 
 inline constexpr std::size_t rawPacketByteCapacity = 65'536u;
+inline constexpr std::size_t nativePacketFrameCapacity = 1'920u;
+inline constexpr std::size_t normalizedPacketFrameCapacity = 11'520u;
 inline constexpr std::size_t defaultRawPacketQueueCapacity = 16u;
+
+[[nodiscard]] bool stream_format_fits_fixed_storage(
+    const AudioFormat& format,
+    std::uint32_t native_buffer_frames,
+    StreamDirection direction) noexcept;
+[[nodiscard]] std::uint64_t network_frames_for_native(
+    std::uint32_t native_frames,
+    std::uint32_t native_sample_rate_hz) noexcept;
 
 struct RawAudioPacket {
   AudioFormat format{};
@@ -163,7 +173,10 @@ class AudioStream : public Startable {
   [[nodiscard]] virtual RawPacketQueue& input_packets() noexcept = 0;
   [[nodiscard]] virtual RawPacketQueue& output_packets() noexcept = 0;
   [[nodiscard]] virtual StreamFailure last_failure() const noexcept = 0;
-  [[nodiscard]] virtual std::uint64_t dropped_packets() const noexcept = 0;
+  [[nodiscard]] virtual std::uint64_t dropped_network_frames()
+      const noexcept = 0;
+  [[nodiscard]] virtual std::uint64_t queue_full_events()
+      const noexcept = 0;
 };
 
 class FakeAudioStream final : public AudioStream {
@@ -184,9 +197,17 @@ class FakeAudioStream final : public AudioStream {
   [[nodiscard]] RawPacketQueue& input_packets() noexcept override;
   [[nodiscard]] RawPacketQueue& output_packets() noexcept override;
   [[nodiscard]] StreamFailure last_failure() const noexcept override;
-  [[nodiscard]] std::uint64_t dropped_packets() const noexcept override;
+  [[nodiscard]] std::uint64_t dropped_network_frames()
+      const noexcept override;
+  [[nodiscard]] std::uint64_t queue_full_events() const noexcept override;
 
   void fail_next_start(emke_audio_status status) noexcept;
+  void inject_async_failure(
+      StreamFailure::Operation operation,
+      std::int32_t native_code) noexcept;
+  void set_realtime_test_probe(
+      bool allocation,
+      bool blocking_lock) noexcept;
   [[nodiscard]] bool emit_capture(
       std::span<const std::byte> bytes,
       std::uint32_t frame_count,
@@ -203,8 +224,14 @@ class FakeAudioStream final : public AudioStream {
   RawPacketQueue input_packets_;
   RawPacketQueue output_packets_;
   emke_audio_status next_start_status_ = EMKE_AUDIO_OK;
-  bool running_ = false;
-  std::uint64_t dropped_packets_ = 0u;
+  std::atomic<bool> running_{false};
+  std::atomic<StreamFailure::Operation> failure_operation_{
+      StreamFailure::Operation::none};
+  std::atomic<std::int32_t> failure_code_{0};
+  std::atomic<std::uint64_t> dropped_network_frames_{0u};
+  std::atomic<std::uint64_t> queue_full_events_{0u};
+  bool probe_allocation_ = false;
+  bool probe_blocking_lock_ = false;
 };
 
 struct WasapiCallResult {
@@ -257,7 +284,9 @@ class WasapiStream final : public AudioStream {
   [[nodiscard]] RawPacketQueue& input_packets() noexcept override;
   [[nodiscard]] RawPacketQueue& output_packets() noexcept override;
   [[nodiscard]] StreamFailure last_failure() const noexcept override;
-  [[nodiscard]] std::uint64_t dropped_packets() const noexcept override;
+  [[nodiscard]] std::uint64_t dropped_network_frames()
+      const noexcept override;
+  [[nodiscard]] std::uint64_t queue_full_events() const noexcept override;
 
  private:
   class Impl;

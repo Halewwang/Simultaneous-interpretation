@@ -93,6 +93,11 @@ PcmConversionResult PcmEncoder::process(
   return {PcmConversionStatus::ok, output_index};
 }
 
+void PcmEncoder::reset() noexcept {
+  has_pending_mono_frame_ = false;
+  pending_mono_frame_ = 0.0f;
+}
+
 PcmDecoder::PcmDecoder() noexcept {
   std::array<double, firTapCount> taps{};
   constexpr double midpoint =

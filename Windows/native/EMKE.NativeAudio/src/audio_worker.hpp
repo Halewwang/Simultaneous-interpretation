@@ -79,7 +79,8 @@ inline constexpr std::size_t networkBatchFrames = 4'800u;
 inline constexpr std::size_t networkBatchBytes =
     networkBatchFrames * sizeof(std::int16_t);
 inline constexpr std::size_t pendingEventCapacity = 64u;
-inline constexpr std::size_t maxNormalizedPacketFrames = 11'520u;
+inline constexpr std::size_t maxNormalizedPacketFrames =
+    normalizedPacketFrameCapacity;
 
 class AudioWorker final : public Startable {
  public:

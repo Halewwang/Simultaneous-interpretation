@@ -320,6 +320,8 @@ struct PendingWorkerEvent {
   emke_audio_status status = EMKE_AUDIO_OK;
   emke_audio_route route = EMKE_AUDIO_ROUTE_STOPPED;
   std::uint64_t sequence = 0u;
+  std::uint32_t endpoint_role = 0u;
+  std::int32_t native_code = 0;
   std::uint32_t frame_count = 0u;
   std::array<std::int16_t, networkBatchFrames> pcm16{};
 };
@@ -382,10 +384,11 @@ struct DirectionState {
       std::vector<float>(
           EMKE_AUDIO_TRANSLATED_PLAYBACK_CAPACITY_LOCAL_FRAMES * 2u);
   std::atomic<std::uint64_t> queued_local_frames{0u};
-  std::atomic<emke_audio_route> requested_route{
-      EMKE_AUDIO_ROUTE_TRANSLATED};
+  emke_audio_route requested_route = EMKE_AUDIO_ROUTE_TRANSLATED;
+  std::uint64_t requested_generation = 1u;
   std::atomic<emke_audio_route> active_route{
-      EMKE_AUDIO_ROUTE_TRANSLATED};
+      EMKE_AUDIO_ROUTE_STOPPED};
+  std::uint64_t active_generation = 0u;
   std::optional<NativeFormatConverter> input_converter;
   PcmBlock current_translation{};
   std::size_t current_translation_offset = 0u;
@@ -643,57 +646,48 @@ class AudioWorker::Impl {
     if (running_.load(std::memory_order_acquire)) {
       return EMKE_AUDIO_OK;
     }
+    if (worker_thread_.joinable()) {
+      worker_thread_.join();
+    }
+    prepare_direction_for_start(inbound_);
+    prepare_direction_for_start(outbound_);
+    physical_output_converter_.reset();
+    app_microphone_converter_.reset();
+    events_.clear();
+    reported_stream_failures_.fill(StreamFailure{});
     stop_requested_.store(false, std::memory_order_release);
-    inbound_.active_route.store(
-        inbound_.requested_route.load(std::memory_order_acquire),
-        std::memory_order_release);
-    outbound_.active_route.store(
-        outbound_.requested_route.load(std::memory_order_acquire),
-        std::memory_order_release);
+    running_.store(true, std::memory_order_release);
     try {
       worker_thread_ = std::thread([this] {
         while (!stop_requested_.load(std::memory_order_acquire)) {
+          if (publish_stream_failures()) {
+            break;
+          }
           if (!process_once()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
           }
         }
+        running_.store(false, std::memory_order_release);
       });
     } catch (...) {
+      running_.store(false, std::memory_order_release);
       return EMKE_AUDIO_INTERNAL_ERROR;
     }
-    running_.store(true, std::memory_order_release);
     return EMKE_AUDIO_OK;
   }
 
   emke_audio_status stop() {
-    if (!running_.load(std::memory_order_acquire) &&
-        !worker_thread_.joinable()) {
-      return EMKE_AUDIO_OK;
-    }
     stop_requested_.store(true, std::memory_order_release);
     if (worker_thread_.joinable()) {
       worker_thread_.join();
     }
     running_.store(false, std::memory_order_release);
-    inbound_.active_route.store(
-        EMKE_AUDIO_ROUTE_STOPPED, std::memory_order_release);
-    outbound_.active_route.store(
-        EMKE_AUDIO_ROUTE_STOPPED, std::memory_order_release);
-    {
-      const std::lock_guard inbound_lock(inbound_.translation_mutex);
-      inbound_.translations.clear();
-      inbound_.has_current_translation = false;
-      inbound_.current_translation_offset = 0u;
-    }
-    {
-      const std::lock_guard outbound_lock(outbound_.translation_mutex);
-      outbound_.translations.clear();
-      outbound_.has_current_translation = false;
-      outbound_.current_translation_offset = 0u;
-    }
-    inbound_.queued_local_frames.store(0u, std::memory_order_release);
-    outbound_.queued_local_frames.store(0u, std::memory_order_release);
+    reset_direction_after_stop(inbound_);
+    reset_direction_after_stop(outbound_);
+    physical_output_converter_.reset();
+    app_microphone_converter_.reset();
     events_.clear();
+    reported_stream_failures_.fill(StreamFailure{});
     return EMKE_AUDIO_OK;
   }
 
@@ -702,6 +696,10 @@ class AudioWorker::Impl {
   }
 
   [[nodiscard]] bool process_once() noexcept {
+    if (publish_stream_failures()) {
+      running_.store(false, std::memory_order_release);
+      return true;
+    }
     bool processed = process_capture(
         Direction::Inbound,
         app_speaker_capture_,
@@ -723,27 +721,33 @@ class AudioWorker::Impl {
     if (!valid_route(direction, route)) {
       return EMKE_AUDIO_INVALID_ARGUMENT;
     }
-    state(direction).requested_route.store(
-        route, std::memory_order_release);
+    DirectionState& current = state(direction);
+    const std::lock_guard translation_lock(current.translation_mutex);
+    if (current.requested_route == route) {
+      return EMKE_AUDIO_OK;
+    }
+    if (current.requested_route == EMKE_AUDIO_ROUTE_TRANSLATED &&
+        route != EMKE_AUDIO_ROUTE_TRANSLATED) {
+      discard_translation_generation(current);
+    }
+    current.requested_route = route;
     return EMKE_AUDIO_OK;
   }
 
   emke_audio_status enqueue_translation(
       Direction direction,
       std::span<const std::int16_t> pcm16) noexcept {
-    if (pcm16.empty() ||
-        pcm16.size() >
-            EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES) {
-      return pcm16.empty() ? EMKE_AUDIO_INVALID_ARGUMENT
-                           : EMKE_AUDIO_QUEUE_FULL;
+    if (pcm16.empty()) {
+      return EMKE_AUDIO_INVALID_ARGUMENT;
+    }
+    if (pcm16.size() >
+        EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES) {
+      dropped_frames_.fetch_add(pcm16.size(), std::memory_order_relaxed);
+      queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
+      return EMKE_AUDIO_QUEUE_FULL;
     }
     DirectionState& current = state(direction);
     const std::lock_guard translation_lock(current.translation_mutex);
-    if (current.requested_route.load(std::memory_order_acquire) !=
-        EMKE_AUDIO_ROUTE_TRANSLATED) {
-      dropped_frames_.fetch_add(pcm16.size(), std::memory_order_relaxed);
-      return EMKE_AUDIO_OK;
-    }
 
     const std::size_t local_frames = pcm16.size() * 2u;
     const std::uint64_t queued =
@@ -809,6 +813,8 @@ class AudioWorker::Impl {
     event.status = pending->status;
     event.route = pending->route;
     event.sequence = pending->sequence;
+    event.endpoint_role = pending->endpoint_role;
+    event.native_code = pending->native_code;
     if (pending->frame_count > capacity) {
       event.pcm16.assign(
           pending->pcm16.begin(),
@@ -867,6 +873,51 @@ class AudioWorker::Impl {
     return direction == Direction::Inbound ? inbound_ : outbound_;
   }
 
+  void prepare_direction_for_start(DirectionState& state) noexcept {
+    const std::lock_guard translation_lock(state.translation_mutex);
+    state.encoder.reset();
+    state.batch_size = 0u;
+    state.captures.clear();
+    state.input_converter.reset();
+    state.active_route.store(
+        state.requested_route, std::memory_order_release);
+    state.active_generation = state.requested_generation;
+  }
+
+  void reset_direction_after_stop(DirectionState& state) noexcept {
+    const std::lock_guard translation_lock(state.translation_mutex);
+    state.encoder.reset();
+    state.batch_size = 0u;
+    state.captures.clear();
+    state.input_converter.reset();
+    state.translations.clear();
+    state.translation_decoder.reset();
+    state.has_current_translation = false;
+    state.current_translation_offset = 0u;
+    state.queued_local_frames.store(0u, std::memory_order_release);
+    if (state.requested_generation !=
+        std::numeric_limits<std::uint64_t>::max()) {
+      ++state.requested_generation;
+    }
+    state.active_route.store(
+        EMKE_AUDIO_ROUTE_STOPPED, std::memory_order_release);
+    state.active_generation = 0u;
+  }
+
+  void discard_translation_generation(DirectionState& state) noexcept {
+    const std::uint64_t discarded =
+        state.queued_local_frames.exchange(0u, std::memory_order_acq_rel);
+    state.translations.clear();
+    state.translation_decoder.reset();
+    state.has_current_translation = false;
+    state.current_translation_offset = 0u;
+    if (state.requested_generation !=
+        std::numeric_limits<std::uint64_t>::max()) {
+      ++state.requested_generation;
+    }
+    dropped_frames_.fetch_add(discarded / 2u, std::memory_order_relaxed);
+  }
+
   [[nodiscard]] bool ensure_converter(
       DirectionState& state,
       const AudioFormat& format) noexcept {
@@ -876,28 +927,81 @@ class AudioWorker::Impl {
     return state.input_converter->supported();
   }
 
-  void apply_route_boundary(
-      Direction direction,
-      DirectionState& state) noexcept {
-    const emke_audio_route requested =
-        state.requested_route.load(std::memory_order_acquire);
+  void apply_route_boundary(DirectionState& state) noexcept {
+    const emke_audio_route requested = state.requested_route;
     const emke_audio_route active =
         state.active_route.load(std::memory_order_acquire);
-    if (requested == active) {
+    if (requested == active &&
+        state.requested_generation == state.active_generation) {
       return;
     }
-    const std::uint64_t discarded =
-        state.queued_local_frames.exchange(0u, std::memory_order_acq_rel);
-    state.translations.clear();
-    state.translation_decoder.reset();
-    state.has_current_translation = false;
-    state.current_translation_offset = 0u;
-    dropped_frames_.fetch_add(discarded / 2u, std::memory_order_relaxed);
     state.active_route.store(requested, std::memory_order_release);
-    if (direction == Direction::Inbound &&
-        requested == EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN) {
+    state.active_generation = state.requested_generation;
+  }
+
+  void enter_translation_failure(
+      Direction direction,
+      DirectionState& state) noexcept {
+    discard_translation_generation(state);
+    if (direction == Direction::Inbound) {
+      state.requested_route = EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN;
+      state.active_route.store(
+          EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN,
+          std::memory_order_release);
       inbound_failures_.fetch_add(1u, std::memory_order_relaxed);
+    } else {
+      state.requested_route = EMKE_AUDIO_ROUTE_MUTED_FAIL_CLOSED;
+      state.active_route.store(
+          EMKE_AUDIO_ROUTE_MUTED_FAIL_CLOSED,
+          std::memory_order_release);
+      outbound_underruns_.fetch_add(1u, std::memory_order_relaxed);
     }
+    state.active_generation = state.requested_generation;
+  }
+
+  [[nodiscard]] bool publish_stream_failures() noexcept {
+    const std::array<AudioStream*, 4u> streams = {
+        &physical_output_,
+        &app_microphone_render_,
+        &app_speaker_capture_,
+        &physical_microphone_capture_,
+    };
+    bool any_failure = false;
+    for (std::size_t index = 0u; index < streams.size(); ++index) {
+      const StreamFailure failure = streams[index]->last_failure();
+      if (failure.operation == StreamFailure::Operation::none) {
+        continue;
+      }
+      any_failure = true;
+      const StreamFailure& reported = reported_stream_failures_[index];
+      if (reported.operation == failure.operation &&
+          reported.native_code == failure.native_code) {
+        continue;
+      }
+      reported_stream_failures_[index] = failure;
+      device_failures_.fetch_add(1u, std::memory_order_relaxed);
+
+      PendingWorkerEvent event;
+      event.kind = EMKE_AUDIO_EVENT_STREAM_ERROR;
+      event.status = EMKE_AUDIO_INTERNAL_ERROR;
+      event.route =
+          failure.role == StreamRole::physicalOutput ||
+                  failure.role == StreamRole::appSpeakerCapture
+              ? inbound_.active_route.load(std::memory_order_acquire)
+              : outbound_.active_route.load(std::memory_order_acquire);
+      event.endpoint_role = static_cast<std::uint32_t>(failure.role);
+      event.native_code = failure.native_code;
+      if (next_event_sequence_ ==
+          std::numeric_limits<std::uint64_t>::max()) {
+        queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
+        continue;
+      }
+      event.sequence = next_event_sequence_++;
+      if (!events_.push(event)) {
+        queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
+      }
+    }
+    return any_failure;
   }
 
   bool process_capture(
@@ -912,14 +1016,18 @@ class AudioWorker::Impl {
     if (!ensure_converter(state, packet.format)) {
       device_failures_.fetch_add(1u, std::memory_order_relaxed);
       dropped_frames_.fetch_add(
-          packet.frame_count / 2u, std::memory_order_relaxed);
+          network_frames_for_native(
+              packet.frame_count, packet.format.sample_rate_hz),
+          std::memory_order_relaxed);
       return true;
     }
     const std::size_t required =
         state.input_converter->required_output_frames(packet.frame_count);
     if (required == 0u || required > maxNormalizedPacketFrames) {
       dropped_frames_.fetch_add(
-          packet.frame_count / 2u, std::memory_order_relaxed);
+          network_frames_for_native(
+              packet.frame_count, packet.format.sample_rate_hz),
+          std::memory_order_relaxed);
       queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
       return true;
     }
@@ -972,8 +1080,6 @@ class AudioWorker::Impl {
       DirectionState& state,
       std::span<const float> original,
       std::uint64_t timestamp) noexcept {
-    publish_network_audio(direction, state, original);
-
     const std::size_t frames = original.size() / 2u;
     PcmBlock selected;
     selected.frame_count = static_cast<std::uint32_t>(frames);
@@ -993,10 +1099,12 @@ class AudioWorker::Impl {
         outbound_underruns_.fetch_add(1u, std::memory_order_relaxed);
       }
       queue_full_events_.fetch_add(1u, std::memory_order_relaxed);
+      publish_network_audio(direction, state, original);
       write_render_packet(render, selected);
       return;
     }
-    apply_route_boundary(direction, state);
+    apply_route_boundary(state);
+    publish_network_audio(direction, state, original);
     const emke_audio_route route =
         state.active_route.load(std::memory_order_acquire);
     if (route == EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS ||
@@ -1019,23 +1127,11 @@ class AudioWorker::Impl {
       } else if (direction == Direction::Inbound) {
         std::copy(original.begin(), original.end(),
                   selected.interleaved_stereo.begin());
-        state.active_route.store(
-            EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN,
-            std::memory_order_release);
-        state.requested_route.store(
-            EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN,
-            std::memory_order_release);
-        inbound_failures_.fetch_add(1u, std::memory_order_relaxed);
+        enter_translation_failure(direction, state);
       } else {
         std::fill_n(
             selected.interleaved_stereo.begin(), original.size(), 0.0f);
-        state.active_route.store(
-            EMKE_AUDIO_ROUTE_MUTED_FAIL_CLOSED,
-            std::memory_order_release);
-        state.requested_route.store(
-            EMKE_AUDIO_ROUTE_MUTED_FAIL_CLOSED,
-            std::memory_order_release);
-        outbound_underruns_.fetch_add(1u, std::memory_order_relaxed);
+        enter_translation_failure(direction, state);
       }
     }
     write_render_packet(render, selected);
@@ -1206,6 +1302,7 @@ class AudioWorker::Impl {
   std::vector<std::byte> physical_output_bytes_;
   std::optional<LocalOutputConverter> physical_output_converter_;
   std::optional<LocalOutputConverter> app_microphone_converter_;
+  std::array<StreamFailure, 4u> reported_stream_failures_{};
   std::thread worker_thread_;
   std::atomic<bool> running_{false};
   std::atomic<bool> stop_requested_{false};
@@ -1310,6 +1407,25 @@ class NativeAudioBackend::Impl {
             physical_microphone_capture_,
             worker_) {}
 
+  [[nodiscard]] bool has_stream_failure() const noexcept {
+    const std::array<const WasapiStream*, 4u> streams = {
+        &physical_output_,
+        &app_microphone_render_,
+        &app_speaker_capture_,
+        &physical_microphone_capture_,
+    };
+    return std::any_of(
+        streams.begin(), streams.end(), [](const WasapiStream* stream) {
+          return stream->last_failure().operation !=
+                 StreamFailure::Operation::none;
+        });
+  }
+
+  [[nodiscard]] bool healthy_running() const noexcept {
+    return lifecycle_.running() && worker_.running() &&
+           !has_stream_failure();
+  }
+
   WasapiStream physical_output_;
   WasapiStream app_microphone_render_;
   WasapiStream app_speaker_capture_;
@@ -1326,6 +1442,12 @@ NativeAudioBackend::~NativeAudioBackend() {
 }
 
 emke_audio_status NativeAudioBackend::start() {
+  if (impl_->lifecycle_.running()) {
+    if (impl_->healthy_running()) {
+      return EMKE_AUDIO_OK;
+    }
+    static_cast<void>(impl_->lifecycle_.stop());
+  }
   return impl_->lifecycle_.start();
 }
 
@@ -1336,8 +1458,8 @@ emke_audio_status NativeAudioBackend::stop() {
 emke_audio_status NativeAudioBackend::set_route(
     Direction direction,
     emke_audio_route route) {
-  if (!impl_->lifecycle_.running()) {
-    return EMKE_AUDIO_NOT_RUNNING;
+  if (impl_->lifecycle_.running() && !impl_->healthy_running()) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
   }
   return impl_->worker_.set_route(direction, route);
 }
@@ -1345,8 +1467,8 @@ emke_audio_status NativeAudioBackend::set_route(
 emke_audio_status NativeAudioBackend::enqueue_translation(
     Direction direction,
     std::span<const std::int16_t> pcm16) {
-  if (!impl_->lifecycle_.running()) {
-    return EMKE_AUDIO_NOT_RUNNING;
+  if (impl_->lifecycle_.running() && !impl_->healthy_running()) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
   }
   return impl_->worker_.enqueue_translation(direction, pcm16);
 }
@@ -1361,21 +1483,32 @@ void NativeAudioBackend::write_diagnostics(
     emke_audio_diagnostics& diagnostics) const {
   impl_->worker_.write_diagnostics(diagnostics);
   diagnostics.dropped_frames +=
-      impl_->physical_output_.dropped_packets() +
-      impl_->app_microphone_render_.dropped_packets() +
-      impl_->app_speaker_capture_.dropped_packets() +
-      impl_->physical_microphone_capture_.dropped_packets();
+      impl_->physical_output_.dropped_network_frames() +
+      impl_->app_microphone_render_.dropped_network_frames() +
+      impl_->app_speaker_capture_.dropped_network_frames() +
+      impl_->physical_microphone_capture_.dropped_network_frames();
+  diagnostics.queue_full_events +=
+      impl_->physical_output_.queue_full_events() +
+      impl_->app_microphone_render_.queue_full_events() +
+      impl_->app_speaker_capture_.queue_full_events() +
+      impl_->physical_microphone_capture_.queue_full_events();
   const std::array streams = {
       &impl_->physical_output_,
       &impl_->app_microphone_render_,
       &impl_->app_speaker_capture_,
       &impl_->physical_microphone_capture_,
   };
+  std::uint64_t current_stream_failures = 0u;
   for (const WasapiStream* stream : streams) {
     if (stream->last_failure().operation !=
         StreamFailure::Operation::none) {
-      ++diagnostics.device_failures;
+      ++current_stream_failures;
     }
+  }
+  diagnostics.device_failures =
+      std::max(diagnostics.device_failures, current_stream_failures);
+  if (!impl_->healthy_running()) {
+    diagnostics.is_running = 0u;
   }
 }
 
