@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{A45CC63E-E2B5-4B13-8654-39ACF92B45F2}</ProjectGuid>
+    <RootNamespace>EMKE.VirtualAudio</RootNamespace>
+    <MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>
+    <Configuration>Release</Configuration>
+    <Platform>x64</Platform>
+    <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Driver</ConfigurationType>
+    <DriverType>KMDF</DriverType>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <TargetVersion>Windows11</TargetVersion>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>EMKE.VirtualAudio</TargetName>
+    <OutDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)obj\$(Platform)\$(Configuration)\</IntDir>
+    <GenerateProjectSpecificOutputFolder>false</GenerateProjectSpecificOutputFolder>
+    <SignMode>Off</SignMode>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_;DEBUG_LEVEL=DEBUGLVL_TERSE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>false</ExceptionHandling>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <WarningLevel>Level4</WarningLevel>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;_USE_IPortClsRuntimePower;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+    <Link>
+      <AdditionalDependencies>portcls.lib;stdunk.lib;libcntpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Windows.SDK.cpp.x64" Version="10.0.28000.2526" GeneratePathProperty="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="EMKE.VirtualAudio.inf" />
+    <ResourceCompile Include="src\SimpleAudioSample.rc" />
+    <ClCompile Include="src\adapter.cpp" />
+    <ClCompile Include="src\basetopo.cpp" />
+    <ClCompile Include="src\common.cpp" />
+    <ClCompile Include="src\hw.cpp" />
+    <ClCompile Include="src\kshelper.cpp" />
+    <ClCompile Include="src\micarraytopo.cpp" />
+    <ClCompile Include="src\mintopo.cpp" />
+    <ClCompile Include="src\minwavert.cpp" />
+    <ClCompile Include="src\minwavertstream.cpp" />
+    <ClCompile Include="src\NewDelete.cpp" />
+    <ClCompile Include="src\savedata.cpp" />
+    <ClCompile Include="src\speakertopo.cpp" />
+    <ClCompile Include="src\ToneGenerator.cpp" />
+    <ClInclude Include="include\emke_endpoint_roles.h" />
+    <ClInclude Include="src\basetopo.h" />
+    <ClInclude Include="src\common.h" />
+    <ClInclude Include="src\definitions.h" />
+    <ClInclude Include="src\endpoints.h" />
+    <ClInclude Include="src\hw.h" />
+    <ClInclude Include="src\kshelper.h" />
+    <ClInclude Include="src\micarray1toptable.h" />
+    <ClInclude Include="src\micarraytopo.h" />
+    <ClInclude Include="src\micarraywavtable.h" />
+    <ClInclude Include="src\minipairs.h" />
+    <ClInclude Include="src\mintopo.h" />
+    <ClInclude Include="src\minwavert.h" />
+    <ClInclude Include="src\minwavertstream.h" />
+    <ClInclude Include="src\NewDelete.h" />
+    <ClInclude Include="src\savedata.h" />
+    <ClInclude Include="src\speakertopo.h" />
+    <ClInclude Include="src\speakertoptable.h" />
+    <ClInclude Include="src\speakerwavtable.h" />
+    <ClInclude Include="src\ToneGenerator.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -134,3 +134,71 @@ jobs:
           ```
           "@
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+
+  driver-build-proof:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Validate driver source and package rules
+        shell: pwsh
+        run: |
+          node --test Windows/driver/tests/driver-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver contract tests failed."
+          }
+
+      - name: Build unsigned driver package
+        id: driver-build
+        shell: pwsh
+        run: |
+          pwsh Windows/tools/build-driver.ps1 -Configuration Release -Platform x64
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver build failed."
+          }
+
+          pwsh Windows/tools/verify-driver-package.ps1 Windows/artifacts/driver/x64/Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver package verification failed."
+          }
+
+      - name: Upload unsigned driver package
+        uses: actions/upload-artifact@v4
+        with:
+          name: emke-virtual-audio-unsigned-${{ github.sha }}
+          path: Windows/artifacts/driver/x64/Release
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+      - name: Record driver build boundary
+        if: always()
+        shell: pwsh
+        run: |
+          $driverBuild = "${{ steps.driver-build.outcome }}"
+          $summary = @"
+          ## EMKE virtual audio driver build proof
+
+          ```text
+          driverBuild = $driverBuild
+          packageVerification = $driverBuild
+          catalogGenerated = $driverBuild
+          catalogSigned = false
+          driverInstall = pending
+          liveEndpoints = pending
+          ```
+
+          The uploaded artifact is a build-only unsigned/test package. No
+          certificate, administrator action, driver installation, or public
+          release is part of this workflow.
+          "@
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
