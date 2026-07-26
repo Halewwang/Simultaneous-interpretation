@@ -17,6 +17,7 @@ on:
       - "Tests/EMKEContractTests/**"
       - "Package.swift"
       - "Windows/tests/EMKE.Contract.Tests/**"
+      - ".github/workflows/shared-contract.yml"
 
 jobs:
   validate-files:
