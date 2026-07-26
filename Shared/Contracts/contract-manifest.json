@@ -1,0 +1,10 @@
+{
+  "contractVersion": 1,
+  "status": "frozen",
+  "schemas": [
+    "v1/translation-events.schema.json",
+    "v1/app-state.schema.json",
+    "v1/compatibility.schema.json"
+  ],
+  "fixtureManifest": "../TestVectors/fixture-manifest.json"
+}
