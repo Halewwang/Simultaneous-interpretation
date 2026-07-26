@@ -45,17 +45,25 @@ function Assert-ContainsExactlyOnce {
     }
 }
 
-function Get-FileCatalogMembers {
+function Get-NormalizedCatalogMemberNames {
     param(
         [Parameter(Mandatory)]
-        [string]$CatalogPath
+        [object]$Items,
+
+        [Parameter(Mandatory)]
+        [string]$Description
     )
 
-    $output = @(& certutil.exe -dump $CatalogPath 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw "certutil could not parse the generated catalog."
+    if ($null -eq $Items.Keys) {
+        throw "Detailed catalog validation did not return $Description keys."
     }
-    return (($output -join "`n") -replace "[^0-9A-Fa-f]", "").ToUpperInvariant()
+    return @(
+        $Items.Keys |
+            ForEach-Object {
+                [System.IO.Path]::GetFileName([string]$_).ToLowerInvariant()
+            } |
+            Sort-Object
+    )
 }
 
 if (-not $IsWindows) {
@@ -126,14 +134,52 @@ if ($catalogSignature.Status -notin @("NotSigned", "Valid")) {
     throw "Catalog is malformed or has an invalid signature status: $($catalogSignature.Status)."
 }
 
-$catalogHex = Get-FileCatalogMembers -CatalogPath $cat.FullName
-foreach ($member in @($inf, $sys)) {
-    $digest = (Get-FileHash -LiteralPath $member.FullName -Algorithm SHA256).Hash
-    if (-not $catalogHex.Contains($digest)) {
-        throw "Catalog does not contain the built $($member.Name) SHA-256 digest."
+$catalogValidation = Test-FileCatalog `
+    -CatalogFilePath $cat.FullName `
+    -Path @($inf.FullName, $sys.FullName) `
+    -Detailed `
+    -ErrorAction Stop
+if ($null -eq $catalogValidation -or
+    $catalogValidation.Status.ToString() -ne "Valid") {
+    $status = if ($null -eq $catalogValidation) {
+        "NoResult"
+    } else {
+        $catalogValidation.Status.ToString()
     }
+    throw "Catalog validation failed for the packaged INF and SYS: $status."
+}
+if ($catalogValidation.HashAlgorithm.ToString() -ne "SHA256") {
+    throw "Catalog must validate packaged files with SHA-256."
+}
+
+$expectedMemberNames = @(
+    $inf.Name.ToLowerInvariant(),
+    $sys.Name.ToLowerInvariant()
+) | Sort-Object
+$catalogMemberNames = Get-NormalizedCatalogMemberNames `
+    -Items $catalogValidation.CatalogItems `
+    -Description "CatalogItems"
+$pathMemberNames = Get-NormalizedCatalogMemberNames `
+    -Items $catalogValidation.PathItems `
+    -Description "PathItems"
+
+$catalogDifference = @(
+    Compare-Object `
+        -ReferenceObject $expectedMemberNames `
+        -DifferenceObject $catalogMemberNames
+)
+$pathDifference = @(
+    Compare-Object `
+        -ReferenceObject $expectedMemberNames `
+        -DifferenceObject $pathMemberNames
+)
+if ($catalogMemberNames.Count -ne 2 -or $catalogDifference.Count -ne 0) {
+    throw "Catalog must contain exactly the packaged INF and SYS."
+}
+if ($pathMemberNames.Count -ne 2 -or $pathDifference.Count -ne 0) {
+    throw "Catalog validation must test exactly the packaged INF and SYS."
 }
 
 Write-Host "Driver package verification passed."
-Write-Host "Catalog signature status: $($catalogSignature.Status) (catalog membership only; no signing claim)."
+Write-Host "Catalog status: $($catalogValidation.Status); signature status: $($catalogSignature.Status) (no signing claim)."
 Write-Host "Driver version: $fileVersion"
