@@ -1,0 +1,38 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "settings.compatibility-gate.v1",
+  "category": "settings",
+  "cases": [
+    {
+      "name": "exact versions",
+      "installed": { "present": true, "signatureValid": true, "abi": 1, "version": "0.1.0", "endpointCount": 2 },
+      "expected": { "allowed": true, "reason": "compatible", "updateRecommended": false }
+    },
+    {
+      "name": "compatible below recommended",
+      "installed": { "present": true, "signatureValid": true, "abi": 1, "version": "0.1.0", "endpointCount": 2 },
+      "manifestOverride": { "recommendedDriverVersion": "0.2.0" },
+      "expected": { "allowed": true, "reason": "compatibleUpdateRecommended", "updateRecommended": true }
+    },
+    {
+      "name": "missing driver",
+      "installed": { "present": false, "signatureValid": false, "abi": 0, "version": "0.0.0", "endpointCount": 0 },
+      "expected": { "allowed": false, "reason": "driverMissing", "updateRecommended": true }
+    },
+    {
+      "name": "invalid signature",
+      "installed": { "present": true, "signatureValid": false, "abi": 1, "version": "0.1.0", "endpointCount": 2 },
+      "expected": { "allowed": false, "reason": "driverSignatureInvalid", "updateRecommended": true }
+    },
+    {
+      "name": "abi mismatch",
+      "installed": { "present": true, "signatureValid": true, "abi": 2, "version": "0.2.0", "endpointCount": 2 },
+      "expected": { "allowed": false, "reason": "driverAbiMismatch", "updateRecommended": true }
+    },
+    {
+      "name": "one endpoint only",
+      "installed": { "present": true, "signatureValid": true, "abi": 1, "version": "0.1.0", "endpointCount": 1 },
+      "expected": { "allowed": false, "reason": "virtualEndpointsIncomplete", "updateRecommended": true }
+    }
+  ]
+}

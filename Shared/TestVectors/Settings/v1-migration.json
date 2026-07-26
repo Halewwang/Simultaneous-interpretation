@@ -1,0 +1,95 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "settings.v1-migration.v1",
+  "category": "settings",
+  "cases": [
+    {
+      "name": "empty object migrates to safe defaults",
+      "input": { "kind": "object", "settings": {} },
+      "expected": {
+        "outcome": "migrated",
+        "overwrite": true,
+        "quarantine": false,
+        "resultSettings": {
+          "schemaVersion": 1,
+          "baseUrl": "https://api.302.ai",
+          "modelId": "gpt-realtime-translate",
+          "nativeLanguage": "zh",
+          "meetingLanguage": "en",
+          "interfaceLanguage": "system",
+          "inputEndpointId": null,
+          "outputEndpointId": null
+        }
+      }
+    },
+    {
+      "name": "schema version 1 is semantic identity",
+      "input": {
+        "kind": "object",
+        "settings": {
+          "schemaVersion": 1,
+          "baseUrl": "https://api.302.ai",
+          "modelId": "gpt-realtime-translate",
+          "nativeLanguage": "zh",
+          "meetingLanguage": "en",
+          "interfaceLanguage": "system",
+          "inputEndpointId": null,
+          "outputEndpointId": null
+        }
+      },
+      "expected": {
+        "outcome": "identity",
+        "overwrite": false,
+        "quarantine": false,
+        "resultSettings": {
+          "schemaVersion": 1,
+          "baseUrl": "https://api.302.ai",
+          "modelId": "gpt-realtime-translate",
+          "nativeLanguage": "zh",
+          "meetingLanguage": "en",
+          "interfaceLanguage": "system",
+          "inputEndpointId": null,
+          "outputEndpointId": null
+        }
+      }
+    },
+    {
+      "name": "unknown future schema version is unsupported",
+      "input": { "kind": "object", "settings": { "schemaVersion": 2 } },
+      "expected": {
+        "outcome": "unsupported",
+        "overwrite": false,
+        "quarantine": false,
+        "resultSettings": {
+          "schemaVersion": 1,
+          "baseUrl": "https://api.302.ai",
+          "modelId": "gpt-realtime-translate",
+          "nativeLanguage": "zh",
+          "meetingLanguage": "en",
+          "interfaceLanguage": "system",
+          "inputEndpointId": null,
+          "outputEndpointId": null
+        }
+      }
+    },
+    {
+      "name": "malformed JSON is quarantined",
+      "input": { "kind": "raw", "raw": "{\"schemaVersion\":" },
+      "expected": {
+        "outcome": "quarantined",
+        "overwrite": false,
+        "quarantine": true,
+        "resultSettings": {
+          "schemaVersion": 1,
+          "baseUrl": "https://api.302.ai",
+          "modelId": "gpt-realtime-translate",
+          "nativeLanguage": "zh",
+          "meetingLanguage": "en",
+          "interfaceLanguage": "system",
+          "inputEndpointId": null,
+          "outputEndpointId": null
+        }
+      }
+    }
+  ]
+}
