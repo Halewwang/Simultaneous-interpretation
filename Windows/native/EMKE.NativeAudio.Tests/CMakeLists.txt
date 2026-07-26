@@ -16,6 +16,7 @@ target_include_directories(EMKE.NativeAudio.Tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../include"
 )
 target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
+  EMKE_NATIVE_AUDIO_DEVICE_TESTS
   EMKE_AUDIO_PCM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared/TestVectors/Audio"
 )
 

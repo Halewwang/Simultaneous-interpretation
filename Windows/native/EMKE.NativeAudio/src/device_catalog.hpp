@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -11,6 +12,8 @@
 #include <vector>
 
 namespace emke::audio {
+
+inline constexpr std::uint32_t deviceStateActive = 0x00000001u;
 
 enum class DeviceDataFlow : std::uint8_t {
   render,
@@ -98,6 +101,7 @@ enum class DeviceCatalogOperation : std::uint8_t {
   readRoleProperty,
   getDefaultEndpoint,
   registerNotifications,
+  unregisterNotifications,
   platformUnsupported,
   outOfMemory,
   unexpectedFailure,
@@ -133,12 +137,14 @@ enum class VirtualEndpointProblem : std::uint8_t {
   missingRole,
   duplicateRole,
   wrongDataFlow,
+  inactiveRole,
+  invalidRole,
 };
 
 struct VirtualEndpointAssessment {
   bool ready = false;
   VirtualEndpointProblem problem = VirtualEndpointProblem::missingRole;
-  EndpointRole role = EndpointRole::meetingSpeakerRender;
+  std::optional<EndpointRole> role = EndpointRole::meetingSpeakerRender;
   std::size_t matching_endpoint_count = 0u;
   DeviceDataFlow expected_flow = DeviceDataFlow::render;
   DeviceDataFlow observed_flow = DeviceDataFlow::render;
@@ -163,12 +169,26 @@ enum class PhysicalResolutionStatus : std::uint8_t {
   missing,
   wrongDataFlow,
   virtualEndpoint,
+  unavailable,
   sourceError,
+};
+
+class DeviceCatalogSnapshot {
+ public:
+  explicit DeviceCatalogSnapshot(std::vector<DeviceEndpoint> endpoints);
+
+  [[nodiscard]] std::size_t size() const noexcept;
+  [[nodiscard]] DeviceEndpoint endpoint_at(std::size_t index) const;
+
+ private:
+  friend class DeviceCatalog;
+
+  std::vector<DeviceEndpoint> endpoints_;
 };
 
 struct PhysicalEndpointResolution {
   PhysicalResolutionStatus status = PhysicalResolutionStatus::missing;
-  const DeviceEndpoint* endpoint = nullptr;
+  std::shared_ptr<const DeviceEndpoint> endpoint;
   std::optional<DeviceCatalogError> error;
 };
 
@@ -179,21 +199,24 @@ struct CatalogRefreshResult {
 
 class DeviceCatalog {
  public:
-  explicit DeviceCatalog(DeviceSource& source) noexcept;
+  explicit DeviceCatalog(DeviceSource& source);
 
   [[nodiscard]] CatalogRefreshResult refresh() noexcept;
-  [[nodiscard]] std::span<const DeviceEndpoint> endpoints() const noexcept;
+  [[nodiscard]] std::shared_ptr<const DeviceCatalogSnapshot> snapshot()
+      const noexcept;
   [[nodiscard]] VirtualEndpointAssessment virtual_endpoint_assessment()
       const noexcept;
   [[nodiscard]] PhysicalEndpointResolution resolve_physical(
       const PhysicalEndpointSelection& selection) noexcept;
 
  private:
-  [[nodiscard]] const DeviceEndpoint* endpoint_with_id(
-      std::u16string_view id) const noexcept;
+  [[nodiscard]] static const DeviceEndpoint* endpoint_with_id(
+      const DeviceCatalogSnapshot& snapshot,
+      std::u16string_view id) noexcept;
 
   DeviceSource& source_;
-  std::vector<DeviceEndpoint> endpoints_;
+  std::mutex source_mutex_;
+  std::shared_ptr<const DeviceCatalogSnapshot> snapshot_;
 };
 
 /*

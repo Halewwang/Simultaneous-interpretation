@@ -1,6 +1,7 @@
 #include "device_catalog.hpp"
 
 #include <array>
+#include <atomic>
 #include <new>
 #include <utility>
 
@@ -379,6 +380,19 @@ class MmDeviceSource final : public DeviceSource {
 
 VirtualEndpointAssessment assess_virtual_endpoints(
     std::span<const DeviceEndpoint> endpoints) noexcept {
+  for (const DeviceEndpoint& endpoint : endpoints) {
+    if (endpoint.has_emke_role_property && !endpoint.role.has_value()) {
+      return {
+          .ready = false,
+          .problem = VirtualEndpointProblem::invalidRole,
+          .role = std::nullopt,
+          .matching_endpoint_count = 1u,
+          .expected_flow = endpoint.data_flow,
+          .observed_flow = endpoint.data_flow,
+      };
+    }
+  }
+
   for (EndpointRole role : all_roles) {
     const DeviceDataFlow expected_flow = endpoint_role_data_flow(role);
     std::size_t matching_count = 0u;
@@ -420,6 +434,18 @@ VirtualEndpointAssessment assess_virtual_endpoints(
           .observed_flow = observed_flow,
       };
     }
+    for (const DeviceEndpoint& endpoint : endpoints) {
+      if (endpoint.role == role && endpoint.state != deviceStateActive) {
+        return {
+            .ready = false,
+            .problem = VirtualEndpointProblem::inactiveRole,
+            .role = role,
+            .matching_endpoint_count = 1u,
+            .expected_flow = expected_flow,
+            .observed_flow = observed_flow,
+        };
+      }
+    }
   }
 
   return {
@@ -432,38 +458,60 @@ VirtualEndpointAssessment assess_virtual_endpoints(
   };
 }
 
-DeviceCatalog::DeviceCatalog(DeviceSource& source) noexcept : source_(source) {}
+DeviceCatalogSnapshot::DeviceCatalogSnapshot(
+    std::vector<DeviceEndpoint> endpoints)
+    : endpoints_(std::move(endpoints)) {}
+
+std::size_t DeviceCatalogSnapshot::size() const noexcept {
+  return endpoints_.size();
+}
+
+DeviceEndpoint DeviceCatalogSnapshot::endpoint_at(std::size_t index) const {
+  return endpoints_.at(index);
+}
+
+DeviceCatalog::DeviceCatalog(DeviceSource& source)
+    : source_(source),
+      snapshot_(std::make_shared<const DeviceCatalogSnapshot>(
+          std::vector<DeviceEndpoint>{})) {}
 
 CatalogRefreshResult DeviceCatalog::refresh() noexcept {
   try {
-    DeviceEnumeration enumeration = source_.enumerate();
+    DeviceEnumeration enumeration;
+    {
+      const std::lock_guard lock(source_mutex_);
+      enumeration = source_.enumerate();
+    }
     if (enumeration.error.has_value()) {
-      endpoints_.clear();
       return {.ok = false, .error = enumeration.error};
     }
-    endpoints_ = std::move(enumeration.endpoints);
+    auto replacement = std::make_shared<const DeviceCatalogSnapshot>(
+        std::move(enumeration.endpoints));
+    std::atomic_store_explicit(
+        &snapshot_, std::move(replacement), std::memory_order_release);
     return {.ok = true};
   } catch (const std::bad_alloc&) {
-    endpoints_.clear();
     return {.ok = false, .error = allocation_error()};
   } catch (...) {
-    endpoints_.clear();
     return {.ok = false, .error = unexpected_error()};
   }
 }
 
-std::span<const DeviceEndpoint> DeviceCatalog::endpoints() const noexcept {
-  return endpoints_;
+std::shared_ptr<const DeviceCatalogSnapshot> DeviceCatalog::snapshot()
+    const noexcept {
+  return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
 }
 
 VirtualEndpointAssessment DeviceCatalog::virtual_endpoint_assessment()
     const noexcept {
-  return assess_virtual_endpoints(endpoints_);
+  const auto current = snapshot();
+  return assess_virtual_endpoints(current->endpoints_);
 }
 
 const DeviceEndpoint* DeviceCatalog::endpoint_with_id(
-    std::u16string_view id) const noexcept {
-  for (const DeviceEndpoint& endpoint : endpoints_) {
+    const DeviceCatalogSnapshot& snapshot,
+    std::u16string_view id) noexcept {
+  for (const DeviceEndpoint& endpoint : snapshot.endpoints_) {
     if (endpoint.id == id) {
       return &endpoint;
     }
@@ -477,6 +525,7 @@ PhysicalEndpointResolution DeviceCatalog::resolve_physical(
   DefaultEndpointResult default_endpoint;
   if (selection.mode == PhysicalEndpointMode::followDefault) {
     try {
+      const std::lock_guard lock(source_mutex_);
       default_endpoint = source_.default_endpoint_id(selection.data_flow);
     } catch (const std::bad_alloc&) {
       return {
@@ -498,7 +547,8 @@ PhysicalEndpointResolution DeviceCatalog::resolve_physical(
     endpoint_id = default_endpoint.endpoint_id;
   }
 
-  const DeviceEndpoint* endpoint = endpoint_with_id(endpoint_id);
+  const auto current = snapshot();
+  const DeviceEndpoint* endpoint = endpoint_with_id(*current, endpoint_id);
   if (endpoint == nullptr) {
     return {.status = PhysicalResolutionStatus::missing};
   }
@@ -508,9 +558,13 @@ PhysicalEndpointResolution DeviceCatalog::resolve_physical(
   if (endpoint->has_emke_role_property) {
     return {.status = PhysicalResolutionStatus::virtualEndpoint};
   }
+  if (endpoint->state != deviceStateActive) {
+    return {.status = PhysicalResolutionStatus::unavailable};
+  }
   return {
       .status = PhysicalResolutionStatus::resolved,
-      .endpoint = endpoint,
+      .endpoint =
+          std::shared_ptr<const DeviceEndpoint>(current, endpoint),
   };
 }
 

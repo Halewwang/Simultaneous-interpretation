@@ -14,6 +14,8 @@
 
 namespace emke::audio {
 
+class DeviceNotificationState;
+
 inline constexpr std::size_t notificationEndpointIdCapacity =
     EMKE_AUDIO_ENDPOINT_ID_CAPACITY;
 
@@ -29,6 +31,7 @@ struct DeviceNotificationEvent {
   DeviceNotificationKind kind = DeviceNotificationKind::propertyChanged;
   std::array<char16_t, notificationEndpointIdCapacity> endpoint_id{};
   std::uint16_t endpoint_id_length = 0u;
+  bool has_endpoint_id = false;
   bool has_new_state = false;
   std::uint32_t new_state = 0u;
   std::uint64_t sequence = 0u;
@@ -45,49 +48,101 @@ struct DeviceNotificationEvent {
  */
 class DeviceNotificationQueue {
  public:
-  explicit DeviceNotificationQueue(std::size_t capacity);
+  explicit DeviceNotificationQueue(
+      std::size_t capacity,
+      std::uint64_t initial_sequence = 1u);
 
   DeviceNotificationQueue(const DeviceNotificationQueue&) = delete;
   DeviceNotificationQueue& operator=(const DeviceNotificationQueue&) = delete;
 
   [[nodiscard]] bool try_push(
       DeviceNotificationKind kind,
-      std::u16string_view endpoint_id,
+      std::optional<std::u16string_view> endpoint_id,
       std::optional<std::uint32_t> new_state = std::nullopt) noexcept;
   [[nodiscard]] bool try_pop(DeviceNotificationEvent& event) noexcept;
 
   [[nodiscard]] std::uint64_t dropped_full() const noexcept;
   [[nodiscard]] std::uint64_t dropped_overlong_id() const noexcept;
+  [[nodiscard]] std::uint64_t dropped_invalid_id() const noexcept;
   [[nodiscard]] std::uint64_t dropped_contention() const noexcept;
+  [[nodiscard]] std::uint64_t dropped_sequence_exhausted() const noexcept;
 
  private:
-  const std::size_t capacity_;
-  std::unique_ptr<DeviceNotificationEvent[]> slots_;
-  alignas(64) std::atomic<std::size_t> read_index_ = 0u;
-  alignas(64) std::atomic<std::size_t> write_index_ = 0u;
-  alignas(64) std::atomic_flag producer_gate_ = ATOMIC_FLAG_INIT;
-  std::uint64_t next_sequence_ = 1u;
-  std::atomic<std::uint64_t> dropped_full_ = 0u;
-  std::atomic<std::uint64_t> dropped_overlong_id_ = 0u;
-  std::atomic<std::uint64_t> dropped_contention_ = 0u;
+  friend class DeviceNotificationReceiver;
+  friend class MmDeviceNotificationRegistration;
+#if defined(_WIN32) && defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  friend bool exercise_mm_notification_client_for_testing(
+      DeviceNotificationQueue& queue) noexcept;
+#endif
+
+  std::shared_ptr<DeviceNotificationState> state_;
 };
 
 class DeviceNotificationReceiver {
  public:
   explicit DeviceNotificationReceiver(DeviceNotificationQueue& queue) noexcept;
+  explicit DeviceNotificationReceiver(
+      std::shared_ptr<DeviceNotificationState> state) noexcept;
 
   [[nodiscard]] bool on_state_changed(
-      std::u16string_view endpoint_id,
+      std::optional<std::u16string_view> endpoint_id,
       std::uint32_t new_state) noexcept;
-  [[nodiscard]] bool on_added(std::u16string_view endpoint_id) noexcept;
-  [[nodiscard]] bool on_removed(std::u16string_view endpoint_id) noexcept;
+  [[nodiscard]] bool on_added(
+      std::optional<std::u16string_view> endpoint_id) noexcept;
+  [[nodiscard]] bool on_removed(
+      std::optional<std::u16string_view> endpoint_id) noexcept;
   [[nodiscard]] bool on_default_changed(
-      std::u16string_view endpoint_id) noexcept;
+      std::optional<std::u16string_view> endpoint_id) noexcept;
   [[nodiscard]] bool on_property_changed(
-      std::u16string_view endpoint_id) noexcept;
+      std::optional<std::u16string_view> endpoint_id) noexcept;
+
+ private:
+  std::shared_ptr<DeviceNotificationState> state_;
+};
+
+struct DeviceNotificationPumpResult {
+  std::size_t events_drained = 0u;
+  bool sequence_valid = true;
+  bool refresh_attempted = false;
+  CatalogRefreshResult refresh;
+};
+
+class DeviceNotificationPump {
+ public:
+  DeviceNotificationPump(
+      DeviceNotificationQueue& queue,
+      DeviceCatalog& catalog) noexcept;
+
+  [[nodiscard]] DeviceNotificationPumpResult drain_and_refresh() noexcept;
 
  private:
   DeviceNotificationQueue& queue_;
+  DeviceCatalog& catalog_;
+  std::optional<std::uint64_t> last_sequence_;
+};
+
+class DeviceNotificationRegistrationBackend {
+ public:
+  virtual ~DeviceNotificationRegistrationBackend() = default;
+
+  [[nodiscard]] virtual std::optional<DeviceCatalogError> unregister()
+      noexcept = 0;
+};
+
+class DeviceNotificationRegistrar {
+ public:
+  virtual ~DeviceNotificationRegistrar() = default;
+
+  [[nodiscard]] virtual
+      std::unique_ptr<DeviceNotificationRegistrationBackend>
+      register_notifications(
+          std::shared_ptr<DeviceNotificationState> state,
+          DeviceCatalogError& error) noexcept = 0;
+};
+
+struct DeviceNotificationCloseResult {
+  bool closed = false;
+  std::optional<DeviceCatalogError> error;
 };
 
 /*
@@ -107,14 +162,25 @@ class MmDeviceNotificationRegistration {
   [[nodiscard]] static std::unique_ptr<MmDeviceNotificationRegistration> create(
       DeviceNotificationQueue& queue,
       DeviceCatalogError& error) noexcept;
+  [[nodiscard]] static std::unique_ptr<MmDeviceNotificationRegistration>
+  create_with_registrar(
+      DeviceNotificationQueue& queue,
+      DeviceNotificationRegistrar& registrar,
+      DeviceCatalogError& error) noexcept;
+
+  [[nodiscard]] DeviceNotificationCloseResult close() noexcept;
 
  private:
-  struct Impl;
+  explicit MmDeviceNotificationRegistration(
+      std::unique_ptr<DeviceNotificationRegistrationBackend> backend) noexcept;
 
-  explicit MmDeviceNotificationRegistration(std::unique_ptr<Impl> impl) noexcept;
-
-  std::unique_ptr<Impl> impl_;
+  std::unique_ptr<DeviceNotificationRegistrationBackend> backend_;
 };
+
+#if defined(_WIN32) && defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+[[nodiscard]] bool exercise_mm_notification_client_for_testing(
+    DeviceNotificationQueue& queue) noexcept;
+#endif
 
 }  // namespace emke::audio
 
