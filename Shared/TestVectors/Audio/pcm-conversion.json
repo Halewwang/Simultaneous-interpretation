@@ -75,16 +75,63 @@
     {
       "name": "decoder FIR history resets only after explicit reset or stop",
       "operation": "decode24kMonoPCM16To48kStereoFloat32WithExplicitLifecycle",
+      "ownerDomain": {
+        "domain": "platformAdapterLifecycle",
+        "owner": "NetworkPCMDecoderAdapterOwner",
+        "internalDecoder": "NetworkPCMDecoder",
+        "lifecycleSemantics": "Owner-level replaceDecoder and stop followed by start create a new internal decoder; this contract does not require a public decoder reset API."
+      },
+      "actionVocabulary": {
+        "decode": { "domain": "platformAdapterLifecycle", "requires": "startedInternalDecoder", "inputRef": "one named PCM16 input", "resultId": "unique per decode action" },
+        "replaceDecoder": { "domain": "platformAdapterLifecycle", "effect": "replace the internal decoder with a new decoder" },
+        "stop": { "domain": "platformAdapterLifecycle", "effect": "discard the internal decoder and enter stopped state" },
+        "start": { "domain": "platformAdapterLifecycle", "effect": "create a new internal decoder and enter started state" }
+      },
       "input": {
         "warmupPCM16LittleEndianBytes": [255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127],
         "probePCM16LittleEndianBytes": [0, 0]
       },
-      "expected": {
-        "operationSequence": ["fresh.decode(probe)", "active.decode(warmup)", "active.decode(probe)", "owner.replaceDecoder", "replacement.decode(probe)", "active.decode(warmup)", "owner.stop", "owner.startWithNewDecoder", "replacement.decode(probe)"],
-        "warmedWithoutResetEqualsFresh": false,
-        "afterExplicitDecoderReplacementEqualsFresh": true,
-        "afterExplicitStopEqualsFresh": true
-      },
+      "runs": [
+        {
+          "runId": "fresh",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "freshProbe" }
+          ]
+        },
+        {
+          "runId": "warmedWithoutReset",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "warmedWarmup", "discardResult": true },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "warmedProbe" }
+          ]
+        },
+        {
+          "runId": "afterOwnerReplacement",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "replacementWarmup", "discardResult": true },
+            { "action": "replaceDecoder" },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "replacementProbe" }
+          ]
+        },
+        {
+          "runId": "afterStopRestart",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "stopRestartWarmup", "discardResult": true },
+            { "action": "stop" },
+            { "action": "start" },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "stopRestartProbe" }
+          ]
+        }
+      ],
+      "comparisons": [
+        { "leftResultId": "warmedProbe", "operator": "notEquals", "rightResultId": "freshProbe", "tolerance": 0.0 },
+        { "leftResultId": "replacementProbe", "operator": "equals", "rightResultId": "freshProbe", "tolerance": 0.0 },
+        { "leftResultId": "stopRestartProbe", "operator": "equals", "rightResultId": "freshProbe", "tolerance": 0.0 }
+      ],
       "assertion": "exactSequenceEquivalence",
       "tolerance": 0.0
     }
