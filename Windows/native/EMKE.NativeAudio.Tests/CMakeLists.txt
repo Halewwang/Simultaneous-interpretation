@@ -1,3 +1,8 @@
+set(
+  EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY
+  "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
+)
+
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
@@ -16,9 +21,9 @@ target_compile_features(EMKE.NativeAudio.IntegrationHost PUBLIC cxx_std_20)
 set_target_properties(EMKE.NativeAudio.IntegrationHost PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES
-  ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
-  LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
-  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
+  ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY}"
+  LIBRARY_OUTPUT_DIRECTORY_RELEASE "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY}"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY}"
 )
 
 add_executable(EMKE.NativeAudio.Tests
@@ -48,6 +53,29 @@ target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
   EMKE_NATIVE_AUDIO_REALTIME_INSTRUMENTATION
   EMKE_AUDIO_PCM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared/TestVectors/Audio"
 )
+set_target_properties(EMKE.NativeAudio.Tests PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE
+    "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY}"
+)
+
+if(WIN32)
+  get_target_property(
+    EMKE_NATIVE_AUDIO_HOST_RUNTIME_DIRECTORY
+    EMKE.NativeAudio.IntegrationHost
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE
+  )
+  get_target_property(
+    EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY_ACTUAL
+    EMKE.NativeAudio.Tests
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE
+  )
+  if(NOT "${EMKE_NATIVE_AUDIO_HOST_RUNTIME_DIRECTORY}" STREQUAL
+      "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY_ACTUAL}")
+    message(FATAL_ERROR
+      "Native tests and IntegrationHost must share a Windows runtime directory."
+    )
+  endif()
+endif()
 
 add_test(NAME EMKE.NativeAudio.Abi COMMAND EMKE.NativeAudio.Tests Abi)
 add_test(NAME EMKE.NativeAudio.FakeBackend COMMAND EMKE.NativeAudio.Tests FakeBackend)
@@ -79,7 +107,8 @@ target_include_directories(EMKE.NativeAudio.CAbiIntegration.Tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
 )
 set_target_properties(EMKE.NativeAudio.CAbiIntegration.Tests PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE
+    "${EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY}"
 )
 
 add_test(
