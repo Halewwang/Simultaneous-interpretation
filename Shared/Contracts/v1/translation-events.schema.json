@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:emke:contracts:v1:translation-events",
+  "title": "EMKE Translation Events v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "target_language"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "session.update" },
+        "target_language": { "enum": ["zh", "en", "de"] }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "audio"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "input_audio_buffer.append" },
+        "audio": { "type": "string", "contentEncoding": "base64" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "session.close" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "session.created" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "session.updated" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "delta"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "translation_audio.delta" },
+        "delta": { "type": "string", "contentEncoding": "base64" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "translation_audio.done" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "delta"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "input_audio_transcription.delta" },
+        "delta": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "input_audio_transcription.done" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type", "code", "message"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "eventId": { "type": "string" },
+        "type": { "const": "session.closed" }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:emke:contracts:v1:app-state",
+  "title": "EMKE App State v1",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "version",
+    "runtimeState",
+    "inboundChannelState",
+    "outboundChannelState",
+    "inboundRoute",
+    "outboundRoute",
+    "inboundLevel",
+    "outboundLevel",
+    "sourceCaption",
+    "translatedCaption"
+  ],
+  "properties": {
+    "contractVersion": { "const": 1 },
+    "version": { "type": "integer", "minimum": 0 },
+    "runtimeState": { "$ref": "#/$defs/runtimeState" },
+    "inboundChannelState": { "$ref": "#/$defs/channelState" },
+    "outboundChannelState": { "$ref": "#/$defs/channelState" },
+    "inboundRoute": { "$ref": "#/$defs/inboundRoute" },
+    "outboundRoute": { "$ref": "#/$defs/outboundRoute" },
+    "inboundLevel": { "type": "number", "minimum": 0, "maximum": 1 },
+    "outboundLevel": { "type": "number", "minimum": 0, "maximum": 1 },
+    "sourceCaption": { "type": "string" },
+    "translatedCaption": { "type": "string" },
+    "error": {
+      "type": "object",
+      "required": ["category", "code", "parameters", "recoveryAction"],
+      "properties": {
+        "category": { "$ref": "#/$defs/errorCategory" },
+        "code": { "type": "string" },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "recoveryAction": { "$ref": "#/$defs/recoveryAction" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "runtimeState": {
+      "enum": ["stopped", "starting", "running", "stopping", "degraded", "failed"]
+    },
+    "channelState": {
+      "enum": ["inactive", "connecting", "connected", "reconnecting", "bypassed", "degraded", "failed"]
+    },
+    "inboundRoute": {
+      "enum": ["stopped", "translated", "originalFailOpen", "originalBypass"]
+    },
+    "outboundRoute": {
+      "enum": ["stopped", "translated", "mutedFailClosed", "originalBypass"]
+    },
+    "errorCategory": {
+      "enum": ["configuration", "permission", "driver", "device", "authentication", "endpointModel", "protocol", "network", "backpressure", "closeTimeout"]
+    },
+    "recoveryAction": {
+      "enum": ["none", "editSettings", "openPrivacySettings", "installDriver", "selectDevice", "updateApiKey", "retry", "reportCompatibility"]
+    }
+  }
+}
