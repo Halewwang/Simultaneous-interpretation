@@ -20,6 +20,9 @@ struct RegisteredTest {
 int run_spsc_ring_tests();
 int run_pcm_converter_tests();
 int run_device_catalog_tests();
+int run_audio_lifecycle_tests();
+int run_audio_worker_tests();
+int run_realtime_tests();
 
 namespace {
 
@@ -814,6 +817,13 @@ std::span<const RegisteredTest> registered_tests() {
       RegisteredTest{
           "Device", "MMDevice catalog and notifications",
           &run_device_catalog_tests},
+      RegisteredTest{
+          "Lifecycle", "bounded native audio lifecycle",
+          &run_audio_lifecycle_tests},
+      RegisteredTest{
+          "Worker", "native audio worker", &run_audio_worker_tests},
+      RegisteredTest{
+          "Realtime", "realtime instrumentation", &run_realtime_tests},
   };
   return tests;
 }

@@ -1,35 +1,3 @@
-add_executable(EMKE.NativeAudio.Tests
-  ../EMKE.NativeAudio/src/device_catalog.cpp
-  ../EMKE.NativeAudio/src/device_notifications.cpp
-  ../EMKE.NativeAudio/src/fake_audio_backend.cpp
-  ../EMKE.NativeAudio/src/pcm_converter.cpp
-  src/abi_tests.cpp
-  src/device_catalog_tests.cpp
-  src/pcm_converter_tests.cpp
-  src/spsc_ring_tests.cpp
-  src/test_main.cpp
-)
-
-target_link_libraries(EMKE.NativeAudio.Tests PRIVATE EMKE.NativeAudio)
-target_include_directories(EMKE.NativeAudio.Tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-)
-target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
-  EMKE_NATIVE_AUDIO_DEVICE_TESTS
-  EMKE_AUDIO_PCM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared/TestVectors/Audio"
-)
-
-add_test(NAME EMKE.NativeAudio.Abi COMMAND EMKE.NativeAudio.Tests Abi)
-add_test(NAME EMKE.NativeAudio.FakeBackend COMMAND EMKE.NativeAudio.Tests FakeBackend)
-add_test(NAME EMKE.NativeAudio.Ring COMMAND EMKE.NativeAudio.Tests Ring)
-add_test(NAME EMKE.NativeAudio.PCM COMMAND EMKE.NativeAudio.Tests PCM)
-add_test(NAME EMKE.NativeAudio.Device COMMAND EMKE.NativeAudio.Tests Device)
-
-if(WIN32)
-  target_link_libraries(EMKE.NativeAudio.Tests PRIVATE ole32 propsys)
-endif()
-
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
@@ -52,6 +20,53 @@ set_target_properties(EMKE.NativeAudio.IntegrationHost PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
   RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
 )
+
+add_executable(EMKE.NativeAudio.Tests
+  ../EMKE.NativeAudio/src/device_catalog.cpp
+  ../EMKE.NativeAudio/src/device_notifications.cpp
+  ../EMKE.NativeAudio/src/fake_audio_backend.cpp
+  ../EMKE.NativeAudio/src/pcm_converter.cpp
+  ../EMKE.NativeAudio/src/audio_worker.cpp
+  ../EMKE.NativeAudio/src/wasapi_stream.cpp
+  src/abi_tests.cpp
+  src/audio_worker_tests.cpp
+  src/device_catalog_tests.cpp
+  src/pcm_converter_tests.cpp
+  src/spsc_ring_tests.cpp
+  src/test_main.cpp
+)
+
+target_link_libraries(
+  EMKE.NativeAudio.Tests PRIVATE EMKE.NativeAudio.IntegrationHost
+)
+target_include_directories(EMKE.NativeAudio.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+)
+target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
+  EMKE_NATIVE_AUDIO_DEVICE_TESTS
+  EMKE_NATIVE_AUDIO_REALTIME_INSTRUMENTATION
+  EMKE_AUDIO_PCM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared/TestVectors/Audio"
+)
+
+add_test(NAME EMKE.NativeAudio.Abi COMMAND EMKE.NativeAudio.Tests Abi)
+add_test(NAME EMKE.NativeAudio.FakeBackend COMMAND EMKE.NativeAudio.Tests FakeBackend)
+add_test(NAME EMKE.NativeAudio.Ring COMMAND EMKE.NativeAudio.Tests Ring)
+add_test(NAME EMKE.NativeAudio.PCM COMMAND EMKE.NativeAudio.Tests PCM)
+add_test(NAME EMKE.NativeAudio.Device COMMAND EMKE.NativeAudio.Tests Device)
+add_test(
+  NAME EMKE.NativeAudio.Lifecycle
+  COMMAND EMKE.NativeAudio.Tests Lifecycle
+)
+add_test(NAME EMKE.NativeAudio.Worker COMMAND EMKE.NativeAudio.Tests Worker)
+add_test(
+  NAME EMKE.NativeAudio.Realtime
+  COMMAND EMKE.NativeAudio.Tests Realtime
+)
+
+if(WIN32)
+  target_link_libraries(EMKE.NativeAudio.Tests PRIVATE ole32 propsys winmm)
+endif()
 
 add_executable(EMKE.NativeAudio.CAbiIntegration.Tests
   src/c_abi_integration_tests.cpp

@@ -36,6 +36,19 @@ class SpscBlockRing {
     return storage_.size();
   }
 
+  [[nodiscard]] std::size_t size() const noexcept {
+    const std::size_t read =
+        read_index_.load(std::memory_order_acquire);
+    const std::size_t write =
+        write_index_.load(std::memory_order_acquire);
+    return write - read;
+  }
+
+  [[nodiscard]] std::size_t remaining_capacity() const noexcept {
+    const std::size_t current = size();
+    return current >= storage_.size() ? 0u : storage_.size() - current;
+  }
+
   [[nodiscard]] bool push(const PcmBlock& block) noexcept {
     if (block.frame_count == 0u || block.frame_count > localBlockFrames) {
       return false;
@@ -64,8 +77,9 @@ class SpscBlockRing {
   }
 
   void clear() noexcept {
-    read_index_.store(0u, std::memory_order_release);
-    write_index_.store(0u, std::memory_order_release);
+    const std::size_t write =
+        write_index_.load(std::memory_order_acquire);
+    read_index_.store(write, std::memory_order_release);
   }
 
  private:

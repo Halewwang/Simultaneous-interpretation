@@ -2,7 +2,11 @@
 #define EMKE_AUDIO_RUNTIME_HPP
 
 #include "emke_native_audio.h"
+#if defined(_WIN32) && !defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+#include "audio_worker.hpp"
+#else
 #include "fake_audio_backend.hpp"
+#endif
 
 #include <cstdint>
 #include <span>
@@ -40,7 +44,11 @@ class AudioRuntime {
 
  private:
   [[maybe_unused]] emke_audio_config config_;
+#if defined(_WIN32) && !defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+  NativeAudioBackend backend_;
+#else
   FakeAudioBackend backend_;
+#endif
 };
 
 }  // namespace emke::audio

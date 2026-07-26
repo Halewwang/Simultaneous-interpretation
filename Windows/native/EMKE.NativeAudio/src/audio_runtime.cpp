@@ -2,7 +2,13 @@
 
 namespace emke::audio {
 
-AudioRuntime::AudioRuntime(const emke_audio_config& config) : config_(config) {}
+AudioRuntime::AudioRuntime(const emke_audio_config& config)
+    : config_(config)
+#if defined(_WIN32) && !defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+      ,
+      backend_(config)
+#endif
+{}
 
 emke_audio_status AudioRuntime::start() {
   return backend_.start();
