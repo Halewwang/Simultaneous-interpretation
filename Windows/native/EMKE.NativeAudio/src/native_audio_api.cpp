@@ -2,6 +2,10 @@
 
 #include "audio_runtime.hpp"
 
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+#include "native_audio_test_hooks.h"
+#endif
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -161,10 +165,11 @@ EMKE_AUDIO_API emke_audio_status emke_audio_poll_event(
 
   try {
     emke::audio::AudioEvent event;
-    const emke_audio_status status = handle->runtime.poll_event(event);
-    if (status != EMKE_AUDIO_OK) {
-      return status;
-    }
+    const std::size_t effective_capacity =
+        pcm16 == nullptr ? 0u
+                         : static_cast<std::size_t>(pcm_capacity_frames);
+    const emke_audio_status status =
+        handle->runtime.poll_event(event, effective_capacity);
 
     out_event->kind = event.kind;
     out_event->status = event.status;
@@ -173,10 +178,10 @@ EMKE_AUDIO_API emke_audio_status emke_audio_poll_event(
         static_cast<std::uint32_t>(event.pcm16.size());
     out_event->sequence = event.sequence;
 
+    if (status != EMKE_AUDIO_OK) {
+      return status;
+    }
     if (!event.pcm16.empty()) {
-      if (pcm16 == nullptr || pcm_capacity_frames < event.pcm16.size()) {
-        return EMKE_AUDIO_INVALID_ARGUMENT;
-      }
       std::copy(event.pcm16.begin(), event.pcm16.end(), pcm16);
     }
     return EMKE_AUDIO_OK;
@@ -204,5 +209,84 @@ EMKE_AUDIO_API emke_audio_status emke_audio_get_diagnostics(
     return EMKE_AUDIO_INTERNAL_ERROR;
   }
 }
+
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+EMKE_AUDIO_TEST_API emke_audio_status
+emke_audio_test_accept_synthetic_float32(
+    emke_audio_handle* handle,
+    emke_audio_test_direction direction,
+    const float* interleaved_stereo,
+    uint32_t local_frame_count) {
+  if (handle == nullptr || interleaved_stereo == nullptr ||
+      local_frame_count == 0u) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+  if (direction != EMKE_AUDIO_TEST_DIRECTION_INBOUND &&
+      direction != EMKE_AUDIO_TEST_DIRECTION_OUTBOUND) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  try {
+    const auto runtime_direction =
+        direction == EMKE_AUDIO_TEST_DIRECTION_INBOUND
+            ? emke::audio::Direction::Inbound
+            : emke::audio::Direction::Outbound;
+    return handle->runtime.test_accept_synthetic(
+        runtime_direction,
+        {interleaved_stereo,
+         static_cast<std::size_t>(local_frame_count) * 2u});
+  } catch (...) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
+  }
+}
+
+EMKE_AUDIO_TEST_API emke_audio_status emke_audio_test_render_pcm16(
+    emke_audio_handle* handle,
+    emke_audio_test_direction direction,
+    int16_t* mono_pcm16,
+    uint32_t network_frame_count) {
+  if (handle == nullptr || mono_pcm16 == nullptr ||
+      network_frame_count == 0u) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+  if (direction != EMKE_AUDIO_TEST_DIRECTION_INBOUND &&
+      direction != EMKE_AUDIO_TEST_DIRECTION_OUTBOUND) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  try {
+    const auto runtime_direction =
+        direction == EMKE_AUDIO_TEST_DIRECTION_INBOUND
+            ? emke::audio::Direction::Inbound
+            : emke::audio::Direction::Outbound;
+    return handle->runtime.test_render(
+        runtime_direction,
+        {mono_pcm16, static_cast<std::size_t>(network_frame_count)});
+  } catch (...) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
+  }
+}
+
+EMKE_AUDIO_TEST_API emke_audio_status emke_audio_test_inject_failure(
+    emke_audio_handle* handle,
+    emke_audio_test_failure failure) {
+  if (handle == nullptr) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  switch (failure) {
+    case EMKE_AUDIO_TEST_FAILURE_DEVICE:
+      handle->runtime.test_inject_device_failure();
+      return EMKE_AUDIO_OK;
+    case EMKE_AUDIO_TEST_FAILURE_INBOUND_TRANSLATION:
+      handle->runtime.test_inject_inbound_translation_failure();
+      return EMKE_AUDIO_OK;
+    case EMKE_AUDIO_TEST_FAILURE_OUTBOUND_UNDERRUN:
+      handle->runtime.test_inject_outbound_underrun();
+      return EMKE_AUDIO_OK;
+  }
+  return EMKE_AUDIO_INVALID_ARGUMENT;
+}
+#endif
 
 }  // extern "C"

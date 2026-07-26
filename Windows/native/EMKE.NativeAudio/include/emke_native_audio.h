@@ -5,6 +5,12 @@
 
 #define EMKE_AUDIO_ABI_VERSION 1u
 #define EMKE_AUDIO_ENDPOINT_ID_CAPACITY 512u
+#define EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ 48000u
+#define EMKE_AUDIO_NETWORK_SAMPLE_RATE_HZ 24000u
+#define EMKE_AUDIO_LOCAL_CYCLE_FRAMES 480u
+#define EMKE_AUDIO_CAPTURE_CAPACITY_LOCAL_FRAMES 4800u
+#define EMKE_AUDIO_TRANSLATED_PLAYBACK_CAPACITY_LOCAL_FRAMES 96000u
+#define EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES 48000u
 
 #if defined(_WIN32)
 #if defined(EMKE_NATIVE_AUDIO_EXPORTS)
@@ -70,7 +76,9 @@ typedef struct emke_audio_config {
 
 /*
  * poll_event fills metadata here and copies PCM16 into the separate caller
- * buffer. frame_count is a mono frame count at 24 kHz.
+ * buffer. frame_count is a mono frame count at 24 kHz. If capacity is too
+ * small, poll returns EMKE_AUDIO_INVALID_ARGUMENT, reports the required
+ * metadata, and retains the event so the caller can retry.
  */
 typedef struct emke_audio_event {
   uint32_t size;
@@ -104,7 +112,12 @@ typedef struct emke_audio_diagnostics {
 
 /*
  * All input pointers are borrowed only for the duration of the call.
- * enqueue functions synchronously copy PCM16 samples into native-owned queues.
+ * enqueue frame counts and queued/consumed/captured/dropped diagnostics use
+ * 24 kHz mono network frames. Synthetic backend capture capacity and processing
+ * cycles use 48 kHz local frames. The 48,000-network-frame translated queue
+ * maps exactly to the 96,000-local-frame playback capacity.
+ *
+ * Enqueue functions synchronously copy PCM16 samples into native-owned queues.
  * destroy accepts NULL, so cleanup after a failed create is safe.
  */
 EMKE_AUDIO_API emke_audio_status emke_audio_create(

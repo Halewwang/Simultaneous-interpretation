@@ -9,6 +9,7 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 struct RegisteredTest {
   const char* group;
@@ -71,10 +72,32 @@ emke_audio_diagnostics valid_diagnostics() {
   return diagnostics;
 }
 
+std::vector<float> stereo_block(std::size_t local_frames, float sample) {
+  return std::vector<float>(local_frames * 2u, sample);
+}
+
 void test_public_abi_layout(TestContext& context) {
   constexpr std::string_view name = "public ABI layout";
 
   EXPECT(context, EMKE_AUDIO_ABI_VERSION == 1u, name);
+  EXPECT(context, EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ == 48'000u, name);
+  EXPECT(context, EMKE_AUDIO_NETWORK_SAMPLE_RATE_HZ == 24'000u, name);
+  EXPECT(context, EMKE_AUDIO_LOCAL_CYCLE_FRAMES == 480u, name);
+  EXPECT(context,
+         EMKE_AUDIO_CAPTURE_CAPACITY_LOCAL_FRAMES == 4'800u,
+         name);
+  EXPECT(context,
+         EMKE_AUDIO_TRANSLATED_PLAYBACK_CAPACITY_LOCAL_FRAMES == 96'000u,
+         name);
+  EXPECT(context,
+         EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES == 48'000u,
+         name);
+  EXPECT(context,
+         EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES *
+                 EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ ==
+             EMKE_AUDIO_TRANSLATED_PLAYBACK_CAPACITY_LOCAL_FRAMES *
+                 EMKE_AUDIO_NETWORK_SAMPLE_RATE_HZ,
+         name);
   EXPECT(context, EMKE_AUDIO_OK == 0, name);
   EXPECT(context, EMKE_AUDIO_INVALID_ARGUMENT == 1, name);
   EXPECT(context, EMKE_AUDIO_ABI_MISMATCH == 2, name);
@@ -356,11 +379,11 @@ void test_c_api_copies_translation_input(TestContext& context) {
 void test_fake_capture_conversion_and_events(TestContext& context) {
   constexpr std::string_view name = "fake capture conversion and events";
 
-  emke::audio::FakeAudioBackend backend(8u, 4u);
+  emke::audio::FakeAudioBackend backend(8u, 480u);
   EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
 
-  const std::array<float, 8> inbound_stereo = {
-      0.5f, 0.5f, 0.5f, 0.5f, -0.5f, -0.5f, -0.5f, -0.5f};
+  auto inbound_stereo = stereo_block(480u, 0.5f);
+  std::fill(inbound_stereo.begin() + 480, inbound_stereo.end(), -0.5f);
   EXPECT(context,
          backend.accept_synthetic_block(
              emke::audio::Direction::Inbound, inbound_stereo) == EMKE_AUDIO_OK,
@@ -369,12 +392,11 @@ void test_fake_capture_conversion_and_events(TestContext& context) {
   emke::audio::AudioEvent event{};
   EXPECT(context, backend.poll_event(event) == EMKE_AUDIO_OK, name);
   EXPECT(context, event.kind == EMKE_AUDIO_EVENT_INBOUND_PCM16, name);
-  EXPECT(context, event.pcm16.size() == 2u, name);
+  EXPECT(context, event.pcm16.size() == 240u, name);
   EXPECT(context, event.pcm16[0] == 16384, name);
-  EXPECT(context, event.pcm16[1] == -16384, name);
+  EXPECT(context, event.pcm16[239] == -16384, name);
 
-  const std::array<float, 4> outbound_stereo = {
-      0.25f, 0.25f, 0.25f, 0.25f};
+  const auto outbound_stereo = stereo_block(480u, 0.25f);
   EXPECT(context,
          backend.accept_synthetic_block(
              emke::audio::Direction::Outbound, outbound_stereo) ==
@@ -382,14 +404,14 @@ void test_fake_capture_conversion_and_events(TestContext& context) {
          name);
   EXPECT(context, backend.poll_event(event) == EMKE_AUDIO_OK, name);
   EXPECT(context, event.kind == EMKE_AUDIO_EVENT_OUTBOUND_PCM16, name);
-  EXPECT(context, event.pcm16.size() == 1u, name);
+  EXPECT(context, event.pcm16.size() == 240u, name);
   EXPECT(context, event.pcm16[0] == 8192, name);
 }
 
 void test_fake_translation_queue_and_queue_full(TestContext& context) {
   constexpr std::string_view name = "fake translation queue and queue full";
 
-  emke::audio::FakeAudioBackend backend(3u, 4u);
+  emke::audio::FakeAudioBackend backend(3u, 480u);
   EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
 
   const std::array<std::int16_t, 3> translated = {7, 8, 9};
@@ -422,7 +444,7 @@ void test_fake_translation_queue_and_queue_full(TestContext& context) {
 void test_fake_outbound_underrun_is_zero_filled(TestContext& context) {
   constexpr std::string_view name = "fake outbound underrun is zero filled";
 
-  emke::audio::FakeAudioBackend backend(8u, 4u);
+  emke::audio::FakeAudioBackend backend(8u, 480u);
   EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
   const std::array<std::int16_t, 2> translated = {1000, -1000};
   EXPECT(context,
@@ -454,10 +476,9 @@ void test_fake_outbound_underrun_is_zero_filled(TestContext& context) {
 void test_fake_inbound_failure_routes_original(TestContext& context) {
   constexpr std::string_view name = "fake inbound failure routes original";
 
-  emke::audio::FakeAudioBackend backend(8u, 4u);
+  emke::audio::FakeAudioBackend backend(8u, 480u);
   EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
-  const std::array<float, 4> original_stereo = {
-      0.25f, 0.25f, 0.25f, 0.25f};
+  const auto original_stereo = stereo_block(480u, 0.25f);
   EXPECT(context,
          backend.accept_synthetic_block(
              emke::audio::Direction::Inbound, original_stereo) ==
@@ -489,7 +510,7 @@ void test_fake_inbound_failure_routes_original(TestContext& context) {
 void test_fake_device_failure_is_deterministic(TestContext& context) {
   constexpr std::string_view name = "fake device failure is deterministic";
 
-  emke::audio::FakeAudioBackend backend(8u, 4u);
+  emke::audio::FakeAudioBackend backend(8u, 480u);
   backend.inject_device_failure();
   EXPECT(context, backend.start() == EMKE_AUDIO_DEVICE_MISSING, name);
   EXPECT(context, !backend.is_running(), name);
@@ -504,9 +525,9 @@ void test_fake_device_failure_is_deterministic(TestContext& context) {
 void test_fake_event_queue_full_is_counted(TestContext& context) {
   constexpr std::string_view name = "fake event queue full is counted";
 
-  emke::audio::FakeAudioBackend backend(8u, 1u);
+  emke::audio::FakeAudioBackend backend(8u, 480u);
   EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
-  const std::array<float, 4> stereo = {0.0f, 0.0f, 0.0f, 0.0f};
+  const auto stereo = stereo_block(480u, 0.0f);
   EXPECT(context,
          backend.accept_synthetic_block(
              emke::audio::Direction::Inbound, stereo) == EMKE_AUDIO_OK,
@@ -520,7 +541,182 @@ void test_fake_event_queue_full_is_counted(TestContext& context) {
   auto diagnostics = valid_diagnostics();
   backend.write_diagnostics(diagnostics);
   EXPECT(context, diagnostics.queue_full_events == 1u, name);
-  EXPECT(context, diagnostics.dropped_frames == 1u, name);
+  EXPECT(context, diagnostics.dropped_frames == 240u, name);
+}
+
+void test_fake_routes_are_direction_safe_and_persistent(TestContext& context) {
+  constexpr std::string_view name =
+      "fake routes are direction safe and persistent";
+
+  emke::audio::FakeAudioBackend inbound;
+  EXPECT(context, inbound.start() == EMKE_AUDIO_OK, name);
+  EXPECT(context,
+         inbound.set_route(emke::audio::Direction::Inbound,
+                           EMKE_AUDIO_ROUTE_MUTED_FAIL_CLOSED) ==
+             EMKE_AUDIO_INVALID_ARGUMENT,
+         name);
+  EXPECT(context,
+         inbound.set_route(emke::audio::Direction::Outbound,
+                           EMKE_AUDIO_ROUTE_ORIGINAL_FAIL_OPEN) ==
+             EMKE_AUDIO_INVALID_ARGUMENT,
+         name);
+
+  const auto inbound_original = stereo_block(480u, 0.25f);
+  EXPECT(context,
+         inbound.accept_synthetic_block(
+             emke::audio::Direction::Inbound, inbound_original) ==
+             EMKE_AUDIO_OK,
+         name);
+  const std::array<std::int16_t, 1> stale_inbound = {-1234};
+  EXPECT(context,
+         inbound.enqueue_translation(
+             emke::audio::Direction::Inbound, stale_inbound) == EMKE_AUDIO_OK,
+         name);
+  inbound.inject_inbound_translation_failure();
+
+  std::array<std::int16_t, 1> inbound_render{};
+  EXPECT(context,
+         inbound.render_translation(
+             emke::audio::Direction::Inbound, inbound_render) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, inbound_render[0] == 8192, name);
+  EXPECT(context,
+         inbound.enqueue_translation(
+             emke::audio::Direction::Inbound, stale_inbound) == EMKE_AUDIO_OK,
+         name);
+  inbound_render[0] = 0;
+  EXPECT(context,
+         inbound.render_translation(
+             emke::audio::Direction::Inbound, inbound_render) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, inbound_render[0] == 8192, name);
+
+  auto diagnostics = valid_diagnostics();
+  inbound.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 0u, name);
+  EXPECT(context, diagnostics.consumed_inbound_translation_frames == 0u, name);
+
+  emke::audio::FakeAudioBackend outbound;
+  EXPECT(context, outbound.start() == EMKE_AUDIO_OK, name);
+  const auto outbound_original = stereo_block(480u, 0.25f);
+  EXPECT(context,
+         outbound.accept_synthetic_block(
+             emke::audio::Direction::Outbound, outbound_original) ==
+             EMKE_AUDIO_OK,
+         name);
+  const std::array<std::int16_t, 1> translated = {1000};
+  EXPECT(context,
+         outbound.enqueue_translation(
+             emke::audio::Direction::Outbound, translated) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context,
+         outbound.set_route(emke::audio::Direction::Outbound,
+                            EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK,
+         name);
+  std::array<std::int16_t, 1> outbound_render{};
+  EXPECT(context,
+         outbound.render_translation(
+             emke::audio::Direction::Outbound, outbound_render) ==
+             EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, outbound_render[0] == 8192, name);
+
+  EXPECT(context,
+         outbound.set_route(emke::audio::Direction::Outbound,
+                            EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context,
+         outbound.enqueue_translation(
+             emke::audio::Direction::Outbound, translated) == EMKE_AUDIO_OK,
+         name);
+  outbound.inject_outbound_underrun();
+  outbound_render[0] = 1;
+  EXPECT(context,
+         outbound.render_translation(
+             emke::audio::Direction::Outbound, outbound_render) ==
+             EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, outbound_render[0] == 0, name);
+  EXPECT(context,
+         outbound.enqueue_translation(
+             emke::audio::Direction::Outbound, translated) == EMKE_AUDIO_OK,
+         name);
+  outbound_render[0] = 1;
+  EXPECT(context,
+         outbound.render_translation(
+             emke::audio::Direction::Outbound, outbound_render) ==
+             EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, outbound_render[0] == 0, name);
+
+  diagnostics = valid_diagnostics();
+  outbound.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.queued_outbound_translation_frames == 0u, name);
+  EXPECT(context,
+         diagnostics.consumed_outbound_translation_frames == 0u,
+         name);
+}
+
+void test_fake_default_capacity_units(TestContext& context) {
+  constexpr std::string_view name = "fake default capacity units";
+
+  emke::audio::FakeAudioBackend translated;
+  EXPECT(context, translated.start() == EMKE_AUDIO_OK, name);
+  const std::vector<std::int16_t> two_seconds_at_24khz(48'000u, 7);
+  EXPECT(context,
+         translated.enqueue_translation(
+             emke::audio::Direction::Inbound, two_seconds_at_24khz) ==
+             EMKE_AUDIO_OK,
+         name);
+  const std::array<std::int16_t, 1> overflow = {8};
+  EXPECT(context,
+         translated.enqueue_translation(
+             emke::audio::Direction::Inbound, overflow) ==
+             EMKE_AUDIO_QUEUE_FULL,
+         name);
+
+  auto diagnostics = valid_diagnostics();
+  translated.write_diagnostics(diagnostics);
+  EXPECT(context,
+         diagnostics.queued_inbound_translation_frames == 48'000u,
+         name);
+
+  emke::audio::FakeAudioBackend capture;
+  EXPECT(context, capture.start() == EMKE_AUDIO_OK, name);
+  const auto full_capture = stereo_block(4'800u, 0.0f);
+  EXPECT(context,
+         capture.accept_synthetic_block(
+             emke::audio::Direction::Inbound, full_capture) == EMKE_AUDIO_OK,
+         name);
+  const auto one_cycle = stereo_block(480u, 0.0f);
+  EXPECT(context,
+         capture.accept_synthetic_block(
+             emke::audio::Direction::Inbound, one_cycle) ==
+             EMKE_AUDIO_QUEUE_FULL,
+         name);
+
+  emke::audio::AudioEvent event;
+  EXPECT(context, capture.poll_event(event) == EMKE_AUDIO_OK, name);
+  EXPECT(context, event.pcm16.size() == 2'400u, name);
+  EXPECT(context,
+         capture.accept_synthetic_block(
+             emke::audio::Direction::Inbound, one_cycle) == EMKE_AUDIO_OK,
+         name);
+
+  emke::audio::FakeAudioBackend cycle;
+  EXPECT(context, cycle.start() == EMKE_AUDIO_OK, name);
+  const auto invalid_cycle = stereo_block(720u, 0.0f);
+  EXPECT(context,
+         cycle.accept_synthetic_block(
+             emke::audio::Direction::Inbound, invalid_cycle) ==
+             EMKE_AUDIO_FORMAT_UNSUPPORTED,
+         name);
+  const auto boundary_481 = stereo_block(481u, 0.0f);
+  EXPECT(context,
+         cycle.accept_synthetic_block(
+             emke::audio::Direction::Inbound, boundary_481) ==
+             EMKE_AUDIO_FORMAT_UNSUPPORTED,
+         name);
 }
 
 }  // namespace
@@ -542,6 +738,8 @@ int run_fake_backend_tests() {
   test_fake_inbound_failure_routes_original(context);
   test_fake_device_failure_is_deterministic(context);
   test_fake_event_queue_full_is_counted(context);
+  test_fake_routes_are_direction_safe_and_persistent(context);
+  test_fake_default_capacity_units(context);
   return context.failed_assertions();
 }
 

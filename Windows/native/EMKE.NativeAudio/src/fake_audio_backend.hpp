@@ -27,8 +27,10 @@ struct AudioEvent {
 class FakeAudioBackend {
  public:
   explicit FakeAudioBackend(
-      std::size_t translation_queue_capacity_frames = 4'800u,
-      std::size_t event_queue_capacity = 8u);
+      std::size_t translation_queue_capacity_network_frames =
+          EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES,
+      std::size_t capture_capacity_local_frames =
+          EMKE_AUDIO_CAPTURE_CAPACITY_LOCAL_FRAMES);
 
   emke_audio_status start();
   emke_audio_status stop();
@@ -47,6 +49,9 @@ class FakeAudioBackend {
       Direction direction,
       std::span<std::int16_t> mono_pcm16_24khz);
   emke_audio_status poll_event(AudioEvent& event);
+  emke_audio_status poll_event(
+      AudioEvent& event,
+      std::size_t pcm_capacity_network_frames);
 
   void inject_device_failure();
   void inject_inbound_translation_failure();
@@ -60,13 +65,18 @@ class FakeAudioBackend {
   [[nodiscard]] const std::deque<std::int16_t>& translation_queue(
       Direction direction) const;
   [[nodiscard]] emke_audio_route& mutable_route(Direction direction);
-  emke_audio_status render_original_inbound(
+  void discard_translation(Direction direction);
+  void enter_inbound_fail_open();
+  void enter_outbound_fail_closed();
+  emke_audio_status render_original(
+      Direction direction,
       std::span<std::int16_t> destination);
   emke_audio_status render_outbound_zeros(
       std::span<std::int16_t> destination);
 
-  std::size_t translation_queue_capacity_frames_;
-  std::size_t event_queue_capacity_;
+  std::size_t translation_queue_capacity_network_frames_;
+  std::size_t capture_capacity_local_frames_;
+  std::size_t queued_capture_local_frames_ = 0u;
   bool running_ = false;
   bool fail_next_start_ = false;
   bool fail_next_inbound_translation_ = false;
@@ -77,6 +87,7 @@ class FakeAudioBackend {
   std::deque<std::int16_t> inbound_translation_;
   std::deque<std::int16_t> outbound_translation_;
   std::vector<std::int16_t> latest_inbound_original_;
+  std::vector<std::int16_t> latest_outbound_original_;
   std::deque<AudioEvent> events_;
   std::uint64_t captured_inbound_frames_ = 0u;
   std::uint64_t captured_outbound_frames_ = 0u;
