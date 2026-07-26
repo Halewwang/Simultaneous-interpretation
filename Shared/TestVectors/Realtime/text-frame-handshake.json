@@ -1,0 +1,65 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "realtime.text-frame-handshake.v1",
+  "category": "realtime",
+  "cases": [
+    {
+      "name": "normal handshake sends session update as text and connects",
+      "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
+      "expected": { "socketCount": 1, "route": "translated", "finalState": "connected" },
+      "steps": [
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
+        { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+      ]
+    },
+    {
+      "name": "client JSON session update sent as binary is protocol failure",
+      "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
+      "expected": { "socketCount": 1, "route": "translated", "finalState": "protocolFailure" },
+      "steps": [
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
+        { "direction": "clientToServer", "frameType": "binary", "eventType": "session.update", "expectedState": "protocolFailure" }
+      ]
+    },
+    {
+      "name": "session updated before session created is protocol failure",
+      "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
+      "expected": { "socketCount": 1, "route": "translated", "finalState": "protocolFailure" },
+      "steps": [
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "protocolFailure" }
+      ]
+    },
+    {
+      "name": "same language uses local bypass with no outbound socket",
+      "configuration": { "nativeLanguage": "zh", "meetingLanguage": "zh" },
+      "expected": { "socketCount": 0, "route": "originalBypass", "finalState": "localBypass" },
+      "steps": [
+        { "direction": "local", "frameType": "none", "eventType": "language.match", "expectedState": "localBypass" }
+      ]
+    },
+    {
+      "name": "two language setup creates two independent sockets",
+      "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
+      "expected": { "socketCount": 2, "route": "bidirectionalTranslated", "finalState": "connected" },
+      "sockets": [
+        {
+          "socketId": "inbound",
+          "steps": [
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+          ]
+        },
+        {
+          "socketId": "outbound",
+          "steps": [
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+          ]
+        }
+      ]
+    }
+  ]
+}

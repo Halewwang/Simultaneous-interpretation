@@ -1,0 +1,37 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "realtime.close-deadline.v1",
+  "category": "realtime",
+  "cases": [
+    {
+      "name": "close deadline starts before close send",
+      "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "closeSend": "blocked" },
+      "expected": { "completion": "closeTimeout", "completionAtMs": 1000, "deadlineStartsAtMs": 0 }
+    },
+    {
+      "name": "inbound and outbound close run concurrently",
+      "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "closeRequests": ["inbound", "outbound"] },
+      "expected": { "concurrent": true, "completion": "closed", "completionAtMs": 400, "routeCompletions": { "inbound": 300, "outbound": 400 } }
+    },
+    {
+      "name": "session closed within 1000 ms delivers queued tail audio",
+      "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "sessionClosedAtMs": 999, "queuedTailAudio": true },
+      "expected": { "completion": "closed", "completionAtMs": 999, "deliverQueuedTailAudio": true }
+    },
+    {
+      "name": "blocked close send reaches local close timeout at 1000 ms",
+      "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "closeSend": "blocked" },
+      "expected": { "completion": "closeTimeout", "completionAtMs": 1000, "localCompletion": true }
+    },
+    {
+      "name": "two close callers await the same completion",
+      "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "closeCallerCount": 2, "sessionClosedAtMs": 200 },
+      "expected": { "completion": "closed", "completionAtMs": 200, "sameCompletion": true, "completionCount": 1 }
+    },
+    {
+      "name": "old generation close completion cannot clear new generation",
+      "input": { "closingGeneration": 1, "activeGeneration": 2, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "oldGenerationCompletionAtMs": 300 },
+      "expected": { "completion": "closed", "completionGeneration": 1, "activeGenerationAfterCompletion": 2, "clearActiveGeneration": false }
+    }
+  ]
+}
