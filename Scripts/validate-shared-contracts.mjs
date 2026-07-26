@@ -116,6 +116,17 @@ const expectedFixtureCases = new Map([
 
 const expectedFixturePaths = [...expectedFixtureCases.keys()];
 
+const expectedFixtureCaseJson = new Map([
+  ["Realtime/text-frame-handshake.json", String.raw`[{"name":"normal handshake sends session update as text and connects","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"connected","inboundRoute":"translated"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]},{"name":"client JSON session update sent as binary is protocol failure","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"failed","inboundRoute":"originalFailOpen","errorCategory":"protocol"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"binary","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"protocolFailure"}]},{"name":"session updated before session created is protocol failure","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"failed","inboundRoute":"originalFailOpen","errorCategory":"protocol"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"protocolFailure"}]},{"name":"same language uses local bypass with no outbound socket","configuration":{"nativeLanguage":"zh","meetingLanguage":"zh"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"connected","inboundRoute":"translated","outboundChannelState":"bypassed","outboundRoute":"originalBypass"},"steps":[{"direction":"local","eventType":"language.match","localInput":{"nativeLanguage":"zh","meetingLanguage":"zh"},"expectedState":"localBypass"}]},{"name":"two language setup creates two independent sockets","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":1,"inboundChannelState":"connected","outboundChannelState":"connected","inboundRoute":"translated","outboundRoute":"translated"},"sockets":[{"socketId":"inbound","steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]},{"socketId":"outbound","steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"en"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]}]}]`],
+  ["Realtime/close-deadline.json", String.raw`[{"name":"close deadline starts before close send","input":{"generation":1,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"closeSend":"blocked"},"expected":{"completion":"closeTimeout","completionAtMs":1000,"deadlineStartsAtMs":0}},{"name":"inbound and outbound close run concurrently","input":{"generation":1,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"closeRequests":["inbound","outbound"]},"expected":{"concurrent":true,"completion":"closed","completionAtMs":400,"routeCompletions":{"inbound":300,"outbound":400}}},{"name":"session closed within 1000 ms delivers queued tail audio","input":{"generation":1,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"sessionClosedAtMs":999,"queuedTailAudio":true},"expected":{"completion":"closed","completionAtMs":999,"tailState":"draining"}},{"name":"blocked close send reaches local close timeout at 1000 ms","input":{"generation":1,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"closeSend":"blocked"},"expected":{"completion":"closeTimeout","completionAtMs":1000,"localCompletion":true}},{"name":"two close callers await the same completion","input":{"generation":1,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"closeCallerCount":2,"sessionClosedAtMs":200},"expected":{"completion":"closed","completionAtMs":200,"sameCompletion":true,"completionCount":1}},{"name":"old generation close completion cannot clear new generation","input":{"closingGeneration":1,"activeGeneration":2,"deadlineMs":1000,"startDeadlineBeforeCloseSend":true,"oldGenerationCompletionAtMs":300},"expected":{"completion":"closed","completionGeneration":1,"activeGenerationAfterCompletion":2,"clearActiveGeneration":false}}]`],
+  ["Routing/inbound-language-gate.json", String.raw`[{"name":"bcp 47 Chinese confidence aggregates to native original","input":{"nativeLanguage":"zh","confidenceByTag":{"zh-Hans":0.45,"zh-Hant":0.4},"threshold":0.75},"expected":{"aggregatedConfidenceByLanguage":{"zh":0.85},"gateDecision":"original","tailState":"none","nextUtterancePolicy":"languageGate"}},{"name":"non native confidence 0.60 routes translated","input":{"nativeLanguage":"zh","confidenceByTag":{"en":0.6},"threshold":0.6},"expected":{"aggregatedConfidenceByLanguage":{"en":0.6},"gateDecision":"translated","tailState":"none","nextUtterancePolicy":"languageGate"}},{"name":"native confidence 0.75 routes original","input":{"nativeLanguage":"zh","confidenceByTag":{"zh":0.75},"threshold":0.75},"expected":{"aggregatedConfidenceByLanguage":{"zh":0.75},"gateDecision":"original","tailState":"none","nextUtterancePolicy":"languageGate"}},{"name":"voiced undecided at 250 ms routes translated","input":{"nativeLanguage":"zh","voiced":true,"decisionAtMs":250,"deadlineMs":250},"expected":{"gateDecision":"translated","tailState":"none","nextUtterancePolicy":"languageGate"}},{"name":"unvoiced undecided at 250 ms routes original","input":{"nativeLanguage":"zh","voiced":false,"decisionAtMs":250,"deadlineMs":250},"expected":{"gateDecision":"original","tailState":"none","nextUtterancePolicy":"languageGate"}},{"name":"vad end waits 500 ms for late input","input":{"event":"vad.end","deadlineMs":250,"restartMs":500},"expected":{"gateDecision":"undecided","tailState":"waiting","nextUtterancePolicy":"languageGate","waitForLateInputMs":500}},{"name":"late audio at 450 ms restarts 500 ms window","input":{"event":"late.audio","arrivalAfterVadEndMs":450,"restartMs":500},"expected":{"gateDecision":"undecided","tailState":"waiting","nextUtterancePolicy":"languageGate","restartWindowMs":500}},{"name":"late transcript at 450 ms restarts 500 ms window","input":{"event":"late.transcript","arrivalAfterVadEndMs":450,"restartMs":500},"expected":{"gateDecision":"undecided","tailState":"waiting","nextUtterancePolicy":"languageGate","restartWindowMs":500}},{"name":"recovery during utterance remains original fail open until next utterance","input":{"inboundRoute":"originalFailOpen","recoveryEvent":"connected"},"expected":{"inboundRoute":"originalFailOpen","gateDecision":"original","tailState":"draining","nextUtterancePolicy":"languageGate"}}]`],
+  ["Routing/channel-failure-safety.json", String.raw`[{"name":"inbound network failure routes original fail open","input":{"event":"inbound.networkFailure"},"expected":{"inboundChannelState":"failed","inboundRoute":"originalFailOpen","errorCategory":"network"}},{"name":"outbound network failure routes muted fail closed","input":{"event":"outbound.networkFailure"},"expected":{"outboundChannelState":"failed","outboundRoute":"mutedFailClosed","errorCategory":"network"}},{"name":"outbound underrun outputs zeros and forbids physical microphone","input":{"event":"outbound.underrun"},"expected":{"outboundChannelState":"degraded","outboundRoute":"mutedFailClosed","errorCategory":"backpressure","outputSamples":"zeros","physicalMicrophone":"forbidden"}},{"name":"explicit outbound bypass routes original bypass","input":{"event":"outbound.bypassEnabled"},"expected":{"outboundChannelState":"bypassed","outboundRoute":"originalBypass"}},{"name":"explicit bypass persists through disconnect and reconnect","input":{"initialOutboundRoute":"originalBypass","events":["disconnect","reconnect"]},"expected":{"outboundChannelState":"bypassed","outboundRoute":"originalBypass","bypassPersisted":true}},{"name":"stop stops both routes","input":{"event":"stop"},"expected":{"inboundChannelState":"inactive","outboundChannelState":"inactive","inboundRoute":"stopped","outboundRoute":"stopped"}}]`],
+  ["Audio/pcm-batching.json", String.raw`[{"name":"one exact network batch emits immediately","operation":"appendPCM16Bytes","input":{"appendByteCounts":[9600]},"expected":{"emittedFrameByteCounts":[9600],"retainedByteCount":0}},{"name":"two half batches combine into one network batch","operation":"appendPCM16Bytes","input":{"appendByteCounts":[4800,4800]},"expected":{"emittedFrameByteCounts":[9600],"retainedByteCount":0}},{"name":"odd PCM16 append fails before buffering","operation":"appendPCM16Bytes","input":{"appendByteCounts":[9601]},"expected":{"errorCode":"invalidPCM16ByteCount","retainedByteCount":0}},{"name":"incomplete even tail remains buffered","operation":"appendPCM16Bytes","input":{"appendByteCounts":[2000,2000]},"expected":{"emittedFrameByteCounts":[],"retainedByteCount":4000}},{"name":"append larger than one batch retains the exact tail","operation":"appendPCM16Bytes","input":{"appendByteCounts":[12000]},"expected":{"emittedFrameByteCounts":[9600],"retainedByteCount":2400}},{"name":"stop flush discards an incomplete tail","operation":"appendPCM16BytesThenStop","input":{"appendByteCounts":[2400],"flushAction":"stop"},"expected":{"emittedFrameByteCounts":[],"retainedByteCountBeforeFlush":2400,"discardedByteCount":2400,"retainedByteCountAfterFlush":0}}]`],
+  ["Audio/pcm-conversion.json", String.raw`[{"name":"encoder clamps Float32 endpoints exactly","operation":"encode48kStereoFloat32To24kMonoPCM16","input":{"interleavedStereoFloat32":[-1.5,-1.5,-1.5,-1.5,0.0,0.0,0.0,0.0,1.5,1.5,1.5,1.5]},"expected":{"pcm16SignedSamples":[-32768,0,32767],"pcm16LittleEndianBytes":[0,128,0,0,255,127]},"assertion":"exact","tolerance":0.0},{"name":"encoder downmixes stereo before averaging two frames","operation":"encode48kStereoFloat32To24kMonoPCM16","input":{"interleavedStereoFloat32":[1.0,-1.0,0.5,0.5]},"expected":{"downmixedMonoFrames":[0.0,0.5],"averagedMonoFrames":[0.25],"pcm16SignedSamples":[8192],"pcm16LittleEndianBytes":[0,32]},"assertion":"exact","tolerance":0.0},{"name":"encoder packs signed PCM16 in little endian byte order","operation":"encode48kStereoFloat32To24kMonoPCM16","input":{"interleavedStereoFloat32":[1.0,1.0,1.0,1.0,-1.0,-1.0,-1.0,-1.0]},"expected":{"pcm16SignedSamples":[32767,-32768],"pcm16LittleEndianBytes":[255,127,0,128]},"assertion":"exact","tolerance":0.0},{"name":"decoder duplicates each interpolated sample to left and right","operation":"decode24kMonoPCM16To48kStereoFloat32","input":{"pcm16LittleEndianBytes":[0,0,255,127]},"expected":{"outputFramesPerInputSample":2,"outputSampleCount":8,"channelPairEquality":true},"assertion":"frameCountAndChannelPairs","tolerance":0.0},{"name":"decoder rejects an odd PCM16 byte count","operation":"decode24kMonoPCM16To48kStereoFloat32","input":{"pcm16LittleEndianBytes":[0]},"expected":{"errorCode":"misalignedPCM16"},"assertion":"errorCode","tolerance":0.0},{"name":"chunked FIR decode matches contiguous decode across aligned chunks","operation":"decode24kMonoPCM16To48kStereoFloat32","input":{"pcm16LittleEndianBytes":[0,32,0,64,0,96],"alignedChunkByteCounts":[2,4]},"expected":{"contiguousAndChunkedOutputEqual":true,"outputFramesPerInputSample":2},"assertion":"absoluteDifferenceAtMostTolerance","tolerance":0.000001},{"name":"decoder FIR history resets only after explicit reset or stop","operation":"decode24kMonoPCM16To48kStereoFloat32WithExplicitLifecycle","ownerDomain":{"domain":"platformAdapterLifecycle","owner":"NetworkPCMDecoderAdapterOwner","internalDecoder":"NetworkPCMDecoder","lifecycleSemantics":"Owner-level replaceDecoder and stop followed by start create a new internal decoder; this contract does not require a public decoder reset API."},"actionVocabulary":{"decode":{"domain":"platformAdapterLifecycle","requires":"startedInternalDecoder","inputRef":"one named PCM16 input","resultId":"unique per decode action"},"replaceDecoder":{"domain":"platformAdapterLifecycle","effect":"replace the internal decoder with a new decoder"},"stop":{"domain":"platformAdapterLifecycle","effect":"discard the internal decoder and enter stopped state"},"start":{"domain":"platformAdapterLifecycle","effect":"create a new internal decoder and enter started state"}},"input":{"warmupPCM16LittleEndianBytes":[255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127,255,127],"probePCM16LittleEndianBytes":[0,0]},"runs":[{"runId":"fresh","initialOwnerState":"startedWithNewInternalDecoder","steps":[{"action":"decode","inputRef":"probePCM16LittleEndianBytes","resultId":"freshProbe"}]},{"runId":"warmedWithoutReset","initialOwnerState":"startedWithNewInternalDecoder","steps":[{"action":"decode","inputRef":"warmupPCM16LittleEndianBytes","resultId":"warmedWarmup","discardResult":true},{"action":"decode","inputRef":"probePCM16LittleEndianBytes","resultId":"warmedProbe"}]},{"runId":"afterOwnerReplacement","initialOwnerState":"startedWithNewInternalDecoder","steps":[{"action":"decode","inputRef":"warmupPCM16LittleEndianBytes","resultId":"replacementWarmup","discardResult":true},{"action":"replaceDecoder"},{"action":"decode","inputRef":"probePCM16LittleEndianBytes","resultId":"replacementProbe"}]},{"runId":"afterStopRestart","initialOwnerState":"startedWithNewInternalDecoder","steps":[{"action":"decode","inputRef":"warmupPCM16LittleEndianBytes","resultId":"stopRestartWarmup","discardResult":true},{"action":"stop"},{"action":"start"},{"action":"decode","inputRef":"probePCM16LittleEndianBytes","resultId":"stopRestartProbe"}]}],"comparisons":[{"leftResultId":"warmedProbe","operator":"notEquals","rightResultId":"freshProbe","tolerance":0.0},{"leftResultId":"replacementProbe","operator":"equals","rightResultId":"freshProbe","tolerance":0.0},{"leftResultId":"stopRestartProbe","operator":"equals","rightResultId":"freshProbe","tolerance":0.0}],"assertion":"exactSequenceEquivalence","tolerance":0.0}]`],
+  ["Settings/v1-migration.json", String.raw`[{"name":"empty object migrates to safe defaults","input":{"kind":"object","settings":{}},"expected":{"outcome":"migrated","overwrite":true,"quarantine":false,"resultSettings":{"schemaVersion":1,"baseUrl":"https://api.302.ai","modelId":"gpt-realtime-translate","nativeLanguage":"zh","meetingLanguage":"en","interfaceLanguage":"system","inputEndpointId":null,"outputEndpointId":null}}},{"name":"schema version 1 is semantic identity","input":{"kind":"object","settings":{"schemaVersion":1,"baseUrl":"https://api.302.ai","modelId":"gpt-realtime-translate","nativeLanguage":"zh","meetingLanguage":"en","interfaceLanguage":"system","inputEndpointId":null,"outputEndpointId":null}},"expected":{"outcome":"identity","overwrite":false,"quarantine":false,"resultSettings":{"schemaVersion":1,"baseUrl":"https://api.302.ai","modelId":"gpt-realtime-translate","nativeLanguage":"zh","meetingLanguage":"en","interfaceLanguage":"system","inputEndpointId":null,"outputEndpointId":null}}},{"name":"unknown future schema version is unsupported","input":{"kind":"object","settings":{"schemaVersion":2}},"expected":{"outcome":"unsupported","overwrite":false,"quarantine":false,"resultSettings":{"schemaVersion":1,"baseUrl":"https://api.302.ai","modelId":"gpt-realtime-translate","nativeLanguage":"zh","meetingLanguage":"en","interfaceLanguage":"system","inputEndpointId":null,"outputEndpointId":null}}},{"name":"malformed JSON is quarantined","input":{"kind":"raw","raw":"{\"schemaVersion\":"},"expected":{"outcome":"quarantined","overwrite":false,"quarantine":true,"resultSettings":{"schemaVersion":1,"baseUrl":"https://api.302.ai","modelId":"gpt-realtime-translate","nativeLanguage":"zh","meetingLanguage":"en","interfaceLanguage":"system","inputEndpointId":null,"outputEndpointId":null}}}]`],
+  ["Settings/compatibility-gate.json", String.raw`[{"name":"exact versions","installed":{"present":true,"signatureValid":true,"abi":1,"version":"0.1.0","endpointCount":2},"expected":{"allowed":true,"reason":"compatible","updateRecommended":false}},{"name":"compatible below recommended","installed":{"present":true,"signatureValid":true,"abi":1,"version":"0.1.0","endpointCount":2},"manifestOverride":{"recommendedDriverVersion":"0.2.0"},"expected":{"allowed":true,"reason":"compatibleUpdateRecommended","updateRecommended":true}},{"name":"missing driver","installed":{"present":false,"signatureValid":false,"abi":0,"version":"0.0.0","endpointCount":0},"expected":{"allowed":false,"reason":"driverMissing","updateRecommended":true}},{"name":"invalid signature","installed":{"present":true,"signatureValid":false,"abi":1,"version":"0.1.0","endpointCount":2},"expected":{"allowed":false,"reason":"driverSignatureInvalid","updateRecommended":true}},{"name":"abi mismatch","installed":{"present":true,"signatureValid":true,"abi":2,"version":"0.2.0","endpointCount":2},"expected":{"allowed":false,"reason":"driverAbiMismatch","updateRecommended":true}},{"name":"one endpoint only","installed":{"present":true,"signatureValid":true,"abi":1,"version":"0.1.0","endpointCount":1},"expected":{"allowed":false,"reason":"virtualEndpointsIncomplete","updateRecommended":true}}]`],
+]);
+
 function fail(message) {
   failures.push(message);
 }
@@ -232,6 +243,102 @@ function deepEqual(actual, expected) {
     && actualKeys.every((key) => deepEqual(actual[key], expected[key]));
 }
 
+function jsonTypeMatches(value, expectedType) {
+  switch (expectedType) {
+    case "object":
+      return isObject(value);
+    case "array":
+      return Array.isArray(value);
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "null":
+      return value === null;
+    default:
+      return false;
+  }
+}
+
+function resolveLocalReference(rootSchema, reference) {
+  if (typeof reference !== "string" || !reference.startsWith("#/")) return undefined;
+  let current = rootSchema;
+  for (const encodedSegment of reference.slice(2).split("/")) {
+    const segment = encodedSegment.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!isObject(current) || !Object.hasOwn(current, segment)) return undefined;
+    current = current[segment];
+  }
+  return isObject(current) ? current : undefined;
+}
+
+function matchesJsonSchema(value, schema, rootSchema = schema) {
+  if (!isObject(schema)) return false;
+
+  if (schema.$ref !== undefined) {
+    const referencedSchema = resolveLocalReference(rootSchema, schema.$ref);
+    if (referencedSchema === undefined || !matchesJsonSchema(value, referencedSchema, rootSchema)) return false;
+  }
+
+  if (schema.oneOf !== undefined) {
+    if (!Array.isArray(schema.oneOf)) return false;
+    const matchCount = schema.oneOf.filter((variant) =>
+      isObject(variant) && matchesJsonSchema(value, variant, rootSchema)).length;
+    if (matchCount !== 1) return false;
+  }
+
+  if (schema.type !== undefined) {
+    const acceptedTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+    if (!acceptedTypes.every((type) => typeof type === "string")
+      || !acceptedTypes.some((type) => jsonTypeMatches(value, type))) return false;
+  }
+  if (schema.const !== undefined && !deepEqual(value, schema.const)) return false;
+  if (schema.enum !== undefined) {
+    if (!Array.isArray(schema.enum) || !schema.enum.some((candidate) => deepEqual(value, candidate))) return false;
+  }
+
+  if (schema.minimum !== undefined) {
+    if (typeof value !== "number" || typeof schema.minimum !== "number" || value < schema.minimum) return false;
+  }
+  if (schema.maximum !== undefined) {
+    if (typeof value !== "number" || typeof schema.maximum !== "number" || value > schema.maximum) return false;
+  }
+  if (schema.pattern !== undefined) {
+    if (typeof value !== "string" || typeof schema.pattern !== "string") return false;
+    try {
+      if (!new RegExp(schema.pattern).test(value)) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  if (schema.required !== undefined) {
+    if (!isObject(value) || !Array.isArray(schema.required)
+      || !schema.required.every((key) => typeof key === "string" && Object.hasOwn(value, key))) return false;
+  }
+
+  if (schema.properties !== undefined || schema.additionalProperties !== undefined) {
+    if (!isObject(value)) return false;
+    const properties = schema.properties ?? {};
+    if (!isObject(properties)) return false;
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (Object.hasOwn(value, key)
+        && (!isObject(propertySchema) || !matchesJsonSchema(value[key], propertySchema, rootSchema))) return false;
+    }
+    for (const [key, propertyValue] of Object.entries(value)) {
+      if (Object.hasOwn(properties, key)) continue;
+      if (schema.additionalProperties === false) return false;
+      if (isObject(schema.additionalProperties)
+        && !matchesJsonSchema(propertyValue, schema.additionalProperties, rootSchema)) return false;
+    }
+  }
+
+  return true;
+}
+
 function fixtureRule(relativePath, rule, condition) {
   if (!condition) fail(`Shared/TestVectors/${relativePath}: ${rule}`);
 }
@@ -252,6 +359,44 @@ function validateCaseInventory(relativePath, fixture) {
     "case inventory drifted",
     expectedNames !== undefined && sameArray(actualNames, expectedNames),
   );
+}
+
+function validateVocabularyOccurrences(owner, relativePath) {
+  if (Array.isArray(owner)) {
+    for (const item of owner) validateVocabularyOccurrences(item, relativePath);
+    return;
+  }
+  if (!isObject(owner)) return;
+
+  for (const [key, vocabulary] of Object.entries(owner)) {
+    if (!key.endsWith("Vocabulary")) continue;
+    const field = key.slice(0, -"Vocabulary".length);
+    const allowed = Array.isArray(vocabulary)
+      ? vocabulary
+      : isObject(vocabulary)
+        ? Object.keys(vocabulary)
+        : [];
+    let occurrenceCount = 0;
+    let valuesAreValid = allowed.length > 0 && allowed.every((value) => typeof value === "string");
+    const inspect = (value, isVocabularyDefinition = false) => {
+      if (Array.isArray(value)) {
+        for (const item of value) inspect(item, isVocabularyDefinition);
+        return;
+      }
+      if (!isObject(value)) return;
+      for (const [nestedKey, nestedValue] of Object.entries(value)) {
+        if (!isVocabularyDefinition && nestedKey === field) {
+          occurrenceCount += 1;
+          if (typeof nestedValue !== "string" || !allowed.includes(nestedValue)) valuesAreValid = false;
+        }
+        inspect(nestedValue, isVocabularyDefinition || nestedKey === key);
+      }
+    };
+    inspect(owner);
+    fixtureRule(relativePath, `${field} values outside owned vocabulary`, occurrenceCount > 0 && valuesAreValid);
+  }
+
+  for (const nestedValue of Object.values(owner)) validateVocabularyOccurrences(nestedValue, relativePath);
 }
 
 function scanDecodedString(value, relativePath) {
@@ -343,10 +488,15 @@ function validateHandshakeFixture(fixture, translationSchema) {
     step?.payloadEncoding === "json"
       && isObject(step.payload)
       && step.payload.type === step.eventType
-      && eventTypes.has(step.eventType)));
+      && eventTypes.has(step.eventType)
+      && matchesJsonSchema(step.payload, translationSchema)));
   fixtureRule(relativePath, "session.update target language drifted", wireSteps
     .filter((step) => step?.eventType === "session.update")
     .every((step) => typeof step.payload?.target_language === "string" && targetLanguages.has(step.payload.target_language)));
+  fixtureRule(relativePath, "session.update schema must require target_language",
+    !matchesJsonSchema({ type: "session.update" }, translationSchema));
+  fixtureRule(relativePath, "translation wire schemas must reject extra properties",
+    !matchesJsonSchema({ type: "session.created", unexpected: true }, translationSchema));
 
   const normal = fixtureCase(fixture, "normal handshake sends session update as text and connects");
   fixtureRule(relativePath, "normal text handshake drifted",
@@ -714,9 +864,9 @@ function validateConversionFixture(fixture) {
   fixtureRule(relativePath, "PCM lifecycle references drifted", referencesValid);
 }
 
-function validateAppVisibleFixtureValues(value, relativePath, enumSets) {
+function validateAppVisibleFixtureValues(value, relativePath, appStateSchema) {
   if (Array.isArray(value)) {
-    for (const item of value) validateAppVisibleFixtureValues(item, relativePath, enumSets);
+    for (const item of value) validateAppVisibleFixtureValues(item, relativePath, appStateSchema);
     return;
   }
   if (!isObject(value)) return;
@@ -729,10 +879,11 @@ function validateAppVisibleFixtureValues(value, relativePath, enumSets) {
   };
   for (const [key, nestedValue] of Object.entries(value)) {
     const enumName = fieldToEnum[key];
-    if (enumName !== undefined && !enumSets[enumName]?.has(nestedValue)) {
+    if (enumName !== undefined
+      && !matchesJsonSchema(nestedValue, { $ref: `#/$defs/${enumName}` }, appStateSchema)) {
       fixtureRule(relativePath, `app-state ${key} value outside schema`, false);
     }
-    validateAppVisibleFixtureValues(nestedValue, relativePath, enumSets);
+    validateAppVisibleFixtureValues(nestedValue, relativePath, appStateSchema);
   }
 }
 
@@ -814,17 +965,25 @@ for (const relativePath of fixturePaths) {
   }
   if (typeof fixture.category !== "string" || fixture.category.length === 0) fail(`${contractPath}: missing category`);
   validateCaseInventory(relativePath, fixture);
+  const expectedCaseJson = expectedFixtureCaseJson.get(relativePath);
+  let expectedCases;
+  try {
+    expectedCases = JSON.parse(expectedCaseJson);
+    if (relativePath === "Audio/pcm-conversion.json") {
+      expectedCases[6].input.warmupPCM16LittleEndianBytes =
+        Array.from({ length: 128 }, (_, index) => index % 2 === 0 ? 255 : 127);
+    }
+  } catch {
+    expectedCases = undefined;
+  }
+  fixtureRule(relativePath, "full named case trigger/expected drifted",
+    expectedCases !== undefined && deepEqual(fixtureCases(fixture), expectedCases));
+  validateVocabularyOccurrences(fixture, relativePath);
 }
 
 const appStateSchema = schemaDocuments.get("v1/app-state.schema.json");
-const enumSets = Object.fromEntries(
-  ["channelState", "inboundRoute", "outboundRoute", "errorCategory"].map((name) => [
-    name,
-    new Set(appStateSchema?.$defs?.[name]?.enum ?? []),
-  ]),
-);
 for (const [relativePath, fixture] of fixtureDocuments) {
-  validateAppVisibleFixtureValues(fixture, relativePath, enumSets);
+  validateAppVisibleFixtureValues(fixture, relativePath, appStateSchema);
 }
 
 validateHandshakeFixture(
