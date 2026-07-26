@@ -146,6 +146,23 @@ private final class CoordinatorLevelClock: @unchecked Sendable {
     }
 }
 
+private final class CoordinatorClassifierSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hypotheses: [LanguageHypotheses]
+
+    init(_ hypotheses: [LanguageHypotheses]) {
+        self.hypotheses = hypotheses
+    }
+
+    func next() -> LanguageHypotheses {
+        lock.withLock {
+            hypotheses.isEmpty
+                ? LanguageHypotheses([:])
+                : hypotheses.removeFirst()
+        }
+    }
+}
+
 private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
     private var sessions: [CoordinatorSessionFake]
     private(set) var requests: [SessionBuildRequest] = []
@@ -704,7 +721,7 @@ func lateContinuousTranslationDeltasExtendTheInboundTailWindow() async throws {
         }
     )
 
-    try await Task.sleep(for: .milliseconds(350))
+    try await Task.sleep(for: .milliseconds(250))
     await harness.inbound.emit(
         .success(.outputAudio(audioDelta(Data([2, 2]))))
     )
@@ -712,6 +729,11 @@ func lateContinuousTranslationDeltasExtendTheInboundTailWindow() async throws {
         await eventually {
             await harness.audio.inboundPlayback.last == Data([2, 2])
         }
+    )
+
+    try await Task.sleep(for: .milliseconds(350))
+    await harness.inbound.emit(
+        .success(.outputTranscript(transcriptDelta(" tail")))
     )
 
     try await Task.sleep(for: .milliseconds(250))
@@ -723,6 +745,169 @@ func lateContinuousTranslationDeltasExtendTheInboundTailWindow() async throws {
             await harness.audio.inboundPlayback.last == Data([3, 3])
         }
     )
+    await harness.coordinator.stop()
+}
+
+@Test
+func lateNonemptyInputTranscriptExtendsTheInboundTailWindow() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([1, 1]))))
+    )
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback == [Data([1, 1])]
+    })
+
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    try await Task.sleep(for: .milliseconds(250))
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta(" tail")))
+    )
+    try await Task.sleep(for: .milliseconds(350))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.last == Data([2, 2])
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func lateOutputTranscriptExtendsTheInboundTailWindow() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([1, 1]))))
+    )
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback == [Data([1, 1])]
+    })
+
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    try await Task.sleep(for: .milliseconds(250))
+    await harness.inbound.emit(
+        .success(.outputTranscript(transcriptDelta("尾部")))
+    )
+    try await Task.sleep(for: .milliseconds(350))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.last == Data([2, 2])
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func lateEmptyInputHypothesesDoNotExtendTheInboundTailWindow() async throws {
+    let classifier = CoordinatorClassifierSequence([
+        LanguageHypotheses(["de": 0.9]),
+        LanguageHypotheses([:])
+    ])
+    let harness = CoordinatorHarness(classifier: { _ in classifier.next() })
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([1, 1]))))
+    )
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback == [Data([1, 1])]
+    })
+
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    try await Task.sleep(for: .milliseconds(250))
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("")))
+    )
+    try await Task.sleep(for: .milliseconds(350))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+    try await Task.sleep(for: .milliseconds(150))
+
+    #expect(await harness.audio.inboundPlayback == [Data([1, 1])])
+    await harness.coordinator.stop()
+}
+
+@Test
+func lateEventsWhileVADIsSpeakingDoNotStartTheInboundFinishWindow() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([1, 1]))))
+    )
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback == [Data([1, 1])]
+    })
+
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    try await Task.sleep(for: .milliseconds(200))
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.last == Data([2, 2])
+    })
+
+    try await Task.sleep(for: .milliseconds(650))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([3, 3]))))
+    )
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.last == Data([3, 3])
+    })
     await harness.coordinator.stop()
 }
 

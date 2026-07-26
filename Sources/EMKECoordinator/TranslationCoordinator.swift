@@ -528,15 +528,16 @@ public actor TranslationCoordinator {
                 to: &state.subtitles.inboundSource
             )
             if inboundUtteranceActive {
+                let hypotheses = languageClassifier(
+                    state.subtitles.inboundSource
+                )
                 await playInbound(
-                    inboundBuffer.observe(
-                        languageClassifier(
-                            state.subtitles.inboundSource
-                        )
-                    )
+                    inboundBuffer.observe(hypotheses)
                 )
                 cancelDeadlineIfResolved()
-                extendInboundFinishWindowIfDraining()
+                if !hypotheses.confidenceByPrimaryTag.isEmpty {
+                    extendInboundFinishWindowIfDraining()
+                }
             }
             publishState()
         case .outputTranscript(let delta):
