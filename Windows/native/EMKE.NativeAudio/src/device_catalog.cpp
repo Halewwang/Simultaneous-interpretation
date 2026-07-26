@@ -5,6 +5,7 @@
 #include <utility>
 
 #if defined(_WIN32)
+#include <windows.h>
 #include <initguid.h>
 
 #include "emke_endpoint_properties.h"
@@ -184,6 +185,13 @@ std::optional<EndpointRole> parse_wide_endpoint_role(
   return std::nullopt;
 }
 
+PROPERTYKEY endpoint_role_property_key() noexcept {
+  return PROPERTYKEY{
+      .fmtid = DEVPKEY_EMKE_EndpointRole.fmtid,
+      .pid = DEVPKEY_EMKE_EndpointRole.pid,
+  };
+}
+
 struct EndpointReadResult {
   std::optional<DeviceEndpoint> endpoint;
   std::optional<DeviceCatalogError> error;
@@ -244,7 +252,8 @@ EndpointReadResult read_endpoint(IMMDevice* device) {
   }
 
   PropVariantValue role_value;
-  result = properties->GetValue(DEVPKEY_EMKE_EndpointRole, role_value.put());
+  const PROPERTYKEY role_key = endpoint_role_property_key();
+  result = properties->GetValue(role_key, role_value.put());
   if (FAILED(result)) {
     return {
         .error =
