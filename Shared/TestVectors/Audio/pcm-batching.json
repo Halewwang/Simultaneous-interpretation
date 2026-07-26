@@ -1,0 +1,62 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "audio.pcm-batching.v1",
+  "category": "audio",
+  "metadata": {
+    "localNormalizedFormat": {
+      "sampleRateHz": 48000,
+      "channels": 2,
+      "sampleType": "float32"
+    },
+    "networkFormat": {
+      "sampleRateHz": 24000,
+      "channels": 1,
+      "sampleType": "pcm16",
+      "signed": true,
+      "byteOrder": "littleEndian"
+    },
+    "networkBatch": {
+      "byteCount": 9600,
+      "sampleCount": 4800,
+      "durationMs": 200
+    }
+  },
+  "cases": [
+    {
+      "name": "one exact network batch emits immediately",
+      "operation": "appendPCM16Bytes",
+      "input": { "appendByteCounts": [9600] },
+      "expected": { "emittedFrameByteCounts": [9600], "retainedByteCount": 0 }
+    },
+    {
+      "name": "two half batches combine into one network batch",
+      "operation": "appendPCM16Bytes",
+      "input": { "appendByteCounts": [4800, 4800] },
+      "expected": { "emittedFrameByteCounts": [9600], "retainedByteCount": 0 }
+    },
+    {
+      "name": "odd PCM16 append fails before buffering",
+      "operation": "appendPCM16Bytes",
+      "input": { "appendByteCounts": [9601] },
+      "expected": { "errorCode": "invalidPCM16ByteCount", "retainedByteCount": 0 }
+    },
+    {
+      "name": "incomplete even tail remains buffered",
+      "operation": "appendPCM16Bytes",
+      "input": { "appendByteCounts": [2000, 2000] },
+      "expected": { "emittedFrameByteCounts": [], "retainedByteCount": 4000 }
+    },
+    {
+      "name": "append larger than one batch retains the exact tail",
+      "operation": "appendPCM16Bytes",
+      "input": { "appendByteCounts": [12000] },
+      "expected": { "emittedFrameByteCounts": [9600], "retainedByteCount": 2400 }
+    },
+    {
+      "name": "stop flush discards an incomplete tail",
+      "operation": "appendPCM16BytesThenStop",
+      "input": { "appendByteCounts": [2400], "flushAction": "stop" },
+      "expected": { "emittedFrameByteCounts": [], "retainedByteCountBeforeFlush": 2400, "discardedByteCount": 2400, "retainedByteCountAfterFlush": 0 }
+    }
+  ]
+}
