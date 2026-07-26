@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Validate shared contract and record hosted toolchain
+      - name: Validate shared contract and build native audio scaffold
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -76,6 +76,26 @@ jobs:
             throw "CMake must be at least 4.2."
           }
 
+          pwsh Windows/tools/verify-toolchain.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows toolchain verifier failed."
+          }
+
+          cmake --preset windows-x64-release -S Windows/native
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native CMake configuration failed."
+          }
+
+          cmake --build --preset windows-x64-release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native CMake build failed."
+          }
+
+          ctest --preset windows-x64-release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native CTest run failed."
+          }
+
           $windowsVersion = (Get-CimInstance -ClassName Win32_OperatingSystem).Version
           if ($windowsVersion -notmatch "^(?:[0-9]+\.){2}([0-9]+)(?:\.[0-9]+)?$") {
             throw "Windows build could not be parsed."
@@ -102,7 +122,7 @@ jobs:
           ```text
           targetOsEligible = $targetOsEligibleValue
           installedWdkProof = pending
-          nativeBuild = pending
+          nativeBuild = passed
           driverBuild = pending
           driverInstall = pending
           liveEndpoints = pending
