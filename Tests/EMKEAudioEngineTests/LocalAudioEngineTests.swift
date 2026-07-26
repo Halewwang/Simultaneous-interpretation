@@ -320,6 +320,68 @@ private func constantPCM16(_ sample: Int16, count: Int) -> Data {
     await harness.engine.stop()
 }
 
+@Test func inboundSuppressedPCMDoesNotLeakFIRHistoryAfterTranslationResumes() async throws {
+    let harness = makeHarness()
+    try await start(harness)
+    try await harness.engine.enqueueInboundTranslation(
+        constantPCM16(.max, count: 80)
+    )
+    harness.factory.physicalOutput.writes.removeAll()
+    await harness.engine.setRouting(
+        inbound: .originalFailOpen,
+        outbound: .translated
+    )
+
+    try await harness.engine.enqueueInboundTranslation(Data([0]))
+    try await harness.engine.enqueueInboundTranslation(
+        constantPCM16(.max, count: 80)
+    )
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .translated
+    )
+    try await harness.engine.enqueueInboundTranslation(
+        constantPCM16(0, count: 80)
+    )
+
+    #expect(
+        harness.factory.physicalOutput.writes
+            == [Array(repeating: 0, count: 320)]
+    )
+    await harness.engine.stop()
+}
+
+@Test func outboundSuppressedPCMDoesNotLeakFIRHistoryAfterTranslationResumes() async throws {
+    let harness = makeHarness()
+    try await start(harness)
+    try await harness.engine.enqueueOutboundTranslation(
+        constantPCM16(.min, count: 80)
+    )
+    harness.factory.virtualMicrophoneOutput.writes.removeAll()
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .mutedFailClosed
+    )
+
+    try await harness.engine.enqueueOutboundTranslation(Data([0]))
+    try await harness.engine.enqueueOutboundTranslation(
+        constantPCM16(.min, count: 80)
+    )
+    await harness.engine.setRouting(
+        inbound: .translated,
+        outbound: .translated
+    )
+    try await harness.engine.enqueueOutboundTranslation(
+        constantPCM16(0, count: 80)
+    )
+
+    #expect(
+        harness.factory.virtualMicrophoneOutput.writes
+            == [Array(repeating: 0, count: 320)]
+    )
+    await harness.engine.stop()
+}
+
 @Test func selectedInboundPCMCanBeOriginalOrTranslated() async throws {
     let harness = makeHarness()
     try await start(harness)

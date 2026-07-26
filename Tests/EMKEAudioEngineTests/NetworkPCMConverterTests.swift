@@ -210,6 +210,44 @@ private func toneMagnitude(
     })
 }
 
+@Test func decoderClampsMinToMaxTransitionToFloatPCMRange() throws {
+    var decoder = NetworkPCMDecoder()
+
+    let decoded = try decoder.append24kMonoPCM16(
+        constantPCM16(.min, count: 80)
+            + constantPCM16(.max, count: 80)
+    )
+
+    #expect(decoded.allSatisfy { sample in
+        sample.isFinite && sample >= -1 && sample <= 1
+    })
+}
+
+@Test func decoderClampsMaxToMinTransitionToFloatPCMRange() throws {
+    var decoder = NetworkPCMDecoder()
+
+    let decoded = try decoder.append24kMonoPCM16(
+        constantPCM16(.max, count: 80)
+            + constantPCM16(.min, count: 80)
+    )
+
+    #expect(decoded.allSatisfy { sample in
+        sample.isFinite && sample >= -1 && sample <= 1
+    })
+}
+
+private func constantPCM16(_ sample: Int16, count: Int) -> Data {
+    var result = Data()
+    result.reserveCapacity(count * 2)
+    for _ in 0..<count {
+        var littleEndian = sample.littleEndian
+        withUnsafeBytes(of: &littleEndian) {
+            result.append(contentsOf: $0)
+        }
+    }
+    return result
+}
+
 @Test func decoderPreservesResultsAcrossChunkBoundaries() throws {
     let pcm = Data([0x00, 0x20, 0x00, 0x40, 0x00, 0x60])
     var contiguousDecoder = NetworkPCMDecoder()

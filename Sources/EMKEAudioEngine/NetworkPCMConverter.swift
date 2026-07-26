@@ -208,10 +208,12 @@ public struct NetworkPCMDecoder: Sendable {
                 : Float(signed) / Float(Int16.max)
 
             let interpolated = interpolator.append(sample)
-            result.append(interpolated.even)
-            result.append(interpolated.even)
-            result.append(interpolated.odd)
-            result.append(interpolated.odd)
+            let even = max(-1, min(1, interpolated.even))
+            let odd = max(-1, min(1, interpolated.odd))
+            result.append(even)
+            result.append(even)
+            result.append(odd)
+            result.append(odd)
             index = pcm16.index(after: nextIndex)
         }
         return result
