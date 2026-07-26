@@ -63,6 +63,7 @@
   </ItemGroup>
   <ItemGroup>
     <Inf Include="EMKE.VirtualAudio.inf" />
+    <FilesToPackage Include="$(TargetPath)" Condition="'$(ConfigurationType)'=='Driver' or '$(ConfigurationType)'=='DynamicLibrary'" />
     <ResourceCompile Include="src\SimpleAudioSample.rc" />
     <ClCompile Include="src\adapter.cpp" />
     <ClCompile Include="src\basetopo.cpp" />

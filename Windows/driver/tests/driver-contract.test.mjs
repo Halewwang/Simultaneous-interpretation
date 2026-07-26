@@ -58,6 +58,10 @@ test("project is a pinned x64 Windows 11 KMDF driver built by MSBuild", async ()
   assert.match(project, /Include="Microsoft\.Windows\.WDK\.x64"/);
   assert.match(project, /Version="10\.0\.28000\.2526"/);
   assert.match(project, /GeneratePathProperty="true"/);
+  assert.match(
+    project,
+    /<FilesToPackage Include="\$\(TargetPath\)" Condition="'\$\(ConfigurationType\)'=='Driver' or '\$\(ConfigurationType\)'=='DynamicLibrary'" \/>/,
+  );
   assert.doesNotMatch(project, /Debug\|/);
 
   const lock = JSON.parse(await text("packages.lock.json"));
