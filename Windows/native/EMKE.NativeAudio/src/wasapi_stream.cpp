@@ -6,6 +6,7 @@
 #include <limits>
 #include <new>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 

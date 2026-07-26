@@ -1,6 +1,7 @@
 #include "audio_worker.hpp"
 #include "wasapi_stream.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
