@@ -147,6 +147,29 @@ function sameArray(actual, expected) {
     && actual.every((value, index) => value === expected[index]);
 }
 
+function inspectDecodedJson(value, findings) {
+  if (typeof value === "string") {
+    if (/["']?authorization["']?\s*[:=]/i.test(value)) findings.add("forbidden Authorization key");
+    if (/(?:["']?(?:api[_ -]?key|access[_ -]?token|secret|token)["']?)\s*[:=]/i.test(value)) findings.add("forbidden secret-like content");
+    if (/sk-[a-z0-9_-]{16,}/i.test(value)) findings.add("forbidden secret-like content");
+    if (/(?:^|[^A-Za-z0-9])\/(?:Users|Volumes|private|var|tmp)\//.test(value)) findings.add("forbidden absolute path");
+    if (/(?:^|[^A-Za-z0-9])[A-Za-z]:\\(?:Users|Windows|ProgramData)\\/.test(value)) findings.add("forbidden absolute path");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) inspectDecodedJson(item, findings);
+    return;
+  }
+  if (!isObject(value)) return;
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const normalizedKey = key.replace(/[ _-]/g, "").toLowerCase();
+    if (normalizedKey === "authorization") findings.add("forbidden Authorization key");
+    if (["apikey", "accesstoken", "token", "secret"].includes(normalizedKey)) findings.add("forbidden secret-like content");
+    inspectDecodedJson(nestedValue, findings);
+  }
+}
+
 function inspectSharedContent() {
   let entries;
   try {
@@ -156,7 +179,7 @@ function inspectSharedContent() {
     return;
   }
   const patterns = [
-    ["forbidden Authorization key", /"authorization"\s*:/i],
+    ["forbidden Authorization key", /["']?authorization["']?\s*[:=]/i],
     ["forbidden secret-like content", /(?:["']?(?:api[_ -]?key|access[_ -]?token|secret|token)["']?)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{12,}/i],
     ["forbidden secret-like content", /sk-[a-z0-9_-]{16,}/i],
     ["forbidden absolute path", /(?:^|["'\s])\/(?:Users|Volumes|private|var|tmp)\//m],
@@ -174,6 +197,15 @@ function inspectSharedContent() {
     }
     for (const [rule, pattern] of patterns) {
       if (pattern.test(content)) fail(`${relativePath}: ${rule}`);
+    }
+    if (entry.name.endsWith(".json")) {
+      try {
+        const findings = new Set();
+        inspectDecodedJson(JSON.parse(content), findings);
+        for (const rule of findings) fail(`${relativePath}: ${rule}`);
+      } catch {
+        // Invalid JSON is reported by the manifest/inventory validation path.
+      }
     }
   }
 }
