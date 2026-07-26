@@ -6,57 +6,57 @@
     {
       "name": "normal handshake sends session update as text and connects",
       "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
-      "expected": { "socketCount": 1, "route": "translated", "finalState": "connected" },
+      "expected": { "socketCount": 1, "inboundChannelState": "connected", "inboundRoute": "translated" },
       "steps": [
-        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
-        { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
-        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
+        { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "en" }, "expectedState": "updating" },
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
       ]
     },
     {
       "name": "client JSON session update sent as binary is protocol failure",
       "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
-      "expected": { "socketCount": 1, "route": "translated", "finalState": "protocolFailure" },
+      "expected": { "socketCount": 1, "inboundChannelState": "failed", "inboundRoute": "originalFailOpen", "errorCategory": "protocol" },
       "steps": [
-        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
-        { "direction": "clientToServer", "frameType": "binary", "eventType": "session.update", "expectedState": "protocolFailure" }
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
+        { "direction": "clientToServer", "frameType": "binary", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "en" }, "expectedState": "protocolFailure" }
       ]
     },
     {
       "name": "session updated before session created is protocol failure",
       "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
-      "expected": { "socketCount": 1, "route": "translated", "finalState": "protocolFailure" },
+      "expected": { "socketCount": 1, "inboundChannelState": "failed", "inboundRoute": "originalFailOpen", "errorCategory": "protocol" },
       "steps": [
-        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "protocolFailure" }
+        { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "protocolFailure" }
       ]
     },
     {
       "name": "same language uses local bypass with no outbound socket",
       "configuration": { "nativeLanguage": "zh", "meetingLanguage": "zh" },
-      "expected": { "socketCount": 0, "route": "originalBypass", "finalState": "localBypass" },
+      "expected": { "socketCount": 0, "outboundChannelState": "bypassed", "outboundRoute": "originalBypass" },
       "steps": [
-        { "direction": "local", "frameType": "none", "eventType": "language.match", "expectedState": "localBypass" }
+        { "direction": "local", "eventType": "language.match", "localInput": { "nativeLanguage": "zh", "meetingLanguage": "zh" }, "expectedState": "localBypass" }
       ]
     },
     {
       "name": "two language setup creates two independent sockets",
       "configuration": { "nativeLanguage": "zh", "meetingLanguage": "en" },
-      "expected": { "socketCount": 2, "route": "bidirectionalTranslated", "finalState": "connected" },
+      "expected": { "socketCount": 2, "inboundChannelState": "connected", "outboundChannelState": "connected", "inboundRoute": "translated", "outboundRoute": "translated" },
       "sockets": [
         {
           "socketId": "inbound",
           "steps": [
-            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
-            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
-            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "zh" }, "expectedState": "updating" },
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
           ]
         },
         {
           "socketId": "outbound",
           "steps": [
-            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "expectedState": "created" },
-            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "expectedState": "updating" },
-            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "expectedState": "connected" }
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "en" }, "expectedState": "updating" },
+            { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
           ]
         }
       ]

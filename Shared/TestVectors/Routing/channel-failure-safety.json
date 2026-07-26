@@ -6,32 +6,32 @@
     {
       "name": "inbound network failure routes original fail open",
       "input": { "event": "inbound.networkFailure" },
-      "expected": { "inboundRoute": "originalFailOpen", "outboundRoute": "unchanged" }
+      "expected": { "inboundChannelState": "failed", "inboundRoute": "originalFailOpen", "errorCategory": "network" }
     },
     {
       "name": "outbound network failure routes muted fail closed",
       "input": { "event": "outbound.networkFailure" },
-      "expected": { "inboundRoute": "unchanged", "outboundRoute": "mutedFailClosed" }
+      "expected": { "outboundChannelState": "failed", "outboundRoute": "mutedFailClosed", "errorCategory": "network" }
     },
     {
       "name": "outbound underrun outputs zeros and forbids physical microphone",
       "input": { "event": "outbound.underrun" },
-      "expected": { "outboundRoute": "mutedFailClosed", "outputSamples": "zeros", "physicalMicrophone": "forbidden" }
+      "expected": { "outboundChannelState": "degraded", "outboundRoute": "mutedFailClosed", "errorCategory": "backpressure", "outputSamples": "zeros", "physicalMicrophone": "forbidden" }
     },
     {
       "name": "explicit outbound bypass routes original bypass",
       "input": { "event": "outbound.bypassEnabled" },
-      "expected": { "outboundRoute": "originalBypass" }
+      "expected": { "outboundChannelState": "bypassed", "outboundRoute": "originalBypass" }
     },
     {
       "name": "explicit bypass persists through disconnect and reconnect",
       "input": { "initialOutboundRoute": "originalBypass", "events": ["disconnect", "reconnect"] },
-      "expected": { "outboundRoute": "originalBypass", "bypassPersisted": true }
+      "expected": { "outboundChannelState": "bypassed", "outboundRoute": "originalBypass", "bypassPersisted": true }
     },
     {
       "name": "stop stops both routes",
       "input": { "event": "stop" },
-      "expected": { "inboundRoute": "stopped", "outboundRoute": "stopped" }
+      "expected": { "inboundChannelState": "inactive", "outboundChannelState": "inactive", "inboundRoute": "stopped", "outboundRoute": "stopped" }
     }
   ]
 }

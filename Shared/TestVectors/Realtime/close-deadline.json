@@ -2,6 +2,8 @@
   "contractVersion": 1,
   "fixtureId": "realtime.close-deadline.v1",
   "category": "realtime",
+  "completionVocabulary": ["closed", "closeTimeout"],
+  "tailStateVocabulary": ["none", "draining"],
   "cases": [
     {
       "name": "close deadline starts before close send",
@@ -16,7 +18,7 @@
     {
       "name": "session closed within 1000 ms delivers queued tail audio",
       "input": { "generation": 1, "deadlineMs": 1000, "startDeadlineBeforeCloseSend": true, "sessionClosedAtMs": 999, "queuedTailAudio": true },
-      "expected": { "completion": "closed", "completionAtMs": 999, "deliverQueuedTailAudio": true }
+      "expected": { "completion": "closed", "completionAtMs": 999, "tailState": "draining" }
     },
     {
       "name": "blocked close send reaches local close timeout at 1000 ms",

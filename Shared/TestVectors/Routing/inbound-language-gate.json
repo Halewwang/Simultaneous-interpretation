@@ -2,51 +2,54 @@
   "contractVersion": 1,
   "fixtureId": "routing.inbound-language-gate.v1",
   "category": "routing",
+  "gateDecisionVocabulary": ["undecided", "original", "translated"],
+  "tailStateVocabulary": ["none", "waiting", "draining"],
+  "nextUtterancePolicyVocabulary": ["languageGate"],
   "cases": [
     {
       "name": "bcp 47 Chinese confidence aggregates to native original",
       "input": { "nativeLanguage": "zh", "confidenceByTag": { "zh-Hans": 0.45, "zh-Hant": 0.4 }, "threshold": 0.75 },
-      "expected": { "aggregatedConfidenceByLanguage": { "zh": 0.85 }, "currentUtteranceRoute": "original", "nextUtteranceRoute": "undecided" }
+      "expected": { "aggregatedConfidenceByLanguage": { "zh": 0.85 }, "gateDecision": "original", "tailState": "none", "nextUtterancePolicy": "languageGate" }
     },
     {
       "name": "non native confidence 0.60 routes translated",
       "input": { "nativeLanguage": "zh", "confidenceByTag": { "en": 0.6 }, "threshold": 0.6 },
-      "expected": { "aggregatedConfidenceByLanguage": { "en": 0.6 }, "currentUtteranceRoute": "translated", "nextUtteranceRoute": "undecided" }
+      "expected": { "aggregatedConfidenceByLanguage": { "en": 0.6 }, "gateDecision": "translated", "tailState": "none", "nextUtterancePolicy": "languageGate" }
     },
     {
       "name": "native confidence 0.75 routes original",
       "input": { "nativeLanguage": "zh", "confidenceByTag": { "zh": 0.75 }, "threshold": 0.75 },
-      "expected": { "aggregatedConfidenceByLanguage": { "zh": 0.75 }, "currentUtteranceRoute": "original", "nextUtteranceRoute": "undecided" }
+      "expected": { "aggregatedConfidenceByLanguage": { "zh": 0.75 }, "gateDecision": "original", "tailState": "none", "nextUtterancePolicy": "languageGate" }
     },
     {
       "name": "voiced undecided at 250 ms routes translated",
       "input": { "nativeLanguage": "zh", "voiced": true, "decisionAtMs": 250, "deadlineMs": 250 },
-      "expected": { "currentUtteranceRoute": "translated", "nextUtteranceRoute": "undecided" }
+      "expected": { "gateDecision": "translated", "tailState": "none", "nextUtterancePolicy": "languageGate" }
     },
     {
       "name": "unvoiced undecided at 250 ms routes original",
       "input": { "nativeLanguage": "zh", "voiced": false, "decisionAtMs": 250, "deadlineMs": 250 },
-      "expected": { "currentUtteranceRoute": "original", "nextUtteranceRoute": "undecided" }
+      "expected": { "gateDecision": "original", "tailState": "none", "nextUtterancePolicy": "languageGate" }
     },
     {
       "name": "vad end waits 500 ms for late input",
       "input": { "event": "vad.end", "deadlineMs": 250, "restartMs": 500 },
-      "expected": { "currentUtteranceRoute": "pending", "nextUtteranceRoute": "undecided", "waitForLateInputMs": 500 }
+      "expected": { "gateDecision": "undecided", "tailState": "waiting", "nextUtterancePolicy": "languageGate", "waitForLateInputMs": 500 }
     },
     {
       "name": "late audio at 450 ms restarts 500 ms window",
       "input": { "event": "late.audio", "arrivalAfterVadEndMs": 450, "restartMs": 500 },
-      "expected": { "currentUtteranceRoute": "pending", "nextUtteranceRoute": "undecided", "restartWindowMs": 500 }
+      "expected": { "gateDecision": "undecided", "tailState": "waiting", "nextUtterancePolicy": "languageGate", "restartWindowMs": 500 }
     },
     {
       "name": "late transcript at 450 ms restarts 500 ms window",
       "input": { "event": "late.transcript", "arrivalAfterVadEndMs": 450, "restartMs": 500 },
-      "expected": { "currentUtteranceRoute": "pending", "nextUtteranceRoute": "undecided", "restartWindowMs": 500 }
+      "expected": { "gateDecision": "undecided", "tailState": "waiting", "nextUtterancePolicy": "languageGate", "restartWindowMs": 500 }
     },
     {
       "name": "recovery during utterance remains original fail open until next utterance",
-      "input": { "currentUtteranceRoute": "originalFailOpen", "recoveryEvent": "connected" },
-      "expected": { "currentUtteranceRoute": "originalFailOpen", "nextUtteranceRoute": "normalGate" }
+      "input": { "inboundRoute": "originalFailOpen", "recoveryEvent": "connected" },
+      "expected": { "inboundRoute": "originalFailOpen", "gateDecision": "original", "tailState": "draining", "nextUtterancePolicy": "languageGate" }
     }
   ]
 }
