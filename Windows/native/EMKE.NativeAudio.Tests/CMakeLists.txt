@@ -1,6 +1,9 @@
 add_executable(EMKE.NativeAudio.Tests
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
+  ../EMKE.NativeAudio/src/pcm_converter.cpp
   src/abi_tests.cpp
+  src/pcm_converter_tests.cpp
+  src/spsc_ring_tests.cpp
   src/test_main.cpp
 )
 
@@ -8,9 +11,14 @@ target_link_libraries(EMKE.NativeAudio.Tests PRIVATE EMKE.NativeAudio)
 target_include_directories(EMKE.NativeAudio.Tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
 )
+target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
+  EMKE_AUDIO_PCM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/../../../Shared/TestVectors/Audio"
+)
 
 add_test(NAME EMKE.NativeAudio.Abi COMMAND EMKE.NativeAudio.Tests Abi)
 add_test(NAME EMKE.NativeAudio.FakeBackend COMMAND EMKE.NativeAudio.Tests FakeBackend)
+add_test(NAME EMKE.NativeAudio.Ring COMMAND EMKE.NativeAudio.Tests Ring)
+add_test(NAME EMKE.NativeAudio.PCM COMMAND EMKE.NativeAudio.Tests PCM)
 
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp

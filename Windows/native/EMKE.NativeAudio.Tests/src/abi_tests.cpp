@@ -17,6 +17,9 @@ struct RegisteredTest {
   int (*function)();
 };
 
+int run_spsc_ring_tests();
+int run_pcm_converter_tests();
+
 namespace {
 
 template <typename Type, typename = void>
@@ -805,6 +808,8 @@ std::span<const RegisteredTest> registered_tests() {
       RegisteredTest{"Abi", "versioned C ABI", &run_abi_tests},
       RegisteredTest{
           "FakeBackend", "deterministic fake backend", &run_fake_backend_tests},
+      RegisteredTest{"Ring", "bounded SPSC block ring", &run_spsc_ring_tests},
+      RegisteredTest{"PCM", "streaming PCM converter", &run_pcm_converter_tests},
   };
   return tests;
 }

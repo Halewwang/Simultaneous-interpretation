@@ -2,6 +2,7 @@ add_library(EMKE.NativeAudio SHARED
   src/audio_runtime.cpp
   src/fake_audio_backend.cpp
   src/native_audio_api.cpp
+  src/pcm_converter.cpp
 )
 
 target_compile_definitions(EMKE.NativeAudio PRIVATE EMKE_NATIVE_AUDIO_EXPORTS)
