@@ -141,7 +141,51 @@ public struct NetworkPCMEncoder: Sendable {
     }
 }
 
+private struct StreamingMonoInterpolator2x: Sendable {
+    private static let phases: (even: [Float], odd: [Float]) = {
+        let tapCount = 127
+        let midpoint = Double(tapCount - 1) * 0.5
+        let cutoff = 0.25
+        var taps = (0..<tapCount).map { index -> Double in
+            let distance = Double(index) - midpoint
+            let sinc = distance == 0
+                ? 2 * cutoff
+                : sin(2 * Double.pi * cutoff * distance)
+                    / (Double.pi * distance)
+            let window = 0.42
+                - 0.5 * cos(2 * .pi * Double(index) / Double(tapCount - 1))
+                + 0.08 * cos(4 * .pi * Double(index) / Double(tapCount - 1))
+            return sinc * window
+        }
+        let gain = 2 / taps.reduce(0, +)
+        taps = taps.map { $0 * gain }
+        return (
+            stride(from: 0, to: tapCount, by: 2).map { Float(taps[$0]) },
+            stride(from: 1, to: tapCount, by: 2).map { Float(taps[$0]) }
+        )
+    }()
+
+    private var history = Array(repeating: Float.zero, count: 64)
+
+    mutating func append(_ sample: Float) -> (even: Float, odd: Float) {
+        history.removeLast()
+        history.insert(sample, at: 0)
+        return (
+            convolve(phase: Self.phases.even),
+            convolve(phase: Self.phases.odd)
+        )
+    }
+
+    private func convolve(phase: [Float]) -> Float {
+        zip(history, phase).reduce(0) { result, pair in
+            result + pair.0 * pair.1
+        }
+    }
+}
+
 public struct NetworkPCMDecoder: Sendable {
+    private var interpolator = StreamingMonoInterpolator2x()
+
     public init() {}
 
     public mutating func append24kMonoPCM16(
@@ -163,10 +207,11 @@ public struct NetworkPCMDecoder: Sendable {
                 ? -1
                 : Float(signed) / Float(Int16.max)
 
-            result.append(sample)
-            result.append(sample)
-            result.append(sample)
-            result.append(sample)
+            let interpolated = interpolator.append(sample)
+            result.append(interpolated.even)
+            result.append(interpolated.even)
+            result.append(interpolated.odd)
+            result.append(interpolated.odd)
             index = pcm16.index(after: nextIndex)
         }
         return result

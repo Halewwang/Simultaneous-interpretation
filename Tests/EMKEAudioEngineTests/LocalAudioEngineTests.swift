@@ -173,6 +173,18 @@ func start(_ harness: EngineHarness) async throws {
     )
 }
 
+private func constantPCM16(_ sample: Int16, count: Int) -> Data {
+    var result = Data()
+    result.reserveCapacity(count * 2)
+    for _ in 0..<count {
+        var littleEndian = sample.littleEndian
+        withUnsafeBytes(of: &littleEndian) {
+            result.append(contentsOf: $0)
+        }
+    }
+    return result
+}
+
 @Test func startCreatesAndStartsAllFourEndpointsOnce() async throws {
     let harness = makeHarness()
 
@@ -259,16 +271,23 @@ func start(_ harness: EngineHarness) async throws {
 
     await harness.engine.processOnceForTesting()
     try await harness.engine.enqueueInboundTranslation(
-        Data([0xff, 0x7f])
+        constantPCM16(.max, count: 80)
     )
     try await harness.engine.enqueueOutboundTranslation(
-        Data([0x00, 0x80])
+        constantPCM16(.min, count: 80)
     )
 
-    #expect(harness.factory.physicalOutput.writes == [[1, 1, 1, 1]])
+    #expect(harness.factory.physicalOutput.writes.first?.count == 320)
     #expect(
-        harness.factory.virtualMicrophoneOutput.writes
-            == [[-1, -1, -1, -1]]
+        abs((harness.factory.physicalOutput.writes.first?.last ?? 0) - 1)
+            < 0.0001
+    )
+    #expect(
+        harness.factory.virtualMicrophoneOutput.writes.first?.count == 320
+    )
+    #expect(
+        abs((harness.factory.virtualMicrophoneOutput.writes.first?.last ?? 0)
+            + 1) < 0.0001
     )
     await harness.engine.stop()
 }
@@ -289,10 +308,14 @@ func start(_ harness: EngineHarness) async throws {
     try await harness.engine.enqueueInboundTranslation(pcm16)
     try await harness.engine.enqueueOutboundTranslation(pcm16)
 
-    #expect(harness.factory.physicalOutput.writes.first?.count == 19_200 * 2)
+    let expectedStereoSampleCount = pcm16.count / 2 * 4
+    #expect(
+        harness.factory.physicalOutput.writes.first?.count
+            == expectedStereoSampleCount
+    )
     #expect(
         harness.factory.virtualMicrophoneOutput.writes.first?.count
-            == 19_200 * 2
+            == expectedStereoSampleCount
     )
     await harness.engine.stop()
 }
@@ -306,10 +329,14 @@ func start(_ harness: EngineHarness) async throws {
     )
 
     try await harness.engine.enqueueInboundOutput(
-        Data([0xff, 0x7f])
+        constantPCM16(.max, count: 80)
     )
 
-    #expect(harness.factory.physicalOutput.writes == [[1, 1, 1, 1]])
+    #expect(harness.factory.physicalOutput.writes.first?.count == 320)
+    #expect(
+        abs((harness.factory.physicalOutput.writes.first?.last ?? 0) - 1)
+            < 0.0001
+    )
     await harness.engine.stop()
 }
 

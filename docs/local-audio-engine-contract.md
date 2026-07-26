@@ -22,7 +22,7 @@ Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtu
 - Each worker cycle processes at most 480 frames, or 10 ms at 48 kHz.
 - The default endpoint ring capacity is 4,800 frames, or 100 ms.
 - Translation input/output uses 24,000 Hz, mono, signed little-endian PCM16.
-- Encoding downmixes stereo, applies a two-frame averaging filter, and downsamples 2:1. Decoding converts each PCM16 sample to Float32 and duplicates it across two frames and two channels.
+- Encoding downmixes stereo, applies a two-frame averaging filter, and downsamples 2:1. Decoding converts PCM16 to stereo Float32 and uses a streaming 127-tap Blackman-windowed half-band FIR to interpolate 24 kHz to 48 kHz. The filter adds about 1.31 ms of fixed group delay and suppresses the high-frequency image that zero-order sample repetition would make audible.
 - Conversion runs on the Swift audio worker, never in an AUHAL callback.
 
 ## Real-Time Boundary
