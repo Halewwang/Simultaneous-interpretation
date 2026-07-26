@@ -12,9 +12,9 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <thread>
-#include <utility>
 #include <vector>
 
 namespace emke::audio {
@@ -658,6 +658,12 @@ class AudioWorker::Impl {
     stop_requested_.store(false, std::memory_order_release);
     running_.store(true, std::memory_order_release);
     try {
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+      if (fail_next_thread_start_for_test_.exchange(
+              false, std::memory_order_acq_rel)) {
+        throw std::bad_alloc{};
+      }
+#endif
       worker_thread_ = std::thread([this] {
         while (!stop_requested_.load(std::memory_order_acquire)) {
           if (publish_stream_failures()) {
@@ -670,7 +676,14 @@ class AudioWorker::Impl {
         running_.store(false, std::memory_order_release);
       });
     } catch (...) {
+      stop_requested_.store(true, std::memory_order_release);
       running_.store(false, std::memory_order_release);
+      rollback_direction_after_start_failure(inbound_);
+      rollback_direction_after_start_failure(outbound_);
+      physical_output_converter_.reset();
+      app_microphone_converter_.reset();
+      events_.clear();
+      reported_stream_failures_.fill(StreamFailure{});
       return EMKE_AUDIO_INTERNAL_ERROR;
     }
     return EMKE_AUDIO_OK;
@@ -694,6 +707,13 @@ class AudioWorker::Impl {
   [[nodiscard]] bool running() const noexcept {
     return running_.load(std::memory_order_acquire);
   }
+
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  void fail_next_thread_start_for_test() noexcept {
+    fail_next_thread_start_for_test_.store(
+        true, std::memory_order_release);
+  }
+#endif
 
   [[nodiscard]] bool process_once() noexcept {
     if (publish_stream_failures()) {
@@ -882,6 +902,18 @@ class AudioWorker::Impl {
     state.active_route.store(
         state.requested_route, std::memory_order_release);
     state.active_generation = state.requested_generation;
+  }
+
+  void rollback_direction_after_start_failure(
+      DirectionState& state) noexcept {
+    const std::lock_guard translation_lock(state.translation_mutex);
+    state.encoder.reset();
+    state.batch_size = 0u;
+    state.captures.clear();
+    state.input_converter.reset();
+    state.active_route.store(
+        EMKE_AUDIO_ROUTE_STOPPED, std::memory_order_release);
+    state.active_generation = 0u;
   }
 
   void reset_direction_after_stop(DirectionState& state) noexcept {
@@ -1306,6 +1338,9 @@ class AudioWorker::Impl {
   std::thread worker_thread_;
   std::atomic<bool> running_{false};
   std::atomic<bool> stop_requested_{false};
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  std::atomic<bool> fail_next_thread_start_for_test_{false};
+#endif
   std::uint64_t next_event_sequence_ = 1u;
   std::atomic<std::uint64_t> captured_inbound_frames_{0u};
   std::atomic<std::uint64_t> captured_outbound_frames_{0u};
@@ -1344,6 +1379,12 @@ emke_audio_status AudioWorker::stop() {
 bool AudioWorker::running() const noexcept {
   return impl_->running();
 }
+
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+void AudioWorker::fail_next_thread_start_for_test() noexcept {
+  impl_->fail_next_thread_start_for_test();
+}
+#endif
 
 bool AudioWorker::process_once() noexcept {
   return impl_->process_once();

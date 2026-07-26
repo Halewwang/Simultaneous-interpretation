@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -233,6 +234,64 @@ struct WorkerHarness {
   emke::audio::FakeAudioStream physical_microphone;
   emke::audio::AudioWorker worker;
 };
+
+void test_worker_thread_start_failure_rolls_back_to_stopped(
+    TestContext& context) {
+  WorkerHarness harness;
+  const std::vector<std::int16_t> primed(240u, 8'000);
+  EXPECT(
+      context,
+      harness.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_ORIGINAL_BYPASS) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      harness.worker.enqueue_translation(
+          emke::audio::Direction::Inbound, primed) == EMKE_AUDIO_OK);
+  EXPECT(
+      context,
+      harness.worker.set_route(
+          emke::audio::Direction::Inbound,
+          EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+  harness.worker.fail_next_thread_start_for_test();
+
+  emke::audio::AudioPipelineLifecycle lifecycle{
+      harness.physical_output,
+      harness.app_microphone,
+      harness.app_speaker,
+      harness.physical_microphone,
+      harness.worker,
+  };
+  EXPECT(context, lifecycle.start() == EMKE_AUDIO_INTERNAL_ERROR);
+  EXPECT(context, !lifecycle.running());
+  EXPECT(context, !harness.worker.running());
+  EXPECT(context, !harness.physical_output.running());
+  EXPECT(context, !harness.app_microphone.running());
+  EXPECT(context, !harness.app_speaker.running());
+  EXPECT(context, !harness.physical_microphone.running());
+
+  emke_audio_diagnostics diagnostics{};
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.is_running == 0u);
+  EXPECT(context, diagnostics.inbound_route == EMKE_AUDIO_ROUTE_STOPPED);
+  EXPECT(context, diagnostics.outbound_route == EMKE_AUDIO_ROUTE_STOPPED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 240u);
+
+  emke::audio::AudioEvent event;
+  EXPECT(
+      context,
+      harness.worker.poll_event(event, 0u) == EMKE_AUDIO_NOT_RUNNING);
+  EXPECT(context, event.kind == EMKE_AUDIO_EVENT_NONE);
+
+  EXPECT(context, lifecycle.start() == EMKE_AUDIO_OK);
+  harness.worker.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.is_running == 1u);
+  EXPECT(
+      context,
+      diagnostics.inbound_route == EMKE_AUDIO_ROUTE_TRANSLATED);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 240u);
+  EXPECT(context, lifecycle.stop() == EMKE_AUDIO_OK);
+}
 
 void test_virtual_format_contract(TestContext& context) {
   const emke::audio::AudioFormat expected{
@@ -778,6 +837,141 @@ void test_async_stream_failure_is_bounded_and_restartable(
   EXPECT(context, harness.worker.stop() == EMKE_AUDIO_OK);
 }
 
+void test_production_async_failure_snapshot_is_coherent_under_concurrency(
+    TestContext& context) {
+  emke::audio::AsyncStreamFailureState state;
+  constexpr std::uint32_t rounds = 20'000u;
+  std::atomic<std::uint32_t> phase{0u};
+  std::atomic<std::uint32_t> reader_ready{0u};
+  std::atomic<std::uint32_t> acknowledged{0u};
+  std::atomic<std::uint32_t> violations{0u};
+  std::atomic<std::uint32_t> rejected_first_records{0u};
+
+  std::thread writer([&] {
+    for (std::uint32_t round = 1u; round <= rounds; ++round) {
+      while (acknowledged.load(std::memory_order_acquire) != round - 1u) {
+        std::this_thread::yield();
+      }
+      state.reset();
+      phase.store(round, std::memory_order_release);
+      while (reader_ready.load(std::memory_order_acquire) != round) {
+        std::this_thread::yield();
+      }
+      const auto operation =
+          round % 2u == 0u
+              ? emke::audio::StreamFailure::Operation::getBuffer
+              : emke::audio::StreamFailure::Operation::releaseBuffer;
+      if (!state.record_first(
+              operation, -static_cast<std::int32_t>(round))) {
+        rejected_first_records.fetch_add(1u, std::memory_order_relaxed);
+      }
+    }
+  });
+
+  std::thread reader([&] {
+    for (std::uint32_t round = 1u; round <= rounds; ++round) {
+      while (phase.load(std::memory_order_acquire) != round) {
+        std::this_thread::yield();
+      }
+      reader_ready.store(round, std::memory_order_release);
+      emke::audio::StreamFailure observed;
+      do {
+        observed = state.snapshot(
+            emke::audio::StreamRole::appSpeakerCapture);
+        if (observed.operation ==
+            emke::audio::StreamFailure::Operation::none) {
+          std::this_thread::yield();
+        }
+      } while (
+          observed.operation ==
+          emke::audio::StreamFailure::Operation::none);
+      const auto expected_operation =
+          round % 2u == 0u
+              ? emke::audio::StreamFailure::Operation::getBuffer
+              : emke::audio::StreamFailure::Operation::releaseBuffer;
+      if (observed.operation != expected_operation ||
+          observed.role !=
+              emke::audio::StreamRole::appSpeakerCapture ||
+          observed.native_code !=
+              -static_cast<std::int32_t>(round)) {
+        violations.fetch_add(1u, std::memory_order_relaxed);
+      }
+      acknowledged.store(round, std::memory_order_release);
+    }
+  });
+
+  writer.join();
+  reader.join();
+  EXPECT(context, violations.load(std::memory_order_relaxed) == 0u);
+  EXPECT(
+      context,
+      rejected_first_records.load(std::memory_order_relaxed) == 0u);
+
+  state.reset();
+  std::atomic<bool> launch_competitors{false};
+  std::atomic<std::uint32_t> winner_count{0u};
+  std::atomic<std::uint32_t> winner_id{0u};
+  const auto compete = [&](std::uint32_t id,
+                           emke::audio::StreamFailure::Operation operation,
+                           std::int32_t native_code) {
+    while (!launch_competitors.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    if (state.record_first(operation, native_code)) {
+      winner_id.store(id, std::memory_order_relaxed);
+      winner_count.fetch_add(1u, std::memory_order_relaxed);
+    }
+  };
+  std::thread first_competitor{
+      compete,
+      1u,
+      emke::audio::StreamFailure::Operation::getBuffer,
+      -111};
+  std::thread second_competitor{
+      compete,
+      2u,
+      emke::audio::StreamFailure::Operation::waitForEvent,
+      -222};
+  launch_competitors.store(true, std::memory_order_release);
+  first_competitor.join();
+  second_competitor.join();
+
+  const emke::audio::StreamFailure first = state.snapshot(
+      emke::audio::StreamRole::appSpeakerCapture);
+  EXPECT(context, winner_count.load(std::memory_order_relaxed) == 1u);
+  if (winner_id.load(std::memory_order_relaxed) == 1u) {
+    EXPECT(
+        context,
+        first.operation ==
+            emke::audio::StreamFailure::Operation::getBuffer);
+    EXPECT(context, first.native_code == -111);
+  } else {
+    EXPECT(context, winner_id.load(std::memory_order_relaxed) == 2u);
+    EXPECT(
+        context,
+        first.operation ==
+            emke::audio::StreamFailure::Operation::waitForEvent);
+    EXPECT(context, first.native_code == -222);
+  }
+  EXPECT(
+      context,
+      !state.record_first(
+          emke::audio::StreamFailure::Operation::waitForEvent, -99));
+  const emke::audio::StreamFailure retained = state.snapshot(
+      emke::audio::StreamRole::appSpeakerCapture);
+  EXPECT(context, retained.operation == first.operation);
+  EXPECT(context, retained.native_code == first.native_code);
+  state.reset();
+  const emke::audio::StreamFailure reset = state.snapshot(
+      emke::audio::StreamRole::physicalOutput);
+  EXPECT(
+      context,
+      reset.operation ==
+          emke::audio::StreamFailure::Operation::none);
+  EXPECT(context, reset.role == emke::audio::StreamRole::physicalOutput);
+  EXPECT(context, reset.native_code == 0);
+}
+
 void test_event_queue_is_fixed_at_64(TestContext& context) {
   WorkerHarness harness;
   EXPECT(
@@ -1033,6 +1227,7 @@ int run_audio_lifecycle_tests() {
 
 int run_audio_worker_tests() {
   TestContext context;
+  test_worker_thread_start_failure_rolls_back_to_stopped(context);
   test_virtual_format_contract(context);
   test_fixed_packet_storage_rejects_oversized_negotiated_formats(context);
   test_native_converter_supports_common_formats_and_chunk_continuity(context);
@@ -1046,6 +1241,8 @@ int run_audio_worker_tests() {
   test_translation_capacity_is_atomic(context);
   test_stop_resets_partial_capture_batch(context);
   test_async_stream_failure_is_bounded_and_restartable(context);
+  test_production_async_failure_snapshot_is_coherent_under_concurrency(
+      context);
   test_event_queue_is_fixed_at_64(context);
   test_raw_callbacks_are_bounded_and_silent_safe(context);
   test_wasapi_adapter_enforces_initialization_order(context);

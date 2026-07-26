@@ -142,6 +142,20 @@ struct StreamFailure {
   std::int32_t native_code = 0;
 };
 
+class AsyncStreamFailureState {
+ public:
+  [[nodiscard]] bool record_first(
+      StreamFailure::Operation operation,
+      std::int32_t native_code) noexcept;
+  void reset() noexcept;
+  [[nodiscard]] StreamFailure snapshot(StreamRole role) const noexcept;
+
+ private:
+  std::atomic<std::uint64_t> snapshot_{0u};
+};
+
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+
 class RealtimeInstrumentation {
  public:
   class Scope {

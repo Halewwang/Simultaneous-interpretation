@@ -1,6 +1,7 @@
 #include "wasapi_stream.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -213,6 +214,49 @@ std::size_t RawPacketQueue::size() const noexcept {
   const std::size_t read = read_index_.load(std::memory_order_acquire);
   const std::size_t write = write_index_.load(std::memory_order_acquire);
   return write - read;
+}
+
+bool AsyncStreamFailureState::record_first(
+    StreamFailure::Operation operation,
+    std::int32_t native_code) noexcept {
+  if (operation == StreamFailure::Operation::none) {
+    return false;
+  }
+  const std::uint64_t encoded =
+      (static_cast<std::uint64_t>(
+           std::bit_cast<std::uint32_t>(native_code))
+       << 32u) |
+      static_cast<std::uint8_t>(operation);
+  std::uint64_t expected = 0u;
+  return snapshot_.compare_exchange_strong(
+      expected,
+      encoded,
+      std::memory_order_release,
+      std::memory_order_relaxed);
+}
+
+void AsyncStreamFailureState::reset() noexcept {
+  snapshot_.store(0u, std::memory_order_release);
+}
+
+StreamFailure AsyncStreamFailureState::snapshot(
+    StreamRole role) const noexcept {
+  const std::uint64_t encoded =
+      snapshot_.load(std::memory_order_acquire);
+  if (encoded == 0u) {
+    return {
+        .operation = StreamFailure::Operation::none,
+        .role = role,
+        .native_code = 0,
+    };
+  }
+  return {
+      .operation = static_cast<StreamFailure::Operation>(
+          static_cast<std::uint8_t>(encoded)),
+      .role = role,
+      .native_code = std::bit_cast<std::int32_t>(
+          static_cast<std::uint32_t>(encoded >> 32u)),
+  };
 }
 
 RealtimeInstrumentation::Scope::Scope() noexcept {
@@ -711,9 +755,7 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
 #endif
     failure_cache_ = {};
     failure_cache_.role = role_;
-    async_failure_operation_.store(
-        StreamFailure::Operation::none, std::memory_order_release);
-    async_failure_code_.store(0, std::memory_order_release);
+    async_failure_.reset();
     return initialize_wasapi_stream(
         *this, role_, exact_virtual_, failure_cache_);
   }
@@ -1000,12 +1042,9 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   [[nodiscard]] StreamFailure last_failure() const noexcept {
     StreamFailure result = failure_cache_;
     result.role = role_;
-    const auto operation =
-        async_failure_operation_.load(std::memory_order_acquire);
-    if (operation != StreamFailure::Operation::none) {
-      result.operation = operation;
-      result.native_code =
-          async_failure_code_.load(std::memory_order_acquire);
+    const StreamFailure async = async_failure_.snapshot(role_);
+    if (async.operation != StreamFailure::Operation::none) {
+      return async;
     }
     return result;
   }
@@ -1020,9 +1059,7 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   std::atomic<std::uint64_t> dropped_network_frames_{0u};
   std::atomic<std::uint64_t> queue_full_events_{0u};
   StreamFailure failure_cache_{};
-  std::atomic<StreamFailure::Operation> async_failure_operation_{
-      StreamFailure::Operation::none};
-  std::atomic<std::int32_t> async_failure_code_{0};
+  AsyncStreamFailureState async_failure_;
 
 #if defined(_WIN32)
   [[nodiscard]] IAudioClient* audio_client() const noexcept {
@@ -1054,12 +1091,8 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
   void record_failure(
       StreamFailure::Operation operation,
       HRESULT result) noexcept {
-    StreamFailure::Operation expected = StreamFailure::Operation::none;
-    if (async_failure_operation_.compare_exchange_strong(
-            expected, operation, std::memory_order_acq_rel)) {
-      async_failure_code_.store(
-          static_cast<std::int32_t>(result), std::memory_order_release);
-    }
+    static_cast<void>(async_failure_.record_first(
+        operation, static_cast<std::int32_t>(result)));
   }
 
   void event_loop() noexcept {
@@ -1084,7 +1117,7 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
       } else {
         render_event();
       }
-      if (async_failure_operation_.load(std::memory_order_acquire) !=
+      if (async_failure_.snapshot(role_).operation !=
           StreamFailure::Operation::none) {
         break;
       }

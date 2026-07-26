@@ -97,6 +97,9 @@ class AudioWorker final : public Startable {
   emke_audio_status start() override;
   emke_audio_status stop() override;
   [[nodiscard]] bool running() const noexcept override;
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  void fail_next_thread_start_for_test() noexcept;
+#endif
 
   [[nodiscard]] bool process_once() noexcept;
   emke_audio_status set_route(
