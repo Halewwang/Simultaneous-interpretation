@@ -82,6 +82,7 @@ jobs:
           }
           $windowsBuild = [int]$Matches[1]
           $targetOsEligible = $windowsBuild -ge 26200
+          $targetOsEligibleValue = $targetOsEligible.ToString().ToLowerInvariant()
           $runnerImage = if ([string]::IsNullOrWhiteSpace($env:ImageOS)) { "unavailable" } else { $env:ImageOS }
           $runnerImageVersion = if ([string]::IsNullOrWhiteSpace($env:ImageVersion)) { "unavailable" } else { $env:ImageVersion }
 
@@ -99,14 +100,12 @@ jobs:
           ## Proof boundary
 
           ```text
-          targetOsEligible = (Windows build >= 26200)
+          targetOsEligible = $targetOsEligibleValue
           installedWdkProof = pending
           nativeBuild = pending
           driverBuild = pending
           driverInstall = pending
           liveEndpoints = pending
           ```
-
-          - Evaluated target OS eligible: $targetOsEligible
           "@
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
