@@ -47,8 +47,30 @@ function Assert-PathUnderRoot {
         $rootPrefix,
         [System.StringComparison]::OrdinalIgnoreCase
     )) {
-        throw "Refusing to operate outside the repository root: $normalizedCandidate"
+        throw "Refusing to operate outside the required root: $normalizedCandidate"
     }
+}
+
+function Resolve-PinnedTool {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Root,
+
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+
+    $candidate = [System.IO.Path]::GetFullPath(
+        (Join-Path $Root $RelativePath)
+    )
+    Assert-PathUnderRoot -Candidate $candidate -Root $Root
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw "$Description is missing from the restored pinned WDK package: $candidate"
+    }
+    return $candidate
 }
 
 if (-not $IsWindows) {
@@ -104,6 +126,40 @@ Invoke-Checked `
     ) `
     -FailureMessage "Locked NuGet restore failed"
 
+$nugetRoot = if ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
+    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".nuget" "packages"
+} else {
+    $env:NUGET_PACKAGES
+}
+$wdkPackageVersion = "10.0.28000.2526"
+$wdkPlatformVersion = "10.0.28000.0"
+$wdkPackage = [System.IO.Path]::GetFullPath(
+    (Join-Path $nugetRoot "microsoft.windows.wdk.x64" $wdkPackageVersion)
+)
+if (-not (Test-Path -LiteralPath $wdkPackage -PathType Container)) {
+    throw "Locked restore did not materialize the pinned WDK package: $wdkPackage"
+}
+
+$stampInf = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\stampinf.exe" `
+    -Description "stampinf.exe"
+$inf2Cat = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x86\Inf2Cat.exe" `
+    -Description "Inf2Cat.exe"
+$drvCat = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\drvcat.exe" `
+    -Description "drvcat.exe"
+
+$wdkBinRoot = Join-Path $wdkPackage "c" "bin" $wdkPlatformVersion
+$wdkX64Bin = [System.IO.Path]::GetDirectoryName($stampInf)
+$wdkX86Bin = [System.IO.Path]::GetDirectoryName($inf2Cat)
+if ([System.IO.Path]::GetDirectoryName($drvCat) -ne $wdkX64Bin) {
+    throw "Pinned drvcat.exe did not resolve beside stampinf.exe."
+}
+
 Invoke-Checked `
     -Executable $msbuild `
     -Arguments @(
@@ -114,14 +170,17 @@ Invoke-Checked `
         "/p:Configuration=$Configuration",
         "/p:Platform=$Platform",
         "/p:SignMode=Off",
+        "/p:WDKBinRoot=$wdkBinRoot",
+        "/p:InfToolPath=$wdkX64Bin",
+        "/p:InfToolExe=stampinf.exe",
+        "/p:Inf2CatToolPath=$wdkX86Bin",
+        "/p:Inf2CatToolExe=Inf2Cat.exe",
+        "/p:DrvCatToolPath=$wdkX64Bin",
+        "/p:DrvCatToolExe=drvcat.exe",
         "/nologo",
         "/verbosity:minimal"
     ) `
-    -FailureMessage (
-        "Driver MSBuild failed. The pinned WDK NuGet supplies x64 headers, " +
-        "libraries, and tools, but the hosted Visual Studio installation must " +
-        "also supply the WindowsKernelModeDriver10.0 platform targets"
-    )
+    -FailureMessage "Driver MSBuild failed after pinned WDK tool resolution"
 
 $builtDriver = Join-Path $buildOutput "EMKE.VirtualAudio.sys"
 if (-not (Test-Path -LiteralPath $builtDriver -PathType Leaf)) {
@@ -137,23 +196,6 @@ Copy-Item -LiteralPath $builtDriver -Destination $artifactDirectory
 Copy-Item `
     -LiteralPath (Join-Path $projectDirectory "EMKE.VirtualAudio.inf") `
     -Destination $artifactDirectory
-
-$nugetRoot = if ([string]::IsNullOrWhiteSpace($env:NUGET_PACKAGES)) {
-    Join-Path ([Environment]::GetFolderPath("UserProfile")) ".nuget" "packages"
-} else {
-    $env:NUGET_PACKAGES
-}
-$wdkPackage = Join-Path $nugetRoot "microsoft.windows.wdk.x64" "10.0.28000.2526"
-$inf2Cat = Get-ChildItem `
-    -LiteralPath (Join-Path $wdkPackage "c" "bin") `
-    -Filter "Inf2Cat.exe" `
-    -File `
-    -Recurse |
-    Where-Object { $_.FullName -match "[\\/]x86[\\/]Inf2Cat\.exe$" } |
-    Select-Object -ExpandProperty FullName -First 1
-if ([string]::IsNullOrWhiteSpace($inf2Cat)) {
-    throw "Inf2Cat.exe is missing from the restored pinned WDK package."
-}
 
 Invoke-Checked `
     -Executable $inf2Cat `

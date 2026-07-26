@@ -126,7 +126,24 @@ test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never inst
   assert.match(script, /\/os:10_X64/i);
   assert.match(script, /Configuration\s*=\s*"Release"/);
   assert.match(script, /Platform\s*=\s*"x64"/);
+  assert.match(script, /\$wdkPackageVersion\s*=\s*"10\.0\.28000\.2526"/);
+  assert.match(script, /\$wdkPlatformVersion\s*=\s*"10\.0\.28000\.0"/);
+  assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\stampinf\.exe/i);
+  assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x86\\Inf2Cat\.exe/i);
+  assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\drvcat\.exe/i);
+  assert.match(script, /"\/p:WDKBinRoot=\$wdkBinRoot"/);
+  assert.match(script, /"\/p:InfToolPath=\$wdkX64Bin"/);
+  assert.match(script, /"\/p:Inf2CatToolPath=\$wdkX86Bin"/);
+  assert.match(script, /"\/p:DrvCatToolPath=\$wdkX64Bin"/);
+  const restoreOffset = script.indexOf('"/t:Restore"');
+  const pinnedToolOffset = script.indexOf("$stampInf = Resolve-PinnedTool");
+  const rebuildOffset = script.indexOf('"/t:Rebuild"');
+  assert.ok(restoreOffset >= 0 && restoreOffset < pinnedToolOffset);
+  assert.ok(pinnedToolOffset < rebuildOffset);
   assert.doesNotMatch(script, /dotnet\s+build/i);
+  assert.doesNotMatch(script, /Get-Command\s+(?:stampinf|inf2cat|drvcat)/i);
+  assert.doesNotMatch(script, /Windows Kits[\\/]/i);
+  assert.doesNotMatch(script, /Get-ChildItem[\s\S]*-Filter\s+"(?:stampinf|Inf2Cat|drvcat)\.exe"/i);
   assert.doesNotMatch(script, /\b(?:pnputil|devcon|bcdedit)\b/i);
 });
 
