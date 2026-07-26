@@ -13,6 +13,8 @@
     <Configuration>Release</Configuration>
     <Platform>x64</Platform>
     <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
+    <EMKETargetOS>Windows11</EMKETargetOS>
+    <WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode>true</RestoreLockedMode>
   </PropertyGroup>
@@ -22,7 +24,9 @@
     <DriverType>KMDF</DriverType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
-    <TargetVersion>Windows11</TargetVersion>
+    <!-- WDK 10.0.28000 uses Windows10 as its target-family token for Windows 10 and Windows 11. -->
+    <!-- The EMKE Windows 11 floor is enforced by EMKETargetOS and the INF 10.0...26200 model decoration. -->
+    <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />

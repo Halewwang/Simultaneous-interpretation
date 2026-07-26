@@ -40,7 +40,19 @@ test("project is a pinned x64 Windows 11 KMDF driver built by MSBuild", async ()
   assert.match(project, /<PlatformToolset>WindowsKernelModeDriver10\.0<\/PlatformToolset>/);
   assert.match(project, /<ConfigurationType>Driver<\/ConfigurationType>/);
   assert.match(project, /<DriverType>KMDF<\/DriverType>/);
-  assert.match(project, /<TargetVersion>Windows11<\/TargetVersion>/);
+  assert.match(project, /<EMKETargetOS>Windows11<\/EMKETargetOS>/);
+  assert.match(project, /<WindowsTargetPlatformVersion>10\.0\.28000\.0<\/WindowsTargetPlatformVersion>/);
+  assert.match(project, /<TargetVersion>Windows10<\/TargetVersion>/);
+  assert.doesNotMatch(project, /<TargetVersion>Windows11<\/TargetVersion>/);
+  const platformVersionOffset = project.indexOf(
+    "<WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>",
+  );
+  const defaultPropsOffset = project.indexOf(
+    '<Import Project="$(VCTargetsPath)\\Microsoft.Cpp.Default.props" />',
+  );
+  assert.ok(platformVersionOffset >= 0 && platformVersionOffset < defaultPropsOffset);
+  assert.match(project, /<Import Project="\$\(VCTargetsPath\)\\Microsoft\.Cpp\.props" \/>/);
+  assert.match(project, /<Import Project="\$\(VCTargetsPath\)\\Microsoft\.Cpp\.targets" \/>/);
   assert.match(project, /<MinimumVisualStudioVersion>18\.0<\/MinimumVisualStudioVersion>/);
   assert.match(project, /<Platform>x64<\/Platform>/);
   assert.match(project, /Include="Microsoft\.Windows\.WDK\.x64"/);
@@ -59,6 +71,7 @@ test("project is a pinned x64 Windows 11 KMDF driver built by MSBuild", async ()
 test("INF freezes the root identity, driver ABI, roles, and endpoint names", async () => {
   const inf = await text("EMKE.VirtualAudio.inf");
   assert.match(inf, /ROOT\\EMKEVIRTUALAUDIO/i);
+  assert.match(inf, /NTamd64\.10\.0\.\.\.26200/);
   assert.match(inf, /DriverAbi[^\\r\\n]*0x00000001/i);
   assert.match(inf, /EMKE Virtual Speaker/);
   assert.match(inf, /EMKE Virtual Microphone/);
