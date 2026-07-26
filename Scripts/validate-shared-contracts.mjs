@@ -147,26 +147,31 @@ function sameArray(actual, expected) {
     && actual.every((value, index) => value === expected[index]);
 }
 
-function inspectDecodedJson(value, findings) {
+function scanDecodedString(value, relativePath) {
+  if (/["']?authorization["']?\s*[:=]/i.test(value)) fail(`${relativePath}: forbidden Authorization key`);
+  if (/(?:["']?(?:api[_ -]?key|access[_ -]?token|secret|token)["']?)\s*[:=]/i.test(value)) fail(`${relativePath}: forbidden secret-like content`);
+  if (/sk-[a-z0-9_-]{16,}/i.test(value)) fail(`${relativePath}: forbidden secret-like content`);
+  if (/(?:^|[^A-Za-z0-9])\/(?:Users|Volumes|private|var|tmp)\//.test(value)) fail(`${relativePath}: forbidden absolute path`);
+  if (/(?:^|[^A-Za-z0-9])[A-Za-z]:\\(?:Users|Windows|ProgramData)\\/.test(value)) fail(`${relativePath}: forbidden absolute path`);
+}
+
+function inspectDecodedJson(value, relativePath) {
   if (typeof value === "string") {
-    if (/["']?authorization["']?\s*[:=]/i.test(value)) findings.add("forbidden Authorization key");
-    if (/(?:["']?(?:api[_ -]?key|access[_ -]?token|secret|token)["']?)\s*[:=]/i.test(value)) findings.add("forbidden secret-like content");
-    if (/sk-[a-z0-9_-]{16,}/i.test(value)) findings.add("forbidden secret-like content");
-    if (/(?:^|[^A-Za-z0-9])\/(?:Users|Volumes|private|var|tmp)\//.test(value)) findings.add("forbidden absolute path");
-    if (/(?:^|[^A-Za-z0-9])[A-Za-z]:\\(?:Users|Windows|ProgramData)\\/.test(value)) findings.add("forbidden absolute path");
+    scanDecodedString(value, relativePath);
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) inspectDecodedJson(item, findings);
+    for (const item of value) inspectDecodedJson(item, relativePath);
     return;
   }
   if (!isObject(value)) return;
 
   for (const [key, nestedValue] of Object.entries(value)) {
+    scanDecodedString(key, relativePath);
     const normalizedKey = key.replace(/[ _-]/g, "").toLowerCase();
-    if (normalizedKey === "authorization") findings.add("forbidden Authorization key");
-    if (["apikey", "accesstoken", "token", "secret"].includes(normalizedKey)) findings.add("forbidden secret-like content");
-    inspectDecodedJson(nestedValue, findings);
+    if (normalizedKey === "authorization") fail(`${relativePath}: forbidden Authorization key`);
+    if (["apikey", "accesstoken", "token", "secret"].includes(normalizedKey)) fail(`${relativePath}: forbidden secret-like content`);
+    inspectDecodedJson(nestedValue, relativePath);
   }
 }
 
@@ -200,9 +205,7 @@ function inspectSharedContent() {
     }
     if (entry.name.endsWith(".json")) {
       try {
-        const findings = new Set();
-        inspectDecodedJson(JSON.parse(content), findings);
-        for (const rule of findings) fail(`${relativePath}: ${rule}`);
+        inspectDecodedJson(JSON.parse(content), relativePath);
       } catch {
         // Invalid JSON is reported by the manifest/inventory validation path.
       }
