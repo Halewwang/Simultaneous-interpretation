@@ -717,7 +717,7 @@ void test_notification_queue_drops_overlong_ids(TestContext& context) {
 
 void test_notification_sequence_stops_before_wrap(TestContext& context) {
   constexpr std::uint64_t last_usable_sequence =
-      std::numeric_limits<std::uint64_t>::max() - 1u;
+      (std::numeric_limits<std::uint64_t>::max)() - 1u;
   emke::audio::DeviceNotificationQueue queue(2u, last_usable_sequence);
   emke::audio::DeviceNotificationReceiver receiver(queue);
 

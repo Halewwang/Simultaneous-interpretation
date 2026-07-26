@@ -8,6 +8,9 @@
  * {3FA64F16-18AF-4E9E-B538-91C1140EC142}, pid 2
  */
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #if defined(_KERNEL_MODE)
 #include <ntddk.h>
 #else

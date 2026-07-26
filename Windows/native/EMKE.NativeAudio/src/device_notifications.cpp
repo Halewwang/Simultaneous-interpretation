@@ -6,6 +6,9 @@
 #include <utility>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <mmdeviceapi.h>
 #include <windows.h>
 
@@ -55,7 +58,8 @@ class DeviceNotificationState {
       }
     } release{producer_gate_};
 
-    if (next_sequence_ == std::numeric_limits<std::uint64_t>::max()) {
+    if (next_sequence_ ==
+        (std::numeric_limits<std::uint64_t>::max)()) {
       dropped_sequence_exhausted_.fetch_add(1u, std::memory_order_relaxed);
       return false;
     }
