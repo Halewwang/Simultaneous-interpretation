@@ -185,6 +185,23 @@ class MmDeviceNotificationRegistration {
 #if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
 void fail_next_notification_registration_shell_allocation_for_testing()
     noexcept;
+
+enum class RegistrationCallTestMode : std::uint8_t {
+  success,
+  returnedFailure,
+  throwsException,
+};
+
+struct RegistrationCallTestResult {
+  bool owner_returned = false;
+  std::uint32_t enumerator_releases = 0u;
+  std::uint32_t client_releases = 0u;
+  std::optional<DeviceCatalogError> error;
+};
+
+[[nodiscard]] RegistrationCallTestResult
+exercise_registration_call_ownership_for_testing(
+    RegistrationCallTestMode mode) noexcept;
 #endif
 
 }  // namespace emke::audio

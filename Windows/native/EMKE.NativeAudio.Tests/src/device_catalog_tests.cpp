@@ -803,6 +803,41 @@ void test_registration_shell_oom_prevents_registrar_side_effect(
   EXPECT(context, probe->unregister_calls == 1);
   EXPECT(context, probe->release_calls == 1);
 }
+
+void test_registration_call_ownership_is_exception_safe(
+    TestContext& context) {
+  const auto success =
+      emke::audio::exercise_registration_call_ownership_for_testing(
+          emke::audio::RegistrationCallTestMode::success);
+  EXPECT(context, success.owner_returned);
+  EXPECT(context, !success.error.has_value());
+  EXPECT(context, success.enumerator_releases == 1u);
+  EXPECT(context, success.client_releases == 1u);
+
+  const auto returned_failure =
+      emke::audio::exercise_registration_call_ownership_for_testing(
+          emke::audio::RegistrationCallTestMode::returnedFailure);
+  EXPECT(context, !returned_failure.owner_returned);
+  EXPECT(context, returned_failure.error.has_value());
+  EXPECT(
+      context,
+      returned_failure.error->operation ==
+          emke::audio::DeviceCatalogOperation::registerNotifications);
+  EXPECT(context, returned_failure.enumerator_releases == 1u);
+  EXPECT(context, returned_failure.client_releases == 1u);
+
+  const auto thrown =
+      emke::audio::exercise_registration_call_ownership_for_testing(
+          emke::audio::RegistrationCallTestMode::throwsException);
+  EXPECT(context, !thrown.owner_returned);
+  EXPECT(context, thrown.error.has_value());
+  EXPECT(
+      context,
+      thrown.error->operation ==
+          emke::audio::DeviceCatalogOperation::unexpectedFailure);
+  EXPECT(context, thrown.enumerator_releases == 1u);
+  EXPECT(context, thrown.client_releases == 1u);
+}
 #endif
 
 void test_registration_destructor_retains_state_after_unregister_failure(
@@ -900,6 +935,7 @@ int run_device_catalog_tests() {
   test_registration_close_retries_and_queue_state_outlives_wrapper(context);
 #if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
   test_registration_shell_oom_prevents_registrar_side_effect(context);
+  test_registration_call_ownership_is_exception_safe(context);
 #endif
   test_registration_destructor_retains_state_after_unregister_failure(context);
   test_concurrent_notification_callbacks_remain_ordered(context);

@@ -256,6 +256,132 @@ DeviceNotificationPumpResult DeviceNotificationPump::drain_and_refresh()
   return result;
 }
 
+namespace {
+
+template <
+    typename RegisterCall,
+    typename FailedResult,
+    typename NativeCode,
+    typename MarkRegistered>
+std::unique_ptr<DeviceNotificationRegistrationBackend>
+complete_registration_call(
+    std::unique_ptr<DeviceNotificationRegistrationBackend> owner,
+    RegisterCall register_call,
+    FailedResult failed_result,
+    NativeCode native_code,
+    MarkRegistered mark_registered,
+    DeviceCatalogError& error) noexcept {
+  try {
+    const auto result = register_call();
+    if (failed_result(result)) {
+      error = DeviceCatalogError{
+          .operation = DeviceCatalogOperation::registerNotifications,
+          .native_code = native_code(result),
+      };
+      return nullptr;
+    }
+  } catch (...) {
+    error = DeviceCatalogError{
+        .operation = DeviceCatalogOperation::unexpectedFailure,
+        .native_code = 0,
+    };
+    return nullptr;
+  }
+
+  static_assert(noexcept(mark_registered()));
+  mark_registered();
+  return owner;
+}
+
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+struct RegistrationReleaseCounts {
+  std::uint32_t enumerator = 0u;
+  std::uint32_t client = 0u;
+};
+
+class TestRegistrationCallBackend final
+    : public DeviceNotificationRegistrationBackend {
+ public:
+  explicit TestRegistrationCallBackend(
+      std::shared_ptr<RegistrationReleaseCounts> counts) noexcept
+      : counts_(std::move(counts)) {}
+
+  ~TestRegistrationCallBackend() override {
+    if (!registered_) {
+      ++counts_->enumerator;
+      ++counts_->client;
+    }
+  }
+
+  void mark_registered() noexcept {
+    registered_ = true;
+  }
+
+  std::optional<DeviceCatalogError> unregister() noexcept override {
+    registered_ = false;
+    return std::nullopt;
+  }
+
+ private:
+  std::shared_ptr<RegistrationReleaseCounts> counts_;
+  bool registered_ = false;
+};
+#endif
+
+}  // namespace
+
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+RegistrationCallTestResult
+exercise_registration_call_ownership_for_testing(
+    RegistrationCallTestMode mode) noexcept {
+  try {
+    auto counts = std::make_shared<RegistrationReleaseCounts>();
+    auto concrete =
+        std::make_unique<TestRegistrationCallBackend>(counts);
+    TestRegistrationCallBackend* const concrete_pointer = concrete.get();
+    std::unique_ptr<DeviceNotificationRegistrationBackend> owner =
+        std::move(concrete);
+    DeviceCatalogError error;
+
+    auto completed = complete_registration_call(
+        std::move(owner),
+        [mode]() -> std::int32_t {
+          if (mode == RegistrationCallTestMode::throwsException) {
+            throw 7;
+          }
+          return mode == RegistrationCallTestMode::returnedFailure ? -42 : 0;
+        },
+        [](std::int32_t result) noexcept { return result != 0; },
+        [](std::int32_t result) noexcept { return result; },
+        [concrete_pointer]() noexcept {
+          concrete_pointer->mark_registered();
+        },
+        error);
+
+    const bool owner_returned = completed != nullptr;
+    if (completed != nullptr) {
+      static_cast<void>(completed->unregister());
+      completed.reset();
+    }
+    return RegistrationCallTestResult{
+        .owner_returned = owner_returned,
+        .enumerator_releases = counts->enumerator,
+        .client_releases = counts->client,
+        .error = owner_returned
+                     ? std::optional<DeviceCatalogError>{}
+                     : std::optional<DeviceCatalogError>{error},
+    };
+  } catch (...) {
+    return RegistrationCallTestResult{
+        .error = DeviceCatalogError{
+            .operation = DeviceCatalogOperation::outOfMemory,
+            .native_code = 0,
+        },
+    };
+  }
+}
+#endif
+
 #if defined(_WIN32)
 
 namespace {
@@ -462,23 +588,13 @@ class MmDeviceRegistrar final : public DeviceNotificationRegistrar {
       return nullptr;
     }
 
+    MmDeviceRegistrationBackend* concrete_backend_pointer = nullptr;
+    std::unique_ptr<DeviceNotificationRegistrationBackend> backend;
     try {
       auto concrete_backend = std::make_unique<MmDeviceRegistrationBackend>(
           enumerator, client);
-      MmDeviceRegistrationBackend* const concrete_backend_pointer =
-          concrete_backend.get();
-      std::unique_ptr<DeviceNotificationRegistrationBackend> backend =
-          std::move(concrete_backend);
-      result = enumerator->RegisterEndpointNotificationCallback(client);
-      if (FAILED(result)) {
-        error = DeviceCatalogError{
-            .operation = DeviceCatalogOperation::registerNotifications,
-            .native_code = static_cast<std::int32_t>(result),
-        };
-        return nullptr;
-      }
-      concrete_backend_pointer->mark_registered();
-      return backend;
+      concrete_backend_pointer = concrete_backend.get();
+      backend = std::move(concrete_backend);
     } catch (const std::bad_alloc&) {
       client->Release();
       enumerator->Release();
@@ -496,6 +612,22 @@ class MmDeviceRegistrar final : public DeviceNotificationRegistrar {
       };
       return nullptr;
     }
+
+    return complete_registration_call(
+        std::move(backend),
+        [enumerator, client]() {
+          return enumerator->RegisterEndpointNotificationCallback(client);
+        },
+        [](HRESULT call_result) noexcept {
+          return FAILED(call_result);
+        },
+        [](HRESULT call_result) noexcept {
+          return static_cast<std::int32_t>(call_result);
+        },
+        [concrete_backend_pointer]() noexcept {
+          concrete_backend_pointer->mark_registered();
+        },
+        error);
   }
 };
 
