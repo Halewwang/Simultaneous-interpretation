@@ -121,6 +121,8 @@ test("exactly four endpoint miniports are declared with onboarding-safe names", 
 test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never installs", async () => {
   const script = await readFile(path.join(toolsDirectory, "build-driver.ps1"), "utf8");
   assert.match(script, /MSBuild\.exe/);
+  assert.match(script, /MSBuild\\\*\*\\Bin\\amd64\\MSBuild\.exe/);
+  assert.doesNotMatch(script, /MSBuild\\\*\*\\Bin\\MSBuild\.exe/);
   assert.match(script, /Inf2Cat\.exe/i);
   assert.match(script, /\/driver:/i);
   assert.match(script, /\/os:10_X64/i);
@@ -131,16 +133,28 @@ test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never inst
   assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\stampinf\.exe/i);
   assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x86\\Inf2Cat\.exe/i);
   assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\drvcat\.exe/i);
+  assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\ApiValidator\.exe/i);
+  assert.match(script, /c\\bin\\\$wdkPlatformVersion\\x64\\aitstatic\.exe/i);
+  assert.match(script, /c\\build\\\$wdkPlatformVersion\\bin\\x64\\InfVerif\.dll/i);
+  assert.match(script, /PackageVerifier\.18\.0\.dll/);
   assert.match(script, /"\/p:WDKBinRoot=\$wdkBinRoot"/);
   assert.match(script, /"\/p:InfToolPath=\$wdkX64Bin"/);
   assert.match(script, /"\/p:Inf2CatToolPath=\$wdkX86Bin"/);
   assert.match(script, /"\/p:DrvCatToolPath=\$wdkX64Bin"/);
+  assert.match(script, /"\/p:PROCESSOR_ARCHITECTURE=AMD64"/);
+  assert.match(script, /"\/p:ApiValidator_ApiExtractorExePath=\$wdkX64Bin"/);
+  assert.match(script, /"\/p:ApiValidatorAdditionalOptions=-AitCmdLogEverything:true"/);
+  assert.match(script, /-WorkingDirectory \$wdkBuildTaskRoot/);
   const restoreOffset = script.indexOf('"/t:Restore"');
   const pinnedToolOffset = script.indexOf("$stampInf = Resolve-PinnedTool");
+  const validationRuntimeOffset = script.indexOf("$packageVerifier = Resolve-PinnedTool");
   const rebuildOffset = script.indexOf('"/t:Rebuild"');
   assert.ok(restoreOffset >= 0 && restoreOffset < pinnedToolOffset);
-  assert.ok(pinnedToolOffset < rebuildOffset);
+  assert.ok(pinnedToolOffset < validationRuntimeOffset);
+  assert.ok(validationRuntimeOffset < rebuildOffset);
   assert.doesNotMatch(script, /dotnet\s+build/i);
+  assert.doesNotMatch(script, /SkipPackageVerification\s*=\s*true/i);
+  assert.doesNotMatch(script, /ApiValidator_Enable\s*=\s*false/i);
   assert.doesNotMatch(script, /Get-Command\s+(?:stampinf|inf2cat|drvcat)/i);
   assert.doesNotMatch(script, /Windows Kits[\\/]/i);
   assert.doesNotMatch(script, /Get-ChildItem[\s\S]*-Filter\s+"(?:stampinf|Inf2Cat|drvcat)\.exe"/i);

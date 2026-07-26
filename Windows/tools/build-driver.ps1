@@ -19,12 +19,31 @@ function Invoke-Checked {
         [string[]]$Arguments,
 
         [Parameter(Mandatory)]
-        [string]$FailureMessage
+        [string]$FailureMessage,
+
+        [string]$WorkingDirectory
     )
 
-    & $Executable @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FailureMessage (exit code $LASTEXITCODE)."
+    $previousLocation = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
+                throw "Required working directory is missing: $WorkingDirectory"
+            }
+            $previousLocation = Get-Location
+            Set-Location -LiteralPath $WorkingDirectory
+        }
+
+        & $Executable @Arguments
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($null -ne $previousLocation) {
+            Set-Location -LiteralPath $previousLocation.Path
+        }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "$FailureMessage (exit code $exitCode)."
     }
 }
 
@@ -104,12 +123,12 @@ if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
 $msbuildCandidates = @(
     & $vswhere -latest -products * -version "[18.0,19.0)" `
         -requires Microsoft.Component.MSBuild `
-        -find "MSBuild\**\Bin\MSBuild.exe" 2>$null
+        -find "MSBuild\**\Bin\amd64\MSBuild.exe" 2>$null
 )
 $msbuild = $msbuildCandidates | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($msbuild) -or
     -not (Test-Path -LiteralPath $msbuild -PathType Leaf)) {
-    throw "Visual Studio 18 MSBuild.exe was not found."
+    throw "Visual Studio 18 64-bit MSBuild.exe was not found."
 }
 
 Invoke-Checked `
@@ -152,12 +171,67 @@ $drvCat = Resolve-PinnedTool `
     -Root $wdkPackage `
     -RelativePath "c\bin\$wdkPlatformVersion\x64\drvcat.exe" `
     -Description "drvcat.exe"
+$apiValidator = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\ApiValidator.exe" `
+    -Description "x64 ApiValidator.exe"
+$apiExtractor = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\aitstatic.exe" `
+    -Description "x64 aitstatic.exe"
+$apiValidatorLibrary = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\Microsoft.Kits.Drivers.ApiValidator.dll" `
+    -Description "ApiValidator runtime library"
+$apiLogger = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\Microsoft.Kits.Logger.dll" `
+    -Description "ApiValidator logger"
+$apiSymbols = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\msdia140.dll" `
+    -Description "ApiValidator DIA runtime"
+$apiDebugHelp = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\bin\$wdkPlatformVersion\x64\DbgHelp.dll" `
+    -Description "ApiValidator debug runtime"
+$packageVerifier = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\build\$wdkPlatformVersion\bin\Microsoft.DriverKit.Build.Tasks.PackageVerifier.18.0.dll" `
+    -Description "INF verifier MSBuild task"
+$infVerif = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\build\$wdkPlatformVersion\bin\x64\InfVerif.dll" `
+    -Description "x64 InfVerif runtime"
+$infVerifHlk = Resolve-PinnedTool `
+    -Root $wdkPackage `
+    -RelativePath "c\build\$wdkPlatformVersion\bin\x64\InfVerifHlk.dll" `
+    -Description "x64 InfVerif HLK runtime"
 
 $wdkBinRoot = Join-Path $wdkPackage "c" "bin" $wdkPlatformVersion
 $wdkX64Bin = [System.IO.Path]::GetDirectoryName($stampInf)
 $wdkX86Bin = [System.IO.Path]::GetDirectoryName($inf2Cat)
-if ([System.IO.Path]::GetDirectoryName($drvCat) -ne $wdkX64Bin) {
-    throw "Pinned drvcat.exe did not resolve beside stampinf.exe."
+$wdkBuildTaskRoot = [System.IO.Path]::GetDirectoryName($packageVerifier)
+$validationFiles = @(
+    $drvCat,
+    $apiValidator,
+    $apiExtractor,
+    $apiValidatorLibrary,
+    $apiLogger,
+    $apiSymbols,
+    $apiDebugHelp
+)
+foreach ($validationFile in $validationFiles) {
+    if ([System.IO.Path]::GetDirectoryName($validationFile) -ne $wdkX64Bin) {
+        throw "Pinned x64 validator dependency resolved outside the exact WDK x64 bin."
+    }
+}
+foreach ($infVerifierRuntime in @($infVerif, $infVerifHlk)) {
+    if ([System.IO.Path]::GetDirectoryName(
+        [System.IO.Path]::GetDirectoryName($infVerifierRuntime)
+    ) -ne $wdkBuildTaskRoot) {
+        throw "Pinned InfVerif runtime resolved outside the exact WDK build-task root."
+    }
 }
 
 Invoke-Checked `
@@ -170,6 +244,7 @@ Invoke-Checked `
         "/p:Configuration=$Configuration",
         "/p:Platform=$Platform",
         "/p:SignMode=Off",
+        "/p:PROCESSOR_ARCHITECTURE=AMD64",
         "/p:WDKBinRoot=$wdkBinRoot",
         "/p:InfToolPath=$wdkX64Bin",
         "/p:InfToolExe=stampinf.exe",
@@ -177,10 +252,13 @@ Invoke-Checked `
         "/p:Inf2CatToolExe=Inf2Cat.exe",
         "/p:DrvCatToolPath=$wdkX64Bin",
         "/p:DrvCatToolExe=drvcat.exe",
+        "/p:ApiValidator_ApiExtractorExePath=$wdkX64Bin",
+        "/p:ApiValidatorAdditionalOptions=-AitCmdLogEverything:true",
         "/nologo",
-        "/verbosity:minimal"
+        "/verbosity:normal"
     ) `
-    -FailureMessage "Driver MSBuild failed after pinned WDK tool resolution"
+    -FailureMessage "Driver MSBuild failed after pinned WDK validation-runtime resolution" `
+    -WorkingDirectory $wdkBuildTaskRoot
 
 $builtDriver = Join-Path $buildOutput "EMKE.VirtualAudio.sys"
 if (-not (Test-Path -LiteralPath $builtDriver -PathType Leaf)) {
