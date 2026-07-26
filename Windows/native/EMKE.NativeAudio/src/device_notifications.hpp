@@ -182,6 +182,11 @@ class MmDeviceNotificationRegistration {
     DeviceNotificationQueue& queue) noexcept;
 #endif
 
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+void fail_next_notification_registration_shell_allocation_for_testing()
+    noexcept;
+#endif
+
 }  // namespace emke::audio
 
 #endif

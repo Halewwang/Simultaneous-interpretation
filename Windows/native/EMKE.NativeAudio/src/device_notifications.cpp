@@ -17,6 +17,18 @@
 
 namespace emke::audio {
 
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+namespace {
+std::atomic<bool> fail_next_registration_shell_allocation = false;
+}
+
+void fail_next_notification_registration_shell_allocation_for_testing()
+    noexcept {
+  fail_next_registration_shell_allocation.store(
+      true, std::memory_order_release);
+}
+#endif
+
 class DeviceNotificationState {
  public:
   DeviceNotificationState(
@@ -451,8 +463,12 @@ class MmDeviceRegistrar final : public DeviceNotificationRegistrar {
     }
 
     try {
-      auto backend = std::make_unique<MmDeviceRegistrationBackend>(
+      auto concrete_backend = std::make_unique<MmDeviceRegistrationBackend>(
           enumerator, client);
+      MmDeviceRegistrationBackend* const concrete_backend_pointer =
+          concrete_backend.get();
+      std::unique_ptr<DeviceNotificationRegistrationBackend> backend =
+          std::move(concrete_backend);
       result = enumerator->RegisterEndpointNotificationCallback(client);
       if (FAILED(result)) {
         error = DeviceCatalogError{
@@ -461,7 +477,7 @@ class MmDeviceRegistrar final : public DeviceNotificationRegistrar {
         };
         return nullptr;
       }
-      backend->mark_registered();
+      concrete_backend_pointer->mark_registered();
       return backend;
     } catch (const std::bad_alloc&) {
       client->Release();
@@ -556,20 +572,34 @@ MmDeviceNotificationRegistration::create_with_registrar(
     DeviceNotificationQueue& queue,
     DeviceNotificationRegistrar& registrar,
     DeviceCatalogError& error) noexcept {
-  auto backend = registrar.register_notifications(queue.state_, error);
-  if (backend == nullptr) {
-    return nullptr;
-  }
-  auto* registration =
-      new (std::nothrow) MmDeviceNotificationRegistration(std::move(backend));
-  if (registration == nullptr) {
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  if (fail_next_registration_shell_allocation.exchange(
+          false, std::memory_order_acq_rel)) {
     error = DeviceCatalogError{
         .operation = DeviceCatalogOperation::outOfMemory,
         .native_code = 0,
     };
     return nullptr;
   }
-  return std::unique_ptr<MmDeviceNotificationRegistration>(registration);
+#endif
+  auto* shell =
+      new (std::nothrow) MmDeviceNotificationRegistration(nullptr);
+  if (shell == nullptr) {
+    error = DeviceCatalogError{
+        .operation = DeviceCatalogOperation::outOfMemory,
+        .native_code = 0,
+    };
+    return nullptr;
+  }
+  auto registration =
+      std::unique_ptr<MmDeviceNotificationRegistration>(shell);
+
+  auto backend = registrar.register_notifications(queue.state_, error);
+  if (backend == nullptr) {
+    return nullptr;
+  }
+  registration->backend_ = std::move(backend);
+  return registration;
 }
 
 DeviceNotificationCloseResult MmDeviceNotificationRegistration::close()

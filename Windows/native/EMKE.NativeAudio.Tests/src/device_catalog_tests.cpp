@@ -166,6 +166,7 @@ class FakeNotificationRegistrar final
   register_notifications(
       std::shared_ptr<emke::audio::DeviceNotificationState> state,
       emke::audio::DeviceCatalogError&) noexcept override {
+    ++register_calls;
     try {
       auto backend =
           std::make_unique<FakeRegistrationBackend>(state, probe_);
@@ -179,6 +180,7 @@ class FakeNotificationRegistrar final
 
   FakeRegistrationBackend* last_backend = nullptr;
   std::weak_ptr<emke::audio::DeviceNotificationState> registered_state;
+  int register_calls = 0;
 
  private:
   std::shared_ptr<RegistrationProbe> probe_;
@@ -770,6 +772,39 @@ void test_registration_close_retries_and_queue_state_outlives_wrapper(
   EXPECT(context, registrar.registered_state.expired());
 }
 
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+void test_registration_shell_oom_prevents_registrar_side_effect(
+    TestContext& context) {
+  auto probe = std::make_shared<RegistrationProbe>();
+  FakeNotificationRegistrar registrar(probe);
+  emke::audio::DeviceNotificationQueue queue(2u);
+  emke::audio::DeviceCatalogError error;
+
+  emke::audio::
+      fail_next_notification_registration_shell_allocation_for_testing();
+  auto registration =
+      emke::audio::MmDeviceNotificationRegistration::create_with_registrar(
+          queue, registrar, error);
+  EXPECT(context, registration == nullptr);
+  EXPECT(
+      context,
+      error.operation == emke::audio::DeviceCatalogOperation::outOfMemory);
+  EXPECT(context, registrar.register_calls == 0);
+  EXPECT(context, probe->unregister_calls == 0);
+  EXPECT(context, probe->release_calls == 0);
+
+  registration =
+      emke::audio::MmDeviceNotificationRegistration::create_with_registrar(
+          queue, registrar, error);
+  EXPECT(context, registration != nullptr);
+  EXPECT(context, registrar.register_calls == 1);
+  const auto close = registration->close();
+  EXPECT(context, close.closed);
+  EXPECT(context, probe->unregister_calls == 1);
+  EXPECT(context, probe->release_calls == 1);
+}
+#endif
+
 void test_registration_destructor_retains_state_after_unregister_failure(
     TestContext& context) {
   auto probe = std::make_shared<RegistrationProbe>();
@@ -863,6 +898,9 @@ int run_device_catalog_tests() {
   test_notification_queue_drops_overlong_ids(context);
   test_notification_sequence_stops_before_wrap(context);
   test_registration_close_retries_and_queue_state_outlives_wrapper(context);
+#if defined(EMKE_NATIVE_AUDIO_DEVICE_TESTS)
+  test_registration_shell_oom_prevents_registrar_side_effect(context);
+#endif
   test_registration_destructor_retains_state_after_unregister_failure(context);
   test_concurrent_notification_callbacks_remain_ordered(context);
   return context.failures();
