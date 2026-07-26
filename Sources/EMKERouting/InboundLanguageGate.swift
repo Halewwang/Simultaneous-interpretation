@@ -14,9 +14,9 @@ public struct LanguageHypotheses: Equatable, Sendable {
             let normalized = item.key.lowercased()
             let primaryTag = normalized.split(separator: "-").first
                 .map(String.init) ?? normalized
-            result[primaryTag] = max(
-                result[primaryTag, default: 0],
-                item.value
+            result[primaryTag] = min(
+                1,
+                result[primaryTag, default: 0] + item.value
             )
         }
     }

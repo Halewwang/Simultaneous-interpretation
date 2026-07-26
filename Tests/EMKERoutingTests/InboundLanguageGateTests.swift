@@ -46,12 +46,36 @@ func resetAllowsNextUtteranceToChooseAgain() {
 }
 
 @Test
-func regionalLanguageTagsCollapseToHighestPrimaryTagConfidence() {
+func regionalLanguageTagsAggregateAndClampPrimaryTagConfidence() {
     let hypotheses = LanguageHypotheses([
         "en-US": 0.52,
         "en-GB": 0.81,
         "de-DE": 0.19,
     ])
-    #expect(hypotheses.confidenceByPrimaryTag["en"] == 0.81)
+    #expect(hypotheses.confidenceByPrimaryTag["en"] == 1)
     #expect(hypotheses.confidenceByPrimaryTag["de"] == 0.19)
+}
+
+@Test
+func regionalLanguageTagsAggregateIntoPrimaryTagConfidence() {
+    let hypotheses = LanguageHypotheses([
+        "en-US": 0.52,
+        "en-GB": 0.81,
+        "de-DE": 0.19,
+    ])
+    #expect(hypotheses.confidenceByPrimaryTag["en"] == 1)
+    #expect(hypotheses.confidenceByPrimaryTag["de"] == 0.19)
+}
+
+@Test
+func scriptVariantsContributeToOnePrimaryLanguageDecision() {
+    let hypotheses = LanguageHypotheses([
+        "zh-Hans": 0.411,
+        "zh-Hant": 0.565,
+        "ja": 0.024,
+    ])
+    var gate = InboundLanguageGate(motherLanguage: .chinese)
+
+    #expect(hypotheses.confidenceByPrimaryTag["zh"] == 0.976)
+    #expect(gate.observe(hypotheses) == .original)
 }
