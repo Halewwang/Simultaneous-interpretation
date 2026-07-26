@@ -642,6 +642,50 @@ void test_encoder_maps_non_finite_averages_deterministically(
   EXPECT(context, !raised_invalid);
 }
 
+void test_encoder_avoids_invalid_for_opposite_infinities_in_stereo_frame(
+    TestContext& context) {
+  const float positive_infinity = std::numeric_limits<float>::infinity();
+  const float negative_infinity = -std::numeric_limits<float>::infinity();
+  const std::vector<float> input = {
+      positive_infinity, negative_infinity, 0.0f, 0.0f};
+  std::vector<std::uint8_t> output(2u, 0xa5u);
+  emke::audio::PcmEncoder encoder;
+
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+  const auto result = encoder.process(input, output);
+  const bool raised_invalid = (std::fetestexcept(FE_INVALID) != 0);
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+
+  EXPECT(context, result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, result.output_count == 2u);
+  EXPECT(context, output == std::vector<std::uint8_t>({0x00u, 0x00u}));
+  EXPECT(context, !raised_invalid);
+}
+
+void test_encoder_avoids_invalid_for_opposite_infinities_across_frames(
+    TestContext& context) {
+  const float positive_infinity = std::numeric_limits<float>::infinity();
+  const float negative_infinity = -std::numeric_limits<float>::infinity();
+  const std::vector<float> input = {
+      positive_infinity,
+      positive_infinity,
+      negative_infinity,
+      negative_infinity,
+  };
+  std::vector<std::uint8_t> output(2u, 0xa5u);
+  emke::audio::PcmEncoder encoder;
+
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+  const auto result = encoder.process(input, output);
+  const bool raised_invalid = (std::fetestexcept(FE_INVALID) != 0);
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+
+  EXPECT(context, result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, result.output_count == 2u);
+  EXPECT(context, output == std::vector<std::uint8_t>({0x00u, 0x00u}));
+  EXPECT(context, !raised_invalid);
+}
+
 void test_encoder_odd_frame_chunks_match_contiguous_output(
     TestContext& context) {
   const std::vector<float> input = {
@@ -974,6 +1018,10 @@ int run_pcm_converter_tests() {
     test_fixture_inventory_and_format_constants(context, batching, conversion);
     test_encoder_consumes_fixture_vectors(context, conversion);
     test_encoder_maps_non_finite_averages_deterministically(context);
+    test_encoder_avoids_invalid_for_opposite_infinities_in_stereo_frame(
+        context);
+    test_encoder_avoids_invalid_for_opposite_infinities_across_frames(
+        context);
     test_encoder_odd_frame_chunks_match_contiguous_output(context);
     test_encoder_insufficient_output_preserves_pending_frame_and_destination(
         context);

@@ -45,6 +45,17 @@ emke::audio::PcmBlock block(std::uint32_t frame_count,
   return value;
 }
 
+bool wait_for_start_or_stop(const std::atomic<bool>& start,
+                            std::stop_token stop_token) noexcept {
+  while (!start.load(std::memory_order_acquire)) {
+    if (stop_token.stop_requested()) {
+      return false;
+    }
+    std::this_thread::yield();
+  }
+  return !stop_token.stop_requested();
+}
+
 void test_capacity_is_fixed_after_construction(TestContext& context) {
   emke::audio::SpscBlockRing capture(emke::audio::captureRingBlockCapacity);
   emke::audio::SpscBlockRing playback(
@@ -69,9 +80,9 @@ void test_single_producer_consumer_preserves_order(TestContext& context) {
   std::size_t produced = 0u;
   std::size_t consumed = 0u;
 
-  std::jthread producer([&] {
-    while (!start.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
+  std::jthread producer([&](std::stop_token stop_token) {
+    if (!wait_for_start_or_stop(start, stop_token)) {
+      return;
     }
     for (std::size_t sequence = 0u; sequence < item_count; ++sequence) {
       const auto frame_count = static_cast<std::uint32_t>(
@@ -92,9 +103,9 @@ void test_single_producer_consumer_preserves_order(TestContext& context) {
     }
   });
 
-  std::jthread consumer([&] {
-    while (!start.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
+  std::jthread consumer([&](std::stop_token stop_token) {
+    if (!wait_for_start_or_stop(start, stop_token)) {
+      return;
     }
     for (std::size_t sequence = 0u; sequence < item_count; ++sequence) {
       emke::audio::PcmBlock output;
@@ -127,6 +138,45 @@ void test_single_producer_consumer_preserves_order(TestContext& context) {
   EXPECT(context, consumed == item_count);
   emke::audio::PcmBlock output;
   EXPECT(context, !ring.pop(output));
+}
+
+void test_start_wait_exits_when_stop_requested_before_start(
+    TestContext& context) {
+  std::atomic<bool> start = false;
+  std::atomic<bool> entered = false;
+  std::atomic<bool> exited = false;
+  std::atomic<bool> observed_start = true;
+  std::jthread waiter([&](std::stop_token stop_token) {
+    entered.store(true, std::memory_order_release);
+    observed_start.store(
+        wait_for_start_or_stop(start, stop_token),
+        std::memory_order_release);
+    exited.store(true, std::memory_order_release);
+  });
+
+  const auto enter_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (!entered.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < enter_deadline) {
+    std::this_thread::yield();
+  }
+  waiter.request_stop();
+  const auto stop_deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+  while (!exited.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < stop_deadline) {
+    std::this_thread::yield();
+  }
+  const bool exited_before_start = exited.load(std::memory_order_acquire);
+  if (!exited_before_start) {
+    start.store(true, std::memory_order_release);
+  }
+  waiter.join();
+
+  EXPECT(context, entered.load(std::memory_order_acquire));
+  EXPECT(context, exited_before_start);
+  EXPECT(context, exited.load(std::memory_order_acquire));
+  EXPECT(context, !observed_start.load(std::memory_order_acquire));
 }
 
 void test_push_rejects_frame_counts_outside_block_boundary(
@@ -254,6 +304,7 @@ static_assert(
 int run_spsc_ring_tests() {
   TestContext context;
   test_capacity_is_fixed_after_construction(context);
+  test_start_wait_exits_when_stop_requested_before_start(context);
   test_single_producer_consumer_preserves_order(context);
   test_push_rejects_frame_counts_outside_block_boundary(context);
   test_write_beyond_capacity_fails_without_overwrite(context);

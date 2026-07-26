@@ -9,6 +9,24 @@
 namespace emke::audio {
 namespace {
 
+float safe_average(float first, float second) noexcept {
+  if (std::isnan(first) || std::isnan(second)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+
+  const bool first_is_infinite = std::isinf(first);
+  const bool second_is_infinite = std::isinf(second);
+  if (first_is_infinite || second_is_infinite) {
+    if (first_is_infinite && second_is_infinite &&
+        std::signbit(first) != std::signbit(second)) {
+      return std::numeric_limits<float>::quiet_NaN();
+    }
+    return first_is_infinite ? first : second;
+  }
+
+  return first * 0.5f + second * 0.5f;
+}
+
 std::int16_t float_to_pcm16(float sample) noexcept {
   if (std::isnan(sample)) {
     return 0;
@@ -53,10 +71,9 @@ PcmConversionResult PcmEncoder::process(
   std::size_t output_index = 0u;
   for (std::size_t frame = 0u; frame < local_frames; ++frame) {
     const std::size_t input_index = frame * localChannelCount;
-    const float mono_frame =
-        (interleaved_stereo_48khz[input_index] +
-         interleaved_stereo_48khz[input_index + 1u]) *
-        0.5f;
+    const float mono_frame = safe_average(
+        interleaved_stereo_48khz[input_index],
+        interleaved_stereo_48khz[input_index + 1u]);
     if (!has_pending_mono_frame_) {
       pending_mono_frame_ = mono_frame;
       has_pending_mono_frame_ = true;
@@ -64,7 +81,7 @@ PcmConversionResult PcmEncoder::process(
     }
 
     const std::int16_t pcm16 =
-        float_to_pcm16((pending_mono_frame_ + mono_frame) * 0.5f);
+        float_to_pcm16(safe_average(pending_mono_frame_, mono_frame));
     const std::uint16_t bits = std::bit_cast<std::uint16_t>(pcm16);
     mono_pcm16_24khz_little_endian[output_index] =
         static_cast<std::uint8_t>(bits & 0xffu);
