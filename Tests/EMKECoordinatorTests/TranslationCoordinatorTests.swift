@@ -363,9 +363,9 @@ private func transcriptDelta(_ text: String) -> TranslationTranscriptDelta {
 private func eventually(
     _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
-    for _ in 0..<20_000 {
+    for _ in 0..<2_000 {
         if await condition() { return true }
-        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(1))
     }
     return false
 }
@@ -666,6 +666,62 @@ func transcriptSelectsExactlyOneInboundCandidate() async throws {
     )
     #expect(
         await harness.audio.inboundPlayback == [Data([2, 2])]
+    )
+    await harness.coordinator.stop()
+}
+
+@Test
+func lateContinuousTranslationDeltasExtendTheInboundTailWindow() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.coordinator.start(configuration: harness.configuration)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(
+        await eventually {
+            await harness.inbound.appended.count == 1
+        }
+    )
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([1, 1]))))
+    )
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(
+        await eventually {
+            await harness.audio.inboundPlayback == [Data([1, 1])]
+        }
+    )
+
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    #expect(
+        await eventually {
+            await harness.inbound.appended.count == 31
+        }
+    )
+
+    try await Task.sleep(for: .milliseconds(350))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+    #expect(
+        await eventually {
+            await harness.audio.inboundPlayback.last == Data([2, 2])
+        }
+    )
+
+    try await Task.sleep(for: .milliseconds(250))
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([3, 3]))))
+    )
+    #expect(
+        await eventually {
+            await harness.audio.inboundPlayback.last == Data([3, 3])
+        }
     )
     await harness.coordinator.stop()
 }

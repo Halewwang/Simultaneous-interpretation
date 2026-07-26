@@ -521,6 +521,7 @@ public actor TranslationCoordinator {
             if inboundBuffer.currentRoute == .undecided {
                 scheduleInboundDeadline()
             }
+            extendInboundFinishWindowIfDraining()
         case .inputTranscript(let delta):
             appendText(
                 delta.text,
@@ -535,6 +536,7 @@ public actor TranslationCoordinator {
                     )
                 )
                 cancelDeadlineIfResolved()
+                extendInboundFinishWindowIfDraining()
             }
             publishState()
         case .outputTranscript(let delta):
@@ -542,6 +544,7 @@ public actor TranslationCoordinator {
                 delta.text,
                 to: &state.subtitles.inboundTranslation
             )
+            extendInboundFinishWindowIfDraining()
             publishState()
         case .closed:
             if !isStopping {
@@ -644,6 +647,11 @@ public actor TranslationCoordinator {
             guard !Task.isCancelled, let self else { return }
             await self.finishInboundUtterance()
         }
+    }
+
+    private func extendInboundFinishWindowIfDraining() {
+        guard inboundUtteranceActive, !inboundVAD.isSpeaking else { return }
+        scheduleInboundFinish()
     }
 
     private func finishInboundUtterance() async {
