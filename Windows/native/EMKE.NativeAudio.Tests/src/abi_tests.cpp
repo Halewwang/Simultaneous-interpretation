@@ -19,6 +19,7 @@ struct RegisteredTest {
 
 int run_spsc_ring_tests();
 int run_pcm_converter_tests();
+int run_device_catalog_tests();
 
 namespace {
 
@@ -810,6 +811,9 @@ std::span<const RegisteredTest> registered_tests() {
           "FakeBackend", "deterministic fake backend", &run_fake_backend_tests},
       RegisteredTest{"Ring", "bounded SPSC block ring", &run_spsc_ring_tests},
       RegisteredTest{"PCM", "streaming PCM converter", &run_pcm_converter_tests},
+      RegisteredTest{
+          "Device", "MMDevice catalog and notifications",
+          &run_device_catalog_tests},
   };
   return tests;
 }
