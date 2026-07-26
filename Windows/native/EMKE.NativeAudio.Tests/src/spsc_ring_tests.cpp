@@ -1,11 +1,13 @@
 #include "spsc_ring.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <new>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -57,21 +59,95 @@ void test_capacity_is_fixed_after_construction(TestContext& context) {
 }
 
 void test_single_producer_consumer_preserves_order(TestContext& context) {
+  constexpr std::size_t item_count = 4'096u;
+  constexpr std::uint64_t first_timestamp = 50'000u;
+  emke::audio::SpscBlockRing ring(7u);
+  std::atomic<bool> start = false;
+  std::atomic<bool> failed = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  std::size_t produced = 0u;
+  std::size_t consumed = 0u;
+
+  std::jthread producer([&] {
+    while (!start.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    for (std::size_t sequence = 0u; sequence < item_count; ++sequence) {
+      const auto frame_count = static_cast<std::uint32_t>(
+          sequence % emke::audio::localBlockFrames + 1u);
+      const auto value = block(
+          frame_count,
+          first_timestamp + sequence,
+          static_cast<float>(sequence));
+      while (!ring.push(value)) {
+        if (failed.load(std::memory_order_acquire) ||
+            std::chrono::steady_clock::now() >= deadline) {
+          failed.store(true, std::memory_order_release);
+          return;
+        }
+        std::this_thread::yield();
+      }
+      ++produced;
+    }
+  });
+
+  std::jthread consumer([&] {
+    while (!start.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    for (std::size_t sequence = 0u; sequence < item_count; ++sequence) {
+      emke::audio::PcmBlock output;
+      while (!ring.pop(output)) {
+        if (failed.load(std::memory_order_acquire) ||
+            std::chrono::steady_clock::now() >= deadline) {
+          failed.store(true, std::memory_order_release);
+          return;
+        }
+        std::this_thread::yield();
+      }
+      const auto expected_frame_count = static_cast<std::uint32_t>(
+          sequence % emke::audio::localBlockFrames + 1u);
+      if (output.interleaved_stereo[0] != static_cast<float>(sequence) ||
+          output.frame_count != expected_frame_count ||
+          output.timestamp != first_timestamp + sequence) {
+        failed.store(true, std::memory_order_release);
+        return;
+      }
+      ++consumed;
+    }
+  });
+
+  start.store(true, std::memory_order_release);
+  producer.join();
+  consumer.join();
+
+  EXPECT(context, !failed.load(std::memory_order_acquire));
+  EXPECT(context, produced == item_count);
+  EXPECT(context, consumed == item_count);
+  emke::audio::PcmBlock output;
+  EXPECT(context, !ring.pop(output));
+}
+
+void test_push_rejects_frame_counts_outside_block_boundary(
+    TestContext& context) {
   emke::audio::SpscBlockRing ring(3u);
-  EXPECT(context, ring.push(block(480u, 11u, 1.0f)));
-  EXPECT(context, ring.push(block(479u, 12u, 2.0f)));
-  EXPECT(context, ring.push(block(478u, 13u, 3.0f)));
+
+  EXPECT(context, !ring.push(block(0u, 10u, 0.0f)));
+  EXPECT(context, ring.push(block(480u, 11u, 480.0f)));
+  EXPECT(context, !ring.push(block(481u, 12u, 481.0f)));
+  EXPECT(context, ring.push(block(1u, 13u, 1.0f)));
 
   emke::audio::PcmBlock output;
   EXPECT(context, ring.pop(output));
+  EXPECT(context, output.frame_count == 480u);
   EXPECT(context, output.timestamp == 11u);
-  EXPECT(context, output.interleaved_stereo[0] == 1.0f);
+  EXPECT(context, output.interleaved_stereo[0] == 480.0f);
   EXPECT(context, ring.pop(output));
-  EXPECT(context, output.timestamp == 12u);
-  EXPECT(context, output.interleaved_stereo[0] == 2.0f);
-  EXPECT(context, ring.pop(output));
+  EXPECT(context, output.frame_count == 1u);
   EXPECT(context, output.timestamp == 13u);
-  EXPECT(context, output.interleaved_stereo[0] == 3.0f);
+  EXPECT(context, output.interleaved_stereo[0] == 1.0f);
+  EXPECT(context, !ring.pop(output));
 }
 
 void test_write_beyond_capacity_fails_without_overwrite(
@@ -179,6 +255,7 @@ int run_spsc_ring_tests() {
   TestContext context;
   test_capacity_is_fixed_after_construction(context);
   test_single_producer_consumer_preserves_order(context);
+  test_push_rejects_frame_counts_outside_block_boundary(context);
   test_write_beyond_capacity_fails_without_overwrite(context);
   test_read_from_empty_returns_false(context);
   test_wraparound_preserves_metadata(context);

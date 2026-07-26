@@ -10,12 +10,17 @@ namespace emke::audio {
 namespace {
 
 std::int16_t float_to_pcm16(float sample) noexcept {
-  const float clamped = std::clamp(sample, -1.0f, 1.0f);
-  if (clamped <= -1.0f) {
+  if (std::isnan(sample)) {
+    return 0;
+  }
+  if (sample <= -1.0f) {
     return std::numeric_limits<std::int16_t>::min();
   }
+  if (sample >= 1.0f) {
+    return std::numeric_limits<std::int16_t>::max();
+  }
   return static_cast<std::int16_t>(
-      std::lround(clamped * std::numeric_limits<std::int16_t>::max()));
+      std::lround(sample * std::numeric_limits<std::int16_t>::max()));
 }
 
 float pcm16_to_float(std::int16_t sample) noexcept {

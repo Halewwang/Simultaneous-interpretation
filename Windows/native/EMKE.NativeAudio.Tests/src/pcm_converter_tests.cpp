@@ -1,6 +1,7 @@
 #include "pcm_converter.hpp"
 
 #include <algorithm>
+#include <cfenv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -606,6 +607,147 @@ void test_encoder_consumes_fixture_vectors(TestContext& context,
           "encoder packs signed PCM16 in little endian byte order"));
 }
 
+void test_encoder_maps_non_finite_averages_deterministically(
+    TestContext& context) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float positive_infinity = std::numeric_limits<float>::infinity();
+  const float negative_infinity = -std::numeric_limits<float>::infinity();
+  const std::vector<float> input = {
+      nan,
+      nan,
+      0.0f,
+      0.0f,
+      positive_infinity,
+      positive_infinity,
+      1.0f,
+      1.0f,
+      negative_infinity,
+      negative_infinity,
+      -1.0f,
+      -1.0f,
+  };
+  const std::vector<std::uint8_t> expected = {
+      0x00u, 0x00u, 0xffu, 0x7fu, 0x00u, 0x80u};
+  std::vector<std::uint8_t> output(expected.size(), 0xa5u);
+  emke::audio::PcmEncoder encoder;
+
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+  const auto result = encoder.process(input, output);
+  const bool raised_invalid = (std::fetestexcept(FE_INVALID) != 0);
+  EXPECT(context, std::feclearexcept(FE_ALL_EXCEPT) == 0);
+
+  EXPECT(context, result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, result.output_count == expected.size());
+  EXPECT(context, output == expected);
+  EXPECT(context, !raised_invalid);
+}
+
+void test_encoder_odd_frame_chunks_match_contiguous_output(
+    TestContext& context) {
+  const std::vector<float> input = {
+      0.0f, 0.0f, 0.5f, 0.5f, 1.0f, 1.0f,
+      0.5f, 0.5f, -0.5f, -0.5f, -1.0f, -1.0f};
+  const std::vector<std::uint8_t> expected = {
+      0x00u, 0x20u, 0xffu, 0x5fu, 0x01u, 0xa0u};
+  std::vector<std::uint8_t> contiguous_output(expected.size(), 0xa5u);
+  std::vector<std::uint8_t> chunked_output(expected.size(), 0xa5u);
+
+  emke::audio::PcmEncoder contiguous;
+  const auto contiguous_result =
+      contiguous.process(input, contiguous_output);
+
+  emke::audio::PcmEncoder chunked;
+  const auto first_result = chunked.process(
+      std::span<const float>(input).subspan(0u, 2u),
+      std::span<std::uint8_t>{});
+  const auto second_result = chunked.process(
+      std::span<const float>(input).subspan(2u, 6u),
+      std::span<std::uint8_t>(chunked_output).subspan(0u, 4u));
+  const auto third_result = chunked.process(
+      std::span<const float>(input).subspan(8u, 4u),
+      std::span<std::uint8_t>(chunked_output).subspan(4u, 2u));
+
+  EXPECT(context,
+         contiguous_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, contiguous_result.output_count == expected.size());
+  EXPECT(context, first_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, first_result.output_count == 0u);
+  EXPECT(context,
+         second_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, second_result.output_count == 4u);
+  EXPECT(context, third_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, third_result.output_count == 2u);
+  EXPECT(context, contiguous_output == expected);
+  EXPECT(context, chunked_output == expected);
+  EXPECT(context, chunked_output == contiguous_output);
+}
+
+void test_encoder_insufficient_output_preserves_pending_frame_and_destination(
+    TestContext& context) {
+  const std::vector<float> first_frame = {0.0f, 0.0f};
+  const std::vector<float> second_frame = {0.5f, 0.5f};
+  const std::vector<float> contiguous_input = {0.0f, 0.0f, 0.5f, 0.5f};
+  std::vector<std::uint8_t> insufficient_output(1u, 0xa5u);
+  std::vector<std::uint8_t> retry_output(2u, 0xa5u);
+  std::vector<std::uint8_t> fresh_output(2u, 0xa5u);
+
+  emke::audio::PcmEncoder retry;
+  const auto pending_result =
+      retry.process(first_frame, std::span<std::uint8_t>{});
+  const auto insufficient_result =
+      retry.process(second_frame, insufficient_output);
+  const auto retry_result = retry.process(second_frame, retry_output);
+
+  emke::audio::PcmEncoder fresh;
+  const auto fresh_result = fresh.process(contiguous_input, fresh_output);
+
+  EXPECT(context, pending_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, pending_result.output_count == 0u);
+  EXPECT(context,
+         insufficient_result.status ==
+             emke::audio::PcmConversionStatus::insufficientOutput);
+  EXPECT(context, insufficient_result.output_count == 0u);
+  EXPECT(context, insufficient_output == std::vector<std::uint8_t>{0xa5u});
+  EXPECT(context, retry_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, fresh_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, retry_result.output_count == 2u);
+  EXPECT(context, fresh_result.output_count == 2u);
+  EXPECT(context, retry_output == fresh_output);
+  EXPECT(context, retry_output == std::vector<std::uint8_t>({0x00u, 0x20u}));
+}
+
+void test_decoder_insufficient_output_preserves_history_and_destination(
+    TestContext& context) {
+  const std::vector<std::uint8_t> input = {
+      0x00u, 0x20u, 0xffu, 0x5fu};
+  std::vector<float> insufficient_output(7u, 9.0f);
+  std::vector<float> retry_output(8u, 9.0f);
+  std::vector<float> fresh_output(8u, 9.0f);
+
+  emke::audio::PcmDecoder retry;
+  const auto insufficient_result =
+      retry.process(input, insufficient_output);
+  const auto retry_result = retry.process(input, retry_output);
+
+  emke::audio::PcmDecoder fresh;
+  const auto fresh_result = fresh.process(input, fresh_output);
+
+  EXPECT(context,
+         insufficient_result.status ==
+             emke::audio::PcmConversionStatus::insufficientOutput);
+  EXPECT(context, insufficient_result.output_count == 0u);
+  EXPECT(context,
+         std::all_of(
+             insufficient_output.begin(),
+             insufficient_output.end(),
+             [](float sample) { return sample == 9.0f; }));
+  EXPECT(context, retry_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, fresh_result.status == emke::audio::PcmConversionStatus::ok);
+  EXPECT(context, retry_result.output_count == 8u);
+  EXPECT(context, fresh_result.output_count == 8u);
+  EXPECT(context, retry_output == fresh_output);
+}
+
 void test_decoder_frame_count_pairs_and_odd_input(TestContext& context,
                                                   const JsonValue& conversion) {
   const JsonValue& duplicate_case = case_named(
@@ -752,6 +894,11 @@ void test_400ms_block_produces_complete_local_output(
          result.output_count / emke::audio::localChannelCount * 1'000u /
                  emke::audio::localSampleRate ==
              400u);
+  EXPECT(context,
+         std::all_of(
+             output.begin(),
+             output.end(),
+             [](float sample) { return sample == 0.0f; }));
 }
 
 void test_decoder_reset_clears_fir_history(TestContext& context,
@@ -826,6 +973,12 @@ int run_pcm_converter_tests() {
         load_audio_fixture("pcm-conversion.json", "audio.pcm-conversion.v1");
     test_fixture_inventory_and_format_constants(context, batching, conversion);
     test_encoder_consumes_fixture_vectors(context, conversion);
+    test_encoder_maps_non_finite_averages_deterministically(context);
+    test_encoder_odd_frame_chunks_match_contiguous_output(context);
+    test_encoder_insufficient_output_preserves_pending_frame_and_destination(
+        context);
+    test_decoder_insufficient_output_preserves_history_and_destination(
+        context);
     test_decoder_frame_count_pairs_and_odd_input(context, conversion);
     test_127_tap_blackman_streaming_interpolation(context);
     test_chunked_decode_matches_contiguous_fixture(context, conversion);

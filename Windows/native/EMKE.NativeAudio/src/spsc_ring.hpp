@@ -37,6 +37,9 @@ class SpscBlockRing {
   }
 
   [[nodiscard]] bool push(const PcmBlock& block) noexcept {
+    if (block.frame_count == 0u || block.frame_count > localBlockFrames) {
+      return false;
+    }
     const std::size_t write = write_index_.load(std::memory_order_relaxed);
     const std::size_t read = read_index_.load(std::memory_order_acquire);
     if (storage_.empty() || write - read >= storage_.size()) {
