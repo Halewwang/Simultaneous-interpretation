@@ -16,7 +16,7 @@
   ],
   "properties": {
     "appVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
-    "contractVersion": { "type": "integer", "minimum": 1 },
+    "contractVersion": { "const": 1 },
     "settingsSchemaVersion": { "type": "integer", "minimum": 1 },
     "driverAbiVersion": { "type": "integer", "minimum": 1 },
     "minimumDriverVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
