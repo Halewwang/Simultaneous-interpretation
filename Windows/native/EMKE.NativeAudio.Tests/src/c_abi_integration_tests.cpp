@@ -256,6 +256,58 @@ void test_running_device_failure_is_observable(TestContext& context) {
   emke_audio_destroy(handle);
 }
 
+void test_public_same_route_reassertion_preserves_audio(
+    TestContext& context) {
+  emke_audio_handle* handle = started_handle(context);
+  const std::array<std::int16_t, 2> inbound = {31, 32};
+  const std::array<std::int16_t, 2> outbound = {41, 42};
+  EXPECT(context,
+         emke_audio_enqueue_inbound_translation(
+             handle, inbound.data(), inbound.size()) == EMKE_AUDIO_OK);
+  EXPECT(context,
+         emke_audio_enqueue_outbound_translation(
+             handle, outbound.data(), outbound.size()) == EMKE_AUDIO_OK);
+
+  EXPECT(context,
+         emke_audio_set_inbound_route(
+             handle, EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+  EXPECT(context,
+         emke_audio_set_outbound_route(
+             handle, EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK);
+
+  auto diagnostics = valid_diagnostics();
+  EXPECT(context,
+         emke_audio_get_diagnostics(handle, &diagnostics) == EMKE_AUDIO_OK);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 2u);
+  EXPECT(context, diagnostics.queued_outbound_translation_frames == 2u);
+  EXPECT(context, diagnostics.dropped_frames == 0u);
+
+  std::array<std::int16_t, 2> rendered_inbound{};
+  std::array<std::int16_t, 2> rendered_outbound{};
+  EXPECT(context,
+         emke_audio_test_render_pcm16(
+             handle,
+             EMKE_AUDIO_TEST_DIRECTION_INBOUND,
+             rendered_inbound.data(),
+             rendered_inbound.size()) == EMKE_AUDIO_OK);
+  EXPECT(context,
+         emke_audio_test_render_pcm16(
+             handle,
+             EMKE_AUDIO_TEST_DIRECTION_OUTBOUND,
+             rendered_outbound.data(),
+             rendered_outbound.size()) == EMKE_AUDIO_OK);
+  EXPECT(context, rendered_inbound == inbound);
+  EXPECT(context, rendered_outbound == outbound);
+
+  diagnostics = valid_diagnostics();
+  EXPECT(context,
+         emke_audio_get_diagnostics(handle, &diagnostics) == EMKE_AUDIO_OK);
+  EXPECT(context, diagnostics.consumed_inbound_translation_frames == 2u);
+  EXPECT(context, diagnostics.consumed_outbound_translation_frames == 2u);
+  EXPECT(context, diagnostics.dropped_frames == 0u);
+  emke_audio_destroy(handle);
+}
+
 }  // namespace
 
 int main() {
@@ -264,5 +316,6 @@ int main() {
   test_public_outbound_safety_and_bypass(context);
   test_public_inbound_fail_open_persists(context);
   test_running_device_failure_is_observable(context);
+  test_public_same_route_reassertion_preserves_audio(context);
   return std::min(context.failures(), 255);
 }

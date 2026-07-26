@@ -719,6 +719,62 @@ void test_fake_default_capacity_units(TestContext& context) {
          name);
 }
 
+void test_fake_same_route_reassertion_preserves_audio(TestContext& context) {
+  constexpr std::string_view name =
+      "fake same route reassertion preserves audio";
+
+  emke::audio::FakeAudioBackend backend;
+  EXPECT(context, backend.start() == EMKE_AUDIO_OK, name);
+  const std::array<std::int16_t, 2> inbound = {11, 12};
+  const std::array<std::int16_t, 2> outbound = {21, 22};
+  EXPECT(context,
+         backend.enqueue_translation(
+             emke::audio::Direction::Inbound, inbound) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context,
+         backend.enqueue_translation(
+             emke::audio::Direction::Outbound, outbound) == EMKE_AUDIO_OK,
+         name);
+
+  EXPECT(context,
+         backend.set_route(emke::audio::Direction::Inbound,
+                           EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK,
+         name);
+  EXPECT(context,
+         backend.set_route(emke::audio::Direction::Outbound,
+                           EMKE_AUDIO_ROUTE_TRANSLATED) == EMKE_AUDIO_OK,
+         name);
+
+  auto diagnostics = valid_diagnostics();
+  backend.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.queued_inbound_translation_frames == 2u, name);
+  EXPECT(context, diagnostics.queued_outbound_translation_frames == 2u, name);
+  EXPECT(context, diagnostics.dropped_frames == 0u, name);
+
+  std::array<std::int16_t, 2> rendered_inbound{};
+  std::array<std::int16_t, 2> rendered_outbound{};
+  EXPECT(context,
+         backend.render_translation(
+             emke::audio::Direction::Inbound, rendered_inbound) ==
+             EMKE_AUDIO_OK,
+         name);
+  EXPECT(context,
+         backend.render_translation(
+             emke::audio::Direction::Outbound, rendered_outbound) ==
+             EMKE_AUDIO_OK,
+         name);
+  EXPECT(context, rendered_inbound == inbound, name);
+  EXPECT(context, rendered_outbound == outbound, name);
+
+  diagnostics = valid_diagnostics();
+  backend.write_diagnostics(diagnostics);
+  EXPECT(context, diagnostics.consumed_inbound_translation_frames == 2u, name);
+  EXPECT(context,
+         diagnostics.consumed_outbound_translation_frames == 2u,
+         name);
+  EXPECT(context, diagnostics.dropped_frames == 0u, name);
+}
+
 }  // namespace
 
 int run_abi_tests() {
@@ -740,6 +796,7 @@ int run_fake_backend_tests() {
   test_fake_event_queue_full_is_counted(context);
   test_fake_routes_are_direction_safe_and_persistent(context);
   test_fake_default_capacity_units(context);
+  test_fake_same_route_reassertion_preserves_audio(context);
   return context.failed_assertions();
 }
 

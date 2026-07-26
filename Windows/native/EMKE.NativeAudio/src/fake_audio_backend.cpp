@@ -78,6 +78,9 @@ emke_audio_status FakeAudioBackend::set_route(Direction direction,
   if (!is_direction_safe_route(direction, route_value)) {
     return EMKE_AUDIO_INVALID_ARGUMENT;
   }
+  if (route(direction) == route_value) {
+    return EMKE_AUDIO_OK;
+  }
 
   discard_translation(direction);
   mutable_route(direction) = route_value;
