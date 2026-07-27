@@ -1,6 +1,7 @@
 #ifndef EMKE_DEVICE_CATALOG_HPP
 #define EMKE_DEVICE_CATALOG_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

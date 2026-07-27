@@ -17,8 +17,25 @@ target_compile_definitions(EMKE.NativeAudio.IntegrationHost PRIVATE
 )
 target_include_directories(EMKE.NativeAudio.IntegrationHost
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/include"
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
+  PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
 )
+get_target_property(
+  EMKE_NATIVE_AUDIO_INTEGRATION_HOST_INCLUDE_DIRECTORIES
+  EMKE.NativeAudio.IntegrationHost
+  INCLUDE_DIRECTORIES
+)
+list(FIND
+  EMKE_NATIVE_AUDIO_INTEGRATION_HOST_INCLUDE_DIRECTORIES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  EMKE_NATIVE_AUDIO_INTEGRATION_HOST_SHARED_INCLUDE_INDEX
+)
+if(EMKE_NATIVE_AUDIO_INTEGRATION_HOST_SHARED_INCLUDE_INDEX EQUAL -1)
+  message(FATAL_ERROR
+    "EMKE.NativeAudio.IntegrationHost must include the Windows shared contract directory."
+  )
+endif()
 target_compile_features(EMKE.NativeAudio.IntegrationHost PUBLIC cxx_std_20)
 if(WIN32)
   # IntegrationHost now owns real MMDevice/C ABI discovery objects, so it must
@@ -129,6 +146,19 @@ endif()
 
 add_executable(EMKE.NativeAudio.CAbiIntegration.Tests
   src/c_abi_integration_tests.cpp
+)
+
+add_executable(EMKE.DeviceCatalog.HeaderSelfContainment.Tests
+  src/device_catalog_header_self_containment_tests.cpp
+)
+target_include_directories(EMKE.DeviceCatalog.HeaderSelfContainment.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+)
+target_compile_features(EMKE.DeviceCatalog.HeaderSelfContainment.Tests PRIVATE cxx_std_20)
+add_test(
+  NAME EMKE.DeviceCatalog.HeaderSelfContainment
+  COMMAND EMKE.DeviceCatalog.HeaderSelfContainment.Tests
 )
 target_link_libraries(
   EMKE.NativeAudio.CAbiIntegration.Tests

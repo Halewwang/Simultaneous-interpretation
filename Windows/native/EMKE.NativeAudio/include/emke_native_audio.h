@@ -14,7 +14,8 @@
 #define EMKE_AUDIO_TRANSLATED_QUEUE_CAPACITY_NETWORK_FRAMES 48000u
 
 #if defined(_WIN32)
-#if defined(EMKE_NATIVE_AUDIO_EXPORTS)
+#if defined(EMKE_NATIVE_AUDIO_EXPORTS) || \
+    defined(EMKE_NATIVE_AUDIO_TEST_SEAM_EXPORTS)
 #define EMKE_AUDIO_API __declspec(dllexport)
 #else
 #define EMKE_AUDIO_API __declspec(dllimport)

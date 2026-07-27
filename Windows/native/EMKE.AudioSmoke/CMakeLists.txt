@@ -11,6 +11,7 @@ if(BUILD_TESTING)
   )
   target_compile_definitions(EMKE.AudioSmoke.Override.Tests PRIVATE
     EMKE_AUDIO_SMOKE_NO_ENTRYPOINT
+    EMKE_NATIVE_AUDIO_TEST_SEAM_EXPORTS
   )
   target_include_directories(EMKE.AudioSmoke.Override.Tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/include"
@@ -28,6 +29,14 @@ if(BUILD_TESTING)
       "-DEXPECTED_OUTPUT=usage: EMKE.AudioSmoke"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
   )
+  get_test_property(
+    EMKE.AudioSmoke.InvalidScenario
+    COMMAND
+    EMKE_AUDIO_SMOKE_INVALID_PROCESS_COMMAND
+  )
+  if(NOT EMKE_AUDIO_SMOKE_INVALID_PROCESS_COMMAND)
+    message(FATAL_ERROR "EMKE.AudioSmoke.InvalidScenario must be registered.")
+  endif()
   if(WIN32)
     # The hosted image has no compatible EMKE driver. This is an executable
     # public-C-ABI gate, not a source inspection or a mock.
@@ -39,5 +48,15 @@ if(BUILD_TESTING)
         -DEXPECTED_OUTPUT=discovery=driverMissing
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
     )
+    get_test_property(
+      EMKE.AudioSmoke.NoCompatibleDriver
+      COMMAND
+      EMKE_AUDIO_SMOKE_NO_DRIVER_PROCESS_COMMAND
+    )
+    if(NOT EMKE_AUDIO_SMOKE_NO_DRIVER_PROCESS_COMMAND)
+      message(FATAL_ERROR
+        "EMKE.AudioSmoke.NoCompatibleDriver must be registered on Windows."
+      )
+    endif()
   endif()
 endif()

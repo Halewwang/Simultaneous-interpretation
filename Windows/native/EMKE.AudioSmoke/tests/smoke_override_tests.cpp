@@ -84,16 +84,18 @@ extern "C" emke_audio_status emke_audio_get_diagnostics(emke_audio_handle*, emke
 }
 
 int main() {
+  // U+975E is the UTF-16 code unit 0x975E; its UTF-8 bytes are E9 9D 9E.
+  constexpr char non_ascii_physical_input[] = "\xE9\x9D\x9E" "ASCII";
   std::array<char*, 8u> argv = {
       const_cast<char*>("smoke"), const_cast<char*>("--scenario"),
       const_cast<char*>("inbound-original"), const_cast<char*>("--seconds"),
       const_cast<char*>("1"), const_cast<char*>("--physical-input"),
-      const_cast<char*>("非ASCII"), nullptr,
+      const_cast<char*>(non_ascii_physical_input), nullptr,
   };
   if (run_main(7, argv.data()) != 0) {
     return 1;
   }
-  if (!(observed_config.physical_input_endpoint_id[0] == u'非' &&
+  if (!(observed_config.physical_input_endpoint_id[0] == 0x975eu &&
         observed_config.physical_input_endpoint_id[1] == u'A' &&
         observed_config.physical_input_endpoint_id[6] == 0u)) {
     return 1;
