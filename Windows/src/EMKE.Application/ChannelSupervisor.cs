@@ -10,7 +10,9 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
 {
     private readonly Channel<T> _normal;
     private readonly Channel<T> _priority;
+#pragma warning disable CA2213 // Never creates a WaitHandle; GC cleanup avoids racing late producers during actor exit.
     private readonly SemaphoreSlim _normalSlots;
+#pragma warning restore CA2213
     private readonly Action<T> _drop;
     private int _disposed;
 
@@ -118,8 +120,6 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
         {
             _drop(priority);
         }
-
-        _normalSlots.Dispose();
     }
 }
 

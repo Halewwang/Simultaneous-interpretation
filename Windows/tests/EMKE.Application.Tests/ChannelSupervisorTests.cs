@@ -92,6 +92,22 @@ public sealed class ChannelSupervisorTests
     }
 
     [TestMethod]
+    public async Task ReliableWriteAfterMailboxExitDropsOwnerAndCompletesItsWaiter()
+    {
+        MailboxProbe late = new("late");
+        RuntimeCommandMailbox<MailboxProbe> mailbox = new(
+            capacity: 1,
+            static probe => probe.Drop());
+        mailbox.Dispose();
+
+        await mailbox.WriteReliableAsync(late, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, late.Owner.DisposeCount);
+        Assert.IsTrue(late.Completion.Task.IsCompleted);
+    }
+
+    [TestMethod]
     public async Task TransientNetworkFailureUsesExactBoundedBackoffSchedule()
     {
         RecordingClock clock = new(completeImmediately: true);

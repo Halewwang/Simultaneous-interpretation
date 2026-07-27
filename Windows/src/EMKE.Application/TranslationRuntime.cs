@@ -89,6 +89,7 @@ public sealed class TranslationRuntime :
         TimeSpan.FromSeconds(1);
 
     private readonly object _submissionSync = new();
+    private readonly object _audioWorkSync = new();
     private readonly TranslationRuntimeDependencies _dependencies;
     private readonly RuntimeStateReducer _reducer = new();
     private readonly RuntimeSnapshotPublisher _publisher = new();
@@ -98,7 +99,8 @@ public sealed class TranslationRuntime :
     private readonly PcmLevelMeter _inboundLevel = new();
     private readonly PcmLevelMeter _outboundLevel = new();
     private readonly PcmVoiceActivityDetector _voiceActivity = new();
-    private readonly ConcurrentDictionary<Task, byte> _inFlightPcm = new();
+    private readonly ConcurrentDictionary<Task, byte> _inFlightAudioWork = new();
+    private readonly Task _actorStartBarrier;
     private readonly Task _actor;
     private AppSnapshot _currentSnapshot;
     private Task<RuntimeError?>? _activeStart;
@@ -109,29 +111,43 @@ public sealed class TranslationRuntime :
     private TaskCompletionSource<RuntimeError?>? _exitCompletion;
     private CancellationTokenSource? _startCancellation;
     private CancellationTokenSource? _pollCancellation;
+    private CancellationTokenSource? _audioWorkCancellation;
     private Task? _pollTask;
     private Task? _startTask;
     private Task? _stopTask;
+    private Task? _stopDeadlineTask;
     private ChannelSupervisor? _inbound;
     private ChannelSupervisor? _outbound;
     private RuntimeSettings? _settings;
     private InboundUtteranceBuffer? _inboundBuffer;
     private bool _acceptCapturedAudio;
+    private bool _acceptEngineWrites;
     private bool _audioStarted;
     private bool _priorityWakeQueued;
     private bool _stopRequested;
     private bool _exitRequested;
+    private bool _exitTerminal;
     private bool _waitingForStartBeforeStop;
     private bool _actorShouldExit;
+    private bool _cleanupPending;
     private long _drainingGeneration;
     private long _droppedAudioFrames;
     private RoutingPolicySnapshot _routingSnapshot;
     private int _disposed;
 
     public TranslationRuntime(TranslationRuntimeDependencies dependencies)
+        : this(dependencies, Task.CompletedTask)
+    {
+    }
+
+    internal TranslationRuntime(
+        TranslationRuntimeDependencies dependencies,
+        Task actorStartBarrier)
     {
         _dependencies =
             dependencies ?? throw new ArgumentNullException(nameof(dependencies));
+        _actorStartBarrier =
+            actorStartBarrier ?? throw new ArgumentNullException(nameof(actorStartBarrier));
         _routingSnapshot = _routingPolicy.Snapshot;
         _currentSnapshot = _reducer.Current;
         _mailbox = new RuntimeCommandMailbox<RuntimeMessage>(
@@ -154,9 +170,18 @@ public sealed class TranslationRuntime :
 
         lock (_submissionSync)
         {
+            ObjectDisposedException.ThrowIf(_exitTerminal, this);
             ObjectDisposedException.ThrowIf(
                 Volatile.Read(ref _disposed) != 0,
                 this);
+            if (_cleanupPending)
+            {
+                return Task.FromResult<RuntimeError?>(Error(
+                    ErrorCategory.CloseTimeout,
+                    "translationRuntime.stopCleanupPending",
+                    RecoveryAction.Retry));
+            }
+
             if (_activeStart is { IsCompleted: false })
             {
                 return _activeStart;
@@ -187,6 +212,7 @@ public sealed class TranslationRuntime :
 
         lock (_submissionSync)
         {
+            ObjectDisposedException.ThrowIf(_exitTerminal, this);
             ObjectDisposedException.ThrowIf(
                 Volatile.Read(ref _disposed) != 0,
                 this);
@@ -195,7 +221,8 @@ public sealed class TranslationRuntime :
                 return _activeStop;
             }
 
-            if (CurrentSnapshot.RuntimeState == RuntimeState.Stopped)
+            if (CurrentSnapshot.RuntimeState == RuntimeState.Stopped
+                && _startCompletion is null)
             {
                 return Task.FromResult<RuntimeError?>(null);
             }
@@ -226,10 +253,13 @@ public sealed class TranslationRuntime :
                 return _activeExit;
             }
 
+            ObjectDisposedException.ThrowIf(_exitTerminal, this);
             _exitCompletion = NewCompletion();
             _activeExit = _exitCompletion.Task;
             _exitRequested = true;
-            if (CurrentSnapshot.RuntimeState != RuntimeState.Stopped)
+            _exitTerminal = true;
+            if (CurrentSnapshot.RuntimeState != RuntimeState.Stopped
+                || _startCompletion is not null)
             {
                 _stopRequested = true;
             }
@@ -262,6 +292,7 @@ public sealed class TranslationRuntime :
 
         _startCancellation?.Cancel();
         _pollCancellation?.Cancel();
+        _audioWorkCancellation?.Cancel();
         _actorCancellation.Cancel();
         _inbound?.Dispose();
         _outbound?.Dispose();
@@ -269,6 +300,7 @@ public sealed class TranslationRuntime :
         _publisher.Dispose();
         _startCancellation?.Dispose();
         _pollCancellation?.Dispose();
+        _audioWorkCancellation?.Dispose();
         _actorCancellation.Dispose();
     }
 
@@ -310,12 +342,16 @@ public sealed class TranslationRuntime :
             return Task.FromCanceled<RuntimeError?>(cancellationToken);
         }
 
-        ObjectDisposedException.ThrowIf(
-            Volatile.Read(ref _disposed) != 0,
-            this);
-        TaskCompletionSource<RuntimeError?> completion = NewCompletion();
-        _mailbox.TryWrite(new OrdinaryCommandMessage(command, completion));
-        return completion.Task;
+        lock (_submissionSync)
+        {
+            ObjectDisposedException.ThrowIf(_exitTerminal, this);
+            ObjectDisposedException.ThrowIf(
+                Volatile.Read(ref _disposed) != 0,
+                this);
+            TaskCompletionSource<RuntimeError?> completion = NewCompletion();
+            _mailbox.TryWrite(new OrdinaryCommandMessage(command, completion));
+            return completion.Task;
+        }
     }
 
     private void EnsurePriorityWakeLocked()
@@ -333,6 +369,8 @@ public sealed class TranslationRuntime :
     {
         try
         {
+            await _actorStartBarrier.WaitAsync(_actorCancellation.Token)
+                .ConfigureAwait(false);
             while (!_actorShouldExit)
             {
                 RuntimeMailboxRead<RuntimeMessage> read =
@@ -352,6 +390,10 @@ public sealed class TranslationRuntime :
             _actorCancellation.IsCancellationRequested)
         {
         }
+        finally
+        {
+            _mailbox.Dispose();
+        }
     }
 
     private void HandlePriorityWake()
@@ -363,6 +405,16 @@ public sealed class TranslationRuntime :
             _priorityWakeQueued = false;
             stop = _stopRequested;
             exit = _exitRequested;
+            if (stop
+                && CurrentSnapshot.RuntimeState == RuntimeState.Stopped
+                && _startCompletion is not null)
+            {
+                _startCompletion.TrySetResult(Error(
+                    ErrorCategory.Protocol,
+                    "translationRuntime.startCanceled",
+                    RecoveryAction.None));
+                _startCompletion = null;
+            }
         }
 
         if (!stop && exit && CurrentSnapshot.RuntimeState == RuntimeState.Stopped)
@@ -383,14 +435,19 @@ public sealed class TranslationRuntime :
         Publish(_reducer.Current);
         _acceptCapturedAudio = false;
         _ = _pollCancellation?.CancelAsync();
+        Task deadline = BeginStopDeadline();
+        _stopDeadlineTask = deadline;
         if (priorState == RuntimeState.Starting)
         {
             _waitingForStartBeforeStop = true;
             _ = _startCancellation?.CancelAsync();
+            ObserveDetached(WatchStartingStopDeadlineAsync(
+                stopGeneration,
+                deadline));
             return;
         }
 
-        StartStopPipeline(stopGeneration);
+        StartStopPipeline(stopGeneration, deadline);
     }
 
     private void HandleMessage(RuntimeMessage message)
@@ -405,6 +462,9 @@ public sealed class TranslationRuntime :
                 break;
             case StopCompletedMessage stopped:
                 HandleStopCompleted(stopped);
+                break;
+            case StopDeadlineElapsedMessage deadline:
+                HandleStartingStopDeadline(deadline);
                 break;
             case SupervisorMessage supervisor:
                 HandleSupervisorMessage(supervisor);
@@ -444,20 +504,36 @@ public sealed class TranslationRuntime :
             _actorCancellation.Token);
         _startTask = ExecuteStartAsync(
             generation,
+            message.Completion,
             _startCancellation.Token);
     }
 
     private async Task ExecuteStartAsync(
         long generation,
+        TaskCompletionSource<RuntimeError?> completion,
         CancellationToken cancellationToken)
     {
-        StartOutcome outcome = await BuildStartOutcomeAsync(
-            generation,
-            cancellationToken).ConfigureAwait(false);
+        StartOutcome outcome;
+        try
+        {
+            outcome = await BuildStartOutcomeAsync(
+                generation,
+                cancellationToken).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // The start worker must always return a stable outcome to the actor.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            RuntimeError error = MapException(exception);
+            SafeLogFailure(error);
+            outcome = StartOutcome.Failed(error);
+        }
+
         await PostReliableAsync(
             new StartCompletedMessage(
                 generation,
                 outcome,
+                completion,
                 DropStartOutcome),
             _actorCancellation.Token).ConfigureAwait(false);
     }
@@ -551,10 +627,11 @@ public sealed class TranslationRuntime :
                     .ConfigureAwait(false);
             if (inboundError is not null)
             {
-                await inbound.DisposeAsync().ConfigureAwait(false);
+                _ = await RollBackStartAsync(
+                    inbound,
+                    outbound: null,
+                    audioStarted).ConfigureAwait(false);
                 inbound = null;
-                await _dependencies.AudioEngine.StopAsync(
-                    CancellationToken.None).ConfigureAwait(false);
                 audioStarted = false;
                 return StartOutcome.Failed(inboundError);
             }
@@ -577,7 +654,9 @@ public sealed class TranslationRuntime :
                     .ConfigureAwait(false);
                 if (outboundError is not null)
                 {
-                    await outbound.DisposeAsync().ConfigureAwait(false);
+                    _ = await DisposeSupervisorAsync(
+                        outbound,
+                        current: null).ConfigureAwait(false);
                     outbound = null;
                 }
             }
@@ -596,7 +675,7 @@ public sealed class TranslationRuntime :
         catch (OperationCanceledException) when (
             cancellationToken.IsCancellationRequested)
         {
-            await RollBackStartAsync(inbound, outbound, audioStarted)
+            _ = await RollBackStartAsync(inbound, outbound, audioStarted)
                 .ConfigureAwait(false);
             return StartOutcome.Failed(Error(
                 ErrorCategory.Protocol,
@@ -607,10 +686,10 @@ public sealed class TranslationRuntime :
         catch (Exception exception)
 #pragma warning restore CA1031
         {
-            await RollBackStartAsync(inbound, outbound, audioStarted)
+            _ = await RollBackStartAsync(inbound, outbound, audioStarted)
                 .ConfigureAwait(false);
             RuntimeError error = MapException(exception);
-            LogFailure(error);
+            SafeLogFailure(error);
             return StartOutcome.Failed(error);
         }
     }
@@ -621,7 +700,16 @@ public sealed class TranslationRuntime :
             && _waitingForStartBeforeStop;
         if (message.Generation != _reducer.Generation && !stopping)
         {
-            _ = CleanupOutcomeAsync(message.Outcome);
+            Task cleanup = CleanupOutcomeAsync(message.Outcome);
+            if (IsCleanupPending())
+            {
+                TrackDeferredCleanup(cleanup);
+            }
+            else
+            {
+                ObserveDetached(cleanup);
+            }
+
             CompleteStart(message.Outcome.Error);
             return;
         }
@@ -633,7 +721,9 @@ public sealed class TranslationRuntime :
             _audioStarted = message.Outcome.AudioStarted;
             CompleteStart(message.Outcome.Error);
             _waitingForStartBeforeStop = false;
-            StartStopPipeline(_reducer.Generation);
+            StartStopPipeline(
+                _reducer.Generation,
+                _stopDeadlineTask ?? BeginStopDeadline());
             return;
         }
 
@@ -668,6 +758,14 @@ public sealed class TranslationRuntime :
             routing = _routingPolicy.FailOutbound(outcome.Error.Category);
         }
         _routingSnapshot = routing;
+        _audioWorkCancellation?.Dispose();
+        _audioWorkCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                _actorCancellation.Token);
+        lock (_audioWorkSync)
+        {
+            _acceptEngineWrites = true;
+        }
 
         Publish(_reducer.SetStartupEnvironment(
             message.Generation,
@@ -683,7 +781,7 @@ public sealed class TranslationRuntime :
         Publish(started);
         _acceptCapturedAudio = true;
         StartPolling(message.Generation);
-        _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
+        TrackRouteMutation(routing);
         CompleteStart(outcome.Error);
     }
 
@@ -741,7 +839,75 @@ public sealed class TranslationRuntime :
         }
     }
 
-    private void StartStopPipeline(long stopGeneration)
+    private Task BeginStopDeadline()
+    {
+        try
+        {
+            return _dependencies.Clock.DelayAsync(
+                LocalStopDeadline,
+                _actorCancellation.Token).AsTask();
+        }
+#pragma warning disable CA1031 // A broken clock fails closed as an immediate local timeout.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            SafeLogFailure(MapException(exception));
+            return Task.CompletedTask;
+        }
+    }
+
+    private async Task WatchStartingStopDeadlineAsync(
+        long stopGeneration,
+        Task deadline)
+    {
+        try
+        {
+            await deadline.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            _actorCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+#pragma warning disable CA1031 // A failed clock task is treated as elapsed.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            SafeLogFailure(MapException(exception));
+        }
+
+        await PostReliableAsync(
+            new StopDeadlineElapsedMessage(stopGeneration),
+            _actorCancellation.Token).ConfigureAwait(false);
+    }
+
+    private void HandleStartingStopDeadline(
+        StopDeadlineElapsedMessage message)
+    {
+        if (message.Generation != _reducer.Generation
+            || CurrentSnapshot.RuntimeState != RuntimeState.Stopping
+            || !_waitingForStartBeforeStop)
+        {
+            return;
+        }
+
+        _waitingForStartBeforeStop = false;
+        MarkCleanupPending();
+        CompleteStart(Error(
+            ErrorCategory.Protocol,
+            "translationRuntime.startCanceled",
+            RecoveryAction.None));
+        CompleteStoppedState(
+            message.Generation,
+            Error(
+                ErrorCategory.CloseTimeout,
+                "translationRuntime.localCloseTimeout",
+                RecoveryAction.Retry));
+    }
+
+    private void StartStopPipeline(
+        long stopGeneration,
+        Task deadline)
     {
         if (_stopTask is { IsCompleted: false })
         {
@@ -751,19 +917,25 @@ public sealed class TranslationRuntime :
         ChannelSupervisor? inbound = _inbound;
         ChannelSupervisor? outbound = _outbound;
         Task? poll = _pollTask;
-        Task[] pcmTasks = _inFlightPcm.Keys.ToArray();
         bool audioStarted = _audioStarted;
         _inbound = null;
         _outbound = null;
         _pollTask = null;
         _audioStarted = false;
+        TaskCompletionSource<RuntimeError?>? completion;
+        lock (_submissionSync)
+        {
+            completion = _stopCompletion;
+        }
+
         _stopTask = ExecuteStopAsync(
             stopGeneration,
             inbound,
             outbound,
             poll,
-            pcmTasks,
-            audioStarted);
+            deadline,
+            audioStarted,
+            completion);
     }
 
     private async Task ExecuteStopAsync(
@@ -771,82 +943,274 @@ public sealed class TranslationRuntime :
         ChannelSupervisor? inbound,
         ChannelSupervisor? outbound,
         Task? poll,
-        Task[] pcmTasks,
-        bool audioStarted)
+        Task deadline,
+        bool audioStarted,
+        TaskCompletionSource<RuntimeError?>? completion)
     {
+        object audioStopSync = new();
+        Task<RuntimeError?>? audioStopTask = null;
+        Task<RuntimeError?> StopAudioOnce()
+        {
+            lock (audioStopSync)
+            {
+                audioStopTask ??= audioStarted
+                    ? StopAudioSafelyAsync()
+                    : Task.FromResult<RuntimeError?>(null);
+                return audioStopTask;
+            }
+        }
+
+        RuntimeError? error;
+        try
+        {
+            Task<RuntimeError?> graceful = CompleteGracefulStopAsync(
+                inbound,
+                outbound,
+                poll,
+                StopAudioOnce);
+            Task winner =
+                await Task.WhenAny(graceful, deadline).ConfigureAwait(false);
+            if (ReferenceEquals(winner, graceful))
+            {
+                error = await graceful.ConfigureAwait(false);
+            }
+            else
+            {
+                error = Error(
+                    ErrorCategory.CloseTimeout,
+                    "translationRuntime.localCloseTimeout",
+                    RecoveryAction.Retry);
+                CloseAudioWorkAdmission(cancel: true);
+                DisposeSupervisor(inbound);
+                DisposeSupervisor(outbound);
+                ObserveDetached(graceful);
+                Task<RuntimeError?> deferredStop =
+                    FinishTimedOutStopAsync(StopAudioOnce);
+                TrackDeferredCleanup(deferredStop);
+                if (deferredStop.IsCompleted)
+                {
+                    _ = await deferredStop.ConfigureAwait(false);
+                }
+                else
+                {
+                    ObserveDetached(deferredStop);
+                }
+            }
+        }
+#pragma warning disable CA1031 // The stop worker must always return a stable outcome to the actor.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            error = MapException(exception);
+            SafeLogFailure(error);
+            CloseAudioWorkAdmission(cancel: true);
+            DisposeSupervisor(inbound);
+            DisposeSupervisor(outbound);
+            Task<RuntimeError?> emergencyStop =
+                FinishTimedOutStopAsync(StopAudioOnce);
+            TrackDeferredCleanup(emergencyStop);
+            ObserveDetached(emergencyStop);
+        }
+
+        await PostReliableAsync(
+            new StopCompletedMessage(stopGeneration, error, completion),
+            _actorCancellation.Token).ConfigureAwait(false);
+    }
+
+    private async Task<RuntimeError?> CompleteGracefulStopAsync(
+        ChannelSupervisor? inbound,
+        ChannelSupervisor? outbound,
+        Task? poll,
+        Func<Task<RuntimeError?>> stopAudio)
+    {
+        RuntimeError? error = null;
         Task inboundClose =
             inbound?.CloseAsync(CancellationToken.None) ?? Task.CompletedTask;
         Task outboundClose =
             outbound?.CloseAsync(CancellationToken.None) ?? Task.CompletedTask;
-        Task closes = Task.WhenAll(inboundClose, outboundClose);
-        Task deadline = _dependencies.Clock.DelayAsync(
-            LocalStopDeadline,
-            _actorCancellation.Token).AsTask();
-        RuntimeError? error = null;
-        Task winner = await Task.WhenAny(closes, deadline).ConfigureAwait(false);
-        if (ReferenceEquals(winner, closes))
-        {
-            try
-            {
-                await closes.ConfigureAwait(false);
-            }
-#pragma warning disable CA1031 // Close errors are reported as stable local failures.
-            catch (Exception exception)
-#pragma warning restore CA1031
-            {
-                error = MapException(exception);
-            }
-        }
-        else
-        {
-            error = Error(
-                ErrorCategory.CloseTimeout,
-                "translationRuntime.localCloseTimeout",
-                RecoveryAction.Retry);
-#pragma warning disable CA1849 // Timeout path must synchronously interrupt non-cooperative sessions.
-            inbound?.Dispose();
-            outbound?.Dispose();
-#pragma warning restore CA1849
-        }
-
+        error = await CaptureFailureAsync(
+            Task.WhenAll(inboundClose, outboundClose),
+            error).ConfigureAwait(false);
         if (poll is not null)
         {
-            try
-            {
-                await poll.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        if (pcmTasks.Length > 0)
-        {
-            await Task.WhenAll(pcmTasks).ConfigureAwait(false);
-        }
-
-        if (audioStarted)
-        {
-            await _dependencies.AudioEngine.StopAsync(CancellationToken.None)
+            error = await CaptureFailureAsync(poll, error)
                 .ConfigureAwait(false);
         }
 
-        if (error is null)
+        CloseAudioWorkAdmission(cancel: false);
+        error = await DrainAudioWorkAsync(error).ConfigureAwait(false);
+        RuntimeError? stopError = await stopAudio().ConfigureAwait(false);
+        error ??= stopError;
+        error = await DisposeSupervisorAsync(inbound, error)
+            .ConfigureAwait(false);
+        error = await DisposeSupervisorAsync(outbound, error)
+            .ConfigureAwait(false);
+        return error;
+    }
+
+    private async Task<RuntimeError?> FinishTimedOutStopAsync(
+        Func<Task<RuntimeError?>> stopAudio)
+    {
+        RuntimeError? error = await DrainAudioWorkAsync(error: null)
+            .ConfigureAwait(false);
+        RuntimeError? stopError = await stopAudio().ConfigureAwait(false);
+        return error ?? stopError;
+    }
+
+    private async Task<RuntimeError?> DrainAudioWorkAsync(
+        RuntimeError? error)
+    {
+        while (true)
         {
-            if (inbound is not null)
+            Task[] pending = _inFlightAudioWork.Keys.ToArray();
+            if (pending.Length == 0)
             {
-                await inbound.DisposeAsync().ConfigureAwait(false);
+                return error;
             }
 
-            if (outbound is not null)
-            {
-                await outbound.DisposeAsync().ConfigureAwait(false);
-            }
+            error = await CaptureFailureAsync(Task.WhenAll(pending), error)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<RuntimeError?> CaptureFailureAsync(
+        Task operation,
+        RuntimeError? current)
+    {
+        try
+        {
+            await operation.ConfigureAwait(false);
+            return current;
+        }
+        catch (OperationCanceledException)
+        {
+            return current;
+        }
+#pragma warning disable CA1031 // Cleanup failures are reduced to a stable runtime error.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            return current ?? MapException(exception);
+        }
+    }
+
+    private async Task<RuntimeError?> StopAudioSafelyAsync()
+    {
+        try
+        {
+            await _dependencies.AudioEngine.StopAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+            return null;
+        }
+#pragma warning disable CA1031 // Native stop failures are reduced to a stable runtime error.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            return MapException(exception);
+        }
+    }
+
+    private static async Task<RuntimeError?> DisposeSupervisorAsync(
+        ChannelSupervisor? supervisor,
+        RuntimeError? current)
+    {
+        if (supervisor is null)
+        {
+            return current;
         }
 
-        await PostReliableAsync(
-            new StopCompletedMessage(stopGeneration, error),
-            _actorCancellation.Token).ConfigureAwait(false);
+        try
+        {
+            await supervisor.DisposeAsync().ConfigureAwait(false);
+            return current;
+        }
+#pragma warning disable CA1031 // Cleanup failures are reduced to a stable runtime error.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            return current ?? MapException(exception);
+        }
+    }
+
+    private static void DisposeSupervisor(ChannelSupervisor? supervisor)
+    {
+        try
+        {
+            supervisor?.Dispose();
+        }
+#pragma warning disable CA1031 // Timeout cleanup cannot escape the stop completion path.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+        }
+    }
+
+    private void CloseAudioWorkAdmission(bool cancel)
+    {
+        CancellationTokenSource? cancellation;
+        lock (_audioWorkSync)
+        {
+            _acceptEngineWrites = false;
+            cancellation = _audioWorkCancellation;
+        }
+
+        if (cancel && cancellation is not null)
+        {
+            try
+            {
+                ObserveDetached(cancellation.CancelAsync());
+            }
+#pragma warning disable CA1031 // A disposed cancellation source is already closed.
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+            }
+        }
+    }
+
+    private static void ObserveDetached(Task task)
+    {
+        _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously
+                | TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
+    }
+
+    private void MarkCleanupPending()
+    {
+        lock (_submissionSync)
+        {
+            _cleanupPending = true;
+        }
+    }
+
+    private bool IsCleanupPending()
+    {
+        lock (_submissionSync)
+        {
+            return _cleanupPending;
+        }
+    }
+
+    private void TrackDeferredCleanup(Task cleanup)
+    {
+        MarkCleanupPending();
+        _ = cleanup.ContinueWith(
+            static (completed, state) =>
+            {
+                TranslationRuntime runtime = (TranslationRuntime)state!;
+                _ = completed.Exception;
+                lock (runtime._submissionSync)
+                {
+                    runtime._cleanupPending = false;
+                }
+            },
+            this,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private void HandleStopCompleted(StopCompletedMessage message)
@@ -856,6 +1220,13 @@ public sealed class TranslationRuntime :
             return;
         }
 
+        CompleteStoppedState(message.Generation, message.Error);
+    }
+
+    private void CompleteStoppedState(
+        long generation,
+        RuntimeError? error)
+    {
         _routingPolicy.Stop();
         _routingSnapshot = _routingPolicy.Snapshot;
         _inboundBuffer?.Stop();
@@ -865,11 +1236,12 @@ public sealed class TranslationRuntime :
         _voiceActivity.Reset();
         Interlocked.Exchange(ref _droppedAudioFrames, 0);
         _settings = null;
-        Publish(_reducer.CompleteStop(message.Generation));
-        CompleteStop(message.Error);
+        _stopDeadlineTask = null;
+        Publish(_reducer.CompleteStop(generation));
+        CompleteStop(error);
         if (_exitRequested)
         {
-            CompleteExit(message.Error);
+            CompleteExit(error);
             _actorShouldExit = true;
         }
     }
@@ -889,11 +1261,17 @@ public sealed class TranslationRuntime :
 
         if (notification.Event is TranslationSessionEvent.AudioDelta audio)
         {
-            _ = EnqueueTranslatedAsync(
-                notification.Direction,
-                audio,
-                drainingTail,
-                message.Completion);
+            if (!TryTrackAudioWork(
+                    cancellationToken => EnqueueTranslatedAsync(
+                        notification.Direction,
+                        audio,
+                        drainingTail,
+                        message.Completion,
+                        cancellationToken)))
+            {
+                message.Drop();
+            }
+
             return;
         }
 
@@ -929,11 +1307,20 @@ public sealed class TranslationRuntime :
                 _reducer.Generation,
                 routing,
                 error: null));
-            _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
-            _ = EnqueueChunksAsync(
-                AudioDirection.Inbound,
-                selected,
-                message.Completion);
+            TrackRouteMutation(routing);
+            if (!TryTrackAudioWork(
+                    cancellationToken => EnqueueChunksAsync(
+                        AudioDirection.Inbound,
+                        selected,
+                        message.Completion,
+                        cancellationToken)))
+            {
+                message.Completion.TrySetResult(Error(
+                    ErrorCategory.CloseTimeout,
+                    "translationRuntime.audioWorkClosed",
+                    RecoveryAction.Retry));
+            }
+
             return;
         }
 
@@ -956,7 +1343,8 @@ public sealed class TranslationRuntime :
         AudioDirection direction,
         TranslationSessionEvent.AudioDelta audio,
         bool drainingTail,
-        TaskCompletionSource<RuntimeError?> completion)
+        TaskCompletionSource<RuntimeError?> completion,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -976,7 +1364,7 @@ public sealed class TranslationRuntime :
                     await _dependencies.AudioEngine
                         .EnqueueInboundTranslationAsync(
                             chunk,
-                            CancellationToken.None).ConfigureAwait(false);
+                            cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -984,7 +1372,7 @@ public sealed class TranslationRuntime :
                 await _dependencies.AudioEngine
                     .EnqueueOutboundTranslationAsync(
                         audio.Pcm16,
-                        CancellationToken.None).ConfigureAwait(false);
+                        cancellationToken).ConfigureAwait(false);
             }
 
             completion.TrySetResult(null);
@@ -1004,7 +1392,8 @@ public sealed class TranslationRuntime :
     private async Task EnqueueChunksAsync(
         AudioDirection direction,
         IReadOnlyList<byte[]> chunks,
-        TaskCompletionSource<RuntimeError?> completion)
+        TaskCompletionSource<RuntimeError?> completion,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -1015,14 +1404,14 @@ public sealed class TranslationRuntime :
                     await _dependencies.AudioEngine
                         .EnqueueInboundTranslationAsync(
                             chunk,
-                            CancellationToken.None).ConfigureAwait(false);
+                            cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
                     await _dependencies.AudioEngine
                         .EnqueueOutboundTranslationAsync(
                             chunk,
-                            CancellationToken.None).ConfigureAwait(false);
+                            cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -1056,7 +1445,7 @@ public sealed class TranslationRuntime :
             _reducer.Generation,
             routing,
             error));
-        _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
+        TrackRouteMutation(routing);
     }
 
     private void ApplyChannelRecovery(AudioDirection direction)
@@ -1072,7 +1461,7 @@ public sealed class TranslationRuntime :
             _reducer.Generation,
             routing,
             error: null));
-        _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
+        TrackRouteMutation(routing);
     }
 
     private void HandleAudioCaptured(AudioCapturedMessage message)
@@ -1113,15 +1502,17 @@ public sealed class TranslationRuntime :
                     message.Generation,
                     routing,
                     error: null));
-                _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
+                TrackRouteMutation(routing);
             }
 
             if (selected.Count > 0)
             {
-                _ = EnqueueChunksAsync(
-                    AudioDirection.Inbound,
-                    selected,
-                    NewCompletion());
+                _ = TryTrackAudioWork(
+                    cancellationToken => EnqueueChunksAsync(
+                        AudioDirection.Inbound,
+                        selected,
+                        NewCompletion(),
+                        cancellationToken));
             }
 
             Publish(_reducer.UpdateLevels(
@@ -1131,7 +1522,14 @@ public sealed class TranslationRuntime :
             if (_inbound is not null)
             {
 #pragma warning disable CA2025 // Stop snapshots and awaits every tracked PCM task before supervisor disposal.
-                TrackPcm(SendCapturedAsync(_inbound, audio));
+                if (!TryTrackAudioWork(
+                        cancellationToken => SendCapturedAsync(
+                            _inbound,
+                            audio,
+                            cancellationToken)))
+                {
+                    audio.Dispose();
+                }
 #pragma warning restore CA2025
                 return;
             }
@@ -1146,7 +1544,14 @@ public sealed class TranslationRuntime :
             if (_outbound is not null)
             {
 #pragma warning disable CA2025 // Stop snapshots and awaits every tracked PCM task before supervisor disposal.
-                TrackPcm(SendCapturedAsync(_outbound, audio));
+                if (!TryTrackAudioWork(
+                        cancellationToken => SendCapturedAsync(
+                            _outbound,
+                            audio,
+                            cancellationToken)))
+                {
+                    audio.Dispose();
+                }
 #pragma warning restore CA2025
                 return;
             }
@@ -1157,13 +1562,14 @@ public sealed class TranslationRuntime :
 
     private static async Task SendCapturedAsync(
         ChannelSupervisor supervisor,
-        AudioEngineEvent audio)
+        AudioEngineEvent audio,
+        CancellationToken cancellationToken)
     {
         try
         {
             _ = await supervisor.SendPcmAsync(
                 audio.Pcm16,
-                CancellationToken.None).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -1171,9 +1577,23 @@ public sealed class TranslationRuntime :
         }
     }
 
-    private void TrackPcm(Task task)
+    private bool TryTrackAudioWork(
+        Func<CancellationToken, Task> start)
     {
-        _inFlightPcm.TryAdd(task, 0);
+        ArgumentNullException.ThrowIfNull(start);
+        Task task;
+        lock (_audioWorkSync)
+        {
+            if (!_acceptEngineWrites
+                || _audioWorkCancellation is null)
+            {
+                return false;
+            }
+
+            task = start(_audioWorkCancellation.Token);
+            _inFlightAudioWork.TryAdd(task, 0);
+        }
+
         _ = task.ContinueWith(
             static (completed, state) =>
             {
@@ -1182,10 +1602,11 @@ public sealed class TranslationRuntime :
                 tracked.TryRemove(completed, out _);
                 _ = completed.Exception;
             },
-            _inFlightPcm,
+            _inFlightAudioWork,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+        return true;
     }
 
     private void HandleOrdinaryCommand(OrdinaryCommandMessage message)
@@ -1206,7 +1627,7 @@ public sealed class TranslationRuntime :
                     _reducer.Generation,
                     routing,
                     error: null));
-                _ = ApplyRoutesAsync(routing, _actorCancellation.Token);
+                TrackRouteMutation(routing);
                 message.Completion.TrySetResult(null);
                 break;
             default:
@@ -1318,10 +1739,12 @@ public sealed class TranslationRuntime :
             _inboundBuffer.Observe(probabilities);
         if (selected.Count > 0)
         {
-            _ = EnqueueChunksAsync(
-                AudioDirection.Inbound,
-                selected,
-                NewCompletion());
+            _ = TryTrackAudioWork(
+                cancellationToken => EnqueueChunksAsync(
+                    AudioDirection.Inbound,
+                    selected,
+                    NewCompletion(),
+                    cancellationToken));
         }
     }
 
@@ -1364,6 +1787,14 @@ public sealed class TranslationRuntime :
         }
     }
 
+    private void TrackRouteMutation(RoutingPolicySnapshot routing)
+    {
+        _ = TryTrackAudioWork(
+            cancellationToken => ApplyRoutesAsync(
+                routing,
+                cancellationToken));
+    }
+
     private async Task ApplyRoutesAsync(
         RoutingPolicySnapshot routing,
         CancellationToken cancellationToken)
@@ -1383,38 +1814,53 @@ public sealed class TranslationRuntime :
         }
     }
 
-    private async Task RollBackStartAsync(
+    private async Task<RuntimeError?> RollBackStartAsync(
         ChannelSupervisor? inbound,
         ChannelSupervisor? outbound,
         bool audioStarted)
     {
-        Task inboundClose =
-            inbound?.CloseAsync(CancellationToken.None) ?? Task.CompletedTask;
-        Task outboundClose =
-            outbound?.CloseAsync(CancellationToken.None) ?? Task.CompletedTask;
-        await Task.WhenAll(inboundClose, outboundClose).ConfigureAwait(false);
-        if (inbound is not null)
-        {
-            await inbound.DisposeAsync().ConfigureAwait(false);
-        }
-
-        if (outbound is not null)
-        {
-            await outbound.DisposeAsync().ConfigureAwait(false);
-        }
+        RuntimeError? error = null;
+        Task inboundClose = StartSupervisorClose(inbound);
+        Task outboundClose = StartSupervisorClose(outbound);
+        error = await CaptureFailureAsync(
+            Task.WhenAll(inboundClose, outboundClose),
+            error).ConfigureAwait(false);
+        error = await DisposeSupervisorAsync(inbound, error)
+            .ConfigureAwait(false);
+        error = await DisposeSupervisorAsync(outbound, error)
+            .ConfigureAwait(false);
         if (audioStarted)
         {
-            await _dependencies.AudioEngine.StopAsync(CancellationToken.None)
+            RuntimeError? stopError = await StopAudioSafelyAsync()
                 .ConfigureAwait(false);
+            error ??= stopError;
         }
+
+        return error;
     }
 
     private async Task CleanupOutcomeAsync(StartOutcome outcome)
     {
-        await RollBackStartAsync(
+        _ = await RollBackStartAsync(
             outcome.Inbound,
             outcome.Outbound,
             outcome.AudioStarted).ConfigureAwait(false);
+    }
+
+    private static Task StartSupervisorClose(
+        ChannelSupervisor? supervisor)
+    {
+        try
+        {
+            return supervisor?.CloseAsync(CancellationToken.None)
+                ?? Task.CompletedTask;
+        }
+#pragma warning disable CA1031 // Synchronous close failures join the same safe cleanup path.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            return Task.FromException(exception);
+        }
     }
 
     private void CompleteStart(RuntimeError? error)
@@ -1469,13 +1915,11 @@ public sealed class TranslationRuntime :
 
     private void DropStartOutcome(StartOutcome outcome)
     {
-#pragma warning disable CA1849 // Drop path must synchronously revoke supervisor ownership.
-        outcome.Inbound?.Dispose();
-        outcome.Outbound?.Dispose();
-#pragma warning restore CA1849
+        DisposeSupervisor(outcome.Inbound);
+        DisposeSupervisor(outcome.Outbound);
         if (outcome.AudioStarted)
         {
-            _ = StopAudioAfterDropAsync();
+            ObserveDetached(StopAudioAfterDropAsync());
         }
     }
 
@@ -1493,16 +1937,24 @@ public sealed class TranslationRuntime :
         }
     }
 
-    private void LogFailure(RuntimeError error)
+    private void SafeLogFailure(RuntimeError error)
     {
-        _dependencies.Log.Write(
-            RuntimeLogLevel.Error,
-            "translationRuntime.failure",
-            new Dictionary<string, string>
-            {
-                ["category"] = error.Category.ToString(),
-                ["code"] = error.Code,
-            });
+        try
+        {
+            _dependencies.Log.Write(
+                RuntimeLogLevel.Error,
+                "translationRuntime.failure",
+                new Dictionary<string, string>
+                {
+                    ["category"] = error.Category.ToString(),
+                    ["code"] = error.Code,
+                });
+        }
+#pragma warning disable CA1031 // Logging is never allowed to break runtime completion.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+        }
     }
 
     private static bool IsWhiteSpace(ReadOnlySpan<char> secret)
@@ -1647,6 +2099,7 @@ public sealed class TranslationRuntime :
     private sealed class StartCompletedMessage(
         long generation,
         StartOutcome outcome,
+        TaskCompletionSource<RuntimeError?> completion,
         Action<StartOutcome> onDrop) : RuntimeMessage
     {
         public long Generation { get; } = generation;
@@ -1656,16 +2109,35 @@ public sealed class TranslationRuntime :
         public override void Drop()
         {
             onDrop(Outcome);
+            completion.TrySetResult(Outcome.Error ?? Error(
+                ErrorCategory.Protocol,
+                "translationRuntime.startCanceled",
+                RecoveryAction.None));
         }
     }
 
     private sealed class StopCompletedMessage(
         long generation,
-        RuntimeError? error) : RuntimeMessage
+        RuntimeError? error,
+        TaskCompletionSource<RuntimeError?>? completion) : RuntimeMessage
     {
         public long Generation { get; } = generation;
 
         public RuntimeError? Error { get; } = error;
+
+        public override void Drop()
+        {
+            completion?.TrySetResult(Error ?? TranslationRuntime.Error(
+                ErrorCategory.Protocol,
+                "translationRuntime.stopCanceled",
+                RecoveryAction.None));
+        }
+    }
+
+    private sealed class StopDeadlineElapsedMessage(
+        long generation) : RuntimeMessage
+    {
+        public long Generation { get; } = generation;
     }
 
     private sealed class SupervisorMessage(
