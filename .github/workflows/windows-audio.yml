@@ -38,6 +38,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Validate Windows audio workflow PowerShell syntax
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File Windows/tools/tests/windows-audio-workflow.syntax.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows audio workflow PowerShell syntax test failed."
+          }
+
       - name: Validate shared contract and build native audio scaffold
         shell: pwsh
         run: |
@@ -233,7 +241,6 @@ jobs:
 
           ## Proof boundary
 
-          ```text
           targetOsEligible = $targetOsEligibleValue
           installedWdkProof = pending
           nativeBuild = passed
@@ -243,7 +250,6 @@ jobs:
           driverBuild = pending
           driverInstall = pending
           liveEndpoints = pending
-          ```
           "@
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
 
