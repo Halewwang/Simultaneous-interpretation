@@ -10,6 +10,9 @@ int run_main(int argc, char** argv);
 namespace {
 
 emke_audio_config observed_config{};
+std::uint32_t discovery_status =
+    EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING;
+int create_calls = 0;
 
 void copy_id(std::uint16_t* destination, const char16_t* value) {
   std::size_t length = 0u;
@@ -46,18 +49,23 @@ extern "C" emke_audio_status emke_audio_discover_endpoints(
   *snapshot = {};
   snapshot->size = sizeof(*snapshot);
   snapshot->abi_version = EMKE_AUDIO_ABI_VERSION;
-  snapshot->discovery_status = EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING;
+  snapshot->discovery_status = discovery_status;
   for (std::uint32_t role = 0u; role < EMKE_AUDIO_DISCOVERED_ENDPOINT_COUNT; ++role) {
     set_endpoint(snapshot->virtual_endpoints[role], role, u"{virtual}");
   }
   copy_id(snapshot->physical_output_endpoint_id, u"{physical-output}");
   snapshot->physical_output_endpoint_id_length = 17u;
+  if (discovery_status != EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING) {
+    copy_id(snapshot->physical_input_endpoint_id, u"{physical-input}");
+    snapshot->physical_input_endpoint_id_length = 16u;
+  }
   return EMKE_AUDIO_OK;
 }
 
 extern "C" emke_audio_status emke_audio_create(const emke_audio_config* config,
                                                  emke_audio_handle** out_handle) {
   observed_config = *config;
+  ++create_calls;
   *out_handle = reinterpret_cast<emke_audio_handle*>(1u);
   return EMKE_AUDIO_OK;
 }
@@ -85,9 +93,18 @@ int main() {
   if (run_main(7, argv.data()) != 0) {
     return 1;
   }
-  return observed_config.physical_input_endpoint_id[0] == u'非' &&
-                 observed_config.physical_input_endpoint_id[1] == u'A' &&
-                 observed_config.physical_input_endpoint_id[6] == 0u
-             ? 0
-             : 1;
+  if (!(observed_config.physical_input_endpoint_id[0] == u'非' &&
+        observed_config.physical_input_endpoint_id[1] == u'A' &&
+        observed_config.physical_input_endpoint_id[6] == 0u)) {
+    return 1;
+  }
+
+  discovery_status = 999u;
+  create_calls = 0;
+  std::array<char*, 6u> unknown_argv = {
+      const_cast<char*>("smoke"), const_cast<char*>("--scenario"),
+      const_cast<char*>("inbound-original"), const_cast<char*>("--seconds"),
+      const_cast<char*>("1"), nullptr,
+  };
+  return run_main(5, unknown_argv.data()) == 4 && create_calls == 0 ? 0 : 1;
 }

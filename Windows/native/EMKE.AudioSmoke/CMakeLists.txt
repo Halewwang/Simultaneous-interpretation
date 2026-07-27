@@ -22,22 +22,22 @@ if(BUILD_TESTING)
   )
   add_test(
     NAME EMKE.AudioSmoke.InvalidScenario
-    COMMAND EMKE.AudioSmoke --scenario unsupported
-  )
-  set_tests_properties(EMKE.AudioSmoke.InvalidScenario PROPERTIES
-    WILL_FAIL TRUE
-    PASS_REGULAR_EXPRESSION "usage: EMKE.AudioSmoke"
+    COMMAND ${CMAKE_COMMAND}
+      -DSMOKE=$<TARGET_FILE:EMKE.AudioSmoke>
+      -DSCENARIO=unsupported
+      "-DEXPECTED_OUTPUT=usage: EMKE.AudioSmoke"
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
   )
   if(WIN32)
     # The hosted image has no compatible EMKE driver. This is an executable
     # public-C-ABI gate, not a source inspection or a mock.
     add_test(
       NAME EMKE.AudioSmoke.NoCompatibleDriver
-      COMMAND EMKE.AudioSmoke --scenario enumerate
-    )
-    set_tests_properties(EMKE.AudioSmoke.NoCompatibleDriver PROPERTIES
-      WILL_FAIL TRUE
-      PASS_REGULAR_EXPRESSION "discovery=driverMissing"
+      COMMAND ${CMAKE_COMMAND}
+        -DSMOKE=$<TARGET_FILE:EMKE.AudioSmoke>
+        -DSCENARIO=enumerate
+        -DEXPECTED_OUTPUT=discovery=driverMissing
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
     )
   endif()
 endif()

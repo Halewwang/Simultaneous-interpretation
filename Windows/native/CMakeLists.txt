@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 4.2)
 
 project(EMKENativeAudio LANGUAGES CXX)
 
+include(CTest)
 enable_testing()
 
 set(EMKE_NATIVE_ARTIFACT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../artifacts/native/x64/Release")

@@ -374,23 +374,24 @@ int run_main(int argc, char** argv) {
     return 5;
   }
   std::cout << "discovery=" << status_name(snapshot.discovery_status) << '\n';
-  if (snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING) {
-    return 3;
-  }
-  if (snapshot.discovery_status ==
-          EMKE_AUDIO_ENDPOINT_DISCOVERY_VIRTUAL_ENDPOINTS_PARTIAL ||
-      snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR) {
-    return 4;
-  }
-  if (snapshot.discovery_status ==
-          EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING &&
-      options.physical_input_override.empty()) {
-    return 4;
-  }
-  if (snapshot.discovery_status ==
-          EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_OUTPUT_MISSING &&
-      options.physical_output_override.empty()) {
-    return 4;
+  switch (snapshot.discovery_status) {
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_READY:
+      break;
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING:
+      if (options.physical_input_override.empty()) {
+        return 4;
+      }
+      break;
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_OUTPUT_MISSING:
+      if (options.physical_output_override.empty()) {
+        return 4;
+      }
+      break;
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING:
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_VIRTUAL_ENDPOINTS_PARTIAL:
+    case EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR:
+    default:
+      return 4;
   }
   if (options.scenario == Scenario::enumerate) {
     if (snapshot.discovery_status != EMKE_AUDIO_ENDPOINT_DISCOVERY_READY) {
