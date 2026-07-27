@@ -806,7 +806,218 @@ Invoke-Case -Name "embedded SetupAPI helper compiles without mutation" -Action {
             throw "Embedded SetupAPI helper is missing '$required'."
         }
     }
+    $exceptionType =
+        "Emke.DriverLab.RootDevnodeCreateException" -as [type]
+    if ($null -eq $exceptionType) {
+        throw "Embedded SetupAPI helper has no typed create exception."
+    }
+    foreach ($property in @(
+        "StateUncertain",
+        "RollbackCompleted",
+        "InstanceId",
+        "CleanupFailure"
+    )) {
+        if ($null -eq $exceptionType.GetProperty($property)) {
+            throw "Typed create exception is missing '$property'."
+        }
+    }
 }
+
+Invoke-Case `
+    -Name "nested typed create exception exposes machine state" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        Initialize-RootDevnodeSetupApi
+        $exceptionType =
+            "Emke.DriverLab.RootDevnodeCreateException" -as [type]
+        $constructor = @($exceptionType.GetConstructors())
+        if ($constructor.Count -ne 1) {
+            throw "Typed create exception constructor is not exact."
+        }
+        $arguments = [object[]]::new(6)
+        $arguments[0] = "simulated uncertain registration failure"
+        $arguments[1] = "ROOT\EMKEVIRTUALAUDIO\0042"
+        $arguments[2] = $true
+        $arguments[3] = $false
+        $arguments[4] = [InvalidOperationException]::new("original")
+        $arguments[5] = [InvalidOperationException]::new("cleanup")
+        $typedFailure = $constructor[0].Invoke($arguments)
+        $outerFailure =
+            [Reflection.TargetInvocationException]::new($typedFailure)
+        $metadata = Get-RootDevnodeFailureMetadata `
+            -Exception $outerFailure
+        if ($null -eq $metadata -or
+            $metadata.StateUncertain -ne $true -or
+            $metadata.RollbackCompleted -ne $false -or
+            $metadata.InstanceId -cne
+            "ROOT\EMKEVIRTUALAUDIO\0042") {
+            throw "Nested typed exception lost machine-readable state."
+        }
+    }
+
+Invoke-Case `
+    -Name "pre-register instance ID failure performs no mutation" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $source = Get-RootDevnodeSetupApiSource
+        $createStart = $source.IndexOf("public static string Create(")
+        $removeStart = $source.IndexOf(
+            "public static void RemoveExact(",
+            $createStart
+        )
+        if ($createStart -lt 0 -or $removeStart -le $createStart) {
+            throw "Embedded SetupAPI Create source could not be isolated."
+        }
+        $createBody = $source.Substring(
+            $createStart,
+            $removeStart - $createStart
+        )
+        $getId = $createBody.IndexOf(
+            "if (!SetupDiGetDeviceInstanceIdW("
+        )
+        $validate = $createBody.IndexOf(
+            "ValidateExactInstanceId(result);"
+        )
+        $register = $createBody.IndexOf("DifRegisterDevice,")
+        if ($getId -lt 0 -or
+            $validate -le $getId -or
+            $register -le $validate) {
+            throw (
+                "Generated exact instance ID is not proven before " +
+                "DIF_REGISTERDEVICE."
+            )
+        }
+
+        $script:inventoryCalls = 0
+        Set-TestFunction -Name Get-TargetDevnodes -Body {
+            $script:inventoryCalls += 1
+            @()
+        }
+        Set-TestFunction -Name New-RootDevnodeFromInf -Body {
+            throw "SetupDiGetDeviceInstanceId failed before registration."
+        }
+        $script:mutationCalls = 0
+        Set-TestFunction -Name Remove-ExactCreatedRootDevnode -Body {
+            $script:mutationCalls += 1
+        }
+        Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
+            $script:mutationCalls += 1
+        }
+        Set-TestFunction -Name Wait-TargetDevnode -Body {
+            throw "Pre-register ID failure reached devnode polling."
+        }
+        Assert-Throws -Pattern "SetupDiGetDeviceInstanceId" -Action {
+            Invoke-CreateAndBindRootDevnode `
+                -StagedInf ([pscustomobject]@{
+                    FullName = "C:\Protected\EMKE.VirtualAudio.inf"
+                }) `
+                -InfMetadata ([pscustomobject]@{
+                    DriverVersion = "1.0.0.1"
+                    ProviderName = "EMKE"
+                })
+        }
+        if ($script:mutationCalls -ne 0 -or
+            $script:inventoryCalls -ne 1) {
+            throw "Pre-register ID failure crossed a mutation boundary."
+        }
+    }
+
+Invoke-Case `
+    -Name "post-register failure reports exact rollback completed" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $script:inventoryCalls = 0
+        Set-TestFunction -Name Get-TargetDevnodes -Body {
+            $script:inventoryCalls += 1
+            @()
+        }
+        Set-TestFunction -Name New-RootDevnodeFromInf -Body {
+            $exception = [InvalidOperationException]::new(
+                "Post-register failure; exact same-handle rollback completed."
+            )
+            $exception.Data["StateUncertain"] = $false
+            $exception.Data["RollbackCompleted"] = $true
+            $exception.Data["InstanceId"] =
+                "ROOT\EMKEVIRTUALAUDIO\0042"
+            throw $exception
+        }
+        $script:externalMutationCalls = 0
+        Set-TestFunction -Name Remove-ExactCreatedRootDevnode -Body {
+            $script:externalMutationCalls += 1
+        }
+        Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
+            $script:externalMutationCalls += 1
+        }
+        Assert-Throws `
+            -Pattern "creation failed.*rollback completed.*state recovered" `
+            -Action {
+            Invoke-CreateAndBindRootDevnode `
+                -StagedInf ([pscustomobject]@{
+                    FullName = "C:\Protected\EMKE.VirtualAudio.inf"
+                }) `
+                -InfMetadata ([pscustomobject]@{
+                    DriverVersion = "1.0.0.1"
+                    ProviderName = "EMKE"
+                })
+        }
+        if ($script:externalMutationCalls -ne 0 -or
+            $script:inventoryCalls -ne 1) {
+            throw "Completed internal rollback reached external mutation."
+        }
+    }
+
+Invoke-Case `
+    -Name "post-register rollback failure permits only read-only inventory" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $script:inventoryCalls = 0
+        Set-TestFunction -Name Get-TargetDevnodes -Body {
+            $script:inventoryCalls += 1
+            @()
+        }
+        Set-TestFunction -Name New-RootDevnodeFromInf -Body {
+            $exception = [InvalidOperationException]::new(
+                "Post-register failure; exact same-handle rollback failed."
+            )
+            $exception.Data["StateUncertain"] = $true
+            $exception.Data["RollbackCompleted"] = $false
+            $exception.Data["InstanceId"] =
+                "ROOT\EMKEVIRTUALAUDIO\0042"
+            throw $exception
+        }
+        $script:externalMutationCalls = 0
+        Set-TestFunction -Name Remove-ExactCreatedRootDevnode -Body {
+            $script:externalMutationCalls += 1
+        }
+        Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
+            $script:externalMutationCalls += 1
+        }
+        $caught = $null
+        try {
+            Invoke-CreateAndBindRootDevnode `
+                -StagedInf ([pscustomobject]@{
+                    FullName = "C:\Protected\EMKE.VirtualAudio.inf"
+                }) `
+                -InfMetadata ([pscustomobject]@{
+                    DriverVersion = "1.0.0.1"
+                    ProviderName = "EMKE"
+                })
+        } catch {
+            $caught = $_
+        }
+        if ($null -eq $caught -or
+            $caught.Exception.Message -notmatch
+            "Partial state.*state uncertain.*read-only inventory") {
+            throw "Failed internal rollback lost the uncertain state."
+        }
+        if ($script:externalMutationCalls -ne 0 -or
+            $script:inventoryCalls -ne 2) {
+            throw (
+                "Failed internal rollback mutated state or skipped " +
+                "read-only inventory."
+            )
+        }
+    }
 
 Invoke-Case -Name "root create bind package identity state machine" -Action {
     Import-LifecycleFunctions -Path $installScript

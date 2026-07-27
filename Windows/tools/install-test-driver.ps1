@@ -781,6 +781,32 @@ using System.Text;
 
 namespace Emke.DriverLab
 {
+    public sealed class RootDevnodeCreateException : Exception
+    {
+        public bool StateUncertain { get; }
+        public bool RollbackCompleted { get; }
+        public string InstanceId { get; }
+        public Exception CleanupFailure { get; }
+
+        public RootDevnodeCreateException(
+            string message,
+            string instanceId,
+            bool stateUncertain,
+            bool rollbackCompleted,
+            Exception originalFailure,
+            Exception cleanupFailure)
+            : base(message, originalFailure)
+        {
+            StateUncertain = stateUncertain;
+            RollbackCompleted = rollbackCompleted;
+            InstanceId = instanceId;
+            CleanupFailure = cleanupFailure;
+            Data["StateUncertain"] = stateUncertain;
+            Data["RollbackCompleted"] = rollbackCompleted;
+            Data["InstanceId"] = instanceId;
+        }
+    }
+
     public static class RootDevnodeSetupApi
     {
         private static readonly IntPtr InvalidHandleValue = new IntPtr(-1);
@@ -930,6 +956,37 @@ namespace Emke.DriverLab
             };
         }
 
+        private static void RemoveRegisteredDeviceFromInfoElement(
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData)
+        {
+            var removeParams = new SpRemoveDeviceParams
+            {
+                ClassInstallHeader = new SpClassInstallHeader
+                {
+                    Size = (uint)Marshal.SizeOf<SpClassInstallHeader>(),
+                    InstallFunction = DifRemove
+                },
+                Scope = DiRemoveDeviceGlobal,
+                HwProfile = 0
+            };
+            if (!SetupDiSetClassInstallParamsW(
+                deviceInfoSet,
+                ref deviceInfoData,
+                ref removeParams,
+                (uint)Marshal.SizeOf<SpRemoveDeviceParams>()))
+            {
+                ThrowLastError("SetupDiSetClassInstallParams(DIF_REMOVE)");
+            }
+            if (!SetupDiCallClassInstaller(
+                DifRemove,
+                deviceInfoSet,
+                ref deviceInfoData))
+            {
+                ThrowLastError("SetupDiCallClassInstaller(DIF_REMOVE)");
+            }
+        }
+
         private static void ValidateExactInstanceId(string instanceId)
         {
             const string prefix = "ROOT\\EMKEVIRTUALAUDIO\\";
@@ -986,52 +1043,95 @@ namespace Emke.DriverLab
             try
             {
                 SpDevinfoData deviceInfoData = NewDeviceInfoData();
-                if (!SetupDiCreateDeviceInfoW(
-                    deviceInfoSet,
-                    className.ToString(),
-                    ref classGuid,
-                    null,
-                    IntPtr.Zero,
-                    DicdGenerateId,
-                    ref deviceInfoData))
+                bool registered = false;
+                string result = null;
+                try
                 {
-                    ThrowLastError("SetupDiCreateDeviceInfo");
-                }
+                    if (!SetupDiCreateDeviceInfoW(
+                        deviceInfoSet,
+                        className.ToString(),
+                        ref classGuid,
+                        null,
+                        IntPtr.Zero,
+                        DicdGenerateId,
+                        ref deviceInfoData))
+                    {
+                        ThrowLastError("SetupDiCreateDeviceInfo");
+                    }
 
-                byte[] multiString = Encoding.Unicode.GetBytes(
-                    hardwareId + "\0\0");
-                if (!SetupDiSetDeviceRegistryPropertyW(
-                    deviceInfoSet,
-                    ref deviceInfoData,
-                    SpdrpHardwareId,
-                    multiString,
-                    (uint)multiString.Length))
-                {
-                    ThrowLastError(
-                        "SetupDiSetDeviceRegistryProperty(SPDRP_HARDWAREID)");
-                }
-                if (!SetupDiCallClassInstaller(
-                    DifRegisterDevice,
-                    deviceInfoSet,
-                    ref deviceInfoData))
-                {
-                    ThrowLastError(
-                        "SetupDiCallClassInstaller(DIF_REGISTERDEVICE)");
-                }
+                    byte[] multiString = Encoding.Unicode.GetBytes(
+                        hardwareId + "\0\0");
+                    if (!SetupDiSetDeviceRegistryPropertyW(
+                        deviceInfoSet,
+                        ref deviceInfoData,
+                        SpdrpHardwareId,
+                        multiString,
+                        (uint)multiString.Length))
+                    {
+                        ThrowLastError(
+                            "SetupDiSetDeviceRegistryProperty" +
+                            "(SPDRP_HARDWAREID)");
+                    }
 
-                var instanceId = new StringBuilder(512);
-                if (!SetupDiGetDeviceInstanceIdW(
-                    deviceInfoSet,
-                    ref deviceInfoData,
-                    instanceId,
-                    (uint)instanceId.Capacity,
-                    out requiredSize))
-                {
-                    ThrowLastError("SetupDiGetDeviceInstanceId");
+                    var instanceId = new StringBuilder(512);
+                    if (!SetupDiGetDeviceInstanceIdW(
+                        deviceInfoSet,
+                        ref deviceInfoData,
+                        instanceId,
+                        (uint)instanceId.Capacity,
+                        out requiredSize))
+                    {
+                        ThrowLastError("SetupDiGetDeviceInstanceId");
+                    }
+                    result = instanceId.ToString();
+                    ValidateExactInstanceId(result);
+
+                    if (!SetupDiCallClassInstaller(
+                        DifRegisterDevice,
+                        deviceInfoSet,
+                        ref deviceInfoData))
+                    {
+                        ThrowLastError(
+                            "SetupDiCallClassInstaller(DIF_REGISTERDEVICE)");
+                    }
+                    registered = true;
+                    return result;
                 }
-                string result = instanceId.ToString();
-                ValidateExactInstanceId(result);
-                return result;
+                catch (Exception originalFailure)
+                {
+                    if (!registered)
+                    {
+                        throw;
+                    }
+                    try
+                    {
+                        RemoveRegisteredDeviceFromInfoElement(
+                            deviceInfoSet,
+                            ref deviceInfoData);
+                    }
+                    catch (Exception cleanupFailure)
+                    {
+                        throw new RootDevnodeCreateException(
+                            message:
+                                "Root device creation failed after registration; " +
+                                "exact same-handle rollback failed; " +
+                                "state uncertain.",
+                            instanceId: result,
+                            stateUncertain: true,
+                            rollbackCompleted: false,
+                            originalFailure: originalFailure,
+                            cleanupFailure: cleanupFailure);
+                    }
+                    throw new RootDevnodeCreateException(
+                        message:
+                            "Root device creation failed after registration; " +
+                            "exact same-handle rollback completed.",
+                        instanceId: result,
+                        stateUncertain: false,
+                        rollbackCompleted: true,
+                        originalFailure: originalFailure,
+                        cleanupFailure: null);
+                }
             }
             finally
             {
@@ -1061,33 +1161,9 @@ namespace Emke.DriverLab
                 {
                     ThrowLastError("SetupDiOpenDeviceInfo");
                 }
-                var removeParams = new SpRemoveDeviceParams
-                {
-                    ClassInstallHeader = new SpClassInstallHeader
-                    {
-                        Size =
-                            (uint)Marshal.SizeOf<SpClassInstallHeader>(),
-                        InstallFunction = DifRemove
-                    },
-                    Scope = DiRemoveDeviceGlobal,
-                    HwProfile = 0
-                };
-                if (!SetupDiSetClassInstallParamsW(
+                RemoveRegisteredDeviceFromInfoElement(
                     deviceInfoSet,
-                    ref deviceInfoData,
-                    ref removeParams,
-                    (uint)Marshal.SizeOf<SpRemoveDeviceParams>()))
-                {
-                    ThrowLastError("SetupDiSetClassInstallParams(DIF_REMOVE)");
-                }
-                if (!SetupDiCallClassInstaller(
-                    DifRemove,
-                    deviceInfoSet,
-                    ref deviceInfoData))
-                {
-                    ThrowLastError(
-                        "SetupDiCallClassInstaller(DIF_REMOVE)");
-                }
+                    ref deviceInfoData);
             }
             finally
             {
@@ -1107,6 +1183,47 @@ function Initialize-RootDevnodeSetupApi {
     }
 }
 
+function Get-RootDevnodeFailureMetadata {
+    param(
+        [Parameter(Mandatory)]
+        [Exception]$Exception
+    )
+
+    $current = $Exception
+    while ($null -ne $current) {
+        if ($current.Data.Contains("StateUncertain") -or
+            $null -ne $current.PSObject.Properties["StateUncertain"]) {
+            $stateUncertain = if (
+                $current.Data.Contains("StateUncertain")
+            ) {
+                [bool]$current.Data["StateUncertain"]
+            } else {
+                [bool]$current.StateUncertain
+            }
+            $rollbackCompleted = if (
+                $current.Data.Contains("RollbackCompleted")
+            ) {
+                [bool]$current.Data["RollbackCompleted"]
+            } else {
+                [bool]$current.RollbackCompleted
+            }
+            $instanceId = if ($current.Data.Contains("InstanceId")) {
+                [string]$current.Data["InstanceId"]
+            } else {
+                [string]$current.InstanceId
+            }
+            return [pscustomobject]@{
+                Failure = $current
+                StateUncertain = $stateUncertain
+                RollbackCompleted = $rollbackCompleted
+                InstanceId = $instanceId
+            }
+        }
+        $current = $current.InnerException
+    }
+    return $null
+}
+
 function New-RootDevnodeFromInf {
     param(
         [Parameter(Mandatory)]
@@ -1120,10 +1237,29 @@ function New-RootDevnodeFromInf {
         throw "Only the exact EMKE root hardware ID may be created."
     }
     Initialize-RootDevnodeSetupApi
-    return [Emke.DriverLab.RootDevnodeSetupApi]::Create(
-        $InfPath,
-        $HardwareId
-    )
+    try {
+        return [Emke.DriverLab.RootDevnodeSetupApi]::Create(
+            $InfPath,
+            $HardwareId
+        )
+    } catch {
+        $outerFailure = $_.Exception
+        $metadata = Get-RootDevnodeFailureMetadata `
+            -Exception $outerFailure
+        if ($null -eq $metadata) {
+            throw
+        }
+        $normalized = [InvalidOperationException]::new(
+            $metadata.Failure.Message,
+            $outerFailure
+        )
+        $normalized.Data["StateUncertain"] =
+            $metadata.StateUncertain
+        $normalized.Data["RollbackCompleted"] =
+            $metadata.RollbackCompleted
+        $normalized.Data["InstanceId"] = $metadata.InstanceId
+        throw $normalized
+    }
 }
 
 function Remove-ExactCreatedRootDevnode {
@@ -1366,8 +1502,22 @@ function Invoke-CreateAndBindRootDevnode {
         }
     } catch {
         $originalFailure = $_
-        if ($null -eq $createdInstanceId) {
-            throw
+        $internalInstanceId =
+            [string]$originalFailure.Exception.Data["InstanceId"]
+        $reportedInstanceId = if (
+            -not [string]::IsNullOrWhiteSpace($internalInstanceId)
+        ) {
+            $internalInstanceId
+        } else {
+            $createdInstanceId
+        }
+        if ($originalFailure.Exception.Data["RollbackCompleted"] -eq $true) {
+            throw (
+                "Root devnode creation failed for '$reportedInstanceId'; " +
+                "exact same-handle rollback completed; state recovered. " +
+                "Original error: " +
+                $originalFailure.Exception.Message
+            )
         }
         if ($originalFailure.Exception.Data["StateUncertain"] -eq $true) {
             $inventorySummary = "read-only inventory failed"
@@ -1384,12 +1534,15 @@ function Invoke-CreateAndBindRootDevnode {
                 )
             }
             throw (
-                "Root devnode bind failed after creating " +
-                "'$createdInstanceId'. Partial state: state uncertain; " +
+                "Root devnode creation or bind failed for " +
+                "'$reportedInstanceId'. Partial state: state uncertain; " +
                 "$inventorySummary; no cleanup mutation was attempted. " +
                 "Original error: " +
                 $originalFailure.Exception.Message
             )
+        }
+        if ($null -eq $createdInstanceId) {
+            throw
         }
         $cleanupStatus = "state uncertain"
         try {

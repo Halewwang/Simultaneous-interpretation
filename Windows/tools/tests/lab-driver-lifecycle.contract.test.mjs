@@ -134,6 +134,34 @@ test("install lifecycle is fail-closed before the one exact pnputil install", as
   assert.match(source, /SetupDiCallClassInstaller/);
   assert.match(source, /DifRegisterDevice/);
   assert.match(source, /DiRemoveDeviceGlobal/);
+  assert.match(source, /class\s+RootDevnodeCreateException/);
+  assert.match(source, /bool\s+StateUncertain\s*{\s*get;/);
+  assert.match(source, /bool\s+RollbackCompleted\s*{\s*get;/);
+  assert.match(source, /string\s+InstanceId\s*{\s*get;/);
+  const createMethod = source.match(
+    /public static string Create\([^]*?(?<body>\{[^]*?)\n        public static void RemoveExact/,
+  );
+  assert.ok(createMethod, "embedded SetupAPI Create method is missing");
+  const createBody = createMethod.groups.body;
+  const getInstanceId = createBody.indexOf(
+    "if (!SetupDiGetDeviceInstanceIdW(",
+  );
+  const validateInstanceId = createBody.indexOf(
+    "ValidateExactInstanceId(result);",
+  );
+  const registerDevice = createBody.indexOf("DifRegisterDevice,");
+  assert.ok(
+    getInstanceId >= 0 &&
+      validateInstanceId > getInstanceId &&
+      registerDevice > validateInstanceId,
+    "generated instance ID must be retrieved and validated before DIF_REGISTERDEVICE",
+  );
+  assert.match(createBody, /bool\s+registered\s*=\s*false/);
+  assert.match(createBody, /registered\s*=\s*true/);
+  assert.match(createBody, /catch\s*\(\s*Exception\s+originalFailure\s*\)/);
+  assert.match(createBody, /RemoveRegisteredDeviceFromInfoElement/);
+  assert.match(createBody, /rollbackCompleted:\s*true/);
+  assert.match(createBody, /stateUncertain:\s*true/);
   assert.doesNotMatch(
     source,
     /AccessControlSections\]::All/,
@@ -257,6 +285,10 @@ test("Windows behavior suite declares mutation-free lifecycle safety cases", asy
     "catalog certificate digest is exactly SHA256",
     "installed package identity matches exact devnode",
     "embedded SetupAPI helper compiles without mutation",
+    "nested typed create exception exposes machine state",
+    "pre-register instance ID failure performs no mutation",
+    "post-register failure reports exact rollback completed",
+    "post-register rollback failure permits only read-only inventory",
     "root create bind package identity state machine",
     "preexisting target blocks root creation",
     "bind failure reports partial state and exact cleanup",
