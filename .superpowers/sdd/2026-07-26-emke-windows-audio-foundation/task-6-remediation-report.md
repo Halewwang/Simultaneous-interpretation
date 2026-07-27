@@ -6,11 +6,12 @@
 
 Task-review fix round 4 is locally complete in implementation commit
 `8a3daeb4af4f7962bc8d995e9096674d96cc539c`. Every new production behavior has
-an observed compiled or executable RED and a fresh local GREEN. The prior
-authorized hosted proof remains valid historical evidence for base commit
-`44c3d08c0380d1bf48684034b42f4349ce14c398`, but it is not remote proof for the
-new round-4 commit. A controller push and a fresh Windows hosted run are still
-required for MSVC, WDK, CTest, package, catalog-mutation, and artifact gates.
+an observed compiled or executable RED and a fresh local GREEN. The controller
+subsequently verified round-4 head
+`93f39e231f409cc8a06eab771b805a07d0ce34e9` in successful GitHub Actions run
+`30234143101`, closing the hosted MSVC, WDK, CTest, package,
+catalog-mutation, and Actions run artifact gates within the proof boundaries
+recorded below.
 
 This is build/package evidence, not release or runtime acceptance. The catalog
 is explicitly unsigned; no driver or Windows application was installed, no
@@ -1161,21 +1162,58 @@ git diff --check
 `cmake`, `pwsh`, MSVC, WDK, and Windows Catalog APIs are unavailable on this
 macOS host. No result is inferred for those tools.
 
-### Remaining remote and live gates
+### Controller-verified round-4 remote Windows evidence
 
-A controller push must run the unchanged authorized workflow against
-`8a3daeb4af4f7962bc8d995e9096674d96cc539c` plus this report commit and prove:
+GitHub Actions run `30234143101` tested round-4 head
+`93f39e231f409cc8a06eab771b805a07d0ce34e9` and completed successfully.
 
-- hosted MSVC builds and all CTest targets, including the new format, reset,
-  routing/DMA, and WaveRT buffer-contract executables;
-- pinned Release x64 WDK `/kernel` compile/link with zero errors;
-- deterministic StampInf `1.0.0.1`, Universal ApiValidator,
-  DriverPackageTarget, and Inf2Cat;
-- exact flat INF/SYS/CAT staging;
-- strict four-tag SHA-1/SHA-256 catalog membership;
-- independent mutated-INF and mutated-SYS rejection;
-- exactly the three unsigned package files in a seven-day Actions run artifact,
-  not a public GitHub Release asset.
+- Hosted native job `89878510405` passed. MSVC built the native and portable
+  driver-boundary targets, and CTest passed all `13/13` tests, including the new
+  shared-format, reset/concurrency, production identity/DMA, and notification
+  buffer-contract executables.
+- Driver job `89878510350` passed:
+  - Release x64 WDK `/kernel` compilation/linking completed with `0 Warning(s)`
+    and `0 Error(s)`;
+  - ApiValidator reported Universal;
+  - the package used KMDF `1.15`;
+  - StampInf emitted `DriverVer=07/26/2026,1.0.0.1`;
+  - the C# catalog layer and PowerShell wrapper each enumerated exactly four
+    catalog members;
+  - the exact staged INF/SYS SHA-1/SHA-256 reference-tag set matched;
+  - the original package was accepted, while independent mutated-INF and
+    mutated-SYS packages were rejected;
+  - signature status was `NotSigned`.
+
+The successful run uploaded this seven-day Actions run artifact:
+
+```text
+name:
+  emke-virtual-audio-unsigned-93f39e231f409cc8a06eab771b805a07d0ce34e9
+artifact ID:
+  8641074977
+uploaded ZIP size:
+  27452 bytes
+uploaded ZIP SHA-256:
+  3269579b51c54ec8756a74aeff44de55c3f6a604aeb09156fedb80e77b348150
+expires:
+  2026-08-03T03:16:45Z
+URL:
+  https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30234143101/artifacts/8641074977
+```
+
+The controller downloaded the artifact and verified that it contains exactly
+three raw package files:
+
+| File | Size (bytes) | SHA-256 |
+| --- | ---: | --- |
+| `EMKE.VirtualAudio.inf` | 8,210 | `d00e70465d4bdc1ad386cab5a516cdb923245270f173371f54f544cdb7318362` |
+| `EMKE.VirtualAudio.sys` | 56,320 | `18d5e7e0e065d9361557fd8e504fe66a0123f4e9c2a375746c745dd33c1f5191` |
+| `emke.virtualaudio.cat` | 1,188 | `4c35ba71918450d6221098a54a50b9a680ba0441162404124c2f87044e6cb27f` |
+
+This is an Actions run artifact, not a public GitHub Release asset. It is an
+unsigned driver package, not a Windows application installer.
+
+### Remaining live gates
 
 Signing, installation, driver loading/removal, Windows 11 25H2 physical-machine
 acceptance, live endpoint enumeration/routing, WaveRT timing, human listening,
@@ -1184,6 +1222,9 @@ and cannot be inferred from hosted build/package proof.
 
 ### Safety boundary for fix round 4
 
-No push, signing, driver installation, driver loading/removal, administrator
-elevation, secret creation/use, self-hosted runner, public GitHub Release, or
-public artifact publication occurred in fix round 4.
+The implementer did not push. The controller push triggered the hosted run
+recorded above. No signing, driver installation, driver loading/removal,
+administrator elevation, secret creation/use, self-hosted runner, public GitHub
+Release asset, or public artifact publication occurred in fix round 4. The
+hosted success does not prove signing, installation, loading, physical-machine
+operation, live endpoint behavior, or a real meeting.
