@@ -16,7 +16,17 @@ function Read-JsonFile {
         throw "Required metadata file does not exist: $Path"
     }
 
-    Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    $jsonText = Get-Content -LiteralPath $Path -Raw
+    $parsedJson = ConvertFrom-Json -InputObject $jsonText -NoEnumerate
+    if (
+        $null -eq $parsedJson -or
+        $parsedJson.GetType() -ne
+            [System.Management.Automation.PSCustomObject]
+    ) {
+        throw "JSON root must be an object: $Path"
+    }
+
+    $parsedJson
 }
 
 function Get-RequiredProperty {
@@ -53,7 +63,8 @@ function Test-ExactPropertyExists {
         [AllowNull()]
         [object]$Object,
         [Parameter(Mandatory)]
-        [string]$Name
+        [string]$Name,
+        [switch]$IgnoreCase
     )
 
     if ($null -eq $Object) {
@@ -61,7 +72,10 @@ function Test-ExactPropertyExists {
     }
 
     foreach ($property in $Object.PSObject.Properties) {
-        if ($property.Name -ceq $Name) {
+        if (
+            ($IgnoreCase -and $property.Name -ieq $Name) -or
+            (-not $IgnoreCase -and $property.Name -ceq $Name)
+        ) {
             return $true
         }
     }
@@ -116,7 +130,11 @@ function Assert-ThreePartVersion {
         [string]$Name
     )
 
-    if (-not [regex]::IsMatch($Value, '^\d+\.\d+\.\d+$')) {
+    $numericPart = '(?:0|[1-9][0-9]*)'
+    if (-not [regex]::IsMatch(
+        $Value,
+        "^$numericPart\.$numericPart\.$numericPart$"
+    )) {
         throw "$Name must contain exactly three non-negative integer parts."
     }
 }
@@ -129,7 +147,11 @@ function Assert-PackageVersion {
         [string]$ProductVersion
     )
 
-    if (-not [regex]::IsMatch($Value, '^\d+\.\d+\.\d+\.\d+$')) {
+    $numericPart = '(?:0|[1-9][0-9]*)'
+    if (-not [regex]::IsMatch(
+        $Value,
+        "^$numericPart\.$numericPart\.$numericPart\.$numericPart$"
+    )) {
         throw 'packageVersion must contain exactly four integer parts.'
     }
 
@@ -204,6 +226,15 @@ Assert-JsonInteger -Value $driverAbiVersion -Name 'driverAbiVersion'
 Assert-JsonInteger `
     -Value $minimumWindowsBuild `
     -Name 'minimumWindowsBuild'
+if ($contractVersion -le 0) {
+    throw 'contractVersion must be greater than zero.'
+}
+if ($settingsSchemaVersion -le 0) {
+    throw 'settingsSchemaVersion must be greater than zero.'
+}
+if ($driverAbiVersion -le 0) {
+    throw 'driverAbiVersion must be greater than zero.'
+}
 Assert-ThreePartVersion `
     -Value $productVersion `
     -Name 'productVersion'
@@ -343,6 +374,15 @@ Assert-JsonInteger `
 Assert-JsonInteger `
     -Value $compatibilityDriverAbiVersion `
     -Name 'compatibility driverAbiVersion'
+if ($compatibilityContractVersion -le 0) {
+    throw 'Compatibility contractVersion must be greater than zero.'
+}
+if ($compatibilitySettingsSchemaVersion -le 0) {
+    throw 'Compatibility settingsSchemaVersion must be greater than zero.'
+}
+if ($compatibilityDriverAbiVersion -le 0) {
+    throw 'Compatibility driverAbiVersion must be greater than zero.'
+}
 Assert-ThreePartVersion `
     -Value $minimumDriverVersion `
     -Name 'minimumDriverVersion'
@@ -371,10 +411,12 @@ if ($compatibilityDriverAbiVersion -ne $driverAbiVersion) {
 
 $hasDriverPackageUrl = Test-ExactPropertyExists `
     -Object $compatibility `
-    -Name 'driverPackageUrl'
+    -Name 'driverPackageUrl' `
+    -IgnoreCase
 $hasDriverPackageSha256 = Test-ExactPropertyExists `
     -Object $compatibility `
-    -Name 'driverPackageSha256'
+    -Name 'driverPackageSha256' `
+    -IgnoreCase
 if (-not $driverPackageAvailable -and (
     $hasDriverPackageUrl -or
     $hasDriverPackageSha256

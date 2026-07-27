@@ -65,12 +65,16 @@ async function runMutatedResolver(mutate) {
       readJson(channelsFile),
       readJson(compatibilityFile),
     ]);
-    mutate({ version, channels, compatibility });
+    const metadata = { version, channels, compatibility };
+    mutate(metadata);
 
     const compatibilityChannel =
-      typeof version.channel === 'string'
-      && /^[A-Za-z0-9!-]+$/.test(version.channel)
-        ? version.channel
+      metadata.version !== null
+      && typeof metadata.version === 'object'
+      && !Array.isArray(metadata.version)
+      && typeof metadata.version.channel === 'string'
+      && /^[A-Za-z0-9!-]+$/.test(metadata.version.channel)
+        ? metadata.version.channel
         : 'internal';
     const fixtureVersionFile = path.join(
       fixtureWindowsRoot,
@@ -79,18 +83,18 @@ async function runMutatedResolver(mutate) {
     await Promise.all([
       writeFile(
         fixtureVersionFile,
-        `${JSON.stringify(version, null, 2)}\n`,
+        `${JSON.stringify(metadata.version, null, 2)}\n`,
       ),
       writeFile(
         path.join(fixturePackagingRoot, 'channels.json'),
-        `${JSON.stringify(channels, null, 2)}\n`,
+        `${JSON.stringify(metadata.channels, null, 2)}\n`,
       ),
       writeFile(
         path.join(
           fixturePackagingRoot,
           `compatibility.${compatibilityChannel}.json`,
         ),
-        `${JSON.stringify(compatibility, null, 2)}\n`,
+        `${JSON.stringify(metadata.compatibility, null, 2)}\n`,
       ),
     ]);
 
@@ -100,7 +104,20 @@ async function runMutatedResolver(mutate) {
   }
 }
 
+const invalidRootMutations = [
+  ['array', (value) => [value]],
+  ['null', () => null],
+  ['primitive', () => 42],
+].flatMap(([shape, createValue]) =>
+  ['version', 'channels', 'compatibility'].map((section) => ({
+    name: `${section} root ${shape}`,
+    mutate: (metadata) => {
+      metadata[section] = createValue(metadata[section]);
+    },
+  })));
+
 const invalidSchemaMutations = [
+  ...invalidRootMutations,
   {
     name: 'missing productVersion',
     mutate: ({ version }) => delete version.productVersion,
@@ -172,6 +189,42 @@ const invalidSchemaMutations = [
     mutate: ({ version, compatibility }) => {
       version.driverAbiVersion = true;
       compatibility.driverAbiVersion = true;
+    },
+  },
+  {
+    name: 'zero contractVersion',
+    mutate: ({ version, compatibility }) => {
+      version.contractVersion = 0;
+      compatibility.contractVersion = 0;
+    },
+  },
+  {
+    name: 'negative settingsSchemaVersion',
+    mutate: ({ version, compatibility }) => {
+      version.settingsSchemaVersion = -1;
+      compatibility.settingsSchemaVersion = -1;
+    },
+  },
+  {
+    name: 'zero driverAbiVersion',
+    mutate: ({ version, compatibility }) => {
+      version.driverAbiVersion = 0;
+      compatibility.driverAbiVersion = 0;
+    },
+  },
+  {
+    name: 'non-canonical productVersion',
+    mutate: ({ version, compatibility }) => {
+      version.productVersion = '00.01.000';
+      version.packageVersion = '00.01.000.0';
+      version.expectedTag = 'windows-v00.01.000';
+      compatibility.appVersion = '00.01.000';
+    },
+  },
+  {
+    name: 'non-canonical packageVersion',
+    mutate: ({ version }) => {
+      version.packageVersion = '0.1.0.00';
     },
   },
   {
@@ -320,6 +373,18 @@ const invalidSchemaMutations = [
       compatibility.recommendedDriverVersion = ' ';
     },
   },
+  {
+    name: 'non-canonical minimumDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.minimumDriverVersion = '00.01.000';
+    },
+  },
+  {
+    name: 'non-canonical recommendedDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.recommendedDriverVersion = '00.01.000';
+    },
+  },
 ];
 
 const invalidDriverPackageMutations = [
@@ -349,6 +414,20 @@ const invalidDriverPackageMutations = [
     name: 'false with empty driverPackageSha256',
     mutate: ({ compatibility }) => {
       compatibility.driverPackageSha256 = '';
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'false with case-variant DriverPackageUrl',
+    mutate: ({ compatibility }) => {
+      compatibility.DriverPackageUrl = null;
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'false with case-variant driverPackageSHA256',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageSHA256 = '';
     },
     expectsLocationError: true,
   },
