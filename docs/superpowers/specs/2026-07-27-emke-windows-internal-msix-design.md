@@ -1,7 +1,7 @@
 # EMKE Translation Windows Internal MSIX Design
 
 **Date:** 2026-07-27
-**Status:** Approved in conversation on 2026-07-27
+**Status:** Approved; Microsoft trust-store correction awaiting reconfirmation
 **Implementation baseline:** `dd9d3cf` (`docs: record Task 7B hosted evidence`)
 **Target:** Windows 11 25H2+, x64, Internal channel
 
@@ -31,14 +31,15 @@ The build produces:
 1. `EMKE-Translation-Windows-0.1.0-internal-x64.msix`
 2. `EMKE-Translation-Windows-0.1.0-internal-x64.cer`
 3. `Install-EMKE-Translation-Internal.ps1`
-4. `SHA256SUMS.txt`
-5. `EMKE-Translation-Windows-0.1.0-internal-x64.zip`
+4. `Uninstall-EMKE-Translation-Internal.ps1`
+5. `SHA256SUMS.txt`
+6. `EMKE-Translation-Windows-0.1.0-internal-x64.zip`
 
 The `.msix` is the application installation file. The ZIP is the handoff
-bundle containing the installation file, public test certificate, installer
-helper, and hashes. No private certificate, certificate password, API key,
-endpoint identifier, recording, transcript, or local path may enter any
-artifact.
+bundle containing the installation file, public test certificate, exact
+install/uninstall helpers, and hashes. No private certificate, certificate
+password, API key, endpoint identifier, recording, transcript, or local path
+may enter any artifact.
 
 The package identity is:
 
@@ -192,10 +193,19 @@ signature, and deletes runner-local signing files during cleanup. Logs and
 artifacts must not contain the private key or password.
 
 The helper script requires an explicit confirmation before importing the
-public certificate into the current user's Trusted People store. It verifies
-the fixed certificate thumbprint and MSIX SHA-256 before calling
-`Add-AppxPackage`. It does not modify Local Machine trust, request elevation,
-install the driver, or weaken Windows execution policy.
+public certificate into the Local Machine Trusted People store. This exact
+certificate-trust action requires elevation and produces one UAC prompt. The
+script verifies the fixed certificate thumbprint and MSIX SHA-256 before
+elevation, re-verifies both after elevation, imports only the supplied
+certificate, and then calls `Add-AppxPackage` for the invoking user. It never
+imports the certificate into a root store, installs the driver, or weakens
+Windows execution policy.
+
+The uninstall helper removes only the exact
+`EMKE.Translation.Internal` package for the invoking user. With a separate
+explicit confirmation and elevation, it may also remove only the exact
+matching Internal certificate thumbprint from Local Machine Trusted People.
+It never removes another certificate with only a similar subject.
 
 This certificate is for Internal testing only. It is not Microsoft Store,
 Trusted Signing, EV, attestation, WHQL, or Windows Certified evidence.
@@ -211,17 +221,24 @@ The Windows CI workflow:
 5. publishes the app self-contained for `win-x64`;
 6. stages only required application files, native DLLs, resources, and the
    generated compatibility manifest;
-7. creates the MSIX with MakeAppx;
-8. signs it with SignTool using the Internal certificate;
-9. verifies manifest identity, publisher, version, architecture, minimum OS,
+7. creates a classic packaged desktop manifest with
+   `EntryPoint="Windows.FullTrustApplication"`,
+   `uap10:RuntimeBehavior="packagedClassicApp"`,
+   `uap10:TrustLevel="mediumIL"`, and the required
+   `rescap:Capability Name="runFullTrust"`;
+8. creates the MSIX with MakeAppx;
+9. signs it with SignTool using the Internal certificate and an explicit
+   SHA-256 file digest;
+10. verifies manifest identity, publisher, version, architecture, minimum OS,
    entry executable, content hashes, and signature;
-10. imports the public certificate into the ephemeral runner's Current User
+11. imports the public certificate into the ephemeral runner's Local Machine
     Trusted People store;
-11. installs the exact MSIX with `Add-AppxPackage`;
-12. verifies package identity and a non-interactive `driverMissing` smoke
+12. installs the exact MSIX with `Add-AppxPackage`;
+13. verifies package identity and a non-interactive `driverMissing` smoke
     result;
-13. removes only that package and test certificate from the ephemeral runner;
-14. emits the handoff files, SHA-256 list, and exact provenance metadata.
+14. removes only that package and exact test certificate from the ephemeral
+    runner;
+15. emits the handoff files, SHA-256 list, and exact provenance metadata.
 
 The package build fails closed when:
 
@@ -243,10 +260,11 @@ The internal tester:
 2. verifies `SHA256SUMS.txt`;
 3. runs `Install-EMKE-Translation-Internal.ps1`;
 4. reviews the explicit Internal certificate warning;
-5. confirms current-user certificate trust;
-6. receives the normal MSIX installation;
-7. launches EMKE Translation from Start;
-8. sees onboarding and the truthful driver-missing state until a separately
+5. confirms one elevated Local Machine Trusted People certificate import;
+6. approves the UAC prompt;
+7. receives the normal per-user MSIX installation;
+8. launches EMKE Translation from Start;
+9. sees onboarding and the truthful driver-missing state until a separately
    authorized signed driver is installed.
 
 Direct double-click installation of the MSIX is supported after the public
@@ -272,7 +290,7 @@ certificate has already been trusted.
 Hosted automation does not prove:
 
 - Windows 11 25H2 physical-machine UI behavior;
-- normal-user certificate trust prompts;
+- the elevated certificate-trust prompt on a physical test machine;
 - signed driver installation or UAC behavior;
 - live four-endpoint routing;
 - real microphone/headphone behavior;
@@ -286,7 +304,7 @@ Those remain separate signed-driver and physical-lab gates.
 
 This milestone is complete when:
 
-1. the Internal MSIX, CER, installer helper, hashes, and ZIP exist;
+1. the Internal MSIX, CER, install/uninstall helpers, hashes, and ZIP exist;
 2. the MSIX is self-contained, x64, version `0.1.0.0`, and targets build
    26200+;
 3. the signature is valid against the included Internal certificate;
@@ -310,3 +328,15 @@ This milestone is complete when:
 - ARM64 or Windows builds below 26200.
 - Changing macOS code, package identity, or release cadence.
 - Claiming real meeting functionality from hosted package evidence.
+
+## 12. Technical Basis
+
+- [Microsoft: generating MSIX package components](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-manual-conversion)
+  requires `runFullTrust` for a package containing a classic full-trust
+  desktop application.
+- [Microsoft: SignTool MSIX signing](https://learn.microsoft.com/windows/msix/package/sign-app-package-using-signtool)
+  requires the package Publisher to match the signing certificate subject and
+  requires an explicit digest algorithm.
+- [Microsoft: package-signing certificate](https://learn.microsoft.com/windows/msix/package/create-certificate-package-signing)
+  places a self-signed test certificate in Local Machine Trusted People before
+  deployment.
