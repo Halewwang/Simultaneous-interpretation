@@ -130,10 +130,16 @@ public sealed class TranslationRuntime :
     private bool _waitingForStartBeforeStop;
     private bool _actorShouldExit;
     private bool _cleanupPending;
+    private bool _nativeCleanupQuarantined;
+    private RuntimeError? _safetyShutdownError;
     private long _drainingGeneration;
     private long _droppedAudioFrames;
     private RoutingPolicySnapshot _routingSnapshot;
+    private Task _routeMutationTail = Task.CompletedTask;
+    private Task _disposeFinalization = Task.CompletedTask;
+    private Task _disposeNativeCleanup = Task.CompletedTask;
     private int _disposed;
+    private int _resourcesReleased;
 
     public TranslationRuntime(TranslationRuntimeDependencies dependencies)
         : this(dependencies, Task.CompletedTask)
@@ -180,6 +186,12 @@ public sealed class TranslationRuntime :
                     ErrorCategory.CloseTimeout,
                     "translationRuntime.stopCleanupPending",
                     RecoveryAction.Retry));
+            }
+
+            if (_nativeCleanupQuarantined)
+            {
+                return Task.FromResult<RuntimeError?>(
+                    NativeCleanupQuarantinedError());
             }
 
             if (_activeStart is { IsCompleted: false })
@@ -285,17 +297,88 @@ public sealed class TranslationRuntime :
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        _ = BeginDispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Volatile.Read(ref _disposed) == 0)
+        {
+            try
+            {
+                if (CurrentSnapshot.RuntimeState != RuntimeState.Stopped)
+                {
+                    await StopAsync().ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _ = BeginDispose();
+            }
+        }
+
+        Task finalization;
+        lock (_submissionSync)
+        {
+            finalization = _disposeFinalization;
+        }
+
+        await finalization.ConfigureAwait(false);
+    }
+
+    private Task BeginDispose()
+    {
+        lock (_submissionSync)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return _disposeFinalization;
+            }
+
+            RuntimeError disposedError = DisposedError();
+            _exitTerminal = true;
+            _stopRequested = false;
+            _exitRequested = false;
+            _startCompletion?.TrySetResult(disposedError);
+            _stopCompletion?.TrySetResult(disposedError);
+            _exitCompletion?.TrySetResult(disposedError);
+            _startCompletion = null;
+            _stopCompletion = null;
+            _exitCompletion = null;
+            CancelNoThrow(_startCancellation);
+            CancelNoThrow(_pollCancellation);
+            CloseAudioWorkAdmission(cancel: true);
+            CancelNoThrow(_actorCancellation);
+            _mailbox.Dispose();
+            DisposeSupervisor(_inbound);
+            DisposeSupervisor(_outbound);
+            bool audioStarted = _audioStarted;
+            _audioStarted = false;
+            _disposeNativeCleanup =
+                CompleteDisposeNativeCleanupAsync(audioStarted);
+            _disposeFinalization = FinalizeDisposeAsync();
+            return _disposeFinalization;
+        }
+    }
+
+    private async Task FinalizeDisposeAsync()
+    {
+        await ObserveCompletionAsync(_actor).ConfigureAwait(false);
+        Task[] workers =
+        [
+            _startTask ?? Task.CompletedTask,
+            _stopTask ?? Task.CompletedTask,
+            _pollTask ?? Task.CompletedTask,
+            _disposeNativeCleanup,
+            .. _inFlightAudioWork.Keys,
+        ];
+        await ObserveCompletionAsync(Task.WhenAll(workers))
+            .ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _resourcesReleased, 1) != 0)
         {
             return;
         }
 
-        _startCancellation?.Cancel();
-        _pollCancellation?.Cancel();
-        _audioWorkCancellation?.Cancel();
-        _actorCancellation.Cancel();
-        _inbound?.Dispose();
-        _outbound?.Dispose();
         _mailbox.Dispose();
         _publisher.Dispose();
         _startCancellation?.Dispose();
@@ -304,32 +387,43 @@ public sealed class TranslationRuntime :
         _actorCancellation.Dispose();
     }
 
-    public async ValueTask DisposeAsync()
+    private async Task CompleteDisposeNativeCleanupAsync(bool audioStarted)
     {
-        if (Volatile.Read(ref _disposed) != 0)
+        _ = await DrainAudioWorkAsync(error: null).ConfigureAwait(false);
+        if (audioStarted)
+        {
+            _ = await StopAudioSafelyAsync().ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ObserveCompletionAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Dispose observes all worker outcomes before releasing shared resources.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+        }
+    }
+
+    private static void CancelNoThrow(CancellationTokenSource? cancellation)
+    {
+        if (cancellation is null)
         {
             return;
         }
 
         try
         {
-            if (CurrentSnapshot.RuntimeState != RuntimeState.Stopped)
-            {
-                await StopAsync().ConfigureAwait(false);
-            }
+            cancellation.Cancel();
         }
-        finally
+#pragma warning disable CA1031 // Concurrent completion may already have released a source.
+        catch (Exception)
+#pragma warning restore CA1031
         {
-            await _actorCancellation.CancelAsync().ConfigureAwait(false);
-            try
-            {
-                await _actor.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            Dispose();
         }
     }
 
@@ -480,6 +574,12 @@ public sealed class TranslationRuntime :
                 break;
             case ClassifiedMessage classified:
                 HandleClassified(classified);
+                break;
+            case RouteMutationCompletedMessage routing:
+                HandleRouteMutationCompleted(routing);
+                break;
+            case AudioWorkFailedMessage audioWork:
+                HandleAudioWorkFailed(audioWork);
                 break;
         }
     }
@@ -757,7 +857,6 @@ public sealed class TranslationRuntime :
         {
             routing = _routingPolicy.FailOutbound(outcome.Error.Category);
         }
-        _routingSnapshot = routing;
         _audioWorkCancellation?.Dispose();
         _audioWorkCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(
@@ -773,16 +872,13 @@ public sealed class TranslationRuntime :
                 outcome.Selection.Input.Label,
                 outcome.Selection.Output.Label),
             outcome.Driver));
-        _ = _reducer.TryCompleteStart(
+        BeginRouteMutation(
             message.Generation,
             routing,
             outcome.Error,
-            out AppSnapshot started);
-        Publish(started);
-        _acceptCapturedAudio = true;
-        StartPolling(message.Generation);
-        TrackRouteMutation(routing);
-        CompleteStart(outcome.Error);
+            completion: null,
+            completionError: outcome.Error,
+            completesStart: true);
     }
 
     private void StartPolling(long generation)
@@ -1106,7 +1202,13 @@ public sealed class TranslationRuntime :
         catch (Exception exception)
 #pragma warning restore CA1031
         {
-            return MapException(exception);
+            RuntimeError error = MapException(exception);
+            lock (_submissionSync)
+            {
+                _nativeCleanupQuarantined = true;
+            }
+
+            return error;
         }
     }
 
@@ -1237,7 +1339,20 @@ public sealed class TranslationRuntime :
         Interlocked.Exchange(ref _droppedAudioFrames, 0);
         _settings = null;
         _stopDeadlineTask = null;
-        Publish(_reducer.CompleteStop(generation));
+        RuntimeError? quarantineError;
+        RuntimeError? safetyError;
+        lock (_submissionSync)
+        {
+            quarantineError = _nativeCleanupQuarantined
+                ? NativeCleanupQuarantinedError()
+                : null;
+            safetyError = _safetyShutdownError;
+            _safetyShutdownError = null;
+        }
+
+        Publish(quarantineError is null
+            ? _reducer.CompleteStop(generation, safetyError)
+            : _reducer.FailStart(generation, quarantineError));
         CompleteStop(error);
         if (_exitRequested)
         {
@@ -1263,6 +1378,7 @@ public sealed class TranslationRuntime :
         {
             if (!TryTrackAudioWork(
                     cancellationToken => EnqueueTranslatedAsync(
+                        notification.Generation,
                         notification.Direction,
                         audio,
                         drainingTail,
@@ -1302,14 +1418,13 @@ public sealed class TranslationRuntime :
             _inboundBuffer?.Begin();
             RoutingPolicySnapshot routing =
                 _routingPolicy.CompleteInboundUtterance();
-            _routingSnapshot = routing;
-            Publish(_reducer.ApplyRouting(
+            BeginRouteMutation(
                 _reducer.Generation,
                 routing,
-                error: null));
-            TrackRouteMutation(routing);
+                snapshotError: null);
             if (!TryTrackAudioWork(
                     cancellationToken => EnqueueChunksAsync(
+                        notification.Generation,
                         AudioDirection.Inbound,
                         selected,
                         message.Completion,
@@ -1326,7 +1441,8 @@ public sealed class TranslationRuntime :
 
         if (notification.Error is not null)
         {
-            ApplyChannelFailure(notification);
+            ApplyChannelFailure(notification, message.Completion);
+            return;
         }
         else if (notification.Event is null
                  && notification.State == ChannelState.Connected
@@ -1340,6 +1456,7 @@ public sealed class TranslationRuntime :
     }
 
     private async Task EnqueueTranslatedAsync(
+        long generation,
         AudioDirection direction,
         TranslationSessionEvent.AudioDelta audio,
         bool drainingTail,
@@ -1381,7 +1498,14 @@ public sealed class TranslationRuntime :
         catch (Exception exception)
 #pragma warning restore CA1031
         {
-            completion.TrySetResult(MapException(exception));
+            RuntimeError error = MapException(exception);
+            await PostReliableAsync(
+                new AudioWorkFailedMessage(
+                    generation,
+                    direction,
+                    error,
+                    completion),
+                _actorCancellation.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -1390,6 +1514,7 @@ public sealed class TranslationRuntime :
     }
 
     private async Task EnqueueChunksAsync(
+        long generation,
         AudioDirection direction,
         IReadOnlyList<byte[]> chunks,
         TaskCompletionSource<RuntimeError?> completion,
@@ -1421,12 +1546,20 @@ public sealed class TranslationRuntime :
         catch (Exception exception)
 #pragma warning restore CA1031
         {
-            completion.TrySetResult(MapException(exception));
+            RuntimeError error = MapException(exception);
+            await PostReliableAsync(
+                new AudioWorkFailedMessage(
+                    generation,
+                    direction,
+                    error,
+                    completion),
+                _actorCancellation.Token).ConfigureAwait(false);
         }
     }
 
     private void ApplyChannelFailure(
-        ChannelSupervisorNotification notification)
+        ChannelSupervisorNotification notification,
+        TaskCompletionSource<RuntimeError?> completion)
     {
         RuntimeError error = notification.Error!;
         RoutingPolicySnapshot routing = notification.Direction switch
@@ -1440,12 +1573,12 @@ public sealed class TranslationRuntime :
                 _routingPolicy.FailOutbound(error.Category),
             _ => _routingPolicy.Snapshot,
         };
-        _routingSnapshot = routing;
-        Publish(_reducer.ApplyRouting(
+        BeginRouteMutation(
             _reducer.Generation,
             routing,
-            error));
-        TrackRouteMutation(routing);
+            error,
+            completion,
+            completionError: null);
     }
 
     private void ApplyChannelRecovery(AudioDirection direction)
@@ -1456,12 +1589,10 @@ public sealed class TranslationRuntime :
             AudioDirection.Outbound => _routingPolicy.ReconnectOutbound(),
             _ => _routingSnapshot,
         };
-        _routingSnapshot = routing;
-        Publish(_reducer.ApplyRouting(
+        BeginRouteMutation(
             _reducer.Generation,
             routing,
-            error: null));
-        TrackRouteMutation(routing);
+            snapshotError: null);
     }
 
     private void HandleAudioCaptured(AudioCapturedMessage message)
@@ -1477,7 +1608,17 @@ public sealed class TranslationRuntime :
         AudioDirection? direction = audio.Direction;
         if (direction is null)
         {
-            audio.Dispose();
+            try
+            {
+                HandleAudioControlEvent(
+                    message.Generation,
+                    audio);
+            }
+            finally
+            {
+                audio.Dispose();
+            }
+
             return;
         }
 
@@ -1497,18 +1638,17 @@ public sealed class TranslationRuntime :
                 selected = completed;
                 RoutingPolicySnapshot routing =
                     _routingPolicy.CompleteInboundUtterance();
-                _routingSnapshot = routing;
-                Publish(_reducer.ApplyRouting(
+                BeginRouteMutation(
                     message.Generation,
                     routing,
-                    error: null));
-                TrackRouteMutation(routing);
+                    snapshotError: null);
             }
 
             if (selected.Count > 0)
             {
                 _ = TryTrackAudioWork(
                     cancellationToken => EnqueueChunksAsync(
+                        message.Generation,
                         AudioDirection.Inbound,
                         selected,
                         NewCompletion(),
@@ -1622,13 +1762,12 @@ public sealed class TranslationRuntime :
                 RoutingPolicySnapshot routing = outbound.Enabled
                     ? _routingPolicy.EnableOutboundBypass()
                     : _routingSnapshot;
-                _routingSnapshot = routing;
-                Publish(_reducer.ApplyRouting(
+                BeginRouteMutation(
                     _reducer.Generation,
                     routing,
-                    error: null));
-                TrackRouteMutation(routing);
-                message.Completion.TrySetResult(null);
+                    snapshotError: null,
+                    message.Completion,
+                    completionError: null);
                 break;
             default:
                 message.Completion.TrySetResult(Error(
@@ -1741,6 +1880,7 @@ public sealed class TranslationRuntime :
         {
             _ = TryTrackAudioWork(
                 cancellationToken => EnqueueChunksAsync(
+                    message.Generation,
                     AudioDirection.Inbound,
                     selected,
                     NewCompletion(),
@@ -1787,20 +1927,65 @@ public sealed class TranslationRuntime :
         }
     }
 
-    private void TrackRouteMutation(RoutingPolicySnapshot routing)
+    private void BeginRouteMutation(
+        long generation,
+        RoutingPolicySnapshot routing,
+        RuntimeError? snapshotError,
+        TaskCompletionSource<RuntimeError?>? completion = null,
+        RuntimeError? completionError = null,
+        bool completesStart = false)
     {
-        _ = TryTrackAudioWork(
+        Task predecessor = _routeMutationTail;
+        TaskCompletionSource sequence =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _routeMutationTail = sequence.Task;
+        bool accepted = TryTrackAudioWork(
             cancellationToken => ApplyRoutesAsync(
+                predecessor,
+                sequence,
+                generation,
                 routing,
+                snapshotError,
+                completion,
+                completionError,
+                completesStart,
                 cancellationToken));
+        if (accepted)
+        {
+            return;
+        }
+
+        sequence.TrySetResult();
+        RuntimeError error = Error(
+            ErrorCategory.CloseTimeout,
+            "translationRuntime.audioWorkClosed",
+            RecoveryAction.Retry);
+        completion?.TrySetResult(error);
+        if (completesStart)
+        {
+            Publish(_reducer.FailStart(generation, error));
+            CompleteStart(error);
+            RequestSafetyShutdown(error);
+        }
     }
 
     private async Task ApplyRoutesAsync(
+        Task predecessor,
+        TaskCompletionSource sequence,
+        long generation,
         RoutingPolicySnapshot routing,
+        RuntimeError? snapshotError,
+        TaskCompletionSource<RuntimeError?>? completion,
+        RuntimeError? completionError,
+        bool completesStart,
         CancellationToken cancellationToken)
     {
+        RuntimeError? mutationError = null;
         try
         {
+            await predecessor.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             await _dependencies.AudioEngine.SetInboundRouteAsync(
                 routing.InboundRoute,
                 cancellationToken).ConfigureAwait(false);
@@ -1808,9 +1993,179 @@ public sealed class TranslationRuntime :
                 routing.OutboundRoute,
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (
-            cancellationToken.IsCancellationRequested)
+#pragma warning disable CA1031 // Native route failures are committed by the actor as safety shutdowns.
+        catch (Exception exception)
+#pragma warning restore CA1031
         {
+            mutationError = MapException(exception);
+        }
+
+        await PostReliableAsync(
+            new RouteMutationCompletedMessage(
+                generation,
+                routing,
+                snapshotError,
+                mutationError,
+                completion,
+                completionError,
+                completesStart,
+                sequence),
+            _actorCancellation.Token).ConfigureAwait(false);
+    }
+
+    private void HandleRouteMutationCompleted(
+        RouteMutationCompletedMessage message)
+    {
+        try
+        {
+            bool stoppingStartup =
+                message.CompletesStart
+                && CurrentSnapshot.RuntimeState == RuntimeState.Stopping
+                && _waitingForStartBeforeStop;
+            if (message.Generation != _reducer.Generation && !stoppingStartup)
+            {
+                message.Completion?.TrySetResult(
+                    message.MutationError ?? message.CompletionError);
+                if (message.CompletesStart)
+                {
+                    CompleteStart(message.MutationError ?? Error(
+                        ErrorCategory.Protocol,
+                        "translationRuntime.startCanceled",
+                        RecoveryAction.None));
+                }
+
+                return;
+            }
+
+            if (stoppingStartup)
+            {
+                RuntimeError canceled = Error(
+                    ErrorCategory.Protocol,
+                    "translationRuntime.startCanceled",
+                    RecoveryAction.None);
+                CompleteStart(canceled);
+                _waitingForStartBeforeStop = false;
+                StartStopPipeline(
+                    _reducer.Generation,
+                    _stopDeadlineTask ?? BeginStopDeadline());
+                return;
+            }
+
+            if (message.MutationError is not null)
+            {
+                message.Completion?.TrySetResult(message.MutationError);
+                if (message.CompletesStart)
+                {
+                    Publish(_reducer.FailStart(
+                        message.Generation,
+                        message.MutationError));
+                    CompleteStart(message.MutationError);
+                }
+
+                RequestSafetyShutdown(message.MutationError);
+                return;
+            }
+
+            _routingSnapshot = message.Routing;
+            if (message.CompletesStart)
+            {
+                _ = _reducer.TryCompleteStart(
+                    message.Generation,
+                    message.Routing,
+                    message.SnapshotError,
+                    out AppSnapshot started);
+                Publish(started);
+                _acceptCapturedAudio = true;
+                StartPolling(message.Generation);
+                CompleteStart(message.CompletionError);
+                return;
+            }
+
+            Publish(_reducer.ApplyRouting(
+                message.Generation,
+                message.Routing,
+                message.SnapshotError));
+            message.Completion?.TrySetResult(message.CompletionError);
+        }
+        finally
+        {
+            message.Sequence.TrySetResult();
+        }
+    }
+
+    private void HandleAudioControlEvent(
+        long generation,
+        AudioEngineEvent audio)
+    {
+        switch (audio.Kind)
+        {
+            case AudioEngineEventKind.DeviceChanged:
+                RequestSafetyShutdown(Error(
+                    ErrorCategory.Device,
+                    "translationRuntime.deviceChanged",
+                    RecoveryAction.SelectDevice));
+                break;
+            case AudioEngineEventKind.StreamError:
+                RequestSafetyShutdown(Error(
+                    ErrorCategory.Protocol,
+                    "translationRuntime.audioStreamError",
+                    RecoveryAction.ReportCompatibility));
+                break;
+            case AudioEngineEventKind.Backpressure
+                when _routingSnapshot.OutboundChannelState == ChannelState.Bypassed
+                     || _routingSnapshot.OutboundRoute
+                     == OutboundRoute.OriginalBypass:
+                break;
+            case AudioEngineEventKind.Backpressure:
+                RuntimeError error = Error(
+                    ErrorCategory.Backpressure,
+                    "translationRuntime.audioBackpressure",
+                    RecoveryAction.Retry);
+                RoutingPolicySnapshot routing =
+                    _routingPolicy.HandleOutboundUnderrun();
+                BeginRouteMutation(
+                    generation,
+                    routing,
+                    error);
+                break;
+        }
+    }
+
+    private void HandleAudioWorkFailed(AudioWorkFailedMessage message)
+    {
+        if (message.Generation != _reducer.Generation
+            || CurrentSnapshot.RuntimeState is not (
+                RuntimeState.Running or RuntimeState.Degraded))
+        {
+            message.Completion.TrySetResult(message.Error);
+            return;
+        }
+
+        RoutingPolicySnapshot routing = message.Direction switch
+        {
+            AudioDirection.Inbound =>
+                _routingPolicy.FailInbound(message.Error.Category),
+            AudioDirection.Outbound =>
+                _routingPolicy.FailOutbound(message.Error.Category),
+            _ => _routingPolicy.Snapshot,
+        };
+        BeginRouteMutation(
+            message.Generation,
+            routing,
+            message.Error,
+            message.Completion,
+            message.Error);
+    }
+
+    private void RequestSafetyShutdown(RuntimeError error)
+    {
+        _acceptCapturedAudio = false;
+        CloseAudioWorkAdmission(cancel: true);
+        lock (_submissionSync)
+        {
+            _safetyShutdownError ??= error;
+            _stopRequested = true;
+            EnsurePriorityWakeLocked();
         }
     }
 
@@ -2026,14 +2381,36 @@ public sealed class TranslationRuntime :
             recovery);
     }
 
+    private static RuntimeError NativeCleanupQuarantinedError()
+    {
+        return Error(
+            ErrorCategory.Driver,
+            "translationRuntime.nativeCleanupQuarantined",
+            RecoveryAction.ReportCompatibility);
+    }
+
+    private static RuntimeError DisposedError()
+    {
+        return Error(
+            ErrorCategory.Protocol,
+            "translationRuntime.disposed",
+            RecoveryAction.None);
+    }
+
     private static TaskCompletionSource<RuntimeError?> NewCompletion()
     {
         return new TaskCompletionSource<RuntimeError?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private static void DropMessage(RuntimeMessage message)
+    private void DropMessage(RuntimeMessage message)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            message.Terminate(DisposedError());
+            return;
+        }
+
         message.Drop();
     }
 
@@ -2070,6 +2447,11 @@ public sealed class TranslationRuntime :
         public virtual void Drop()
         {
         }
+
+        public virtual void Terminate(RuntimeError error)
+        {
+            Drop();
+        }
     }
 
     private sealed class PriorityWakeMessage : RuntimeMessage
@@ -2094,6 +2476,11 @@ public sealed class TranslationRuntime :
                 "translationRuntime.commandQueueFull",
                 RecoveryAction.Retry));
         }
+
+        public override void Terminate(RuntimeError error)
+        {
+            Completion.TrySetResult(error);
+        }
     }
 
     private sealed class StartCompletedMessage(
@@ -2114,6 +2501,12 @@ public sealed class TranslationRuntime :
                 "translationRuntime.startCanceled",
                 RecoveryAction.None));
         }
+
+        public override void Terminate(RuntimeError error)
+        {
+            onDrop(Outcome);
+            completion.TrySetResult(error);
+        }
     }
 
     private sealed class StopCompletedMessage(
@@ -2131,6 +2524,11 @@ public sealed class TranslationRuntime :
                 ErrorCategory.Protocol,
                 "translationRuntime.stopCanceled",
                 RecoveryAction.None));
+        }
+
+        public override void Terminate(RuntimeError terminalError)
+        {
+            completion?.TrySetResult(terminalError);
         }
     }
 
@@ -2161,6 +2559,16 @@ public sealed class TranslationRuntime :
                 ErrorCategory.Backpressure,
                 "translationRuntime.commandQueueFull",
                 RecoveryAction.Retry));
+        }
+
+        public override void Terminate(RuntimeError error)
+        {
+            if (Notification.Event is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+
+            Completion.TrySetResult(error);
         }
     }
 
@@ -2206,6 +2614,11 @@ public sealed class TranslationRuntime :
                 "translationRuntime.commandQueueFull",
                 RecoveryAction.Retry));
         }
+
+        public override void Terminate(RuntimeError error)
+        {
+            Completion.TrySetResult(error);
+        }
     }
 
     private sealed class DevicesRefreshedMessage(
@@ -2230,6 +2643,11 @@ public sealed class TranslationRuntime :
                 "translationRuntime.commandQueueFull",
                 RecoveryAction.Retry));
         }
+
+        public override void Terminate(RuntimeError terminalError)
+        {
+            Completion.TrySetResult(terminalError);
+        }
     }
 
     private sealed class ClassifiedMessage(
@@ -2239,5 +2657,74 @@ public sealed class TranslationRuntime :
         public long Generation { get; } = generation;
 
         public LanguageProbabilities Probabilities { get; } = probabilities;
+    }
+
+    private sealed class RouteMutationCompletedMessage(
+        long generation,
+        RoutingPolicySnapshot routing,
+        RuntimeError? snapshotError,
+        RuntimeError? mutationError,
+        TaskCompletionSource<RuntimeError?>? completion,
+        RuntimeError? completionError,
+        bool completesStart,
+        TaskCompletionSource sequence) : RuntimeMessage
+    {
+        public long Generation { get; } = generation;
+
+        public RoutingPolicySnapshot Routing { get; } = routing;
+
+        public RuntimeError? SnapshotError { get; } = snapshotError;
+
+        public RuntimeError? MutationError { get; } = mutationError;
+
+        public TaskCompletionSource<RuntimeError?>? Completion { get; } =
+            completion;
+
+        public RuntimeError? CompletionError { get; } = completionError;
+
+        public bool CompletesStart { get; } = completesStart;
+
+        public TaskCompletionSource Sequence { get; } = sequence;
+
+        public override void Drop()
+        {
+            Completion?.TrySetResult(MutationError ?? CompletionError ?? Error(
+                ErrorCategory.Protocol,
+                "translationRuntime.routeMutationCanceled",
+                RecoveryAction.None));
+            Sequence.TrySetResult();
+        }
+
+        public override void Terminate(RuntimeError error)
+        {
+            Completion?.TrySetResult(error);
+            Sequence.TrySetResult();
+        }
+    }
+
+    private sealed class AudioWorkFailedMessage(
+        long generation,
+        AudioDirection direction,
+        RuntimeError error,
+        TaskCompletionSource<RuntimeError?> completion) : RuntimeMessage
+    {
+        public long Generation { get; } = generation;
+
+        public AudioDirection Direction { get; } = direction;
+
+        public RuntimeError Error { get; } = error;
+
+        public TaskCompletionSource<RuntimeError?> Completion { get; } =
+            completion;
+
+        public override void Drop()
+        {
+            Completion.TrySetResult(Error);
+        }
+
+        public override void Terminate(RuntimeError error)
+        {
+            Completion.TrySetResult(error);
+        }
     }
 }

@@ -215,6 +215,247 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task FailedNativeFailClosedRouteNeverPublishesItAndForcesSafetyStop()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        TranslationRuntime runtime = harness.CreateRuntime();
+        try
+        {
+            Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+            await harness.Audio.FirstOutboundRouteApplied.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            harness.Audio.StopGate.Block();
+            harness.Audio.OutboundRouteException =
+                new NotSupportedException("route probe");
+
+            harness.Audio.Emit(AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.Backpressure,
+                AudioEngineStatus.QueueFull,
+                AudioEngineRoute.Translated,
+                sequence: 701));
+            await harness.Audio.StopEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+            Assert.AreNotEqual(
+                OutboundRoute.MutedFailClosed,
+                runtime.CurrentSnapshot.OutboundRoute);
+            Assert.AreEqual(0, harness.OutboundSession.SendCount);
+            Assert.IsFalse(harness.Trace.Contains("audio.enqueue.outbound"));
+        }
+        finally
+        {
+            harness.Audio.OutboundRouteException = null;
+            harness.Audio.StopGate.Release();
+            harness.Clock.ReleaseAll();
+            await runtime.DisposeAsync().AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
+    public async Task FirstRouteFailureCancelsQueuedMutationBeforeNativeApplyOrCommit()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        TranslationRuntime runtime = harness.CreateRuntime();
+        try
+        {
+            Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+            harness.Audio.RouteGate.Block();
+            harness.Audio.FailNextOutboundRoute(
+                new NotSupportedException("first route probe"));
+            harness.Audio.StopGate.Block();
+            harness.Audio.Emit(AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.Backpressure,
+                AudioEngineStatus.QueueFull,
+                AudioEngineRoute.Translated,
+                sequence: 751));
+            await harness.Audio.RouteGate.Entered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            Task<RuntimeError?> queuedBypass = runtime.SubmitAsync(
+                new RuntimeCommand.SetOutboundBypass(true));
+
+            harness.Audio.RouteGate.Release();
+            await harness.Audio.StopEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            RuntimeError? queuedError = await queuedBypass
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+            Assert.IsNotNull(queuedError);
+            Assert.AreEqual(2, harness.Audio.OutboundRouteCallCount);
+            Assert.AreEqual(
+                OutboundRoute.Translated,
+                runtime.CurrentSnapshot.OutboundRoute);
+        }
+        finally
+        {
+            harness.Audio.RouteGate.Release();
+            harness.Audio.StopGate.Release();
+            harness.Clock.ReleaseAll();
+            await runtime.DisposeAsync().AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
+    public async Task DeviceChangedControlEventStopsAndRetainsStableError()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        harness.Audio.Emit(AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.DeviceChanged,
+            AudioEngineStatus.DeviceMissing,
+            AudioEngineRoute.Stopped,
+            sequence: 801));
+        await harness.Audio.StopEntered.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.RuntimeState == RuntimeState.Stopped);
+
+        Assert.AreEqual(
+            "translationRuntime.deviceChanged",
+            runtime.CurrentSnapshot.Error?.Code);
+        Assert.AreEqual(ErrorCategory.Device, runtime.CurrentSnapshot.Error?.Category);
+        harness.Factory.Queue(
+            new FakeTranslationSession("restart-inbound"),
+            new FakeTranslationSession("restart-outbound"));
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        Assert.AreEqual(2, harness.AudioStartCount);
+    }
+
+    [TestMethod]
+    public async Task StreamErrorControlEventStopsAndRetainsStableError()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        harness.Audio.Emit(AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.StreamError,
+            AudioEngineStatus.InternalError,
+            AudioEngineRoute.Translated,
+            sequence: 803));
+        await harness.Audio.StopEntered.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.RuntimeState == RuntimeState.Stopped);
+
+        Assert.AreEqual(
+            "translationRuntime.audioStreamError",
+            runtime.CurrentSnapshot.Error?.Code);
+        Assert.AreEqual(
+            ErrorCategory.Protocol,
+            runtime.CurrentSnapshot.Error?.Category);
+    }
+
+    [TestMethod]
+    public async Task BackpressureControlEventPreservesExplicitOutboundBypass()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.Settings = new RuntimeSettings(
+            LanguageCode.Zh,
+            LanguageCode.Zh,
+            "gpt-realtime-translate",
+            inboundBypass: false,
+            outboundBypass: false);
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        harness.Audio.Emit(AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.Backpressure,
+            AudioEngineStatus.QueueFull,
+            AudioEngineRoute.OriginalBypass,
+            sequence: 802));
+        await harness.Audio.PollRead.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        Assert.IsNull(await runtime.SubmitAsync(
+            new RuntimeCommand.RefreshDevices()).ConfigureAwait(false));
+
+        Assert.AreEqual(
+            OutboundRoute.OriginalBypass,
+            runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreEqual(0, harness.AudioStopCount);
+    }
+
+    [TestMethod]
+    public async Task StartupFailClosedRouteFailureStopsInsteadOfPublishingDegraded()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.OutboundSession.ConnectError = Error(
+            ErrorCategory.Network,
+            "test.outboundNetwork");
+        harness.Audio.OutboundRouteException =
+            new NotSupportedException("startup route probe");
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        RuntimeError? error = await runtime.StartAsync()
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await harness.Audio.StopEntered.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.RuntimeState == RuntimeState.Stopped);
+
+        Assert.IsNotNull(error);
+        Assert.AreEqual(1, harness.AudioStopCount);
+        Assert.AreNotEqual(
+            OutboundRoute.MutedFailClosed,
+            runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreNotEqual(
+            RuntimeState.Degraded,
+            runtime.CurrentSnapshot.RuntimeState);
+    }
+
+    [TestMethod]
+    public async Task OutboundEnqueueFailureCommitsFailClosedRouteThroughActor()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        await harness.Audio.FirstOutboundRouteApplied.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        harness.Audio.OutboundEnqueueException = new RuntimeOperationException(
+            Error(ErrorCategory.Backpressure, "test.outboundQueueFull"));
+        TrackingPcmLease lease = new([1, 0]);
+
+        harness.OutboundSession.Emit(new TranslationSessionEvent.AudioDelta(lease));
+        await lease.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.OutboundRoute
+                == OutboundRoute.MutedFailClosed);
+
+        Assert.AreEqual(
+            ErrorCategory.Backpressure,
+            runtime.CurrentSnapshot.Error?.Category);
+    }
+
+    [TestMethod]
+    public async Task InboundEnqueueFailureCommitsFailOpenRouteThroughActor()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        await harness.Audio.FirstOutboundRouteApplied.Task
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        harness.Audio.InboundEnqueueException = new RuntimeOperationException(
+            Error(ErrorCategory.Backpressure, "test.inboundQueueFull"));
+        TrackingPcmLease lease = new([1, 0]);
+
+        harness.InboundSession.Emit(new TranslationSessionEvent.AudioDelta(lease));
+        await lease.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        harness.InboundSession.Emit(new TranslationSessionEvent.Completed());
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.InboundRoute
+                == InboundRoute.OriginalFailOpen);
+
+        Assert.AreEqual(
+            ErrorCategory.Backpressure,
+            runtime.CurrentSnapshot.Error?.Category);
+    }
+
+    [TestMethod]
     public async Task SameLanguageCreatesOneSessionAndUsesOutboundOriginalBypass()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -550,11 +791,16 @@ public sealed class TranslationRuntimeTests
     public async Task StopDeadlineTracksRouteMutationBeforeEngineStop()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
-        harness.Audio.RouteGate.Block();
         TranslationRuntime runtime = harness.CreateRuntime();
         try
         {
             Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+            harness.Audio.RouteGate.Block();
+            harness.Audio.Emit(AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.Backpressure,
+                AudioEngineStatus.QueueFull,
+                AudioEngineRoute.Translated,
+                sequence: 901));
             await harness.Audio.RouteGate.Entered.Task
                 .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
@@ -723,7 +969,7 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
-    public async Task StopCompletesWithStableErrorWhenAudioStopThrows()
+    public async Task AudioStopFailureQuarantinesRuntimeAndRejectsRestart()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
         await using TranslationRuntime runtime = harness.CreateRuntime();
@@ -735,7 +981,33 @@ public sealed class TranslationRuntimeTests
             .WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
 
         Assert.AreEqual(ErrorCategory.Protocol, error?.Category);
-        Assert.AreEqual(RuntimeState.Stopped, runtime.CurrentSnapshot.RuntimeState);
+        Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
+        RuntimeError? restart = await runtime.StartAsync().ConfigureAwait(false);
+        Assert.AreEqual(
+            "translationRuntime.nativeCleanupQuarantined",
+            restart?.Code);
+        Assert.AreEqual(1, harness.AudioStartCount);
+    }
+
+    [TestMethod]
+    public async Task RollbackAudioStopFailureQuarantinesRetryWithoutAnotherNativeStart()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.InboundSession.ConnectError = Error(
+            ErrorCategory.Authentication,
+            "test.inboundAuthentication");
+        harness.Audio.StopException =
+            new NotSupportedException("rollback audio stop probe");
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        RuntimeError? first = await runtime.StartAsync().ConfigureAwait(false);
+        RuntimeError? retry = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.Authentication, first?.Category);
+        Assert.AreEqual(
+            "translationRuntime.nativeCleanupQuarantined",
+            retry?.Code);
+        Assert.AreEqual(1, harness.AudioStartCount);
     }
 
     [TestMethod]
@@ -895,6 +1167,77 @@ public sealed class TranslationRuntimeTests
         CollectionAssert.DoesNotContain(observer.Seen.ToArray(), later);
     }
 
+    [TestMethod]
+    public async Task SynchronousDisposeCompletesQueuedLifecycleWaiters()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        TaskCompletionSource actorStart =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TranslationRuntime runtime = harness.CreateRuntime(actorStart.Task);
+        Task<RuntimeError?> start = runtime.StartAsync();
+        Task<RuntimeError?> refresh = runtime.SubmitAsync(
+            new RuntimeCommand.RefreshDevices());
+        Task<RuntimeError?> stop = runtime.StopAsync();
+        Task<RuntimeError?> exit = runtime.ExitAsync();
+
+#pragma warning disable CA1849 // This test verifies the synchronous IDisposable contract.
+        runtime.Dispose();
+#pragma warning restore CA1849
+
+        Assert.AreEqual(
+            "translationRuntime.disposed",
+            (await start.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false))?.Code);
+        Assert.AreEqual(
+            "translationRuntime.disposed",
+            (await refresh.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false))?.Code);
+        Assert.AreEqual(
+            "translationRuntime.disposed",
+            (await stop.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false))?.Code);
+        Assert.AreEqual(
+            "translationRuntime.disposed",
+            (await exit.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false))?.Code);
+    }
+
+    [TestMethod]
+    public async Task SynchronousDisposeCompletesActiveStartBeforeWorkerUnwinds()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.SettingsGate.Block();
+        TranslationRuntime runtime = harness.CreateRuntime();
+        Task<RuntimeError?> start = runtime.StartAsync();
+        await harness.SettingsGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+
+#pragma warning disable CA1849 // This test verifies the synchronous IDisposable contract.
+        runtime.Dispose();
+#pragma warning restore CA1849
+
+        RuntimeError? error = await start.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        Assert.AreEqual("translationRuntime.disposed", error?.Code);
+        harness.SettingsGate.Release();
+    }
+
+    [TestMethod]
+    public async Task SynchronousDisposeDrainsAndStopsRunningNativeEngine()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+#pragma warning disable CA1849 // This test verifies the synchronous IDisposable contract.
+        runtime.Dispose();
+#pragma warning restore CA1849
+        await runtime.DisposeAsync().AsTask()
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+        Assert.AreEqual(1, harness.AudioStopCount);
+    }
+
     private static async Task AssertStartFailureAsync(
         Action<RuntimeHarness> configure,
         ErrorCategory expectedCategory,
@@ -918,6 +1261,21 @@ public sealed class TranslationRuntimeTests
             code,
             new Dictionary<string, string>(),
             RecoveryAction.Retry);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        for (int attempt = 0; attempt < 1_000; attempt++)
+        {
+            if (predicate())
+            {
+                return;
+            }
+
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+
+        Assert.Fail("Condition was not observed.");
     }
 
     private static async Task<RuntimeError?> StartWhenCleanupFinishesAsync(
@@ -1245,6 +1603,8 @@ internal sealed class RuntimeHarness
         private int _maximumPollDepth;
         private int _startCount;
         private int _stopCount;
+        private int _outboundRouteCallCount;
+        private readonly ConcurrentQueue<Exception> _outboundRouteFailures = new();
 
         public ControlledAsyncGate StartGate { get; } = new();
 
@@ -1272,9 +1632,21 @@ internal sealed class RuntimeHarness
 
         public Exception? StopException { get; set; }
 
+        public Exception? OutboundRouteException { get; set; }
+
+        public Exception? OutboundEnqueueException { get; set; }
+
+        public Exception? InboundEnqueueException { get; set; }
+
+        public TaskCompletionSource FirstOutboundRouteApplied { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int StopCount => Volatile.Read(ref _stopCount);
 
         public int StartCount => Volatile.Read(ref _startCount);
+
+        public int OutboundRouteCallCount =>
+            Volatile.Read(ref _outboundRouteCallCount);
 
         public int MaximumMutationDepth => Volatile.Read(ref _maximumMutationDepth);
 
@@ -1352,6 +1724,11 @@ internal sealed class RuntimeHarness
             InboundEnqueueEntered.TrySetResult();
             await InboundEnqueueGate.WaitAsync(cancellationToken)
                 .ConfigureAwait(false);
+            if (InboundEnqueueException is not null)
+            {
+                throw InboundEnqueueException;
+            }
+
             owner.Trace.Enqueue("audio.enqueue.inbound.complete");
         }
 
@@ -1361,6 +1738,11 @@ internal sealed class RuntimeHarness
         {
             owner.Trace.Enqueue("audio.enqueue.outbound");
             OutboundEnqueueEntered.TrySetResult();
+            if (OutboundEnqueueException is not null)
+            {
+                throw OutboundEnqueueException;
+            }
+
             return ValueTask.CompletedTask;
         }
 
@@ -1376,7 +1758,24 @@ internal sealed class RuntimeHarness
             OutboundRoute route,
             CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _outboundRouteCallCount);
+            if (_outboundRouteFailures.TryDequeue(out Exception? failure))
+            {
+                throw failure;
+            }
+
+            if (OutboundRouteException is not null)
+            {
+                throw OutboundRouteException;
+            }
+
+            FirstOutboundRouteApplied.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+
+        public void FailNextOutboundRoute(Exception exception)
+        {
+            _outboundRouteFailures.Enqueue(exception);
         }
 
         public void Emit(AudioEngineEvent audio)

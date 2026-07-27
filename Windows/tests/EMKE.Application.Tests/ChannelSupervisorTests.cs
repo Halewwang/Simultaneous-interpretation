@@ -108,6 +108,66 @@ public sealed class ChannelSupervisorTests
     }
 
     [TestMethod]
+    public async Task RepeatedNormalWakesDoNotLoseOrDuplicateLaterPriorityItem()
+    {
+        List<MailboxProbe> dropped = [];
+        using RuntimeCommandMailbox<MailboxProbe> mailbox = new(
+            capacity: 1,
+            probe =>
+            {
+                probe.Drop();
+                dropped.Add(probe);
+            });
+
+        for (int index = 0; index < 1_000; index++)
+        {
+            MailboxProbe normal = new($"normal-{index}");
+            Assert.IsTrue(mailbox.TryWrite(normal));
+            RuntimeMailboxRead<MailboxProbe> read =
+                await mailbox.ReadAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+            Assert.IsFalse(read.IsPriority);
+            Assert.AreSame(normal, read.Item);
+        }
+
+        MailboxProbe priority = new("priority");
+        Assert.IsTrue(mailbox.TryWritePriority(priority));
+        RuntimeMailboxRead<MailboxProbe> priorityRead =
+            await mailbox.ReadAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+
+        Assert.IsTrue(priorityRead.IsPriority);
+        Assert.AreSame(priority, priorityRead.Item);
+        Assert.IsEmpty(dropped);
+        mailbox.Dispose();
+        Assert.AreEqual(0, priority.Owner.DisposeCount);
+    }
+
+    [TestMethod]
+    public async Task DisposeDrainsFullQueueAndReleasesBlockedReliableProducer()
+    {
+        MailboxProbe queued = new("queued");
+        MailboxProbe producer = new("producer");
+        RuntimeCommandMailbox<MailboxProbe> mailbox = new(
+            capacity: 1,
+            static probe => probe.Drop());
+        Assert.IsTrue(mailbox.TryWrite(queued));
+        Task producerWrite = mailbox.WriteReliableAsync(
+            producer,
+            CancellationToken.None).AsTask();
+        Assert.IsFalse(producerWrite.IsCompleted);
+
+        mailbox.Dispose();
+        await producerWrite.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, queued.Owner.DisposeCount);
+        Assert.AreEqual(1, producer.Owner.DisposeCount);
+        Assert.IsTrue(queued.Completion.Task.IsCompleted);
+        Assert.IsTrue(producer.Completion.Task.IsCompleted);
+    }
+
+    [TestMethod]
     public async Task TransientNetworkFailureUsesExactBoundedBackoffSchedule()
     {
         RecordingClock clock = new(completeImmediately: true);

@@ -12,6 +12,7 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
     private readonly Channel<T> _priority;
 #pragma warning disable CA2213 // Never creates a WaitHandle; GC cleanup avoids racing late producers during actor exit.
     private readonly SemaphoreSlim _normalSlots;
+    private readonly SemaphoreSlim _available = new(0);
 #pragma warning restore CA2213
     private readonly Action<T> _drop;
     private int _disposed;
@@ -47,6 +48,7 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
 
         if (_normal.Writer.TryWrite(item))
         {
+            _available.Release();
             return true;
         }
 
@@ -57,7 +59,13 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
 
     public bool TryWritePriority(T item)
     {
-        return _priority.Writer.TryWrite(item);
+        if (!_priority.Writer.TryWrite(item))
+        {
+            return false;
+        }
+
+        _available.Release();
+        return true;
     }
 
     public async ValueTask WriteReliableAsync(
@@ -67,6 +75,7 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
         await _normalSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (_normal.Writer.TryWrite(item))
         {
+            _available.Release();
             return;
         }
 
@@ -79,6 +88,8 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
     {
         while (true)
         {
+            await _available.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
             if (_priority.Reader.TryRead(out T? priority))
             {
                 return new RuntimeMailboxRead<T>(true, priority);
@@ -90,14 +101,12 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
                 return new RuntimeMailboxRead<T>(false, normal);
             }
 
-            Task<bool> priorityReady =
-                _priority.Reader.WaitToReadAsync(cancellationToken).AsTask();
-            Task<bool> normalReady =
-                _normal.Reader.WaitToReadAsync(cancellationToken).AsTask();
-            Task<bool> ready =
-                await Task.WhenAny(priorityReady, normalReady)
-                    .ConfigureAwait(false);
-            _ = await ready.ConfigureAwait(false);
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                throw new OperationCanceledException(
+                    "The runtime mailbox is closed.",
+                    cancellationToken);
+            }
         }
     }
 
@@ -120,6 +129,8 @@ internal sealed class RuntimeCommandMailbox<T> : IDisposable
         {
             _drop(priority);
         }
+
+        _available.Release();
     }
 }
 

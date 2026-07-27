@@ -76,7 +76,9 @@ internal sealed class RuntimeStateReducer
         return _generation;
     }
 
-    public AppSnapshot CompleteStop(long generation)
+    public AppSnapshot CompleteStop(
+        long generation,
+        RuntimeError? error = null)
     {
         if (generation != _generation)
         {
@@ -95,7 +97,7 @@ internal sealed class RuntimeStateReducer
             translatedCaption: string.Empty,
             Current.AudioSelection,
             Current.DriverCompatibility,
-            error: null,
+            error,
             audioDiagnostics: new AudioDiagnostics(true, 0));
         return Current;
     }
