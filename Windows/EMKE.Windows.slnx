@@ -7,23 +7,11 @@
     <Project Path="src/EMKE.Routing/EMKE.Routing.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/EMKE.Application.Tests/EMKE.Application.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
-    <Project Path="tests/EMKE.Contract.Tests/EMKE.Contract.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
-    <Project Path="tests/EMKE.Core.Tests/EMKE.Core.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
-    <Project Path="tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
-    <Project Path="tests/EMKE.Realtime.Tests/EMKE.Realtime.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
-    <Project Path="tests/EMKE.Routing.Tests/EMKE.Routing.Tests.csproj">
-      <Platform Project="x64" />
-    </Project>
+    <Project Path="tests/EMKE.Application.Tests/EMKE.Application.Tests.csproj" />
+    <Project Path="tests/EMKE.Contract.Tests/EMKE.Contract.Tests.csproj" />
+    <Project Path="tests/EMKE.Core.Tests/EMKE.Core.Tests.csproj" />
+    <Project Path="tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj" />
+    <Project Path="tests/EMKE.Realtime.Tests/EMKE.Realtime.Tests.csproj" />
+    <Project Path="tests/EMKE.Routing.Tests/EMKE.Routing.Tests.csproj" />
   </Folder>
 </Solution>
