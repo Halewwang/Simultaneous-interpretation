@@ -3484,8 +3484,8 @@
   "contractVersion" : 1,
   "corpusId" : "routing.language-corpus.v1",
   "generationNote" : "Project-generated synthetic meeting sentences; no external corpus text is included.",
-  "generatorVersion" : "emke-language-corpus/1.0.0",
+  "generatorVersion" : "emke-language-corpus/1.1.0",
   "macOSBaselineEnvironment" : "Version 27.0 (Build 26A5388g)",
-  "macOSBaselineToolVersion" : "emke-macos-language-baseline/1.0.0",
+  "macOSBaselineToolVersion" : "emke-macos-language-baseline/1.1.0",
   "sentenceLicense" : "CC0-1.0"
 }

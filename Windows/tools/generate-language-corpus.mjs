@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-const generatorVersion = "emke-language-corpus/1.0.0";
+const generatorVersion = "emke-language-corpus/1.1.0";
 
 const chineseSubjects = [
   "产品团队",
@@ -87,6 +87,7 @@ function sentences(subjects, predicates, language) {
       category: language,
       nativeLanguage: language,
       text: `${subject} ${predicate}${language === "zh" ? "。" : "."}`,
+      expectedFinalRoute: "original",
     })),
   );
 }
@@ -96,6 +97,7 @@ const ambiguous = Array.from({ length: 60 }, (_, index) => ({
   category: "ambiguous",
   nativeLanguage: ["zh", "en", "de"][index % 3],
   text: String(index + 1).padStart(2, "0"),
+  expectedFinalRoute: "undecided",
 }));
 
 const outputIndex = process.argv.indexOf("--output");
