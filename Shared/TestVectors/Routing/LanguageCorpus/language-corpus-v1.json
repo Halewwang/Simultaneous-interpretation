@@ -1,0 +1,3491 @@
+{
+  "cases" : [
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-001",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-002",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-003",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-004",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-005",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-006",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-007",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-008",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-009",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-010",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "产品团队 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-011",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-012",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-013",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-014",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-015",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-016",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-017",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-018",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-019",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-020",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "设计小组 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-021",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-022",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999958161439281,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-023",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-024",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999995225638827,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-025",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-026",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999927117207335,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-027",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999994061931408,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-028",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999070568483148,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-029",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998992339824326,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-030",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999818718749225,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "工程同事 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-031",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-032",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999974969734922,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-033",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-034",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-035",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-036",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999951635854245,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-037",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-038",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999928732158878,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-039",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999920963741715,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-040",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999986947320139,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "客户代表 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-041",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-042",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999983839710183,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-043",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-044",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-045",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-046",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999967918446941,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-047",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-048",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999959815356192,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-049",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999958659403774,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-050",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999990490219941,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "会议主持人 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-051",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-052",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-053",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-054",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-055",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-056",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-057",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-058",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-059",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-060",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "项目负责人 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-061",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-062",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-063",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-064",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-065",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-066",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-067",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-068",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-069",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-070",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "测试团队 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-071",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-072",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-073",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-074",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-075",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-076",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999999890717592,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-077",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-078",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999997879296014,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-079",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999997922744797,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-080",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "运营伙伴 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-081",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-082",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999996102905016,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-083",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-084",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-085",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-086",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999987986454428,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-087",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-088",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999984662438806,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-089",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999985906758866,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-090",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999997632641682,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "研究人员 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-091",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 今天讨论发布计划和风险。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-092",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 正在整理用户反馈和建议。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-093",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 已经确认下一阶段的目标。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-094",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 需要检查翻译结果的准确性。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-095",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 准备记录重要决定和行动项。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-096",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999998858281569,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 希望改善会议中的沟通体验。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-097",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 将会验证音频连接是否稳定。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-098",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999998954582265,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 正在比较不同方案的优缺点。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-099",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999998179133165,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 计划明天完成最后一次测试。"
+    },
+    {
+      "category" : "zh",
+      "expectedFinalRoute" : "original",
+      "id" : "zh-100",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "zh",
+      "nativeLanguage" : "zh",
+      "text" : "支持团队 同意按照当前节奏继续推进。"
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-001",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.99828040599823,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-002",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9908349514007568,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-003",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988073110580444,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-004",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9955461025238037,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-005",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9969232678413391,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-006",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9979255199432373,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-007",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989354014396667,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-008",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987757802009583,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-009",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9944990873336792,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-010",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.998894453048706,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The product team agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-011",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.99859219789505,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-012",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9914637207984924,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-013",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.998671293258667,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-014",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9966550469398499,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-015",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9973267912864685,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-016",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.998022198677063,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-017",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989530444145203,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-018",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9991391897201538,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-019",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9947632551193237,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-020",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989242553710938,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The design group agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-021",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9993754029273987,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-022",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9959080219268799,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-023",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9994606375694275,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-024",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.998924732208252,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-025",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988382458686829,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-026",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999243438243866,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-027",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999457061290741,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-028",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999426007270813,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-029",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9983206391334534,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-030",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999625563621521,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our engineering partners agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-031",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9994209408760071,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-032",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9960206151008606,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-033",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999472439289093,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-034",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989965558052063,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-035",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988152384757996,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-036",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9993139505386353,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-037",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9995750784873962,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-038",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9995366334915161,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-039",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9983566403388977,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-040",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9995075464248657,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The customer representative agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-041",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9979200959205627,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-042",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9894950985908508,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-043",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9972801208496094,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-044",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9954445362091064,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-045",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9968927502632141,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-046",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9972267150878906,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-047",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988880753517151,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-048",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9986811280250549,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-049",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9936783909797668,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-050",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9983702898025513,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The meeting host agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-051",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9984978437423706,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-052",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9930034279823303,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-053",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988107085227966,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-054",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9962153434753418,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-055",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9974856972694397,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-056",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9984696507453918,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-057",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989660978317261,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-058",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9989036321640015,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-059",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9958672523498535,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-060",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987847805023193,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The project lead agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-061",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9982768297195435,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-062",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9904477596282959,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-063",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9983152747154236,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-064",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9950155019760132,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-065",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.99666428565979,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-066",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9976062178611755,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-067",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9990000128746033,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-068",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988225102424622,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-069",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9928126931190491,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-070",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987260103225708,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The quality team agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-071",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9993220567703247,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-072",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9955324530601501,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-073",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999350368976593,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-074",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987344145774841,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-075",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987395405769348,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-076",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.99916672706604,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-077",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999454915523529,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-078",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9993755221366882,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-079",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9979836940765381,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-080",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9995791912078857,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "Our operations partners agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-081",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9982872009277344,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-082",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9908608198165894,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-083",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9985325932502747,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-084",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9956631064414978,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-085",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9965812563896179,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-086",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9974157214164734,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-087",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9987569451332092,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-088",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9990109801292419,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-089",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9936158657073975,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-090",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988154172897339,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The research group agrees to continue at the current pace."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-091",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.998264491558075,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team discusses the release plan and risks today."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-092",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.990345299243927,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team is organizing user feedback and suggestions."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-093",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9986700415611267,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team has confirmed the goals for the next phase."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-094",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.995094895362854,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team needs to verify the accuracy of the translation."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-095",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9971030354499817,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team will record the important decisions and action items."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-096",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.997887372970581,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team wants to improve communication during the meeting."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-097",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9990125894546509,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team will verify that the audio connection remains stable."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-098",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988173842430115,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team is comparing the advantages of several approaches."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-099",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9940647482872009,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team plans to complete the final test tomorrow."
+    },
+    {
+      "category" : "en",
+      "expectedFinalRoute" : "original",
+      "id" : "en-100",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9988592863082886,
+      "macOSPrimaryLanguage" : "en",
+      "nativeLanguage" : "en",
+      "text" : "The support team agrees to continue at the current pace."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-001",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999865293502808,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-002",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999369382858276,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-003",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999774098396301,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-004",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999955296516418,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-005",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999921917915344,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-006",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999815225601196,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-007",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999863505363464,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-008",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9997116923332214,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-009",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998740553855896,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-010",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Produktteam stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-011",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999567866325378,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-012",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998902082443237,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-013",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999576807022095,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-014",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999894499778748,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-015",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999771118164062,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-016",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999268054962158,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-017",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999330043792725,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-018",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9985483288764954,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-019",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9992523193359375,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-020",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Designgruppe stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-021",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999889135360718,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-022",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999638199806213,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-023",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999837279319763,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-024",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999934434890747,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-025",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999991774559021,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-026",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999805688858032,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-027",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999881386756897,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-028",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999078512191772,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-029",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999377727508545,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-030",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Entwicklungspartner stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-031",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999661445617676,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-032",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999321103096008,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-033",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999961793422699,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-034",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999914765357971,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-035",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999828338623047,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-036",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999431371688843,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-037",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999718070030212,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-038",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9991860389709473,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-039",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9996252655982971,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-040",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Kundenvertretung stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-041",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999641180038452,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-042",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999291300773621,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-043",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999698400497437,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-044",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999893307685852,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-045",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999798536300659,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-046",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999598264694214,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-047",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999713897705078,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-048",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9996227025985718,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-049",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9997583031654358,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-050",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Gesprächsleitung stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-051",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999775886535645,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-052",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999375343322754,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-053",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999738931655884,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-054",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999992847442627,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-055",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999865293502808,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-056",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999719858169556,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-057",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999792575836182,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-058",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9996092915534973,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-059",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998251795768738,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-060",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Projektleitung stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-061",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999862909317017,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-062",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999470114707947,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-063",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999780654907227,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-064",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999935626983643,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-065",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999918937683105,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-066",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999797344207764,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-067",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999878406524658,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-068",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998546838760376,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-069",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999215006828308,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-070",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Qualitätsteam stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-071",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999825954437256,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-072",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999471306800842,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-073",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999770522117615,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-074",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999901652336121,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-075",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999896287918091,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-076",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999975323677063,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-077",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999749660491943,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-078",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998425245285034,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-079",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9998832941055298,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-080",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Unsere Betriebspartner stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-081",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999715685844421,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-082",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999256730079651,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-083",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999642372131348,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-084",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999921321868896,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-085",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999824166297913,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-086",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999595880508423,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-087",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999773502349854,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-088",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9996289014816284,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-089",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999779999256134,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-090",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Die Forschungsgruppe stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-091",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999825358390808,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam bespricht heute den Veröffentlichungsplan und die Risiken."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-092",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999923825263977,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam ordnet die Rückmeldungen und Vorschläge der Nutzer."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-093",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999760389328003,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam hat die Ziele für die nächste Phase bestätigt."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-094",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999952912330627,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam muss die Genauigkeit der Übersetzung überprüfen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-095",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999896287918091,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam notiert die wichtigen Entscheidungen und Aufgaben."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-096",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999710321426392,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam möchte die Kommunikation während des Treffens verbessern."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-097",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9999815225601196,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam prüft die Stabilität der Audioverbindung."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-098",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.9995157718658447,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam vergleicht die Vorteile verschiedener Lösungen."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-099",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 0.999693751335144,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam plant morgen den abschließenden Test."
+    },
+    {
+      "category" : "de",
+      "expectedFinalRoute" : "original",
+      "id" : "de-100",
+      "macOSBaselineDecision" : "original",
+      "macOSPrimaryConfidence" : 1,
+      "macOSPrimaryLanguage" : "de",
+      "nativeLanguage" : "de",
+      "text" : "Das Supportteam stimmt der Fortsetzung im aktuellen Tempo zu."
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-001",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "01"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-002",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "02"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-003",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "03"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-004",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "04"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-005",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "05"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-006",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "06"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-007",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "07"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-008",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "08"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-009",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "09"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-010",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "10"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-011",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "11"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-012",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "12"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-013",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "13"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-014",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "14"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-015",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "15"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-016",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "16"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-017",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "17"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-018",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "18"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-019",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "19"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-020",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "20"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-021",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "21"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-022",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "22"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-023",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "23"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-024",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "24"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-025",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "25"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-026",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "26"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-027",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "27"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-028",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "28"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-029",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "29"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-030",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "30"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-031",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "31"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-032",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "32"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-033",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "33"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-034",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "34"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-035",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "35"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-036",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "36"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-037",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "37"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-038",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "38"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-039",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "39"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-040",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "40"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-041",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "41"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-042",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "42"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-043",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "43"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-044",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "44"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-045",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "45"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-046",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "46"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-047",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "47"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-048",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "48"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-049",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "49"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-050",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "50"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-051",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "51"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-052",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "52"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-053",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "53"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-054",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "54"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-055",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "55"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-056",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "56"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-057",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "57"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-058",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "zh",
+      "text" : "58"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-059",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "en",
+      "text" : "59"
+    },
+    {
+      "category" : "ambiguous",
+      "expectedFinalRoute" : "undecided",
+      "id" : "ambiguous-060",
+      "macOSBaselineDecision" : "undecided",
+      "nativeLanguage" : "de",
+      "text" : "60"
+    }
+  ],
+  "contractVersion" : 1,
+  "corpusId" : "routing.language-corpus.v1",
+  "generationNote" : "Project-generated synthetic meeting sentences; no external corpus text is included.",
+  "generatorVersion" : "emke-language-corpus/1.0.0",
+  "macOSBaselineEnvironment" : "Version 27.0 (Build 26A5388g)",
+  "macOSBaselineToolVersion" : "emke-macos-language-baseline/1.0.0",
+  "sentenceLicense" : "CC0-1.0"
+}

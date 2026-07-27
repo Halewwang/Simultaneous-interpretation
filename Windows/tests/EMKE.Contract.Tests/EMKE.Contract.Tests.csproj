@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/EMKE.Core/EMKE.Core.csproj" />
     <ProjectReference Include="../../src/EMKE.Realtime/EMKE.Realtime.csproj" />
+    <ProjectReference Include="../../src/EMKE.Routing/EMKE.Routing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

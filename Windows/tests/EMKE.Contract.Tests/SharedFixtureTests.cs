@@ -261,16 +261,10 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Routing")]
-    public void RealtimeHandshakeChannelAndRouteExpectationsAwaitTask6Adapter()
+    public void RealtimeHandshakeChannelAndRouteExpectationsUseRoutingPolicy()
     {
         using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
-        Assert.IsTrue(fixture.RootElement.GetProperty("cases")
-            .EnumerateArray()
-            .All(static fixtureCase =>
-                fixtureCase.GetProperty("expected")
-                    .TryGetProperty("inboundRoute", out _)));
-        Assert.Inconclusive(
-            "Realtime channel and route projection belongs to the EMKE.Routing adapter (Runtime Task 6).");
+        RoutingFixtureAdapter.ValidateRealtimeProjection(fixture.RootElement);
     }
 
     [TestMethod]
@@ -296,11 +290,15 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Routing")]
-    public void RoutingFixturesAwaitOwnedAdapter()
+    public void RoutingFixturesUseOwnedProductionAdapters()
     {
-        AssertFixtureCategoryIsReadable("routing");
-        Assert.Inconclusive(
-            "Awaiting EMKE.Routing fixture adapter validation (Runtime Task 6).");
+        using JsonDocument gate =
+            LoadFixture("Routing/inbound-language-gate.json");
+        using JsonDocument failures =
+            LoadFixture("Routing/channel-failure-safety.json");
+
+        RoutingFixtureAdapter.ValidateInboundLanguageGate(gate.RootElement);
+        RoutingFixtureAdapter.ValidateChannelFailureSafety(failures.RootElement);
     }
 
     [TestMethod]

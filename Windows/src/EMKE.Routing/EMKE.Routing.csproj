@@ -4,4 +4,9 @@
     <ProjectReference Include="../EMKE.Core/EMKE.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/language-profile-v1.json" />
+    <None Include="Resources/THIRD_PARTY_NOTICES.md" />
+  </ItemGroup>
+
 </Project>

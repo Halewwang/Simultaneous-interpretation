@@ -14,6 +14,10 @@ let package = Package(
         .library(name: "EMKEAudioEngine", targets: ["EMKEAudioEngine"]),
         .library(name: "EMKECoordinator", targets: ["EMKECoordinator"]),
         .executable(name: "EMKEMenuBarApp", targets: ["EMKEMenuBarApp"]),
+        .executable(
+            name: "EMKELanguageBaselineTool",
+            targets: ["EMKELanguageBaselineTool"]
+        ),
     ],
     dependencies: [
         .package(
@@ -66,6 +70,14 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             resources: [.process("Resources")]
+        ),
+        .executableTarget(
+            name: "EMKELanguageBaselineTool",
+            dependencies: [
+                "EMKECore",
+                "EMKERouting",
+            ],
+            path: "Tools/EMKELanguageBaselineTool"
         ),
         .testTarget(
             name: "EMKECoreTests",
