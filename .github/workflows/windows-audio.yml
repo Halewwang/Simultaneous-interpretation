@@ -167,6 +167,26 @@ jobs:
             throw "Catalog reference-set tests failed."
           }
 
+          node --test Windows/tools/tests/lab-driver-lifecycle.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle contract tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.validation.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle validation tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.behavior.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle behavior tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.integration.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle integration tests failed."
+          }
+
       - name: Build unsigned driver package
         id: driver-build
         shell: pwsh

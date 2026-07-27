@@ -6,8 +6,15 @@ import { fileURLToPath } from "node:url";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const toolsDirectory = path.resolve(testDirectory, "..");
+const repositoryRoot = path.resolve(testDirectory, "..", "..", "..");
 const installPath = path.join(toolsDirectory, "install-test-driver.ps1");
 const uninstallPath = path.join(toolsDirectory, "uninstall-test-driver.ps1");
+const workflowPath = path.join(
+  repositoryRoot,
+  ".github",
+  "workflows",
+  "windows-audio.yml",
+);
 const behaviorTestPath = path.join(
   testDirectory,
   "lab-driver-lifecycle.behavior.test.ps1",
@@ -40,6 +47,12 @@ function assertCommonSafetyContract(source, operation) {
   assert.match(source, /pnputil\.exe/);
   assert.match(source, /function\s+Resolve-SystemPnpUtil/);
   assert.match(source, /SpecialFolder\]::System/);
+  assert.match(source, /\[int\]\$TimeoutSeconds/);
+  assert.match(source, /\.Kill\(\$true\)/);
+  assert.match(source, /\.WaitForExit\(5000\)/);
+  assert.match(source, /function\s+Invoke-BoundedPoll/);
+  assert.match(source, /state uncertain/);
+  assert.match(source, /read-only inventory/);
 
   const firstFunction = source.search(/^function\s+/m);
   const strictMode = source.search(/Set-StrictMode\s+-Version\s+Latest/);
@@ -81,6 +94,11 @@ test("install lifecycle is fail-closed before the one exact pnputil install", as
   assert.match(source, /\[string\]\$PackagePath/);
   assert.match(source, /\[string\]\$ExpectedPackageSha256/);
   assert.match(source, /\[string\]\$SmokePath/);
+  assert.match(source, /\[string\]\$ExpectedSmokeSha256/);
+  assert.match(
+    source,
+    /ExpectedSmokeSha256[^]*ValidatePattern\(["']\^\[0-9A-Fa-f\]\{64\}\$["']\)|ValidatePattern\(["']\^\[0-9A-Fa-f\]\{64\}\$["']\)[^]*ExpectedSmokeSha256/,
+  );
   assert.match(source, /\[switch\]\$ConfirmInstall/);
   assert.match(source, /DefaultParameterSetName\s*=\s*["']Install["']/);
   assert.match(source, /ParameterSetName\s*=\s*["']Digest["']/);
@@ -96,7 +114,34 @@ test("install lifecycle is fail-closed before the one exact pnputil install", as
   assert.match(source, /ROOT\\EMKEVIRTUALAUDIO/);
   assert.match(source, /\/add-driver/);
   assert.match(source, /\/install/);
-  assert.match(source, /Invoke-PnpUtilInstall\s+-InfPath\s+\$package\.Inf\.FullName/);
+  assert.match(
+    source,
+    /Arguments\s+@\(["']\/add-driver["'][^]*?-TimeoutSeconds\s+120/,
+  );
+  assert.match(
+    source,
+    /Arguments\s+@\(["']--scenario["'][^]*?-TimeoutSeconds\s+15/,
+  );
+  assert.match(
+    source,
+    /Invoke-CreateAndBindRootDevnode[^]*-StagedInf\s+\$package\.Inf/,
+  );
+  assert.match(source, /SetupDiGetINFClassW/);
+  assert.match(source, /SetupDiCreateDeviceInfoList/);
+  assert.match(source, /SetupDiCreateDeviceInfoW/);
+  assert.match(source, /SetupDiSetDeviceRegistryPropertyW/);
+  assert.match(source, /SetupDiSetClassInstallParamsW/);
+  assert.match(source, /SetupDiCallClassInstaller/);
+  assert.match(source, /DifRegisterDevice/);
+  assert.match(source, /DiRemoveDeviceGlobal/);
+  assert.doesNotMatch(
+    source,
+    /AccessControlSections\]::All/,
+    "staging ACL writes must not request absent SACL/audit privileges",
+  );
+  assert.match(source, /AccessControlSections\]::Owner/);
+  assert.match(source, /AccessControlSections\]::Group/);
+  assert.match(source, /AccessControlSections\]::Access/);
   assert.match(source, /--scenario["']?\s*,\s*["']enumerate/);
   assert.match(source, /discovery=ready/);
   assert.match(source, /result=ready/);
@@ -140,10 +185,31 @@ test("uninstall lifecycle resolves one exact published INF from PnP metadata", a
   assert.match(source, /\/force/);
   assert.match(
     source,
-    /Invoke-PnpUtilUninstall\s+-PublishedInf\s+\$publishedInf/,
+    /Invoke-PnpUtilRemoveDevice\s+-InstanceId\s+\$devnode\.PNPDeviceID/,
   );
-  assert.doesNotMatch(source, /pnputil[^]*\*/i);
-  assert.doesNotMatch(source, /Where-Object[^]*(?:FriendlyName|Description)/i);
+  assert.match(
+    source,
+    /Wait-TargetDevnodeAbsent\s+-ExpectedInstanceId\s+\$devnode\.PNPDeviceID/,
+  );
+  assert.match(
+    source,
+    /Invoke-PnpUtilDeleteDriver\s+-PublishedInf\s+\$publishedInf/,
+  );
+  const removeDevice = source.search(/Invoke-PnpUtilRemoveDevice\s+-InstanceId/);
+  const deleteDriver = source.search(
+    /Invoke-PnpUtilDeleteDriver\s+-PublishedInf/,
+  );
+  assert.ok(
+    removeDevice >= 0 && deleteDriver > removeDevice,
+    "uninstall must remove the exact devnode before deleting its published INF",
+  );
+  assert.doesNotMatch(source, /Arguments\s+@\([^)]*\*/i);
+  assert.doesNotMatch(source, /\$_\.(?:FriendlyName|Description)/i);
+  assert.equal(
+    [...source.matchAll(/-TimeoutSeconds\s+120/g)].length,
+    2,
+    "remove-device and delete-driver must each use the bounded PnP timeout",
+  );
 });
 
 test("Windows behavior suite declares mutation-free lifecycle safety cases", async () => {
@@ -165,7 +231,8 @@ test("Windows behavior suite declares mutation-free lifecycle safety cases", asy
     "smoke missing result",
     "smoke driverMissing",
     "missing uninstall confirmation",
-    "one exact uninstall command",
+    "one exact remove-device command",
+    "one exact delete-driver command",
     "valid catalog without signer",
     "untrusted catalog statuses",
     "install devnode validation",
@@ -174,12 +241,29 @@ test("Windows behavior suite declares mutation-free lifecycle safety cases", asy
     "uninstall unsupported OS build",
     "uninstall non-administrator",
     "post-uninstall devnode still present",
+    "shared published INF blocks every deletion",
     "smoke duplicate status",
     "smoke contradictory status",
     "smoke raw detail remains suppressed",
     "install orchestrator exact process boundary",
     "uninstall orchestrator exact process boundary",
     "digest mismatch reports observed digest",
+    "local input rejects UNC and reparse paths",
+    "protected staging ACL contract and cleanup guard",
+    "staged inputs detect package and smoke replacement",
+    "expected Smoke digest blocks ready-looking replacement",
+    "install orchestrator uses only protected staged copies",
+    "actual INF Models parser rejects inactive-section bait",
+    "catalog certificate digest is exactly SHA256",
+    "installed package identity matches exact devnode",
+    "embedded SetupAPI helper compiles without mutation",
+    "root create bind package identity state machine",
+    "preexisting target blocks root creation",
+    "bind failure reports partial state and exact cleanup",
+    "captured process timeout kills and reports uncertain state",
+    "bounded polling reaches completion and timeout",
+    "devnode and published INF polling is exact and bounded",
+    "process timeout permits only read-only inventory",
   ];
   for (const name of requiredCases) {
     assert.match(source, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -209,4 +293,43 @@ test("PowerShell integration suite exercises safe real process and invocation se
   assert.match(source, /Invoke-CapturedProcess/);
   assert.match(source, /WriteAllText/);
   assert.doesNotMatch(source, /["']\/(?:add-driver|delete-driver)["']/i);
+});
+
+test("Windows CI runs all lifecycle suites as independent non-mutating gates", async () => {
+  const source = await readRequired(workflowPath);
+  const gates = [
+    {
+      command:
+        "node --test Windows/tools/tests/lab-driver-lifecycle.contract.test.mjs",
+      failure: "Lifecycle contract tests failed.",
+    },
+    {
+      command:
+        "pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.validation.test.ps1",
+      failure: "Lifecycle validation tests failed.",
+    },
+    {
+      command:
+        "pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.behavior.test.ps1",
+      failure: "Lifecycle behavior tests failed.",
+    },
+    {
+      command:
+        "pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.integration.test.ps1",
+      failure: "Lifecycle integration tests failed.",
+    },
+  ];
+  let previousOffset = -1;
+  for (const gate of gates) {
+    const commandOffset = source.indexOf(gate.command);
+    assert.ok(
+      commandOffset > previousOffset,
+      `missing or misordered independent CI command: ${gate.command}`,
+    );
+    const following = source.slice(commandOffset);
+    assert.match(following, /^\S[^\n]*\n\s*if \(\$LASTEXITCODE -ne 0\)/);
+    assert.match(following, new RegExp(gate.failure.replaceAll(".", "\\.")));
+    previousOffset = commandOffset;
+  }
+  assert.doesNotMatch(source, /-Confirm(?:Install|Uninstall)\b/);
 });

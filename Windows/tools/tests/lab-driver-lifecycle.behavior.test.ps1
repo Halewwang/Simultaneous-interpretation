@@ -113,20 +113,18 @@ function Invoke-Case {
 }
 
 function New-InstallPackageRecord {
-    $inf = [System.IO.FileInfo]::new(
-        "C:\EMKE lab package; Write-Output INJECTED\Driver Name.inf"
-    )
-    $sys = [System.IO.FileInfo]::new(
-        "C:\EMKE lab package; Write-Output INJECTED\Driver Name.sys"
-    )
-    $cat = [System.IO.FileInfo]::new(
-        "C:\EMKE lab package; Write-Output INJECTED\Driver Name.cat"
-    )
+    $directory = "C:\EMKE lab package; Write-Output INJECTED"
     return [pscustomobject]@{
-        Directory = "C:\EMKE lab package; Write-Output INJECTED"
-        Inf = $inf
-        Sys = $sys
-        Cat = $cat
+        Directory = $directory
+        Inf = [pscustomobject]@{
+            FullName = "$directory\Driver Name.inf"
+        }
+        Sys = [pscustomobject]@{
+            FullName = "$directory\Driver Name.sys"
+        }
+        Cat = [pscustomobject]@{
+            FullName = "$directory\Driver Name.cat"
+        }
     }
 }
 
@@ -147,10 +145,29 @@ function Set-SafeInstallDefaults {
     Set-TestFunction -Name Get-StrictDriverPackage -Body {
         New-InstallPackageRecord
     }
+    Set-TestFunction -Name New-ProtectedStagingDirectory -Body {
+        [pscustomobject]@{
+            Path = "C:\ProgramData\EMKE\DriverLabStaging\" + ("1" * 32)
+            Token = "1" * 32
+        }
+    }
+    Set-TestFunction -Name Copy-InstallInputsToStaging -Body {
+        [pscustomobject]@{
+            Package = (New-InstallPackageRecord)
+            Smoke = [pscustomobject]@{
+                FullName = "C:\Smoke Tools\EMKE.AudioSmoke.exe"
+            }
+            PackageSha256 = "A" * 64
+            SmokeSha256 = "E" * 64
+        }
+    }
+    Set-TestFunction -Name Assert-StagedInputsUnchanged -Body {}
+    Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {}
     Set-TestFunction -Name Invoke-DriverPackageVerifier -Body {}
     Set-TestFunction -Name Get-DriverPackageSha256 -Body {
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
     }
+    Set-TestFunction -Name Get-FileSha256 -Body { "E" * 64 }
     Set-TestFunction -Name Get-CatalogSignatureMetadata -Body {
         [pscustomobject]@{
             Status = "Valid"
@@ -165,7 +182,18 @@ function Set-SafeInstallDefaults {
     Set-TestFunction -Name Get-DriverInfMetadata -Body {
         [pscustomobject]@{
             DriverVer = "07/26/2026,1.0.0.1"
+            DriverVersion = "1.0.0.1"
+            ProviderName = "EMKE"
+            ModelSection = "EMKE.NTamd64.10.0...26200"
+            InstallSection = "EMKE_Install"
             HardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        }
+    }
+    Set-TestFunction -Name Assert-InstalledDriverPackageIdentity -Body {
+        [pscustomobject]@{
+            InfName = "oem42.inf"
+            DriverVersion = "1.0.0.1"
+            ProviderName = "EMKE"
         }
     }
     Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
@@ -173,13 +201,21 @@ function Set-SafeInstallDefaults {
         $script:pnpCalls.Add(@($InfPath))
     }
     Set-TestFunction -Name Get-TargetDevnodes -Body {
+        @()
+    }
+    Set-TestFunction -Name New-RootDevnodeFromInf -Body {
+        "ROOT\EMKEVIRTUALAUDIO\0000"
+    }
+    Set-TestFunction -Name Wait-TargetDevnode -Body {
         @([pscustomobject]@{
             PNPDeviceID = "ROOT\EMKEVIRTUALAUDIO\0000"
             HardwareID = @("ROOT\EMKEVIRTUALAUDIO")
             Present = $true
             ConfigManagerErrorCode = 0
-        })
+        })[0]
     }
+    Set-TestFunction -Name Remove-ExactCreatedRootDevnode -Body {}
+    Set-TestFunction -Name Wait-TargetDevnodeAbsent -Body {}
     Set-TestFunction -Name Assert-InstalledDevnodeHealthy -Body {}
     Set-TestFunction -Name Invoke-SmokeEnumeration -Body {}
 }
@@ -195,6 +231,7 @@ function Invoke-InstallWithDefaults {
         -PackagePath "C:\EMKE lab package; Write-Output INJECTED" `
         -ExpectedPackageSha256 $Digest `
         -SmokePath "C:\Smoke Tools\EMKE.AudioSmoke.exe" `
+        -ExpectedSmokeSha256 ("E" * 64) `
         -ConfirmInstall:$Confirm
 }
 
@@ -288,10 +325,11 @@ Invoke-Case -Name "one exact install command" -Action {
         "C:\Windows\System32\pnputil.exe"
     }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
-        param($Executable, $Arguments)
+        param($Executable, $Arguments, $TimeoutSeconds)
         $script:processCall = [pscustomobject]@{
             Executable = $Executable
             Arguments = @($Arguments)
+            TimeoutSeconds = $TimeoutSeconds
         }
         [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
     }
@@ -300,6 +338,9 @@ Invoke-Case -Name "one exact install command" -Action {
     $expectedExecutable = "C:\Windows\System32\pnputil.exe"
     if ($script:processCall.Executable -cne $expectedExecutable) {
         throw "Install executable was not fixed to the system pnputil.exe."
+    }
+    if ($script:processCall.TimeoutSeconds -ne 120) {
+        throw "Install command did not use the bounded PnP timeout."
     }
     $expected = @("/add-driver", $infPath, "/install")
     if ([string]::Join("`n", $script:processCall.Arguments) -cne
@@ -314,6 +355,7 @@ Invoke-Case -Name "smoke nonzero exit" -Action {
         param($Path)
         $Path
     }
+    Set-TestFunction -Name Get-FileSha256 -Body { "E" * 64 }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
         [pscustomobject]@{
             ExitCode = 7
@@ -321,7 +363,9 @@ Invoke-Case -Name "smoke nonzero exit" -Action {
         }
     }
     Assert-Throws -Pattern "exit code" -Action {
-        Invoke-SmokeEnumeration -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe"
+        Invoke-SmokeEnumeration `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64)
     }
 }
 
@@ -331,11 +375,14 @@ Invoke-Case -Name "smoke missing discovery" -Action {
         param($Path)
         $Path
     }
+    Set-TestFunction -Name Get-FileSha256 -Body { "E" * 64 }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
         [pscustomobject]@{ ExitCode = 0; OutputLines = @("result=ready") }
     }
     Assert-Throws -Pattern "discovery=ready" -Action {
-        Invoke-SmokeEnumeration -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe"
+        Invoke-SmokeEnumeration `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64)
     }
 }
 
@@ -345,11 +392,14 @@ Invoke-Case -Name "smoke missing result" -Action {
         param($Path)
         $Path
     }
+    Set-TestFunction -Name Get-FileSha256 -Body { "E" * 64 }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
         [pscustomobject]@{ ExitCode = 0; OutputLines = @("discovery=ready") }
     }
     Assert-Throws -Pattern "result=ready" -Action {
-        Invoke-SmokeEnumeration -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe"
+        Invoke-SmokeEnumeration `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64)
     }
 }
 
@@ -359,6 +409,7 @@ Invoke-Case -Name "smoke driverMissing" -Action {
         param($Path)
         $Path
     }
+    Set-TestFunction -Name Get-FileSha256 -Body { "E" * 64 }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
         [pscustomobject]@{
             ExitCode = 0
@@ -366,7 +417,9 @@ Invoke-Case -Name "smoke driverMissing" -Action {
         }
     }
     Assert-Throws -Pattern "driverMissing|discovery=ready" -Action {
-        Invoke-SmokeEnumeration -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe"
+        Invoke-SmokeEnumeration `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64)
     }
 }
 
@@ -395,7 +448,10 @@ Invoke-Case -Name "missing uninstall confirmation" -Action {
     Set-TestFunction -Name Assert-SupportedWindowsHost -Body {}
     Set-TestFunction -Name Assert-LabMachinePrerequisites -Body {}
     Set-TestFunction -Name Get-TargetDevnodes -Body { @() }
-    Set-TestFunction -Name Invoke-PnpUtilUninstall -Body {
+    Set-TestFunction -Name Invoke-PnpUtilRemoveDevice -Body {
+        $script:pnpCalls += 1
+    }
+    Set-TestFunction -Name Invoke-PnpUtilDeleteDriver -Body {
         $script:pnpCalls += 1
     }
     Assert-Throws -Pattern "ConfirmUninstall" -Action {
@@ -406,29 +462,65 @@ Invoke-Case -Name "missing uninstall confirmation" -Action {
     }
 }
 
-Invoke-Case -Name "one exact uninstall command" -Action {
+Invoke-Case -Name "one exact remove-device command" -Action {
     Import-LifecycleFunctions -Path $uninstallScript
     $script:processCall = $null
     Set-TestFunction -Name Resolve-SystemPnpUtil -Body {
         "C:\Windows\System32\pnputil.exe"
     }
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
-        param($Executable, $Arguments)
+        param($Executable, $Arguments, $TimeoutSeconds)
         $script:processCall = [pscustomobject]@{
             Executable = $Executable
             Arguments = @($Arguments)
+            TimeoutSeconds = $TimeoutSeconds
         }
         [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
     }
-    Invoke-PnpUtilUninstall -PublishedInf "oem42.inf"
+    $instanceId = "ROOT\EMKEVIRTUALAUDIO\0000"
+    Invoke-PnpUtilRemoveDevice -InstanceId $instanceId
     $expectedExecutable = "C:\Windows\System32\pnputil.exe"
     if ($script:processCall.Executable -cne $expectedExecutable) {
         throw "Uninstall executable was not fixed to the system pnputil.exe."
     }
-    $expected = @("/delete-driver", "oem42.inf", "/uninstall", "/force")
+    if ($script:processCall.TimeoutSeconds -ne 120) {
+        throw "Remove-device command did not use the bounded PnP timeout."
+    }
+    $expected = @("/remove-device", $instanceId)
     if ([string]::Join("`n", $script:processCall.Arguments) -cne
         [string]::Join("`n", $expected)) {
-        throw "Uninstall arguments were not the one exact allow-listed command."
+        throw "Remove-device arguments were not exact."
+    }
+}
+
+Invoke-Case -Name "one exact delete-driver command" -Action {
+    Import-LifecycleFunctions -Path $uninstallScript
+    $script:processCall = $null
+    Set-TestFunction -Name Resolve-SystemPnpUtil -Body {
+        "C:\Windows\System32\pnputil.exe"
+    }
+    Set-TestFunction -Name Invoke-CapturedProcess -Body {
+        param($Executable, $Arguments, $TimeoutSeconds)
+        $script:processCall = [pscustomobject]@{
+            Executable = $Executable
+            Arguments = @($Arguments)
+            TimeoutSeconds = $TimeoutSeconds
+        }
+        [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
+    }
+    Invoke-PnpUtilDeleteDriver -PublishedInf "oem42.inf"
+    $expected = @(
+        "/delete-driver",
+        "oem42.inf",
+        "/uninstall",
+        "/force"
+    )
+    if ([string]::Join("`n", $script:processCall.Arguments) -cne
+        [string]::Join("`n", $expected)) {
+        throw "Delete-driver arguments were not exact."
+    }
+    if ($script:processCall.TimeoutSeconds -ne 120) {
+        throw "Delete-driver command did not use the bounded PnP timeout."
     }
 }
 

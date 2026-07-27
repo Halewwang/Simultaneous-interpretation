@@ -67,7 +67,11 @@ function Invoke-CapturedProcess {
         [string]$Executable,
 
         [Parameter(Mandatory)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 900)]
+        [int]$TimeoutSeconds
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -88,6 +92,30 @@ function Invoke-CapturedProcess {
         }
         $standardOutput = $process.StandardOutput.ReadToEndAsync()
         $standardError = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $terminationDetail = "process-tree termination was attempted"
+            try {
+                $process.Kill($true)
+                if (-not $process.WaitForExit(5000)) {
+                    $terminationDetail = (
+                        "process-tree termination was attempted but bounded " +
+                        "reaping did not complete"
+                    )
+                }
+            } catch {
+                $terminationDetail = (
+                    "process-tree termination failed: " +
+                    $_.Exception.Message
+                )
+            }
+            $exception = [TimeoutException]::new(
+                "Process timed out after $TimeoutSeconds seconds; " +
+                "state uncertain; perform read-only inventory before any " +
+                "further mutation; $terminationDetail."
+            )
+            $exception.Data["StateUncertain"] = $true
+            throw $exception
+        }
         $process.WaitForExit()
         $stdout = $standardOutput.GetAwaiter().GetResult()
         $stderr = $standardError.GetAwaiter().GetResult()
@@ -111,6 +139,52 @@ function Get-TargetDevnodes {
     return @($rootDevices | Where-Object {
         @($_.HardwareID) -icontains $script:TargetHardwareId
     })
+}
+
+function Invoke-PollDelay {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds
+    )
+
+    Start-Sleep -Milliseconds $DelayMilliseconds
+}
+
+function Invoke-BoundedPoll {
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Action,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$IsComplete,
+
+        [Parameter(Mandatory)]
+        [string]$Description,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+        $value = & $Action
+        if (& $IsComplete $value) {
+            return $value
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Invoke-PollDelay -DelayMilliseconds $DelayMilliseconds
+        }
+    }
+    $exception = [TimeoutException]::new(
+        "Timed out waiting for $Description after $MaxAttempts attempts; " +
+        "state uncertain; perform read-only inventory before any further " +
+        "mutation."
+    )
+    $exception.Data["StateUncertain"] = $true
+    throw $exception
 }
 
 function Assert-CurrentTargetDevnode {
@@ -168,7 +242,38 @@ function Get-PublishedInfForDevnode {
     return $publishedInf
 }
 
-function Invoke-PnpUtilUninstall {
+function Assert-ExactTargetInstanceId {
+    param(
+        [Parameter(Mandatory)]
+        [string]$InstanceId
+    )
+
+    if ($InstanceId -notmatch "^ROOT\\EMKEVIRTUALAUDIO\\[^\\]+$") {
+        throw "Refusing a non-exact EMKE target instance ID."
+    }
+}
+
+function Invoke-PnpUtilRemoveDevice {
+    param(
+        [Parameter(Mandatory)]
+        [string]$InstanceId
+    )
+
+    Assert-ExactTargetInstanceId -InstanceId $InstanceId
+    $pnpUtil = Resolve-SystemPnpUtil
+    $result = Invoke-CapturedProcess `
+        -Executable $pnpUtil `
+        -Arguments @("/remove-device", $InstanceId) `
+        -TimeoutSeconds 120
+    if ($result.ExitCode -ne 0) {
+        throw (
+            "pnputil exact device removal failed with exit code " +
+            "$($result.ExitCode)."
+        )
+    }
+}
+
+function Invoke-PnpUtilDeleteDriver {
     param(
         [Parameter(Mandatory)]
         [string]$PublishedInf
@@ -183,9 +288,33 @@ function Invoke-PnpUtilUninstall {
             $PublishedInf,
             "/uninstall",
             "/force"
-        )
+        ) `
+        -TimeoutSeconds 120
     if ($result.ExitCode -ne 0) {
         throw "pnputil driver removal failed with exit code $($result.ExitCode)."
+    }
+}
+
+function Assert-NoOtherPublishedInfReferences {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$TargetDevnode,
+
+        [Parameter(Mandatory)]
+        [string]$PublishedInf
+    )
+
+    Assert-PublishedInfName -PublishedInf $PublishedInf
+    $signedDrivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver)
+    $otherReferences = @($signedDrivers | Where-Object {
+        [string]$_.InfName -ieq $PublishedInf -and
+        [string]$_.DeviceID -ine [string]$TargetDevnode.PNPDeviceID
+    })
+    if ($otherReferences.Count -ne 0) {
+        throw (
+            "Published INF '$PublishedInf' is shared by another signed-driver " +
+            "reference; refusing every deletion."
+        )
     }
 }
 
@@ -200,6 +329,62 @@ function Assert-TargetDevnodeAbsent {
     if ($present.Count -ne 0) {
         throw "The exact target devnode is still present after driver removal."
     }
+}
+
+function Wait-TargetDevnodeAbsent {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedInstanceId,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    [void](Invoke-BoundedPoll `
+        -Action {
+            @(Get-TargetDevnodes)
+        } `
+        -IsComplete {
+            param($Value)
+            $null -eq $Value -or @($Value).Count -eq 0
+        } `
+        -Description "absence of exact target devnode '$ExpectedInstanceId'" `
+        -MaxAttempts $MaxAttempts `
+        -DelayMilliseconds $DelayMilliseconds)
+}
+
+function Wait-PublishedInfUnreferenced {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PublishedInf,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    Assert-PublishedInfName -PublishedInf $PublishedInf
+    [void](Invoke-BoundedPoll `
+        -Action {
+            @(
+                Get-CimInstance -ClassName Win32_PnPSignedDriver |
+                Where-Object {
+                    [string]$_.InfName -ieq $PublishedInf
+                }
+            )
+        } `
+        -IsComplete {
+            param($Value)
+            $null -eq $Value -or @($Value).Count -eq 0
+        } `
+        -Description "published INF '$PublishedInf' to become unreferenced" `
+        -MaxAttempts $MaxAttempts `
+        -DelayMilliseconds $DelayMilliseconds)
 }
 
 function Invoke-UninstallTestDriver {
@@ -217,14 +402,21 @@ function Invoke-UninstallTestDriver {
     $devnode = Assert-CurrentTargetDevnode -Devnodes $devnodes
     $publishedInf = Get-PublishedInfForDevnode -Devnode $devnode
     Assert-PublishedInfName -PublishedInf $publishedInf
+    Assert-NoOtherPublishedInfReferences `
+        -TargetDevnode $devnode `
+        -PublishedInf $publishedInf
 
     Write-Host "Hardware ID: $script:TargetHardwareId"
+    Write-Host "Target instance: $($devnode.PNPDeviceID)"
     Write-Host "Published INF: $publishedInf"
 
-    Invoke-PnpUtilUninstall -PublishedInf $publishedInf
-    $remaining = @(Get-TargetDevnodes)
-    Assert-TargetDevnodeAbsent -Devnodes $remaining
-    Write-Host "Target devnode is no longer present."
+    Invoke-PnpUtilRemoveDevice -InstanceId $devnode.PNPDeviceID
+    Wait-TargetDevnodeAbsent -ExpectedInstanceId $devnode.PNPDeviceID
+    Write-Host "Exact target devnode is no longer present."
+
+    Wait-PublishedInfUnreferenced -PublishedInf $publishedInf
+    Invoke-PnpUtilDeleteDriver -PublishedInf $publishedInf
+    Write-Host "Unreferenced published INF was removed."
 }
 
 Invoke-UninstallTestDriver @PSBoundParameters

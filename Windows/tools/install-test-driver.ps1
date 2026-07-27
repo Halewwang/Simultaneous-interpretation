@@ -11,6 +11,10 @@ param(
     [Parameter(Mandatory, ParameterSetName = "Install")]
     [string]$SmokePath,
 
+    [Parameter(Mandatory, ParameterSetName = "Install")]
+    [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+    [string]$ExpectedSmokeSha256,
+
     [Parameter(ParameterSetName = "Install")]
     [switch]$ConfirmInstall,
 
@@ -62,17 +66,48 @@ function Assert-LabMachinePrerequisites {
     }
 }
 
+function Assert-LocalNonReparsePath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("Container", "Leaf")]
+        [string]$ExpectedType
+    )
+
+    if ($Path -match "^[\\/]{2}") {
+        throw "UNC and device paths are forbidden for lifecycle inputs."
+    }
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path `
+        -LiteralPath $fullPath `
+        -PathType $ExpectedType)) {
+        throw "Required $ExpectedType path does not exist: $Path"
+    }
+
+    $current = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+    while ($null -ne $current) {
+        if (($current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne
+            0) {
+            throw "Lifecycle paths must not contain a reparse point: $Path"
+        }
+        $current = if ($current -is [IO.FileInfo]) {
+            $current.Directory
+        } else {
+            $current.Parent
+        }
+    }
+    return $fullPath
+}
+
 function Resolve-RequiredFile {
     param(
         [Parameter(Mandatory)]
         [string]$Path
     )
 
-    $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
-    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
-        throw "Required file does not exist: $Path"
-    }
-    return $resolved
+    return Assert-LocalNonReparsePath -Path $Path -ExpectedType Leaf
 }
 
 function Resolve-SystemPnpUtil {
@@ -114,10 +149,9 @@ function Get-StrictDriverPackage {
         [string]$Directory
     )
 
-    $resolved = (Resolve-Path -LiteralPath $Directory -ErrorAction Stop).Path
-    if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
-        throw "Driver package path is not a directory: $Directory"
-    }
+    $resolved = Assert-LocalNonReparsePath `
+        -Path $Directory `
+        -ExpectedType Container
     $nested = @(Get-ChildItem -LiteralPath $resolved -Directory -Force)
     if ($nested.Count -ne 0) {
         throw "Driver package must be flat."
@@ -126,6 +160,11 @@ function Get-StrictDriverPackage {
     if ($files.Count -ne 3) {
         throw "Driver package must contain only one INF, one SYS, and one CAT."
     }
+    foreach ($file in $files) {
+        [void](Assert-LocalNonReparsePath `
+            -Path $file.FullName `
+            -ExpectedType Leaf)
+    }
 
     return [pscustomobject]@{
         Directory = $resolved
@@ -133,6 +172,18 @@ function Get-StrictDriverPackage {
         Sys = Get-SinglePackageFile -Files $files -Extension ".sys"
         Cat = Get-SinglePackageFile -Files $files -Extension ".cat"
     }
+}
+
+function Get-FileSha256 {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $resolved = Resolve-RequiredFile -Path $Path
+    return (Get-FileHash `
+        -LiteralPath $resolved `
+        -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
 function Invoke-DriverPackageVerifier {
@@ -195,6 +246,210 @@ function Test-FixedSha256Equal {
     )
 }
 
+function Get-ProtectedStagingSddl {
+    return "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+}
+
+function Assert-ProtectedStagingSecurityDescriptor {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Sddl
+    )
+
+    $descriptor =
+        [Security.AccessControl.RawSecurityDescriptor]::new($Sddl)
+    if ($descriptor.Owner.Value -cne "S-1-5-32-544") {
+        throw "Protected staging owner must be BUILTIN\Administrators."
+    }
+    if (($descriptor.ControlFlags -band
+        [Security.AccessControl.ControlFlags]::DiscretionaryAclProtected) -eq
+        0) {
+        throw "Protected staging DACL must not inherit access rules."
+    }
+    if ($descriptor.DiscretionaryAcl.Count -ne 2) {
+        throw "Protected staging DACL must contain exactly two access rules."
+    }
+    $expectedSids = @("S-1-5-18", "S-1-5-32-544")
+    foreach ($ace in $descriptor.DiscretionaryAcl) {
+        if ($ace.AceQualifier -ne
+            [Security.AccessControl.AceQualifier]::AccessAllowed -or
+            $ace.AccessMask -ne 0x1F01FF -or
+            ($ace.AceFlags -band
+                [Security.AccessControl.AceFlags]::ContainerInherit) -eq 0 -or
+            ($ace.AceFlags -band
+                [Security.AccessControl.AceFlags]::ObjectInherit) -eq 0 -or
+            $ace.SecurityIdentifier.Value -notin $expectedSids) {
+            throw (
+                "Protected staging DACL may grant inherited FullControl " +
+                "only to SYSTEM and BUILTIN\Administrators."
+            )
+        }
+    }
+    $actualSids = @($descriptor.DiscretionaryAcl |
+        ForEach-Object { $_.SecurityIdentifier.Value } |
+        Sort-Object -Unique)
+    if ($actualSids.Count -ne 2) {
+        throw "Protected staging DACL has duplicate or missing principals."
+    }
+}
+
+function Get-SystemStagingRoot {
+    $programData = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::CommonApplicationData
+    )
+    if ([string]::IsNullOrWhiteSpace($programData)) {
+        throw "The local system staging base could not be resolved."
+    }
+    return [IO.Path]::GetFullPath(
+        (Join-Path $programData "EMKE\DriverLabStaging")
+    )
+}
+
+function Set-ProtectedStagingAcl {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $security = [Security.AccessControl.DirectorySecurity]::new()
+    $sections =
+        [Security.AccessControl.AccessControlSections]::Owner -bor
+        [Security.AccessControl.AccessControlSections]::Group -bor
+        [Security.AccessControl.AccessControlSections]::Access
+    $security.SetSecurityDescriptorSddlForm(
+        (Get-ProtectedStagingSddl),
+        $sections
+    )
+    Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+}
+
+function Assert-ProtectedStagingAcl {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $resolved = Assert-LocalNonReparsePath `
+        -Path $Path `
+        -ExpectedType Container
+    $acl = Get-Acl -LiteralPath $resolved -ErrorAction Stop
+    Assert-ProtectedStagingSecurityDescriptor -Sddl $acl.Sddl
+}
+
+function New-ProtectedStagingDirectory {
+    $root = Get-SystemStagingRoot
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    [void](Assert-LocalNonReparsePath `
+        -Path $root `
+        -ExpectedType Container)
+    Set-ProtectedStagingAcl -Path $root
+    Assert-ProtectedStagingAcl -Path $root
+
+    $token = [guid]::NewGuid().ToString("N")
+    $path = Join-Path $root $token
+    [IO.Directory]::CreateDirectory($path) | Out-Null
+    [void](Assert-LocalNonReparsePath `
+        -Path $path `
+        -ExpectedType Container)
+    Set-ProtectedStagingAcl -Path $path
+    Assert-ProtectedStagingAcl -Path $path
+    return [pscustomobject]@{
+        Path = $path
+        Token = $token
+    }
+}
+
+function Remove-ProtectedStagingDirectory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Token
+    )
+
+    $parsedToken = [guid]::Empty
+    if (-not [guid]::TryParseExact($Token, "N", [ref]$parsedToken)) {
+        throw "Owned staging cleanup requires an exact GUID token."
+    }
+    $root = [IO.Path]::GetFullPath((Get-SystemStagingRoot))
+    $expected = [IO.Path]::GetFullPath((Join-Path $root $Token))
+    $actual = [IO.Path]::GetFullPath($Path)
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($actual, $expected)) {
+        throw "Refusing cleanup outside the exact owned staging directory."
+    }
+    if (-not (Test-Path -LiteralPath $actual)) {
+        return
+    }
+    [void](Assert-LocalNonReparsePath `
+        -Path $actual `
+        -ExpectedType Container)
+    Assert-ProtectedStagingAcl -Path $actual
+    Remove-Item -LiteralPath $actual -Recurse -Force -ErrorAction Stop
+}
+
+function Copy-InstallInputsToStaging {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$Package,
+
+        [Parameter(Mandatory)]
+        [psobject]$SmokeFile,
+
+        [Parameter(Mandatory)]
+        [string]$StagingRoot
+    )
+
+    $resolvedRoot = Assert-LocalNonReparsePath `
+        -Path $StagingRoot `
+        -ExpectedType Container
+    if (@(Get-ChildItem -LiteralPath $resolvedRoot -Force).Count -ne 0) {
+        throw "Owned staging directory must be empty before copying inputs."
+    }
+    $packageDirectory = Join-Path $resolvedRoot "package"
+    $smokeDirectory = Join-Path $resolvedRoot "smoke"
+    [IO.Directory]::CreateDirectory($packageDirectory) | Out-Null
+    [IO.Directory]::CreateDirectory($smokeDirectory) | Out-Null
+    foreach ($source in @($Package.Inf, $Package.Sys, $Package.Cat)) {
+        $destination = Join-Path $packageDirectory $source.Name
+        [IO.File]::Copy($source.FullName, $destination, $false)
+    }
+    $smokeDestination = Join-Path $smokeDirectory $SmokeFile.Name
+    [IO.File]::Copy($SmokeFile.FullName, $smokeDestination, $false)
+
+    $stagedPackage = Get-StrictDriverPackage -Directory $packageDirectory
+    $stagedSmokePath = Resolve-RequiredFile -Path $smokeDestination
+    $stagedSmoke = Get-Item -LiteralPath $stagedSmokePath -Force
+    return [pscustomobject]@{
+        Package = $stagedPackage
+        Smoke = $stagedSmoke
+        PackageSha256 = Get-DriverPackageSha256 -Package $stagedPackage
+        SmokeSha256 = Get-FileSha256 -Path $stagedSmoke.FullName
+    }
+}
+
+function Assert-StagedInputsUnchanged {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$StagedInputs
+    )
+
+    $package = Get-StrictDriverPackage `
+        -Directory $StagedInputs.Package.Directory
+    $packageSha256 = Get-DriverPackageSha256 -Package $package
+    if (-not (Test-FixedSha256Equal `
+        -Expected $StagedInputs.PackageSha256 `
+        -Actual $packageSha256)) {
+        throw "Protected staged driver package changed after validation."
+    }
+    $smokeSha256 = Get-FileSha256 -Path $StagedInputs.Smoke.FullName
+    if (-not (Test-FixedSha256Equal `
+        -Expected $StagedInputs.SmokeSha256 `
+        -Actual $smokeSha256)) {
+        throw "Protected staged Smoke SHA-256 changed after validation."
+    }
+}
+
 function Get-CatalogSignatureMetadata {
     param(
         [Parameter(Mandatory)]
@@ -233,40 +488,200 @@ function Assert-CatalogSignatureValid {
         throw "Driver catalog signature has no signing certificate."
     }
     if ([string]::IsNullOrWhiteSpace($Metadata.SummarySha256) -or
-        $Metadata.SummarySha256 -notmatch "^[0-9A-Fa-f]{16,}$") {
+        $Metadata.SummarySha256 -notmatch "^[0-9A-Fa-f]{64}$") {
         throw "Driver catalog signing certificate has no usable SHA-256 summary."
     }
+}
+
+function ConvertTo-InfSectionMap {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text
+    )
+
+    $sections =
+        [Collections.Generic.Dictionary[string, object]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+    $currentSection = $null
+    foreach ($rawLine in ($Text -split "\r?\n")) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or
+            $line.StartsWith(";", [StringComparison]::Ordinal)) {
+            continue
+        }
+        if ($line -match "^\[(?<name>[^\[\]]+)\]$") {
+            $name = $Matches["name"].Trim()
+            if ($sections.ContainsKey($name)) {
+                throw "INF contains duplicate section [$name]."
+            }
+            $currentSection =
+                [Collections.Generic.List[string]]::new()
+            $sections.Add($name, $currentSection)
+            continue
+        }
+        if ($null -eq $currentSection) {
+            throw "INF content appeared before the first section."
+        }
+        $currentSection.Add($line)
+    }
+    return $sections
+}
+
+function ConvertTo-InfKeyValueMap {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Lines,
+
+        [Parameter(Mandatory)]
+        [string]$SectionName
+    )
+
+    $values =
+        [Collections.Generic.Dictionary[string, string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+    foreach ($line in $Lines) {
+        $separator = $line.IndexOf("=")
+        if ($separator -le 0) {
+            throw "INF section [$SectionName] contains a malformed entry."
+        }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        if ([string]::IsNullOrWhiteSpace($key) -or
+            [string]::IsNullOrWhiteSpace($value) -or
+            $values.ContainsKey($key)) {
+            throw "INF section [$SectionName] has a duplicate or empty key."
+        }
+        $values.Add($key, $value)
+    }
+    return $values
+}
+
+function ConvertFrom-QuotedInfString {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if ($Value -match '^"(?<value>[^"]*)"$') {
+        return $Matches["value"]
+    }
+    return $Value
 }
 
 function Get-DriverInfMetadata {
     param(
         [Parameter(Mandatory)]
-        [System.IO.FileInfo]$Inf
+        [System.IO.FileInfo]$Inf,
+
+        [Parameter(Mandatory)]
+        [int]$WindowsBuild
     )
 
     $text = Get-Content -LiteralPath $Inf.FullName -Raw
-    $driverVerMatches = [regex]::Matches(
-        $text,
-        "(?im)^\s*DriverVer\s*=\s*(?<value>[^\r\n]+?)\s*$"
-    )
-    if ($driverVerMatches.Count -ne 1) {
-        throw "Driver package INF must contain exactly one DriverVer."
+    $sections = ConvertTo-InfSectionMap -Text $text
+    foreach ($requiredSection in @("Version", "Manufacturer", "Strings")) {
+        if (-not $sections.ContainsKey($requiredSection)) {
+            throw "INF is missing required section [$requiredSection]."
+        }
     }
-    $hardwareMatches = [regex]::Matches(
-        $text,
-        "(?im)^\s*%[^%=\r\n]+%\s*=\s*[^,\r\n]+,\s*" +
-            "(?<hardware>ROOT\\EMKEVIRTUALAUDIO)\s*$"
+
+    $strings = ConvertTo-InfKeyValueMap `
+        -Lines $sections["Strings"] `
+        -SectionName "Strings"
+    if (-not $strings.ContainsKey("ProviderName") -or
+        -not $strings.ContainsKey("ManufacturerName")) {
+        throw "INF [Strings] must define provider and manufacturer names."
+    }
+    $providerName =
+        ConvertFrom-QuotedInfString -Value $strings["ProviderName"]
+    $manufacturerName =
+        ConvertFrom-QuotedInfString -Value $strings["ManufacturerName"]
+    if ($providerName -cne "EMKE" -or $manufacturerName -cne "EMKE") {
+        throw "INF provider and manufacturer must both resolve to EMKE."
+    }
+
+    $version = ConvertTo-InfKeyValueMap `
+        -Lines $sections["Version"] `
+        -SectionName "Version"
+    if (-not $version.ContainsKey("Provider") -or
+        $version["Provider"] -cne "%ProviderName%" -or
+        -not $version.ContainsKey("DriverVer")) {
+        throw "INF [Version] provider or DriverVer is invalid."
+    }
+    $driverVer = $version["DriverVer"]
+    if ($driverVer -notmatch (
+        "^(?<date>[0-9]{2}/[0-9]{2}/[0-9]{4})," +
+        "(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$"
+    )) {
+        throw "INF DriverVer must contain one date and four-part version."
+    }
+    $driverVersion = ([version]$Matches["version"]).ToString()
+
+    if ($WindowsBuild -lt $script:MinimumWindowsBuild) {
+        throw "INF Models selection requires Windows build 26200 or newer."
+    }
+    $manufacturerLines = $sections["Manufacturer"]
+    if ($manufacturerLines.Count -ne 1) {
+        throw "INF [Manufacturer] must contain exactly one Models mapping."
+    }
+    $manufacturer = ConvertTo-InfKeyValueMap `
+        -Lines $manufacturerLines `
+        -SectionName "Manufacturer"
+    if ($manufacturer.Count -ne 1 -or
+        -not $manufacturer.ContainsKey("%ManufacturerName%")) {
+        throw "INF [Manufacturer] mapping is not the frozen EMKE mapping."
+    }
+    $manufacturerParts = @($manufacturer["%ManufacturerName%"].Split(",") |
+        ForEach-Object { $_.Trim() })
+    if ($manufacturerParts.Count -ne 2 -or
+        $manufacturerParts[0] -cne "EMKE" -or
+        $manufacturerParts[1] -cne "NTamd64.10.0...26200") {
+        throw "INF [Manufacturer] has an unsupported Models decoration."
+    }
+    $modelSection = "EMKE.NTamd64.10.0...26200"
+    if (-not $sections.ContainsKey($modelSection)) {
+        throw "INF is missing the active x64 Models section [$modelSection]."
+    }
+    foreach ($sectionName in $sections.Keys) {
+        if ($sectionName -imatch "^EMKE\.NT" -and
+            $sectionName -cne $modelSection) {
+            throw "INF contains an unexpected inactive Models section."
+        }
+    }
+    $modelLines = $sections[$modelSection]
+    if ($modelLines.Count -ne 1) {
+        throw "Active INF Models section must contain exactly one model entry."
+    }
+    $modelSeparator = $modelLines[0].IndexOf("=")
+    if ($modelSeparator -le 0) {
+        throw "Active INF Models entry is malformed."
+    }
+    $modelParts = @(
+        $modelLines[0].Substring($modelSeparator + 1).Split(",") |
+        ForEach-Object { $_.Trim() }
     )
-    if ($hardwareMatches.Count -ne 1) {
+    if ($modelParts.Count -ne 2 -or
+        $modelParts[0] -cne "EMKE_Install" -or
+        $modelParts[1] -cne $script:TargetHardwareId) {
         throw (
-            "Driver package INF must declare the exact hardware ID " +
-            "$script:TargetHardwareId exactly once."
+            "Active INF model must use EMKE_Install and contain only the " +
+            "exact target hardware ID with no compatible IDs."
         )
+    }
+    $installSection = "EMKE_Install"
+    if (-not $sections.ContainsKey("$installSection.NT")) {
+        throw "INF active model references a missing install section."
     }
 
     return [pscustomobject]@{
-        DriverVer = $driverVerMatches[0].Groups["value"].Value.Trim()
-        HardwareId = $hardwareMatches[0].Groups["hardware"].Value
+        DriverVer = $driverVer
+        DriverVersion = $driverVersion
+        ProviderName = $providerName
+        ModelSection = $modelSection
+        InstallSection = $installSection
+        HardwareId = $modelParts[1]
     }
 }
 
@@ -276,7 +691,11 @@ function Invoke-CapturedProcess {
         [string]$Executable,
 
         [Parameter(Mandatory)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 900)]
+        [int]$TimeoutSeconds
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -297,6 +716,30 @@ function Invoke-CapturedProcess {
         }
         $standardOutput = $process.StandardOutput.ReadToEndAsync()
         $standardError = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $terminationDetail = "process-tree termination was attempted"
+            try {
+                $process.Kill($true)
+                if (-not $process.WaitForExit(5000)) {
+                    $terminationDetail = (
+                        "process-tree termination was attempted but bounded " +
+                        "reaping did not complete"
+                    )
+                }
+            } catch {
+                $terminationDetail = (
+                    "process-tree termination failed: " +
+                    $_.Exception.Message
+                )
+            }
+            $exception = [TimeoutException]::new(
+                "Process timed out after $TimeoutSeconds seconds; " +
+                "state uncertain; perform read-only inventory before any " +
+                "further mutation; $terminationDetail."
+            )
+            $exception.Data["StateUncertain"] = $true
+            throw $exception
+        }
         $process.WaitForExit()
         $stdout = $standardOutput.GetAwaiter().GetResult()
         $stderr = $standardError.GetAwaiter().GetResult()
@@ -322,10 +765,378 @@ function Invoke-PnpUtilInstall {
     $pnpUtil = Resolve-SystemPnpUtil
     $result = Invoke-CapturedProcess `
         -Executable $pnpUtil `
-        -Arguments @("/add-driver", $InfPath, "/install")
+        -Arguments @("/add-driver", $InfPath, "/install") `
+        -TimeoutSeconds 120
     if ($result.ExitCode -ne 0) {
         throw "pnputil driver installation failed with exit code $($result.ExitCode)."
     }
+}
+
+function Get-RootDevnodeSetupApiSource {
+    return @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Emke.DriverLab
+{
+    public static class RootDevnodeSetupApi
+    {
+        private static readonly IntPtr InvalidHandleValue = new IntPtr(-1);
+        private const uint DicdGenerateId = 0x00000001;
+        private const uint SpdrpHardwareId = 0x00000001;
+        private const uint DifRemove = 0x00000005;
+        private const uint DifRegisterDevice = 0x00000019;
+        private const uint DiRemoveDeviceGlobal = 0x00000001;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SpDevinfoData
+        {
+            public uint Size;
+            public Guid ClassGuid;
+            public uint DevInst;
+            public IntPtr Reserved;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SpClassInstallHeader
+        {
+            public uint Size;
+            public uint InstallFunction;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SpRemoveDeviceParams
+        {
+            public SpClassInstallHeader ClassInstallHeader;
+            public uint Scope;
+            public uint HwProfile;
+        }
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiGetINFClassW(
+            string infName,
+            out Guid classGuid,
+            StringBuilder className,
+            uint classNameSize,
+            out uint requiredSize);
+
+        [DllImport(
+            "setupapi.dll",
+            EntryPoint = "SetupDiCreateDeviceInfoList",
+            SetLastError = true)]
+        private static extern IntPtr CreateDeviceInfoListForClass(
+            ref Guid classGuid,
+            IntPtr parentWindow);
+
+        [DllImport(
+            "setupapi.dll",
+            EntryPoint = "SetupDiCreateDeviceInfoList",
+            SetLastError = true)]
+        private static extern IntPtr CreateEmptyDeviceInfoList(
+            IntPtr classGuid,
+            IntPtr parentWindow);
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiCreateDeviceInfoW(
+            IntPtr deviceInfoSet,
+            string deviceName,
+            ref Guid classGuid,
+            string deviceDescription,
+            IntPtr parentWindow,
+            uint creationFlags,
+            ref SpDevinfoData deviceInfoData);
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiSetDeviceRegistryPropertyW(
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData,
+            uint property,
+            byte[] propertyBuffer,
+            uint propertyBufferSize);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiCallClassInstaller(
+            uint installFunction,
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData);
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiSetClassInstallParamsW(
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData,
+            ref SpRemoveDeviceParams classInstallParams,
+            uint classInstallParamsSize);
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiGetDeviceInstanceIdW(
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData,
+            StringBuilder deviceInstanceId,
+            uint deviceInstanceIdSize,
+            out uint requiredSize);
+
+        [DllImport(
+            "setupapi.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiOpenDeviceInfoW(
+            IntPtr deviceInfoSet,
+            string deviceInstanceId,
+            IntPtr parentWindow,
+            uint openFlags,
+            ref SpDevinfoData deviceInfoData);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiDestroyDeviceInfoList(
+            IntPtr deviceInfoSet);
+
+        private static void ThrowLastError(string operation)
+        {
+            throw new Win32Exception(
+                Marshal.GetLastWin32Error(),
+                operation + " failed.");
+        }
+
+        private static SpDevinfoData NewDeviceInfoData()
+        {
+            return new SpDevinfoData
+            {
+                Size = (uint)Marshal.SizeOf<SpDevinfoData>()
+            };
+        }
+
+        private static void ValidateExactInstanceId(string instanceId)
+        {
+            const string prefix = "ROOT\\EMKEVIRTUALAUDIO\\";
+            if (String.IsNullOrWhiteSpace(instanceId) ||
+                !instanceId.StartsWith(
+                    prefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "Instance ID is outside the exact EMKE root target.",
+                    nameof(instanceId));
+            }
+            string suffix = instanceId.Substring(prefix.Length);
+            if (suffix.Length == 0 || suffix.Contains("\\"))
+            {
+                throw new ArgumentException(
+                    "Instance ID is not one exact EMKE root instance.",
+                    nameof(instanceId));
+            }
+        }
+
+        public static string Create(string infPath, string hardwareId)
+        {
+            if (!String.Equals(
+                    hardwareId,
+                    "ROOT\\EMKEVIRTUALAUDIO",
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Only the exact EMKE root hardware ID is allowed.",
+                    nameof(hardwareId));
+            }
+
+            Guid classGuid;
+            uint requiredSize;
+            var className = new StringBuilder(256);
+            if (!SetupDiGetINFClassW(
+                infPath,
+                out classGuid,
+                className,
+                (uint)className.Capacity,
+                out requiredSize))
+            {
+                ThrowLastError("SetupDiGetINFClass");
+            }
+
+            IntPtr deviceInfoSet = CreateDeviceInfoListForClass(
+                ref classGuid,
+                IntPtr.Zero);
+            if (deviceInfoSet == InvalidHandleValue)
+            {
+                ThrowLastError("SetupDiCreateDeviceInfoList");
+            }
+            try
+            {
+                SpDevinfoData deviceInfoData = NewDeviceInfoData();
+                if (!SetupDiCreateDeviceInfoW(
+                    deviceInfoSet,
+                    className.ToString(),
+                    ref classGuid,
+                    null,
+                    IntPtr.Zero,
+                    DicdGenerateId,
+                    ref deviceInfoData))
+                {
+                    ThrowLastError("SetupDiCreateDeviceInfo");
+                }
+
+                byte[] multiString = Encoding.Unicode.GetBytes(
+                    hardwareId + "\0\0");
+                if (!SetupDiSetDeviceRegistryPropertyW(
+                    deviceInfoSet,
+                    ref deviceInfoData,
+                    SpdrpHardwareId,
+                    multiString,
+                    (uint)multiString.Length))
+                {
+                    ThrowLastError(
+                        "SetupDiSetDeviceRegistryProperty(SPDRP_HARDWAREID)");
+                }
+                if (!SetupDiCallClassInstaller(
+                    DifRegisterDevice,
+                    deviceInfoSet,
+                    ref deviceInfoData))
+                {
+                    ThrowLastError(
+                        "SetupDiCallClassInstaller(DIF_REGISTERDEVICE)");
+                }
+
+                var instanceId = new StringBuilder(512);
+                if (!SetupDiGetDeviceInstanceIdW(
+                    deviceInfoSet,
+                    ref deviceInfoData,
+                    instanceId,
+                    (uint)instanceId.Capacity,
+                    out requiredSize))
+                {
+                    ThrowLastError("SetupDiGetDeviceInstanceId");
+                }
+                string result = instanceId.ToString();
+                ValidateExactInstanceId(result);
+                return result;
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            }
+        }
+
+        public static void RemoveExact(string instanceId)
+        {
+            ValidateExactInstanceId(instanceId);
+            IntPtr deviceInfoSet = CreateEmptyDeviceInfoList(
+                IntPtr.Zero,
+                IntPtr.Zero);
+            if (deviceInfoSet == InvalidHandleValue)
+            {
+                ThrowLastError("SetupDiCreateDeviceInfoList");
+            }
+            try
+            {
+                SpDevinfoData deviceInfoData = NewDeviceInfoData();
+                if (!SetupDiOpenDeviceInfoW(
+                    deviceInfoSet,
+                    instanceId,
+                    IntPtr.Zero,
+                    0,
+                    ref deviceInfoData))
+                {
+                    ThrowLastError("SetupDiOpenDeviceInfo");
+                }
+                var removeParams = new SpRemoveDeviceParams
+                {
+                    ClassInstallHeader = new SpClassInstallHeader
+                    {
+                        Size =
+                            (uint)Marshal.SizeOf<SpClassInstallHeader>(),
+                        InstallFunction = DifRemove
+                    },
+                    Scope = DiRemoveDeviceGlobal,
+                    HwProfile = 0
+                };
+                if (!SetupDiSetClassInstallParamsW(
+                    deviceInfoSet,
+                    ref deviceInfoData,
+                    ref removeParams,
+                    (uint)Marshal.SizeOf<SpRemoveDeviceParams>()))
+                {
+                    ThrowLastError("SetupDiSetClassInstallParams(DIF_REMOVE)");
+                }
+                if (!SetupDiCallClassInstaller(
+                    DifRemove,
+                    deviceInfoSet,
+                    ref deviceInfoData))
+                {
+                    ThrowLastError(
+                        "SetupDiCallClassInstaller(DIF_REMOVE)");
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            }
+        }
+    }
+}
+'@
+}
+
+function Initialize-RootDevnodeSetupApi {
+    if ($null -eq ("Emke.DriverLab.RootDevnodeSetupApi" -as [type])) {
+        Add-Type `
+            -Language CSharp `
+            -TypeDefinition (Get-RootDevnodeSetupApiSource)
+    }
+}
+
+function New-RootDevnodeFromInf {
+    param(
+        [Parameter(Mandatory)]
+        [string]$InfPath,
+
+        [Parameter(Mandatory)]
+        [string]$HardwareId
+    )
+
+    if ($HardwareId -cne $script:TargetHardwareId) {
+        throw "Only the exact EMKE root hardware ID may be created."
+    }
+    Initialize-RootDevnodeSetupApi
+    return [Emke.DriverLab.RootDevnodeSetupApi]::Create(
+        $InfPath,
+        $HardwareId
+    )
+}
+
+function Remove-ExactCreatedRootDevnode {
+    param(
+        [Parameter(Mandatory)]
+        [string]$InstanceId
+    )
+
+    if ($InstanceId -notmatch "^ROOT\\EMKEVIRTUALAUDIO\\[^\\]+$") {
+        throw "Refusing cleanup outside one exact created EMKE instance."
+    }
+    Initialize-RootDevnodeSetupApi
+    [Emke.DriverLab.RootDevnodeSetupApi]::RemoveExact($InstanceId)
 }
 
 function Get-TargetDevnodes {
@@ -335,6 +1146,111 @@ function Get-TargetDevnodes {
     return @($rootDevices | Where-Object {
         @($_.HardwareID) -icontains $script:TargetHardwareId
     })
+}
+
+function Invoke-PollDelay {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds
+    )
+
+    Start-Sleep -Milliseconds $DelayMilliseconds
+}
+
+function Invoke-BoundedPoll {
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Action,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$IsComplete,
+
+        [Parameter(Mandatory)]
+        [string]$Description,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt += 1) {
+        $value = & $Action
+        if (& $IsComplete $value) {
+            return $value
+        }
+        if ($attempt -lt $MaxAttempts) {
+            Invoke-PollDelay -DelayMilliseconds $DelayMilliseconds
+        }
+    }
+    $exception = [TimeoutException]::new(
+        "Timed out waiting for $Description after $MaxAttempts attempts; " +
+        "state uncertain; perform read-only inventory before any further " +
+        "mutation."
+    )
+    $exception.Data["StateUncertain"] = $true
+    throw $exception
+}
+
+function Wait-TargetDevnode {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedInstanceId,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    $state = Invoke-BoundedPoll `
+        -Action {
+            $devnodes = @(Get-TargetDevnodes)
+            [pscustomobject]@{
+                All = $devnodes
+                Exact = @($devnodes | Where-Object {
+                    [string]$_.PNPDeviceID -ceq $ExpectedInstanceId
+                })
+            }
+        } `
+        -IsComplete {
+            param($Value)
+            $Value.All.Count -eq 1 -and
+            $Value.Exact.Count -eq 1 -and
+            $Value.Exact[0].Present -eq $true
+        } `
+        -Description "one exact present target devnode '$ExpectedInstanceId'" `
+        -MaxAttempts $MaxAttempts `
+        -DelayMilliseconds $DelayMilliseconds
+    return $state.Exact[0]
+}
+
+function Wait-TargetDevnodeAbsent {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ExpectedInstanceId,
+
+        [ValidateRange(1, 300)]
+        [int]$MaxAttempts = 30,
+
+        [ValidateRange(1, 60000)]
+        [int]$DelayMilliseconds = 1000
+    )
+
+    [void](Invoke-BoundedPoll `
+        -Action {
+            @(Get-TargetDevnodes)
+        } `
+        -IsComplete {
+            param($Value)
+            $null -eq $Value -or @($Value).Count -eq 0
+        } `
+        -Description "absence of exact target devnode '$ExpectedInstanceId'" `
+        -MaxAttempts $MaxAttempts `
+        -DelayMilliseconds $DelayMilliseconds)
 }
 
 function Assert-InstalledDevnodeHealthy {
@@ -354,7 +1270,15 @@ function Assert-InstalledDevnodeHealthy {
     if ($devnode.Present -ne $true) {
         throw "The target driver devnode is not present after installation."
     }
-    if ([int]$devnode.ConfigManagerErrorCode -ne 0) {
+    $errorCode = 0
+    if ($null -eq $devnode.ConfigManagerErrorCode -or
+        -not [int]::TryParse(
+            [string]$devnode.ConfigManagerErrorCode,
+            [ref]$errorCode
+        )) {
+        throw "ConfigManagerErrorCode must be an integer."
+    }
+    if ($errorCode -ne 0) {
         throw (
             "The target driver devnode is not healthy; ConfigManagerErrorCode=" +
             "$($devnode.ConfigManagerErrorCode)."
@@ -362,16 +1286,157 @@ function Assert-InstalledDevnodeHealthy {
     }
 }
 
+function Assert-InstalledDriverPackageIdentity {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$Devnode,
+
+        [Parameter(Mandatory)]
+        [psobject]$InfMetadata
+    )
+
+    $signedDrivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver)
+    $matching = @($signedDrivers | Where-Object {
+        $_.DeviceID -ieq $Devnode.PNPDeviceID
+    })
+    if ($matching.Count -ne 1) {
+        throw (
+            "Expected one installed package identity for the exact devnode; " +
+            "found $($matching.Count)."
+        )
+    }
+    $identity = $matching[0]
+    if ([string]$identity.InfName -notmatch "^oem[0-9]+\.inf$") {
+        throw "Installed package has a non-allow-listed published INF."
+    }
+    if ([string]$identity.DriverVersion -cne
+        [string]$InfMetadata.DriverVersion) {
+        throw "Installed package version does not match trusted INF DriverVer."
+    }
+    if ([string]$identity.ProviderName -cne "EMKE" -or
+        [string]$InfMetadata.ProviderName -cne "EMKE") {
+        throw "Installed package provider does not match trusted EMKE INF."
+    }
+    return [pscustomobject]@{
+        InfName = [string]$identity.InfName
+        DriverVersion = [string]$identity.DriverVersion
+        ProviderName = [string]$identity.ProviderName
+    }
+}
+
+function Invoke-CreateAndBindRootDevnode {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$StagedInf,
+
+        [Parameter(Mandatory)]
+        [psobject]$InfMetadata
+    )
+
+    $existing = @(Get-TargetDevnodes)
+    if ($existing.Count -ne 0) {
+        throw (
+            "A pre-existing target devnode already exists; refusing an " +
+            "implicit driver update."
+        )
+    }
+
+    $createdInstanceId = $null
+    try {
+        $createdInstanceId = New-RootDevnodeFromInf `
+            -InfPath $StagedInf.FullName `
+            -HardwareId $script:TargetHardwareId
+        $createdDevnode = Wait-TargetDevnode `
+            -ExpectedInstanceId $createdInstanceId
+        if ($createdDevnode.PNPDeviceID -cne $createdInstanceId) {
+            throw "Created devnode discovery returned the wrong instance ID."
+        }
+
+        Invoke-PnpUtilInstall -InfPath $StagedInf.FullName
+        $installedDevnode = Wait-TargetDevnode `
+            -ExpectedInstanceId $createdInstanceId
+        Assert-InstalledDevnodeHealthy -Devnodes @($installedDevnode)
+        $identity = Assert-InstalledDriverPackageIdentity `
+            -Devnode $installedDevnode `
+            -InfMetadata $InfMetadata
+        return [pscustomobject]@{
+            CreatedInstanceId = $createdInstanceId
+            Devnode = $installedDevnode
+            Identity = $identity
+        }
+    } catch {
+        $originalFailure = $_
+        if ($null -eq $createdInstanceId) {
+            throw
+        }
+        if ($originalFailure.Exception.Data["StateUncertain"] -eq $true) {
+            $inventorySummary = "read-only inventory failed"
+            try {
+                $inventory = @(Get-TargetDevnodes)
+                $inventorySummary = (
+                    "read-only inventory observed $($inventory.Count) target " +
+                    "devnode(s)"
+                )
+            } catch {
+                $inventorySummary = (
+                    "read-only inventory failed: " +
+                    $_.Exception.Message
+                )
+            }
+            throw (
+                "Root devnode bind failed after creating " +
+                "'$createdInstanceId'. Partial state: state uncertain; " +
+                "$inventorySummary; no cleanup mutation was attempted. " +
+                "Original error: " +
+                $originalFailure.Exception.Message
+            )
+        }
+        $cleanupStatus = "state uncertain"
+        try {
+            Remove-ExactCreatedRootDevnode `
+                -InstanceId $createdInstanceId
+            Wait-TargetDevnodeAbsent `
+                -ExpectedInstanceId $createdInstanceId
+            $cleanupStatus = "exact created instance confirmed absent"
+        } catch {
+            $cleanupStatus = (
+                "state uncertain; exact-instance cleanup failed: " +
+                $_.Exception.Message
+            )
+        }
+        throw (
+            "Root devnode bind failed after creating '$createdInstanceId'. " +
+            "Partial state: driver binding was not proven; cleanup=" +
+            "$cleanupStatus. Original error: " +
+            $originalFailure.Exception.Message
+        )
+    }
+}
+
 function Invoke-SmokeEnumeration {
     param(
         [Parameter(Mandatory)]
-        [string]$SmokePath
+        [string]$SmokePath,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+        [string]$ExpectedSmokeSha256
     )
 
     $resolvedSmoke = Resolve-RequiredFile -Path $SmokePath
+    $actualSmokeSha256 = Get-FileSha256 -Path $resolvedSmoke
+    if (-not (Test-FixedSha256Equal `
+        -Expected $ExpectedSmokeSha256 `
+        -Actual $actualSmokeSha256)) {
+        throw (
+            "Smoke SHA-256 does not match the trusted expected value. " +
+            "Refusing execution."
+        )
+    }
     $result = Invoke-CapturedProcess `
         -Executable $resolvedSmoke `
-        -Arguments @("--scenario", "enumerate")
+        -Arguments @("--scenario", "enumerate") `
+        -TimeoutSeconds 15
     if ($result.ExitCode -ne 0) {
         throw "Audio smoke enumeration failed with exit code $($result.ExitCode)."
     }
@@ -408,6 +1473,10 @@ function Invoke-InstallTestDriver {
         [Parameter(Mandatory)]
         [string]$SmokePath,
 
+        [Parameter(Mandatory)]
+        [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+        [string]$ExpectedSmokeSha256,
+
         [switch]$ConfirmInstall
     )
 
@@ -418,44 +1487,84 @@ function Invoke-InstallTestDriver {
     Assert-LabMachinePrerequisites
 
     $resolvedSmoke = Resolve-RequiredFile -Path $SmokePath
+    $inputSmoke = [pscustomobject]@{
+        FullName = $resolvedSmoke
+        Name = [IO.Path]::GetFileName($resolvedSmoke)
+    }
+    $inputPackage = Get-StrictDriverPackage -Directory $PackagePath
+    $staging = $null
+    try {
+        $staging = New-ProtectedStagingDirectory
+        $staged = Copy-InstallInputsToStaging `
+            -Package $inputPackage `
+            -SmokeFile $inputSmoke `
+            -StagingRoot $staging.Path
+        $package = $staged.Package
+        Invoke-DriverPackageVerifier -PackageDirectory $package.Directory
 
-    $package = Get-StrictDriverPackage -Directory $PackagePath
-    Invoke-DriverPackageVerifier -PackageDirectory $package.Directory
+        $actualPackageSha256 =
+            Get-DriverPackageSha256 -Package $package
+        Write-Host "Observed package SHA-256: $actualPackageSha256"
+        if (-not (Test-FixedSha256Equal `
+            -Expected $ExpectedPackageSha256 `
+            -Actual $actualPackageSha256)) {
+            throw (
+                "Driver package SHA-256 does not match the trusted " +
+                "expected value. Refusing installation."
+            )
+        }
+        if (-not (Test-FixedSha256Equal `
+            -Expected $ExpectedSmokeSha256 `
+            -Actual $staged.SmokeSha256)) {
+            throw (
+                "Smoke SHA-256 does not match the trusted expected value. " +
+                "Refusing installation."
+            )
+        }
 
-    $actualPackageSha256 = Get-DriverPackageSha256 -Package $package
-    Write-Host "Observed package SHA-256: $actualPackageSha256"
-    if (-not (Test-FixedSha256Equal `
-        -Expected $ExpectedPackageSha256 `
-        -Actual $actualPackageSha256)) {
-        throw (
-            "Driver package SHA-256 does not match the trusted expected value. " +
-            "Refusing installation."
+        $signature = Get-CatalogSignatureMetadata -Catalog $package.Cat
+        Assert-CatalogSignatureValid -Metadata $signature
+        $infMetadata = Get-DriverInfMetadata `
+            -Inf $package.Inf `
+            -WindowsBuild (Get-WindowsBuildNumber)
+        if ($infMetadata.HardwareId -cne $script:TargetHardwareId) {
+            throw "Driver INF hardware ID is not the exact target."
+        }
+
+        Write-Host "DriverVer: $($infMetadata.DriverVer)"
+        Write-Host "Hardware ID: $($infMetadata.HardwareId)"
+        Write-Host "Verified package SHA-256: $actualPackageSha256"
+        Write-Host (
+            "Catalog signature: Valid; signing certificate SHA-256: " +
+            "$($signature.SummarySha256); host Authenticode validation only; " +
+            "Microsoft/WHQL not established"
         )
+
+        Assert-StagedInputsUnchanged -StagedInputs $staged
+        $binding = Invoke-CreateAndBindRootDevnode `
+            -StagedInf $package.Inf `
+            -InfMetadata $infMetadata
+        $installedIdentity = $binding.Identity
+        Write-Host (
+            "Installed package: $($installedIdentity.InfName); " +
+            "version=$($installedIdentity.DriverVersion); " +
+            "provider=$($installedIdentity.ProviderName)"
+        )
+        Assert-StagedInputsUnchanged -StagedInputs $staged
+        Invoke-SmokeEnumeration `
+            -SmokePath $staged.Smoke.FullName `
+            -ExpectedSmokeSha256 $ExpectedSmokeSha256
+        Write-Host (
+            "Audio smoke: discovery=ready; result=ready; " +
+            "public ABI four-role contract passed."
+        )
+    } finally {
+        if ($null -ne $staging) {
+            Remove-ProtectedStagingDirectory `
+                -Path $staging.Path `
+                -Token $staging.Token
+        }
     }
-
-    $signature = Get-CatalogSignatureMetadata -Catalog $package.Cat
-    Assert-CatalogSignatureValid -Metadata $signature
-    $infMetadata = Get-DriverInfMetadata -Inf $package.Inf
-    if ($infMetadata.HardwareId -cne $script:TargetHardwareId) {
-        throw "Driver INF hardware ID is not the exact target."
-    }
-
-    Write-Host "DriverVer: $($infMetadata.DriverVer)"
-    Write-Host "Hardware ID: $($infMetadata.HardwareId)"
-    Write-Host "Verified package SHA-256: $actualPackageSha256"
-    Write-Host (
-        "Catalog signature: Valid; signing certificate SHA-256: " +
-        $signature.SummarySha256
-    )
-
-    Invoke-PnpUtilInstall -InfPath $package.Inf.FullName
-    $devnodes = @(Get-TargetDevnodes)
-    Assert-InstalledDevnodeHealthy -Devnodes $devnodes
-    Invoke-SmokeEnumeration -SmokePath $resolvedSmoke
-    Write-Host (
-        "Audio smoke: discovery=ready; result=ready; " +
-        "public ABI four-role contract passed."
-    )
 }
 
 if ($PSCmdlet.ParameterSetName -ceq "Digest") {

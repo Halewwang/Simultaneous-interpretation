@@ -225,6 +225,7 @@ Invoke-Case -Name "install dot-source leaves no lifecycle functions" -Action {
             PackagePath = "C:\missing"
             ExpectedPackageSha256 = ("A" * 64)
             SmokePath = "C:\missing.exe"
+            ExpectedSmokeSha256 = ("E" * 64)
         } `
         -ForbiddenFunctions @(
             "Invoke-PnpUtilInstall",
@@ -238,7 +239,8 @@ Invoke-Case -Name "uninstall dot-source leaves no lifecycle functions" -Action {
         -Path $uninstallScript `
         -Parameters @{} `
         -ForbiddenFunctions @(
-            "Invoke-PnpUtilUninstall",
+            "Invoke-PnpUtilRemoveDevice",
+            "Invoke-PnpUtilDeleteDriver",
             "Invoke-UninstallTestDriver",
             "Resolve-SystemPnpUtil"
         )
@@ -376,7 +378,8 @@ foreach ($item in $ProbeArguments) {
                     $arguments[0],
                     $arguments[1],
                     $arguments[2]
-                )
+                ) `
+                -TimeoutSeconds 10
             if ($result.ExitCode -ne 0) {
                 throw "Safe argument probe failed with exit code $($result.ExitCode)."
             }
