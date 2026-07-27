@@ -45,6 +45,22 @@ function Assert-ContainsExactlyOnce {
     }
 }
 
+function ConvertTo-SafeCatalogDiagnosticValue {
+    param(
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrEmpty($Value)) {
+        return "<empty>"
+    }
+    $singleLine = [regex]::Replace($Value, "[\x00-\x1F\x7F]", "?")
+    if ($singleLine.Length -gt 512) {
+        return $singleLine.Substring(0, 512) + "<truncated>"
+    }
+    return $singleLine
+}
+
 if (-not $IsWindows) {
     throw "Driver package verification requires Windows catalog APIs."
 }
@@ -314,9 +330,31 @@ if ($catalogSignature.Status -notin @("NotSigned", "Valid")) {
     throw "Catalog is malformed or has an invalid signature status: $($catalogSignature.Status)."
 }
 
-$catalogMembers = @(
-    [Emke.DriverPackage.CatalogMembership]::Enumerate($cat.FullName)
+$catalogEnumeration = [Emke.DriverPackage.CatalogMembership]::Enumerate(
+    $cat.FullName
 )
+$catalogMembers = @($catalogEnumeration)
+$csharpMemberCount = if ($null -eq $catalogEnumeration) {
+    0
+} else {
+    $catalogEnumeration.Length
+}
+Write-Host (
+    "Catalog enumeration diagnostic: C# member count=$csharpMemberCount; " +
+    "PowerShell wrapper count=$($catalogMembers.Count)."
+)
+$diagnosticIndex = 0
+foreach ($catalogMember in $catalogEnumeration) {
+    $diagnosticFileName = ConvertTo-SafeCatalogDiagnosticValue `
+        -Value ([System.IO.Path]::GetFileName([string]$catalogMember.FileName))
+    $diagnosticReferenceTag = ConvertTo-SafeCatalogDiagnosticValue `
+        -Value ([string]$catalogMember.ReferenceTag)
+    Write-Host (
+        "Catalog member[$diagnosticIndex]: filename='$diagnosticFileName'; " +
+        "referenceTag='$diagnosticReferenceTag'."
+    )
+    $diagnosticIndex += 1
+}
 if ($catalogMembers.Count -ne 2) {
     throw "Catalog must contain exactly the packaged INF and SYS."
 }
