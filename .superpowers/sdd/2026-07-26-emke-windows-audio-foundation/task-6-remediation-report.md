@@ -9,10 +9,12 @@ behavior, package-boundary behavior, shared contracts, native-header
 compatibility, project XML, and whitespace gates pass on macOS. Windows WDK
 compilation/linking, Universal ApiValidator, DriverPackageTarget, and
 Inf2Cat signability/CAT generation have now passed in the authorized hosted
-run. That run then correctly failed the strict package verifier on a dynamically
-stamped INF/SYS version mismatch. The deterministic StampInf metadata fix is
-locally green, but its remote WDK rerun, runtime catalog P/Invoke verifier,
-private Actions artifact, driver installation, and live endpoint/meeting
+run. A later run proved the deterministic StampInf fix and reached the catalog
+membership verifier. A diagnostic run then proved that CryptCAT returns four
+Inf2Cat v2 reference members for the two staged files: SHA-1 and SHA-256 for
+each, with empty file-name fields. The corrected exact reference-tag multiset
+model is locally green, but its remote Windows hash/API and mutation-integration
+rerun, private Actions artifact, driver installation, and live endpoint/meeting
 behavior remain explicitly unproved.
 
 ## Design and provenance
@@ -290,11 +292,12 @@ acceptance remain pending even if the hosted build passes.
 
 ## Risks and concerns
 
-- The prior authorized WDK/MSVC run passed compilation/linking and package
-  generation, but the new deterministic StampInf metadata cannot be executed
-  on macOS. Its remote rerun and the handwritten C# catalog P/Invoke integration
-  remain required. A remote failure must be treated as an implementation
-  defect, not weakened validation.
+- Authorized WDK/MSVC runs have passed compilation/linking, deterministic
+  StampInf, package generation, and raw CryptCAT member enumeration. The new
+  SHA-1/SHA-256 hash calculations and exact multiset match cannot call Wintrust
+  on macOS; their remote original/mutation integration remains required. A
+  remote failure must be treated as an implementation defect, not weakened
+  validation.
 - The compiled portable test proves bridge semantics, but not PortCls/WaveRT
   scheduling, DMA timing, memory ordering on a live Windows audio stack, or
   audible meeting behavior.
@@ -635,3 +638,155 @@ metadata change is claimed yet.
 
 No signing, installation, loading, removal, elevation, secret use, push, or
 public release occurred in fix round 2.
+
+## Remediation cycle 2 — fix round 3
+
+### Remote RED after deterministic stamping
+
+Authorized GitHub Actions run `30231445659` tested commit
+`f40e5cf99aca08a78246741484d9b688046b3a4e`.
+
+- `hosted-toolchain-proof`, job `89870987057`: passed completely.
+- `driver-build-proof`, job `89870987108`: passed fixed StampInf
+  (`-d "07/26/2026" -v "1.0.0.1"`), `/kernel` compilation/linking,
+  Universal ApiValidator, DriverPackageTarget, Inf2Cat signability/CAT
+  generation, and packaged INF contract validation.
+- The unchanged strict verifier then failed at line 321:
+
+```text
+Catalog must contain exactly the packaged INF and SYS.
+```
+
+That message did not expose whether the defect was the C# structure/P/Invoke,
+PowerShell array handling, or the assumed catalog member model. No fix was made
+from that ambiguous RED.
+
+### Diagnostic run and actual Inf2Cat v2 model
+
+Diagnostics-only commit `f3939a5a2b8a05c06cbc985c517ee46108bb166e`
+retained the original failure condition and added safe output for the C# array
+length, PowerShell count, and each member's basename/reference tag. Control
+characters are replaced and values are bounded to 512 characters.
+
+Authorized diagnostic run `30231802598` produced:
+
+- `hosted-toolchain-proof`, job `89871964361`: passed completely.
+- `driver-build-proof`, job `89871964339`: passed the same WDK/package gates,
+  then reported:
+
+```text
+Catalog enumeration diagnostic: C# member count=4; PowerShell wrapper count=4.
+Catalog member[0]: filename='<empty>'; referenceTag='ECDFF0C81259205802827D29D92CBA23DD3F7A86'.
+Catalog member[1]: filename='<empty>'; referenceTag='D00E70465D4BDC1AD386CAB5A516CDB923245270F173371F54F544CDB7318362'.
+Catalog member[2]: filename='<empty>'; referenceTag='528B7BFC5184DECCC159D005D056AA70ED92D7CF74812B04ABB774E7F23291E0'.
+Catalog member[3]: filename='<empty>'; referenceTag='1EDDD9B478C972346ABE98818C7D734659FA655E'.
+```
+
+This disproves both the nested PowerShell-array hypothesis and a structure
+marshalling failure. CryptCAT successfully enumerates four Inf2Cat v2 members.
+The 40/64/64/40 hexadecimal lengths establish SHA-1 and SHA-256 reference
+members for each of the two packaged files, while `pwszFileName` is empty for
+all four. The prior verifier incorrectly required exactly two named members.
+
+The official API model used for the correction is:
+
+- `CRYPTCATMEMBER.pwszReferenceTag` is the member reference tag, while
+  `pwszFileName` is a separate nullable pointer-backed field:
+  <https://learn.microsoft.com/en-us/windows/win32/api/mscat/ns-mscat-cryptcatmember>
+- `CryptCATEnumerateMember` returns each member and advances using the prior
+  returned pointer:
+  <https://learn.microsoft.com/en-us/windows/win32/api/mscat/nf-mscat-cryptcatenumeratemember>
+- `CryptCATAdminAcquireContext2` selects the catalog hash algorithm, and
+  `CryptCATAdminCalcHashFromFileHandle2` hashes the exact open file bytes:
+  <https://learn.microsoft.com/en-us/windows/win32/api/mscat/nf-mscat-cryptcatadminacquirecontext2>
+  and
+  <https://learn.microsoft.com/en-us/windows/win32/api/mscat/nf-mscat-cryptcatadmincalchashfromfilehandle2>.
+
+### TDD RED: C# array to exact reference-tag multiset
+
+`Windows/driver/tests/catalog-reference-set.test.ps1` is a locally executable
+PowerShell boundary test. Its C# fixture returns the same public member shape
+as production, including empty file names, and PowerShell passes that CLR array
+to the production matcher. The hand-derived fixture contains two SHA-1-shaped
+and two SHA-256-shaped literal tags.
+
+Command:
+
+```text
+pwsh -NoProfile -File Windows/driver/tests/catalog-reference-set.test.ps1
+```
+
+RED before the production matcher existed:
+
+```text
+catalog-reference-set.test.ps1: The term
+'Windows/tools/catalog-reference-set.ps1' is not recognized as a name of a
+cmdlet, function, script file, or executable program.
+```
+
+The test requires order-independent acceptance of the exact four-tag multiset
+and rejection of a duplicate replacing a required tag, an unknown replacement,
+a missing tag, and an extra unknown tag.
+
+### Minimal strict fix and local GREEN
+
+- `CryptCATAdminAcquireContext2` and
+  `CryptCATAdminCalcHashFromFileHandle2` now calculate both SHA-1 and SHA-256
+  catalog hashes for the exact staged INF and SYS bytes.
+- The production matcher normalizes case, sorts both multisets, requires equal
+  cardinality, and compares every position. Missing, duplicate, or additional
+  catalog members therefore fail closed.
+- Matching depends only on the four computed reference tags. It does not depend
+  on the empty Inf2Cat v2 `pwszFileName`, and it does not use regex catalog
+  dumps, `Get-FileHash`, `certutil`, or `Test-FileCatalog`.
+- Safe count/member diagnostics remain available on both success and failure.
+- The hosted workflow runs the PowerShell/C# boundary test before building.
+- The existing Windows-only integration still requires the original package to
+  pass and independently mutated INF and SYS bytes to fail.
+
+Local GREEN:
+
+```text
+catalog reference-set PowerShell/C# boundary
+  PASS: exact unordered set accepted; duplicate/unknown/missing/extra rejected
+
+driver/package Node suites
+  PASS: 19 tests, 19 pass, 0 fail
+
+PowerShell 7.6.4 parser
+  PASS: verifier, matcher, boundary test, and mutation integration parse cleanly
+
+kernel shim type-width compile
+  PASS: exit 0
+
+kernel-shaped production bridge compile
+  PASS: exit 0
+
+portable bridge behavior
+  PASS: 6 cases
+
+shared contracts
+  PASS: contract v1: 3 schemas, 8 fixtures
+
+portable device_catalog compile
+  PASS: exit 0
+
+driver project XML
+  PASS: xmllint exit 0
+
+git diff --check
+  PASS: no output
+```
+
+The final fix-round commit SHA and complete fresh local gate results are
+supplied in the controller handoff because a commit cannot embed its own SHA.
+
+### Remaining remote gate and safety boundary
+
+A controller-pushed run must execute the two hash algorithms against the real
+staged INF/SYS, accept the original catalog, reject both independent mutations,
+and upload only the private seven-day unsigned artifact. No final remote GREEN
+or artifact is claimed yet.
+
+No signing, installation, loading, removal, elevation, secret use, or public
+release occurred in fix round 3.

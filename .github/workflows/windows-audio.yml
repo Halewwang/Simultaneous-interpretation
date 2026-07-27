@@ -162,6 +162,11 @@ jobs:
             throw "Driver executable package-boundary tests failed."
           }
 
+          pwsh -NoProfile -File Windows/driver/tests/catalog-reference-set.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Catalog reference-set tests failed."
+          }
+
       - name: Build unsigned driver package
         id: driver-build
         shell: pwsh

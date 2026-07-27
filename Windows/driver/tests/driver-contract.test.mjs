@@ -251,6 +251,10 @@ test("package verifier is fail-closed and checks catalog membership", async () =
     path.join(toolsDirectory, "verify-driver-package.ps1"),
     "utf8",
   );
+  const referenceSet = await readFile(
+    path.join(toolsDirectory, "catalog-reference-set.ps1"),
+    "utf8",
+  );
   assert.match(script, /-Extension "\.inf" -Description "INF"/i);
   assert.match(script, /-Extension "\.sys" -Description "SYS"/i);
   assert.match(script, /-Extension "\.cat" -Description "CAT"/i);
@@ -263,8 +267,17 @@ test("package verifier is fail-closed and checks catalog membership", async () =
   assert.match(script, /CryptCATEnumerateMember/);
   assert.match(script, /CryptCATAdminAcquireContext2/);
   assert.match(script, /CryptCATAdminCalcHashFromFileHandle2/);
-  assert.match(script, /ReferenceTag -ieq \$catalogHash/);
-  assert.match(script, /\$catalogMembers\.Count -ne 2/);
+  assert.match(script, /foreach \(\$hashAlgorithm in @\("SHA1", "SHA256"\)\)/);
+  assert.match(script, /CalculateCatalogHash/);
+  assert.match(script, /Assert-ExactCatalogMemberReferenceTags/);
+  assert.match(script, /Catalog enumeration diagnostic/);
+  assert.match(script, /filename=.*referenceTag=/s);
+  assert.match(referenceSet, /function Assert-ExactCatalogMemberReferenceTags/);
+  assert.match(referenceSet, /\$actualTags \| Sort-Object/);
+  assert.match(referenceSet, /\$expectedTags \| Sort-Object/);
+  assert.match(referenceSet, /-cne/);
+  assert.doesNotMatch(script, /\$catalogMembers\.Count -ne 2/);
+  assert.doesNotMatch(script, /GetFileName\(\$_\.FileName\)/);
   assert.doesNotMatch(script, /Test-FileCatalog/);
   assert.doesNotMatch(script, /certutil/i);
   assert.doesNotMatch(script, /Get-FileHash/i);
@@ -293,6 +306,7 @@ test("authorized hosted workflow builds, verifies, and uploads only the package"
   );
   assert.match(workflow, /node --test Windows\/driver\/tests\/driver-contract\.test\.mjs/);
   assert.match(workflow, /node --test Windows\/driver\/tests\/package-boundary\.test\.mjs/);
+  assert.match(workflow, /catalog-reference-set\.test\.ps1/);
   assert.match(workflow, /pwsh Windows\/tools\/build-driver\.ps1/);
   assert.match(workflow, /pwsh Windows\/tools\/verify-driver-package\.ps1/);
   assert.match(workflow, /package-verifier\.integration\.ps1/);

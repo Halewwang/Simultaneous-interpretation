@@ -7,6 +7,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$catalogReferenceSetHelper = Join-Path `
+    $PSScriptRoot `
+    "catalog-reference-set.ps1"
+. $catalogReferenceSetHelper
+
 function Get-SinglePackageFile {
     param(
         [Parameter(Mandatory)]
@@ -193,19 +198,35 @@ namespace Emke.DriverPackage
             }
         }
 
-        public static string CalculateSha256CatalogHash(string filePath)
+        public static string CalculateCatalogHash(
+            string filePath,
+            string hashAlgorithm)
         {
+            if (!String.Equals(
+                    hashAlgorithm,
+                    "SHA1",
+                    StringComparison.Ordinal) &&
+                !String.Equals(
+                    hashAlgorithm,
+                    "SHA256",
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Only SHA1 and SHA256 catalog hashes are supported.",
+                    nameof(hashAlgorithm));
+            }
             IntPtr catalogAdmin;
             if (!CryptCATAdminAcquireContext2(
                 out catalogAdmin,
                 IntPtr.Zero,
-                "SHA256",
+                hashAlgorithm,
                 IntPtr.Zero,
                 0))
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
-                    "CryptCATAdminAcquireContext2 failed.");
+                    "CryptCATAdminAcquireContext2 failed for " +
+                    hashAlgorithm + ".");
             }
 
             try
@@ -226,7 +247,8 @@ namespace Emke.DriverPackage
                     {
                         throw new Win32Exception(
                             Marshal.GetLastWin32Error(),
-                            "Catalog hash-size calculation failed.");
+                            "Catalog hash-size calculation failed for " +
+                            hashAlgorithm + ".");
                     }
                     byte[] hash = new byte[hashSize];
                     if (!CryptCATAdminCalcHashFromFileHandle2(
@@ -238,7 +260,8 @@ namespace Emke.DriverPackage
                     {
                         throw new Win32Exception(
                             Marshal.GetLastWin32Error(),
-                            "Catalog hash calculation failed.");
+                            "Catalog hash calculation failed for " +
+                            hashAlgorithm + ".");
                     }
                     return BitConverter.ToString(hash).Replace("-", "");
                 }
@@ -333,7 +356,7 @@ if ($catalogSignature.Status -notin @("NotSigned", "Valid")) {
 $catalogEnumeration = [Emke.DriverPackage.CatalogMembership]::Enumerate(
     $cat.FullName
 )
-$catalogMembers = @($catalogEnumeration)
+[object[]]$catalogMembers = $catalogEnumeration
 $csharpMemberCount = if ($null -eq $catalogEnumeration) {
     0
 } else {
@@ -341,7 +364,7 @@ $csharpMemberCount = if ($null -eq $catalogEnumeration) {
 }
 Write-Host (
     "Catalog enumeration diagnostic: C# member count=$csharpMemberCount; " +
-    "PowerShell wrapper count=$($catalogMembers.Count)."
+    "PowerShell member count=$($catalogMembers.Count)."
 )
 $diagnosticIndex = 0
 foreach ($catalogMember in $catalogEnumeration) {
@@ -355,25 +378,21 @@ foreach ($catalogMember in $catalogEnumeration) {
     )
     $diagnosticIndex += 1
 }
-if ($catalogMembers.Count -ne 2) {
-    throw "Catalog must contain exactly the packaged INF and SYS."
-}
 
-foreach ($packageFile in @($inf, $sys)) {
-    $catalogHash = [Emke.DriverPackage.CatalogMembership]::CalculateSha256CatalogHash(
-        $packageFile.FullName
-    )
-    $matchingMembers = @(
-        $catalogMembers | Where-Object {
-            [System.IO.Path]::GetFileName($_.FileName) -ieq $packageFile.Name -and
-            $_.ReferenceTag -ieq $catalogHash
+$expectedReferenceTags = @(
+    foreach ($packageFile in @($inf, $sys)) {
+        foreach ($hashAlgorithm in @("SHA1", "SHA256")) {
+            [Emke.DriverPackage.CatalogMembership]::CalculateCatalogHash(
+                $packageFile.FullName,
+                $hashAlgorithm
+            )
         }
-    )
-    if ($matchingMembers.Count -ne 1) {
-        throw "Catalog does not contain the exact packaged bytes for $($packageFile.Name)."
     }
-}
+)
+Assert-ExactCatalogMemberReferenceTags `
+    -CatalogMembers $catalogMembers `
+    -ExpectedReferenceTags $expectedReferenceTags
 
 Write-Host "Driver package verification passed."
-Write-Host "Catalog membership: exact INF and SYS SHA-256 members; signature status: $($catalogSignature.Status) (no signing claim)."
+Write-Host "Catalog membership: exact INF and SYS SHA-1/SHA-256 reference members; signature status: $($catalogSignature.Status) (no signing claim)."
 Write-Host "Driver version: $fileVersion"
