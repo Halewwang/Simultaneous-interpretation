@@ -14,15 +14,15 @@ Abstract:
 #ifndef _SIMPLEAUDIOSAMPLE_SPEAKERWAVTABLE_H_
 #define _SIMPLEAUDIOSAMPLE_SPEAKERWAVTABLE_H_
 
-// To keep the code simple assume device supports only 48KHz, 16-bit, stereo (PCM and NON-PCM)
+// The frozen virtual-endpoint format is 48 kHz stereo IEEE Float32.
 
-#define SPEAKER_DEVICE_MAX_CHANNELS                 2       // Max Channels.
+#define SPEAKER_DEVICE_MAX_CHANNELS                 EMKE_AUDIO_CHANNEL_COUNT
 
-#define SPEAKER_HOST_MAX_CHANNELS                   2       // Max Channels.
-#define SPEAKER_HOST_MIN_BITS_PER_SAMPLE            16      // Min Bits Per Sample
-#define SPEAKER_HOST_MAX_BITS_PER_SAMPLE            16      // Max Bits Per Sample
-#define SPEAKER_HOST_MIN_SAMPLE_RATE                48000   // Min Sample Rate
-#define SPEAKER_HOST_MAX_SAMPLE_RATE                48000   // Max Sample Rate
+#define SPEAKER_HOST_MAX_CHANNELS                   EMKE_AUDIO_CHANNEL_COUNT
+#define SPEAKER_HOST_MIN_BITS_PER_SAMPLE            EMKE_AUDIO_BITS_PER_SAMPLE
+#define SPEAKER_HOST_MAX_BITS_PER_SAMPLE            EMKE_AUDIO_BITS_PER_SAMPLE
+#define SPEAKER_HOST_MIN_SAMPLE_RATE                EMKE_AUDIO_SAMPLE_RATE
+#define SPEAKER_HOST_MAX_SAMPLE_RATE                EMKE_AUDIO_SAMPLE_RATE
 
 //
 // Max # of pin instances.
@@ -41,22 +41,22 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE SpeakerHostPinSupportedDeviceFormats[] =
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         {
             {
                 WAVE_FORMAT_EXTENSIBLE,
-                2,
-                48000,
-                192000,
-                4,
-                16,
+                EMKE_AUDIO_CHANNEL_COUNT,
+                EMKE_AUDIO_SAMPLE_RATE,
+                EMKE_AUDIO_AVG_BYTES_PER_SECOND,
+                EMKE_AUDIO_BLOCK_ALIGN,
+                EMKE_AUDIO_BITS_PER_SAMPLE,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
             },
-            16,
+            EMKE_AUDIO_BITS_PER_SAMPLE,
             KSAUDIO_SPEAKER_STEREO,
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
         }
     }
 };
@@ -107,7 +107,7 @@ KSDATARANGE_AUDIO SpeakerPinDataRangesStream[] =
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         SPEAKER_HOST_MAX_CHANNELS,

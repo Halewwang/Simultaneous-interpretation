@@ -86,11 +86,22 @@ test("INF freezes the root identity, driver ABI, roles, and endpoint names", asy
 });
 
 test("driver and native host share the endpoint property key and role strings", async () => {
-  const roleHeader = await text("include/emke_endpoint_roles.h");
-  const nativeHeader = await readFile(
-    path.resolve(driverDirectory, "..", "native", "include", "emke_endpoint_properties.h"),
+  const roleHeader = await readFile(
+    path.resolve(driverDirectory, "..", "shared", "emke_endpoint_contract.h"),
     "utf8",
   );
+  const nativeCatalog = await readFile(
+    path.resolve(
+      driverDirectory,
+      "..",
+      "native",
+      "EMKE.NativeAudio",
+      "src",
+      "device_catalog.hpp",
+    ),
+    "utf8",
+  );
+  const miniports = await text("src/minipairs.h");
   assert.match(roleHeader, /3fa64f16/i);
   assert.match(roleHeader, /0x18af/i);
   assert.match(roleHeader, /0x4e9e/i);
@@ -101,12 +112,12 @@ test("driver and native host share the endpoint property key and role strings", 
   assert.match(roleHeader, /0x14/);
   assert.match(roleHeader, /0x0e/);
   assert.match(roleHeader, /0x42/);
-  assert.match(roleHeader, /,\s*2\s*\)/);
+  assert.match(roleHeader, /EMKE_ENDPOINT_ROLE_PROPERTY_PID\s+2u/);
   for (const role of roles) {
     assert.match(roleHeader, new RegExp(role.replaceAll(".", "\\.")));
   }
-  assert.match(nativeHeader, /3fa64f16/i);
-  assert.match(nativeHeader, /,\s*2\s*\)/);
+  assert.match(nativeCatalog, /#include "emke_endpoint_contract\.h"/);
+  assert.match(miniports, /#include "emke_endpoint_contract\.h"/);
 });
 
 test("exactly four endpoint miniports are declared with onboarding-safe names", async () => {
@@ -120,6 +131,23 @@ test("exactly four endpoint miniports are declared with onboarding-safe names", 
   assert.match(miniports, /EMKE Internal Microphone Render/);
   assert.match(miniports, /g_cRenderEndpoints\s+2/);
   assert.match(miniports, /g_cCaptureEndpoints\s+2/);
+});
+
+test("WaveRT tables and stream movement use the compiled Float32 bridge contract", async () => {
+  const speakerFormats = await text("src/speakerwavtable.h");
+  const captureFormats = await text("src/micarraywavtable.h");
+  const stream = await text("src/minwavertstream.cpp");
+  for (const formats of [speakerFormats, captureFormats]) {
+    assert.match(formats, /KSDATAFORMAT_SUBTYPE_IEEE_FLOAT/);
+    assert.match(formats, /EMKE_AUDIO_SAMPLE_RATE/);
+    assert.match(formats, /EMKE_AUDIO_CHANNEL_COUNT/);
+    assert.match(formats, /EMKE_AUDIO_BITS_PER_SAMPLE/);
+    assert.doesNotMatch(formats, /KSDATAFORMAT_SUBTYPE_PCM/);
+  }
+  assert.match(stream, /EmkeAudioBridgeWrite/);
+  assert.match(stream, /EmkeAudioBridgeRead/);
+  assert.match(stream, /EmkeAudioBridgeReset/);
+  assert.doesNotMatch(stream, /GenerateSine|SaveData|WriteData/);
 });
 
 test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never installs", async () => {
@@ -149,6 +177,17 @@ test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never inst
   assert.match(script, /"\/p:ApiValidator_ApiExtractorExePath=\$wdkX64Bin"/);
   assert.match(script, /"\/p:ApiValidatorAdditionalOptions=-AitCmdLogEverything:true"/);
   assert.match(script, /-WorkingDirectory \$wdkBuildTaskRoot/);
+  assert.match(script, /\$wdkPackageOutput\s*=\s*Join-Path \$buildOutput "EMKE\.VirtualAudio"/);
+  assert.match(script, /stage-driver-package\.mjs/);
+  assert.match(script, /validate-driver-contract\.mjs/);
+  assert.doesNotMatch(
+    script,
+    /Join-Path \$projectDirectory "EMKE\.VirtualAudio\.inf"\)\s*`\s*\n\s*-Destination \$artifactDirectory/,
+  );
+  assert.doesNotMatch(
+    script,
+    /Remove-Item -LiteralPath \$artifactDirectory -Recurse/,
+  );
   const restoreOffset = script.indexOf('"/t:Restore"');
   const pinnedToolOffset = script.indexOf("$stampInf = Resolve-PinnedTool");
   const validationRuntimeOffset = script.indexOf("$packageVerifier = Resolve-PinnedTool");
@@ -178,15 +217,13 @@ test("package verifier is fail-closed and checks catalog membership", async () =
   assert.match(script, /FileVersion/i);
   assert.match(script, /DriverAbi/i);
   assert.match(script, /Get-AuthenticodeSignature/);
-  assert.match(script, /Test-FileCatalog/);
-  assert.match(script, /-CatalogFilePath \$cat\.FullName/);
-  assert.match(script, /-Path @\(\$inf\.FullName, \$sys\.FullName\)/);
-  assert.match(script, /-Detailed/);
-  assert.match(script, /CatalogItems/);
-  assert.match(script, /PathItems/);
-  assert.match(script, /Status\.ToString\(\) -ne "Valid"/);
-  assert.match(script, /\$catalogMemberNames\.Count -ne 2/);
-  assert.match(script, /\$pathMemberNames\.Count -ne 2/);
+  assert.match(script, /CryptCATOpen/);
+  assert.match(script, /CryptCATEnumerateMember/);
+  assert.match(script, /CryptCATAdminAcquireContext2/);
+  assert.match(script, /CryptCATAdminCalcHashFromFileHandle2/);
+  assert.match(script, /ReferenceTag -ieq \$catalogHash/);
+  assert.match(script, /\$catalogMembers\.Count -ne 2/);
+  assert.doesNotMatch(script, /Test-FileCatalog/);
   assert.doesNotMatch(script, /certutil/i);
   assert.doesNotMatch(script, /Get-FileHash/i);
   assert.doesNotMatch(script, /catalogHex|SHA-256 digest/i);
@@ -213,8 +250,10 @@ test("authorized hosted workflow builds, verifies, and uploads only the package"
     "utf8",
   );
   assert.match(workflow, /node --test Windows\/driver\/tests\/driver-contract\.test\.mjs/);
+  assert.match(workflow, /node --test Windows\/driver\/tests\/package-boundary\.test\.mjs/);
   assert.match(workflow, /pwsh Windows\/tools\/build-driver\.ps1/);
   assert.match(workflow, /pwsh Windows\/tools\/verify-driver-package\.ps1/);
+  assert.match(workflow, /package-verifier\.integration\.ps1/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Windows\/artifacts\/driver\/x64\/Release/);
   assert.doesNotMatch(workflow, /\b(?:pnputil|devcon|bcdedit)\b/i);

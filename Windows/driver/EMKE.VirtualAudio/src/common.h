@@ -122,8 +122,10 @@ Abstract:
 
 typedef enum
 {
-    eSpeakerDevice = 0,
-    eMicArrayDevice1,
+    eMeetingSpeakerRenderDevice = 0,
+    eAppSpeakerCaptureDevice,
+    eAppMicrophoneRenderDevice,
+    eMeetingMicrophoneCaptureDevice,
     eMaxDeviceType,
 } eDeviceType;
 

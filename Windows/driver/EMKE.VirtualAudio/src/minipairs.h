@@ -14,6 +14,8 @@ Abstract:
 #ifndef _SIMPLEAUDIOSAMPLE_MINIPAIRS_H_
 #define _SIMPLEAUDIOSAMPLE_MINIPAIRS_H_
 
+#include "emke_endpoint_contract.h"
+
 #include "speakertopo.h"
 #include "speakertoptable.h"
 #include "speakerwavtable.h"
@@ -21,9 +23,9 @@ Abstract:
 #include "micarraytopo.h"
 #include "micarray1toptable.h"
 #include "micarraywavtable.h"
-#include "emke_endpoint_roles.h"
-
 C_ASSERT(EMKE_DRIVER_ABI == 1);
+C_ASSERT(SPEAKER_MAX_INPUT_SYSTEM_STREAMS == 1);
+C_ASSERT(MICARRAY_MAX_INPUT_STREAMS == 1);
 
 NTSTATUS
 CreateMiniportWaveRTSimpleAudioSample
@@ -78,7 +80,7 @@ PHYSICALCONNECTIONTABLE SpeakerTopologyPhysicalConnections[] =
 static
 ENDPOINT_MINIPAIR MeetingSpeakerMiniports =
 {
-    eSpeakerDevice,
+    eMeetingSpeakerRenderDevice,
     L"TopologyMeetingSpeaker",
     NULL,                                                   // optional template name
     CreateMiniportTopologySimpleAudioSample,
@@ -103,7 +105,7 @@ ENDPOINT_MINIPAIR MeetingSpeakerMiniports =
 static
 ENDPOINT_MINIPAIR AppMicrophoneRenderMiniports =
 {
-    eSpeakerDevice,
+    eAppMicrophoneRenderDevice,
     L"TopologyAppMicrophoneRender",
     NULL,
     CreateMiniportTopologySimpleAudioSample,
@@ -152,7 +154,7 @@ PHYSICALCONNECTIONTABLE MicArray1TopologyPhysicalConnections[] =
 static
 ENDPOINT_MINIPAIR AppSpeakerCaptureMiniports =
 {
-    eMicArrayDevice1,
+    eAppSpeakerCaptureDevice,
     L"TopologyAppSpeakerCapture",
     NULL,                                   // optional template name
     CreateMicArrayMiniportTopology,
@@ -177,7 +179,7 @@ ENDPOINT_MINIPAIR AppSpeakerCaptureMiniports =
 static
 ENDPOINT_MINIPAIR MeetingMicrophoneMiniports =
 {
-    eMicArrayDevice1,
+    eMeetingMicrophoneCaptureDevice,
     L"TopologyMeetingMicrophone",
     NULL,
     CreateMicArrayMiniportTopology,

@@ -47,6 +47,7 @@ target_link_libraries(
 target_include_directories(EMKE.NativeAudio.Tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
   "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
 )
 target_compile_definitions(EMKE.NativeAudio.Tests PRIVATE
   EMKE_NATIVE_AUDIO_DEVICE_TESTS
@@ -114,4 +115,18 @@ set_target_properties(EMKE.NativeAudio.CAbiIntegration.Tests PROPERTIES
 add_test(
   NAME EMKE.NativeAudio.CAbiIntegration
   COMMAND EMKE.NativeAudio.CAbiIntegration.Tests
+)
+
+add_executable(EMKE.DriverBridge.Tests
+  ../../driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp
+  ../../driver/tests/bridge-behavior-tests.cpp
+)
+target_include_directories(EMKE.DriverBridge.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/EMKE.VirtualAudio/src"
+)
+target_compile_features(EMKE.DriverBridge.Tests PRIVATE cxx_std_17)
+add_test(
+  NAME EMKE.DriverBridge.Behavior
+  COMMAND EMKE.DriverBridge.Tests
 )

@@ -223,7 +223,7 @@ Arguments:
 
     //If called for the mic array pin, set ResultantFormat to be the endpoint's only supported format.
     //Otherwise, allow the class handler to set ResultantFormat.
-    if ((this->m_DeviceType) == eMicArrayDevice1)
+    if (!IsRenderDevice())
     {
         requiredSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
 

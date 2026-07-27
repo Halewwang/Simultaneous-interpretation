@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include "emke_endpoint_contract.h"
+
 namespace emke::audio {
 
 inline constexpr std::uint32_t deviceStateActive = 0x00000001u;
@@ -28,13 +30,13 @@ enum class EndpointRole : std::uint8_t {
 };
 
 inline constexpr std::string_view meetingSpeakerRenderRole =
-    "emke.meeting-speaker.render";
+    EMKE_ROLE_MEETING_SPEAKER_RENDER_UTF8;
 inline constexpr std::string_view appSpeakerCaptureRole =
-    "emke.app-speaker.capture";
+    EMKE_ROLE_APP_SPEAKER_CAPTURE_UTF8;
 inline constexpr std::string_view appMicrophoneRenderRole =
-    "emke.app-microphone.render";
+    EMKE_ROLE_APP_MICROPHONE_RENDER_UTF8;
 inline constexpr std::string_view meetingMicrophoneCaptureRole =
-    "emke.meeting-microphone.capture";
+    EMKE_ROLE_MEETING_MICROPHONE_CAPTURE_UTF8;
 
 [[nodiscard]] constexpr std::string_view endpoint_role_string(
     EndpointRole role) noexcept {

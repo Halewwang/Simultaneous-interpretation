@@ -33,8 +33,24 @@ Return Value:
 --*/
 {
     PAGED_CODE();
+    if (m_pNotificationTimer)
+    {
+        ExDeleteTimer
+        (
+            m_pNotificationTimer,
+            TRUE,
+            TRUE,
+            NULL
+        );
+        m_pNotificationTimer = NULL;
+
+        // No stream callback may publish or consume samples after reset.
+        KeFlushQueuedDpcs();
+    }
+
     if (NULL != m_pMiniport)
     {
+        EmkeAudioBridgeReset(&g_EmkeAudioBridges, m_BridgeEndpoint);
 
         if (m_bUnregisterStream)
         {
@@ -81,78 +97,8 @@ Return Value:
         ExFreePoolWithTag( m_pWfExt, MINWAVERTSTREAM_POOLTAG );
         m_pWfExt = NULL;
     }
-    if (m_pNotificationTimer)
-    {
-        ExDeleteTimer
-        (
-            m_pNotificationTimer,
-            TRUE, // Cancel the timer if it is currently set.
-            TRUE, // Wait for the timer to finish expiring and for any callback to a ExTimerCallback routine to finish.
-            NULL
-         );
-    }
-
-    // Since we just cancelled the notification timer, wait for all queued
-    // DPCs to complete before we free the notification DPC.
-    //
-    KeFlushQueuedDpcs();
-
     DPF_ENTER(("[CMiniportWaveRTStream::~CMiniportWaveRTStream]"));
 } // ~CMiniportWaveRTStream
-
-//=============================================================================
-#pragma code_seg("PAGE")
-
-NTSTATUS CMiniportWaveRTStream::ReadRegistrySettings()
-{
-    PAGED_CODE();
-
-    NTSTATUS                    ntStatus;
-    PDRIVER_OBJECT              DriverObject;
-    HANDLE                      DriverKey;
-    RTL_QUERY_REGISTRY_TABLE    paramTable[] = {
-        // QueryRoutine     Flags                                               Name                            EntryContext                            DefaultType                                                     DefaultData                                 DefaultLength
-        { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"HostCaptureToneFrequency",        &m_ulHostCaptureToneFrequency,          (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD,  &m_ulHostCaptureToneFrequency,              sizeof(DWORD) },
-        { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"HostCaptureToneAmplitude",        &m_dwHostCaptureToneAmplitude,          (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD,  &m_dwHostCaptureToneAmplitude,              sizeof(DWORD) },
-        { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"HostCaptureToneDCOffset",         &m_dwHostCaptureToneDCOffset,           (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD,  &m_dwHostCaptureToneDCOffset,               sizeof(DWORD) },
-        { NULL,   RTL_QUERY_REGISTRY_DIRECT | RTL_QUERY_REGISTRY_TYPECHECK, L"HostCaptureToneInitialPhase",     &m_dwHostCaptureToneInitialPhase,       (REG_DWORD << RTL_QUERY_REGISTRY_TYPECHECK_SHIFT) | REG_DWORD,  &m_dwHostCaptureToneInitialPhase,           sizeof(DWORD) },
-        { NULL,   0,                                                        NULL,                               NULL,                                   0,                                                              NULL,                                       0 }
-    };
-
-    DriverObject = WdfDriverWdmGetDriverObject(WdfGetDriver());
-    DriverKey = NULL;
-    ntStatus = IoOpenDriverRegistryKey(DriverObject,
-                                 DriverRegKeyParameters,
-                                 KEY_READ,
-                                 0,
-                                 &DriverKey);
-
-    if (!NT_SUCCESS(ntStatus))
-    {
-        return ntStatus;
-    }
-
-    ntStatus = RtlQueryRegistryValues(RTL_REGISTRY_HANDLE,
-                                  (PCWSTR) DriverKey,
-                                  &paramTable[0],
-                                  NULL,
-                                  NULL);
-
-    if (!NT_SUCCESS(ntStatus))
-    {
-        DPF(D_VERBOSE, ("RtlQueryRegistryValues failed, using default values, 0x%x", ntStatus));
-        //
-        // Don't return error because we will operate with default values.
-        //
-    }
-
-    if (DriverKey)
-    {
-        ZwClose(DriverKey);
-    }
-
-    return ntStatus;
-}
 
 NTSTATUS
 CMiniportWaveRTStream::Init
@@ -228,11 +174,6 @@ Return Value:
     m_bEoSReceived = FALSE;
     m_bLastBufferRendered = FALSE;
 
-    m_ulHostCaptureToneFrequency = IsEqualGUID(SignalProcessingMode, AUDIO_SIGNALPROCESSINGMODE_RAW) ? 1000 : 2000;
-    m_dwHostCaptureToneAmplitude = 50;
-    m_dwHostCaptureToneDCOffset = 0;
-    m_dwHostCaptureToneInitialPhase = 0;
-
     m_pPortStream = PortStream_;
     InitializeListHead(&m_NotificationList);
     m_ulNotificationIntervalMs = 0;
@@ -262,6 +203,7 @@ Return Value:
         return STATUS_INVALID_PARAMETER;
     }
     m_pMiniport->AddRef();
+    m_BridgeEndpoint = m_pMiniport->GetBridgeEndpoint();
     if (!NT_SUCCESS(ntStatus))
     {
         return ntStatus;
@@ -299,78 +241,6 @@ Return Value:
     if (m_plPeakMeter == NULL)
     {
         return STATUS_INSUFFICIENT_RESOURCES;
-    }
-
-    if (m_bCapture)
-    {
-        ReadRegistrySettings();
-        DWORD toneFrequency = 0;
-        DWORD toneAmplitude = 0;
-        DWORD toneDCOffset = 0;
-        DWORD toneInitialPhase = 0;
-
-        double toneAmplitudeDouble = 0;
-        double toneDCOffsetDouble = 0;
-        double toneInitialPhaseDouble = 0;
-
-        toneFrequency = m_ulHostCaptureToneFrequency;
-        toneAmplitude = m_dwHostCaptureToneAmplitude;
-        toneDCOffset = m_dwHostCaptureToneDCOffset;
-        toneInitialPhase = m_dwHostCaptureToneInitialPhase;
-
-        if (labs(toneAmplitude) > 100)
-        {
-            toneAmplitude = toneAmplitude > 0 ? 100 : -100;
-        }
-
-        if (labs(toneDCOffset) > 100)
-        {
-            toneDCOffset = toneDCOffset > 0 ? 100 : -100;
-        }
-
-        DWORD abssum = labs(toneAmplitude) + labs(toneDCOffset);
-
-        if (abssum > 100)
-        {
-            toneAmplitudeDouble = ((double)toneAmplitude) / abssum;
-            toneDCOffsetDouble = ((double)toneDCOffset) / abssum;
-        }
-        else
-        {
-            toneAmplitudeDouble = ((double)toneAmplitude) / 100.0;
-            toneDCOffsetDouble = ((double)toneDCOffset) / 100.0;
-        }
-
-        if (labs(toneInitialPhase) > 31416)
-        {
-            toneInitialPhase = toneInitialPhase > 0 ? 31416 : -31416;
-        }
-
-        toneInitialPhaseDouble = (double)toneInitialPhase / 10000;
-
-        ntStatus = m_ToneGenerator.Init(toneFrequency, toneAmplitudeDouble, toneDCOffsetDouble, toneInitialPhaseDouble, m_pWfExt);
-
-        if (!NT_SUCCESS(ntStatus))
-        {
-            return ntStatus;
-        }
-    }
-    else if (!g_DoNotCreateDataFiles)
-    {
-        //
-        // Create an output file for the render data.
-        //
-        DPF(D_TERSE, ("SaveData %p", &m_SaveData));
-        ntStatus = m_SaveData.SetDataFormat(DataFormat_);
-        if (NT_SUCCESS(ntStatus))
-        {
-            ntStatus = m_SaveData.Initialize();
-        }
-
-        if (!NT_SUCCESS(ntStatus))
-        {
-            return ntStatus;
-        }
     }
 
     //
@@ -482,19 +352,6 @@ NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification
     }
 
     RequestedSize_ -= RequestedSize_ % (m_pWfExt->Format.nBlockAlign);
-
-    if (!m_bCapture && (!g_DoNotCreateDataFiles))
-    {
-        NTSTATUS ntStatus;
-
-        // Simple Audio Sample uses following buffer to hold data before writing to a file.
-        // Allocating larger buffer will reduce File I/O operations.
-        ntStatus = m_SaveData.SetMaxWriteSize(RequestedSize_ * 4);
-        if (!NT_SUCCESS(ntStatus))
-        {
-            return ntStatus;
-        }
-    }
 
     PHYSICAL_ADDRESS highAddress;
     highAddress.HighPart = 0;
@@ -1181,7 +1038,16 @@ NTSTATUS CMiniportWaveRTStream::SetState
             {
                 // Acquire stream resources
             }
+            if (m_ulNotificationIntervalMs > 0)
+            {
+                ExCancelTimer(m_pNotificationTimer, NULL);
+                KeFlushQueuedDpcs();
+            }
             KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+            // Publish STOP while holding the same lock used by UpdatePosition.
+            // After this point no later position query can move bridge data.
+            m_KsState = KSSTATE_STOP;
+
             // Reset DMA
             m_llPacketCounter = 0;
             m_ullPlayPosition = 0;
@@ -1198,17 +1064,21 @@ NTSTATUS CMiniportWaveRTStream::SetState
 
             KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
-            // Wait until all work items are completed.
-            if (!m_bCapture && !g_DoNotCreateDataFiles)
+            EmkeAudioBridgeReset(&g_EmkeAudioBridges, m_BridgeEndpoint);
+            if (m_bCapture && m_pDmaBuffer != NULL && m_ulDmaBufferSize > 0)
             {
-                m_SaveData.WaitAllWorkItems();
+                RtlZeroMemory(m_pDmaBuffer, m_ulDmaBufferSize);
             }
             break;
 
         case KSSTATE_ACQUIRE:
             if (m_KsState == KSSTATE_STOP)
             {
-                // Acquire stream resources
+                EmkeAudioBridgeReset(&g_EmkeAudioBridges, m_BridgeEndpoint);
+                if (m_bCapture && m_pDmaBuffer != NULL && m_ulDmaBufferSize > 0)
+                {
+                    RtlZeroMemory(m_pDmaBuffer, m_ulDmaBufferSize);
+                }
             }
             break;
 
@@ -1287,11 +1157,6 @@ NTSTATUS CMiniportWaveRTStream::SetFormat
 
     PAGED_CODE();
 
-    //if (!m_fCapture && !g_DoNotCreateDataFiles)
-    //{
-    //    ntStatus = m_SaveData.SetDataFormat(Format);
-    //}
-
     return STATUS_NOT_SUPPORTED;
 }
 
@@ -1326,13 +1191,16 @@ VOID CMiniportWaveRTStream::UpdatePosition
 
     ULONG ByteDisplacement = ((m_ulDmaMovementRate * TimeElapsedInMS) + m_byteDisplacementCarryForward) / 1000 ;
     m_byteDisplacementCarryForward = ((m_ulDmaMovementRate * TimeElapsedInMS) + m_byteDisplacementCarryForward) % 1000;
+    ASSERT((ByteDisplacement % EMKE_AUDIO_BLOCK_ALIGN) == 0);
+    ByteDisplacement -= ByteDisplacement % EMKE_AUDIO_BLOCK_ALIGN;
 
     // Increment presentation position even after last buffer is rendered.
     m_ullPresentationPosition += ByteDisplacement;
 
     if (m_bCapture)
     {
-        // Write sine wave to buffer.
+        // Copy bridged render samples into the capture DMA buffer. Underrun is
+        // explicitly zero-filled by EmkeAudioBridgeRead.
         WriteBytes(ByteDisplacement);
     }
     else
@@ -1355,6 +1223,8 @@ VOID CMiniportWaveRTStream::UpdatePosition
                     ByteDisplacement = ByteDisplacement - (((ULONG)m_ullWritePosition + ByteDisplacement) % m_ulDmaBufferSize - m_ulCurrentWritePosition);
                 }
             }
+            ASSERT((ByteDisplacement % EMKE_AUDIO_BLOCK_ALIGN) == 0);
+            ByteDisplacement -= ByteDisplacement % EMKE_AUDIO_BLOCK_ALIGN;
         }
 
         // If the last packet was rendered(read in the sample driver's case), send out an etw event.
@@ -1364,11 +1234,8 @@ VOID CMiniportWaveRTStream::UpdatePosition
             m_bLastBufferRendered = TRUE;
         }
 
-        if (!g_DoNotCreateDataFiles)
-        {
-            // Read from buffer and write to a file.
-            ReadBytes(ByteDisplacement);
-        }
+        // Copy the host render DMA span into the matching bounded bridge.
+        ReadBytes(ByteDisplacement);
     }
 
     // Increment the DMA position by the number of bytes displaced since the last
@@ -1397,7 +1264,7 @@ VOID CMiniportWaveRTStream::WriteBytes
 
 Routine Description:
 
-This function writes the audio buffer using a sine wave generator
+This function fills capture DMA from the matching bounded bridge.
 
 Arguments:
 
@@ -1412,8 +1279,14 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
+        ASSERT((runWrite % EMKE_AUDIO_BLOCK_ALIGN) == 0);
+        ULONG frameCount = runWrite / EMKE_AUDIO_BLOCK_ALIGN;
 
-        m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);
+        EmkeAudioBridgeRead(
+            &g_EmkeAudioBridges,
+            m_BridgeEndpoint,
+            reinterpret_cast<float*>(m_pDmaBuffer + bufferOffset),
+            frameCount);
 
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
@@ -1430,7 +1303,7 @@ VOID CMiniportWaveRTStream::ReadBytes
 
 Routine Description:
 
-This function reads the audio buffer and saves the data in a file.
+This function publishes render DMA into the matching bounded bridge.
 
 Arguments:
 
@@ -1445,7 +1318,13 @@ ByteDisplacement - # of bytes to process.
     while (ByteDisplacement > 0)
     {
         ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);
+        ASSERT((runWrite % EMKE_AUDIO_BLOCK_ALIGN) == 0);
+        ULONG frameCount = runWrite / EMKE_AUDIO_BLOCK_ALIGN;
+        EmkeAudioBridgeWrite(
+            &g_EmkeAudioBridges,
+            m_BridgeEndpoint,
+            reinterpret_cast<const float*>(m_pDmaBuffer + bufferOffset),
+            frameCount);
         bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
         ByteDisplacement -= runWrite;
     }
@@ -1499,11 +1378,7 @@ Return Value:
         m_ulContentId = ulOldContentId;
     }
 
-    //
-    // Simple Audio Sample writes each stream seperately to disk. If the rights for this
-    // stream indicates that the stream is CopyProtected, stop writing to disk.
-    //
-    m_SaveData.Disable(drmRights->CopyProtect);
+    UNREFERENCED_PARAMETER(drmRights);
 
     //
     // From MSDN:

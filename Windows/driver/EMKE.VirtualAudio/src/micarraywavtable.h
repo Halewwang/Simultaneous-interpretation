@@ -18,10 +18,10 @@ Abstract:-
 //
 // Mic array range.
 //
-#define MICARRAY_RAW_CHANNELS                   2       // Channels for raw mode
-#define MICARRAY_DEVICE_MAX_CHANNELS            2       // Max channels overall
-#define MICARRAY_32_BITS_PER_SAMPLE_PCM         32      // 32 Bits Per Sample
-#define MICARRAY_RAW_SAMPLE_RATE                48000   // Raw sample rate
+#define MICARRAY_RAW_CHANNELS                   EMKE_AUDIO_CHANNEL_COUNT
+#define MICARRAY_DEVICE_MAX_CHANNELS            EMKE_AUDIO_CHANNEL_COUNT
+#define MICARRAY_32_BITS_PER_SAMPLE_FLOAT       EMKE_AUDIO_BITS_PER_SAMPLE
+#define MICARRAY_RAW_SAMPLE_RATE                EMKE_AUDIO_SAMPLE_RATE
 
 //
 // Max # of pin instances.
@@ -40,22 +40,22 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE MicArrayPinSupportedDeviceFormats[] =
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         {
             {
                 WAVE_FORMAT_EXTENSIBLE,
-                2,
-                48000,
-                384000,
-                8,
-                32,
+                EMKE_AUDIO_CHANNEL_COUNT,
+                EMKE_AUDIO_SAMPLE_RATE,
+                EMKE_AUDIO_AVG_BYTES_PER_SECOND,
+                EMKE_AUDIO_BLOCK_ALIGN,
+                EMKE_AUDIO_BITS_PER_SAMPLE,
                 sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)
             },
-            32,
+            EMKE_AUDIO_BITS_PER_SAMPLE,
             KSAUDIO_SPEAKER_STEREO,
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM)
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)
         }
     }
 };
@@ -110,12 +110,12 @@ KSDATARANGE_AUDIO MicArrayPinDataRangesRawStream[] =
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
-            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_PCM),
+            STATICGUIDOF(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT),
             STATICGUIDOF(KSDATAFORMAT_SPECIFIER_WAVEFORMATEX)
         },
         MICARRAY_RAW_CHANNELS,
-        MICARRAY_32_BITS_PER_SAMPLE_PCM,
-        MICARRAY_32_BITS_PER_SAMPLE_PCM,
+        MICARRAY_32_BITS_PER_SAMPLE_FLOAT,
+        MICARRAY_32_BITS_PER_SAMPLE_FLOAT,
         MICARRAY_RAW_SAMPLE_RATE,
         MICARRAY_RAW_SAMPLE_RATE
     },

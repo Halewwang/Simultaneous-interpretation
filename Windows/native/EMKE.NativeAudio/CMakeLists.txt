@@ -15,6 +15,7 @@ target_include_directories(EMKE.NativeAudio
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
 )
 target_compile_features(EMKE.NativeAudio PUBLIC cxx_std_20)
 if(WIN32)

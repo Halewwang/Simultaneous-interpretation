@@ -105,7 +105,8 @@ $repositoryRoot = [System.IO.Path]::GetFullPath(
 $projectDirectory = Join-Path $repositoryRoot "Windows" "driver" "EMKE.VirtualAudio"
 $projectPath = Join-Path $projectDirectory "EMKE.VirtualAudio.vcxproj"
 $buildOutput = Join-Path $projectDirectory "build" "x64" "Release"
-$artifactDirectory = Join-Path $repositoryRoot "Windows" "artifacts" "driver" "x64" "Release"
+$artifactRoot = Join-Path $repositoryRoot "Windows" "artifacts"
+$artifactDirectory = Join-Path $artifactRoot "driver" "x64" "Release"
 
 Assert-PathUnderRoot -Candidate $projectDirectory -Root $repositoryRoot
 Assert-PathUnderRoot -Candidate $buildOutput -Root $repositoryRoot
@@ -114,6 +115,18 @@ Assert-PathUnderRoot -Candidate $artifactDirectory -Root $repositoryRoot
 if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
     throw "Driver project is missing: $projectPath"
 }
+
+$contractValidator = Join-Path $PSScriptRoot "validate-driver-contract.mjs"
+$sharedContract = Join-Path $repositoryRoot "Windows" "shared" "emke_endpoint_contract.h"
+$sourceInf = Join-Path $projectDirectory "EMKE.VirtualAudio.inf"
+Invoke-Checked `
+    -Executable "node" `
+    -Arguments @(
+        $contractValidator,
+        "--header", $sharedContract,
+        "--inf", $sourceInf
+    ) `
+    -FailureMessage "Driver INF diverges from the shared native contract"
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio" "Installer" "vswhere.exe"
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -260,20 +273,22 @@ Invoke-Checked `
     -FailureMessage "Driver MSBuild failed after pinned WDK validation-runtime resolution" `
     -WorkingDirectory $wdkBuildTaskRoot
 
-$builtDriver = Join-Path $buildOutput "EMKE.VirtualAudio.sys"
-if (-not (Test-Path -LiteralPath $builtDriver -PathType Leaf)) {
-    throw "MSBuild did not produce the expected driver: $builtDriver"
+$wdkPackageOutput = Join-Path $buildOutput "EMKE.VirtualAudio"
+if (-not (Test-Path -LiteralPath $wdkPackageOutput -PathType Container)) {
+    throw "WDK did not produce the expected stamped package directory: $wdkPackageOutput"
 }
 
-if (Test-Path -LiteralPath $artifactDirectory) {
-    Remove-Item -LiteralPath $artifactDirectory -Recurse -Force
-}
-New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
-
-Copy-Item -LiteralPath $builtDriver -Destination $artifactDirectory
-Copy-Item `
-    -LiteralPath (Join-Path $projectDirectory "EMKE.VirtualAudio.inf") `
-    -Destination $artifactDirectory
+$packageStager = Join-Path $PSScriptRoot "stage-driver-package.mjs"
+Invoke-Checked `
+    -Executable "node" `
+    -Arguments @(
+        $packageStager,
+        "--repository-root", $repositoryRoot,
+        "--artifact-root", $artifactRoot,
+        "--source-package", $wdkPackageOutput,
+        "--artifact-directory", $artifactDirectory
+    ) `
+    -FailureMessage "Safe staging of the exact WDK-stamped INF and SYS failed"
 
 Invoke-Checked `
     -Executable $inf2Cat `

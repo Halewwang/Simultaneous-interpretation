@@ -17,7 +17,9 @@
 The Simple Audio Sample is the smallest current Microsoft WaveRT virtual-audio
 sample in the same driver-samples repository as SYSVAD. EMKE imports only its
 driver source/header/resource files. The sample repository is not a submodule,
-and the resolved commit above is the immutable provenance reference.
+and the resolved commit above is the immutable provenance reference. The EMKE
+cross-endpoint data path is local code rather than an assertion that a SYSVAD
+physical connection or loopback pin is a cross-endpoint bridge.
 
 ### Local modifications
 
@@ -28,10 +30,22 @@ and the resolved commit above is the immutable provenance reference.
   endpoint reference strings for EMKE.
 - Expanded the sample's one render and one capture endpoint to two render and
   two capture WaveRT miniport pairs.
-- Added the frozen EMKE endpoint-role property key, role strings, driver ABI 1,
-  and the two user-facing plus two internal endpoint names.
+- Added two fixed-capacity, preallocated SPSC bridges called directly from the
+  WaveRT render/capture data-movement callbacks. The bridge design follows the
+  bounded/nonpaged stream-state conventions reviewed in
+  `audio/sysvad/EndpointsCommon`; it does not import SYSVAD tone, keyword,
+  offload, or same-filter loopback features.
+- Removed the sample capture tone generator and render file-sink/work-item
+  implementation from the EMKE driver.
+- Replaced the sample PCM endpoint tables with one exact 48 kHz stereo IEEE
+  Float32 contract.
+- Added one shared native endpoint-contract header compiled by the driver and
+  native host, containing the endpoint-role property key, role strings, driver
+  ABI 1, and the two user-facing plus two internal endpoint identities.
 - Replaced the sample INF with the EMKE package INF and added fail-closed build
-  and package-verification scripts.
+  and package-verification scripts. The distributable INF/SYS are copied from
+  WDK `DriverPackageTarget` output; catalog membership is checked with Windows
+  catalog APIs against the exact staged bytes.
 - No Microsoft logos, trademarks, certificates, binaries, or package artifacts
   are copied.
 

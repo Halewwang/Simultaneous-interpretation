@@ -14,6 +14,8 @@ Abstract:
 #ifndef _SIMPLEAUDIOSAMPLE_MINWAVERT_H_
 #define _SIMPLEAUDIOSAMPLE_MINWAVERT_H_
 
+#include "emke_audio_bridge.h"
+
 //=============================================================================
 // Referenced Forward
 //=============================================================================
@@ -228,7 +230,28 @@ protected:
 #pragma code_seg()
     BOOL IsRenderDevice()
     {
-        return m_DeviceType == eSpeakerDevice ? TRUE : FALSE;
+        return (m_DeviceType == eMeetingSpeakerRenderDevice ||
+                m_DeviceType == eAppMicrophoneRenderDevice)
+            ? TRUE
+            : FALSE;
+    }
+
+    EmkeBridgeEndpoint GetBridgeEndpoint()
+    {
+        switch (m_DeviceType)
+        {
+            case eMeetingSpeakerRenderDevice:
+                return EmkeBridgeEndpoint::meetingSpeakerRender;
+            case eAppSpeakerCaptureDevice:
+                return EmkeBridgeEndpoint::appSpeakerCapture;
+            case eAppMicrophoneRenderDevice:
+                return EmkeBridgeEndpoint::appMicrophoneRender;
+            case eMeetingMicrophoneCaptureDevice:
+                return EmkeBridgeEndpoint::meetingMicrophoneCapture;
+            default:
+                ASSERT(FALSE);
+                return EmkeBridgeEndpoint::meetingSpeakerRender;
+        }
     }
 
     BOOL IsSystemRenderPin(ULONG nPinId);

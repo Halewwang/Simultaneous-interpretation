@@ -157,6 +157,11 @@ jobs:
             throw "Driver contract tests failed."
           }
 
+          node --test Windows/driver/tests/package-boundary.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver executable package-boundary tests failed."
+          }
+
       - name: Build unsigned driver package
         id: driver-build
         shell: pwsh
@@ -169,6 +174,13 @@ jobs:
           pwsh Windows/tools/verify-driver-package.ps1 Windows/artifacts/driver/x64/Release
           if ($LASTEXITCODE -ne 0) {
             throw "Driver package verification failed."
+          }
+
+          pwsh Windows/driver/tests/package-verifier.integration.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release `
+            -Verifier Windows/tools/verify-driver-package.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver package verifier integration tests failed."
           }
 
       - name: Upload unsigned driver package

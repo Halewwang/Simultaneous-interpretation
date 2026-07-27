@@ -1,3 +1,11 @@
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <initguid.h>
+#endif
+
 #include "device_catalog.hpp"
 
 #include <array>
@@ -6,18 +14,9 @@
 #include <utility>
 
 #if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <initguid.h>
-
-#include "emke_endpoint_properties.h"
-
 #include <mmdeviceapi.h>
 #include <propvarutil.h>
 #include <propsys.h>
-#include <windows.h>
 
 #include <cwchar>
 #include <string_view>

@@ -39,7 +39,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)..\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;_USE_IPortClsRuntimePower;_NEW_DELETE_OPERATORS_;DEBUG_LEVEL=DEBUGLVL_TERSE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ExceptionHandling>false</ExceptionHandling>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -47,7 +47,7 @@
       <WarningLevel>Level4</WarningLevel>
     </ClCompile>
     <ResourceCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)..\..\shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WIN32;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;_USE_IPortClsRuntimePower;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
@@ -68,6 +68,7 @@
     <ClCompile Include="src\adapter.cpp" />
     <ClCompile Include="src\basetopo.cpp" />
     <ClCompile Include="src\common.cpp" />
+    <ClCompile Include="src\emke_audio_bridge.cpp" />
     <ClCompile Include="src\hw.cpp" />
     <ClCompile Include="src\kshelper.cpp" />
     <ClCompile Include="src\micarraytopo.cpp" />
@@ -75,13 +76,12 @@
     <ClCompile Include="src\minwavert.cpp" />
     <ClCompile Include="src\minwavertstream.cpp" />
     <ClCompile Include="src\NewDelete.cpp" />
-    <ClCompile Include="src\savedata.cpp" />
     <ClCompile Include="src\speakertopo.cpp" />
-    <ClCompile Include="src\ToneGenerator.cpp" />
-    <ClInclude Include="include\emke_endpoint_roles.h" />
+    <ClInclude Include="..\..\shared\emke_endpoint_contract.h" />
     <ClInclude Include="src\basetopo.h" />
     <ClInclude Include="src\common.h" />
     <ClInclude Include="src\definitions.h" />
+    <ClInclude Include="src\emke_audio_bridge.h" />
     <ClInclude Include="src\endpoints.h" />
     <ClInclude Include="src\hw.h" />
     <ClInclude Include="src\kshelper.h" />
@@ -93,11 +93,9 @@
     <ClInclude Include="src\minwavert.h" />
     <ClInclude Include="src\minwavertstream.h" />
     <ClInclude Include="src\NewDelete.h" />
-    <ClInclude Include="src\savedata.h" />
     <ClInclude Include="src\speakertopo.h" />
     <ClInclude Include="src\speakertoptable.h" />
     <ClInclude Include="src\speakerwavtable.h" />
-    <ClInclude Include="src\ToneGenerator.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
