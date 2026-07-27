@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
+    <RootNamespace>EMKE.Contract.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
