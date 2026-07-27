@@ -1,0 +1,11 @@
+{
+  "productVersion": "0.1.0",
+  "packageVersion": "0.1.0.0",
+  "expectedTag": "windows-v0.1.0",
+  "contractVersion": 1,
+  "settingsSchemaVersion": 1,
+  "driverAbiVersion": 1,
+  "minimumWindowsBuild": 26200,
+  "architecture": "x64",
+  "channel": "internal"
+}
