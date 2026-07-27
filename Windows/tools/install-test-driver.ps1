@@ -1,17 +1,26 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = "Install")]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Install")]
+    [Parameter(Mandatory, ParameterSetName = "Digest")]
     [string]$PackagePath,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Install")]
     [ValidatePattern("^[0-9A-Fa-f]{64}$")]
     [string]$ExpectedPackageSha256,
 
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = "Install")]
     [string]$SmokePath,
 
-    [switch]$ConfirmInstall
+    [Parameter(ParameterSetName = "Install")]
+    [switch]$ConfirmInstall,
+
+    [Parameter(Mandatory, ParameterSetName = "Digest")]
+    [switch]$PrintPackageSha256
 )
+
+if ($MyInvocation.InvocationName -ceq ".") {
+    throw "Dot-source invocation is forbidden for this lifecycle script."
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -331,6 +340,7 @@ function Get-TargetDevnodes {
 function Assert-InstalledDevnodeHealthy {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Devnodes
     )
 
@@ -365,14 +375,25 @@ function Invoke-SmokeEnumeration {
     if ($result.ExitCode -ne 0) {
         throw "Audio smoke enumeration failed with exit code $($result.ExitCode)."
     }
-    if ($result.OutputLines -contains "discovery=driverMissing") {
-        throw "Audio smoke enumeration reported driverMissing."
+    $discoveryStatuses = @($result.OutputLines | Where-Object {
+        [string]$_ -cmatch "^discovery="
+    })
+    $resultStatuses = @($result.OutputLines | Where-Object {
+        [string]$_ -cmatch "^result="
+    })
+    if ($discoveryStatuses.Count -ne 1 -or
+        $discoveryStatuses[0] -cne "discovery=ready") {
+        throw (
+            "Audio smoke enumeration must report exactly one " +
+            "discovery=ready status."
+        )
     }
-    if ($result.OutputLines -notcontains "discovery=ready") {
-        throw "Audio smoke enumeration did not report discovery=ready."
-    }
-    if ($result.OutputLines -notcontains "result=ready") {
-        throw "Audio smoke enumeration did not report result=ready."
+    if ($resultStatuses.Count -ne 1 -or
+        $resultStatuses[0] -cne "result=ready") {
+        throw (
+            "Audio smoke enumeration must report exactly one " +
+            "result=ready status."
+        )
     }
 }
 
@@ -402,6 +423,7 @@ function Invoke-InstallTestDriver {
     Invoke-DriverPackageVerifier -PackageDirectory $package.Directory
 
     $actualPackageSha256 = Get-DriverPackageSha256 -Package $package
+    Write-Host "Observed package SHA-256: $actualPackageSha256"
     if (-not (Test-FixedSha256Equal `
         -Expected $ExpectedPackageSha256 `
         -Actual $actualPackageSha256)) {
@@ -420,7 +442,7 @@ function Invoke-InstallTestDriver {
 
     Write-Host "DriverVer: $($infMetadata.DriverVer)"
     Write-Host "Hardware ID: $($infMetadata.HardwareId)"
-    Write-Host "Package SHA-256: $actualPackageSha256"
+    Write-Host "Verified package SHA-256: $actualPackageSha256"
     Write-Host (
         "Catalog signature: Valid; signing certificate SHA-256: " +
         $signature.SummarySha256
@@ -434,6 +456,17 @@ function Invoke-InstallTestDriver {
         "Audio smoke: discovery=ready; result=ready; " +
         "public ABI four-role contract passed."
     )
+}
+
+if ($PSCmdlet.ParameterSetName -ceq "Digest") {
+    Assert-SupportedWindowsHost
+    $observedPackage = Get-StrictDriverPackage -Directory $PackagePath
+    $observedDigest = Get-DriverPackageSha256 -Package $observedPackage
+    Write-Output (
+        "Observed/Generated package SHA-256 " +
+        "(not a trusted expected value): $observedDigest"
+    )
+    return
 }
 
 Invoke-InstallTestDriver @PSBoundParameters

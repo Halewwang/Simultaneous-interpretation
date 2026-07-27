@@ -3,6 +3,10 @@ param(
     [switch]$ConfirmUninstall
 )
 
+if ($MyInvocation.InvocationName -ceq ".") {
+    throw "Dot-source invocation is forbidden for this lifecycle script."
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -112,6 +116,7 @@ function Get-TargetDevnodes {
 function Assert-CurrentTargetDevnode {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Devnodes
     )
 
@@ -149,17 +154,16 @@ function Get-PublishedInfForDevnode {
     $matching = @($signedDrivers | Where-Object {
         $_.DeviceID -ieq $Devnode.PNPDeviceID
     })
-    $publishedInfs = @($matching |
-        ForEach-Object { [string]$_.InfName } |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Sort-Object -Unique)
-    if ($publishedInfs.Count -ne 1) {
+    if ($matching.Count -ne 1) {
         throw (
-            "Expected one published INF for the exact target devnode; " +
-            "found $($publishedInfs.Count)."
+            "Expected one signed-driver metadata match for the exact " +
+            "target devnode; found $($matching.Count)."
         )
     }
-    $publishedInf = $publishedInfs[0]
+    $publishedInf = [string]$matching[0].InfName
+    if ([string]::IsNullOrWhiteSpace($publishedInf)) {
+        throw "The exact target devnode has no published INF metadata."
+    }
     Assert-PublishedInfName -PublishedInf $publishedInf
     return $publishedInf
 }
@@ -188,6 +192,7 @@ function Invoke-PnpUtilUninstall {
 function Assert-TargetDevnodeAbsent {
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [object[]]$Devnodes
     )
 
