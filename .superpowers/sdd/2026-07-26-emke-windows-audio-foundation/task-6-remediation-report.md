@@ -1174,8 +1174,8 @@ A controller push must run the unchanged authorized workflow against
 - exact flat INF/SYS/CAT staging;
 - strict four-tag SHA-1/SHA-256 catalog membership;
 - independent mutated-INF and mutated-SYS rejection;
-- exactly the three unsigned package files in a private seven-day Actions
-  artifact.
+- exactly the three unsigned package files in a seven-day Actions run artifact,
+  not a public GitHub Release asset.
 
 Signing, installation, driver loading/removal, Windows 11 25H2 physical-machine
 acceptance, live endpoint enumeration/routing, WaveRT timing, human listening,
