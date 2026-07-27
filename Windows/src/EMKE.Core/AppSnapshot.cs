@@ -1,0 +1,399 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace EMKE.Core;
+
+[JsonConverter(typeof(RuntimeStateJsonConverter))]
+public enum RuntimeState
+{
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+    Degraded,
+    Failed,
+}
+
+[JsonConverter(typeof(ChannelStateJsonConverter))]
+public enum ChannelState
+{
+    Inactive,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Bypassed,
+    Degraded,
+    Failed,
+}
+
+[JsonConverter(typeof(InboundRouteJsonConverter))]
+public enum InboundRoute
+{
+    Stopped,
+    Translated,
+    OriginalFailOpen,
+    OriginalBypass,
+}
+
+[JsonConverter(typeof(OutboundRouteJsonConverter))]
+public enum OutboundRoute
+{
+    Stopped,
+    Translated,
+    MutedFailClosed,
+    OriginalBypass,
+}
+
+public sealed record AudioSelection
+{
+    public AudioSelection(string inboundLabel, string outboundLabel)
+    {
+        InboundLabel = inboundLabel ?? throw new ArgumentNullException(nameof(inboundLabel));
+        OutboundLabel = outboundLabel ?? throw new ArgumentNullException(nameof(outboundLabel));
+    }
+
+    public string InboundLabel { get; }
+
+    public string OutboundLabel { get; }
+}
+
+public sealed record DriverCompatibility
+{
+    public DriverCompatibility(bool isCompatible, string statusLabel)
+    {
+        IsCompatible = isCompatible;
+        StatusLabel = statusLabel ?? throw new ArgumentNullException(nameof(statusLabel));
+    }
+
+    public bool IsCompatible { get; }
+
+    public string StatusLabel { get; }
+}
+
+public sealed record TranslationCompatibilityReport
+{
+    public TranslationCompatibilityReport(bool isCompatible, IEnumerable<string> findings)
+    {
+        ArgumentNullException.ThrowIfNull(findings);
+
+        string[] copy = findings.ToArray();
+        if (copy.Any(static finding => finding is null))
+        {
+            throw new ArgumentException("Findings cannot contain null values.", nameof(findings));
+        }
+
+        IsCompatible = isCompatible;
+        Findings = Array.AsReadOnly(copy);
+    }
+
+    public bool IsCompatible { get; }
+
+    public IReadOnlyList<string> Findings { get; }
+}
+
+public sealed record AudioDiagnostics
+{
+    public AudioDiagnostics(bool isHealthy, ulong droppedFrameCount)
+    {
+        IsHealthy = isHealthy;
+        DroppedFrameCount = droppedFrameCount;
+    }
+
+    public bool IsHealthy { get; }
+
+    public ulong DroppedFrameCount { get; }
+}
+
+public sealed record UpdateAvailability
+{
+    public UpdateAvailability(bool isAvailable, string versionLabel)
+    {
+        IsAvailable = isAvailable;
+        VersionLabel = versionLabel ?? throw new ArgumentNullException(nameof(versionLabel));
+    }
+
+    public bool IsAvailable { get; }
+
+    public string VersionLabel { get; }
+}
+
+public sealed record AppSnapshot
+{
+    public AppSnapshot(
+        int contractVersion,
+        ulong version,
+        RuntimeState runtimeState,
+        ChannelState inboundChannelState,
+        ChannelState outboundChannelState,
+        InboundRoute inboundRoute,
+        OutboundRoute outboundRoute,
+        double inboundLevel,
+        double outboundLevel,
+        string sourceCaption,
+        string translatedCaption,
+        AudioSelection audioSelection,
+        DriverCompatibility driverCompatibility,
+        TranslationCompatibilityReport? connectionReport,
+        AudioDiagnostics audioDiagnostics,
+        UpdateAvailability updateAvailability,
+        RuntimeError? error)
+    {
+        if (contractVersion != 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(contractVersion), contractVersion, "Only contract version 1 is supported.");
+        }
+
+        ContractVersion = contractVersion;
+        Version = version;
+        RuntimeState = runtimeState;
+        InboundChannelState = inboundChannelState;
+        OutboundChannelState = outboundChannelState;
+        InboundRoute = inboundRoute;
+        OutboundRoute = outboundRoute;
+        InboundLevel = ClampLevel(inboundLevel, nameof(inboundLevel));
+        OutboundLevel = ClampLevel(outboundLevel, nameof(outboundLevel));
+        SourceCaption = sourceCaption ?? throw new ArgumentNullException(nameof(sourceCaption));
+        TranslatedCaption = translatedCaption ?? throw new ArgumentNullException(nameof(translatedCaption));
+        AudioSelection = audioSelection ?? throw new ArgumentNullException(nameof(audioSelection));
+        DriverCompatibility = driverCompatibility ?? throw new ArgumentNullException(nameof(driverCompatibility));
+        ConnectionReport = connectionReport;
+        AudioDiagnostics = audioDiagnostics ?? throw new ArgumentNullException(nameof(audioDiagnostics));
+        UpdateAvailability = updateAvailability ?? throw new ArgumentNullException(nameof(updateAvailability));
+        Error = error;
+    }
+
+    [JsonPropertyName("contractVersion")]
+    public int ContractVersion { get; }
+
+    [JsonPropertyName("version")]
+    public ulong Version { get; }
+
+    [JsonPropertyName("runtimeState")]
+    public RuntimeState RuntimeState { get; }
+
+    [JsonPropertyName("inboundChannelState")]
+    public ChannelState InboundChannelState { get; }
+
+    [JsonPropertyName("outboundChannelState")]
+    public ChannelState OutboundChannelState { get; }
+
+    [JsonPropertyName("inboundRoute")]
+    public InboundRoute InboundRoute { get; }
+
+    [JsonPropertyName("outboundRoute")]
+    public OutboundRoute OutboundRoute { get; }
+
+    [JsonPropertyName("inboundLevel")]
+    public double InboundLevel { get; }
+
+    [JsonPropertyName("outboundLevel")]
+    public double OutboundLevel { get; }
+
+    [JsonPropertyName("sourceCaption")]
+    public string SourceCaption { get; }
+
+    [JsonPropertyName("translatedCaption")]
+    public string TranslatedCaption { get; }
+
+    [JsonIgnore]
+    public AudioSelection AudioSelection { get; }
+
+    [JsonIgnore]
+    public DriverCompatibility DriverCompatibility { get; }
+
+    [JsonIgnore]
+    public TranslationCompatibilityReport? ConnectionReport { get; }
+
+    [JsonIgnore]
+    public AudioDiagnostics AudioDiagnostics { get; }
+
+    [JsonIgnore]
+    public UpdateAvailability UpdateAvailability { get; }
+
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RuntimeError? Error { get; }
+
+    public AppSnapshot WithNextVersion()
+    {
+        ulong nextVersion = checked(Version + 1UL);
+        return new AppSnapshot(
+            ContractVersion,
+            nextVersion,
+            RuntimeState,
+            InboundChannelState,
+            OutboundChannelState,
+            InboundRoute,
+            OutboundRoute,
+            InboundLevel,
+            OutboundLevel,
+            SourceCaption,
+            TranslatedCaption,
+            AudioSelection,
+            DriverCompatibility,
+            ConnectionReport,
+            AudioDiagnostics,
+            UpdateAvailability,
+            Error);
+    }
+
+    private static double ClampLevel(double level, string parameterName)
+    {
+        if (!double.IsFinite(level))
+        {
+            throw new ArgumentOutOfRangeException(parameterName, level, "Audio levels must be finite.");
+        }
+
+        return Math.Clamp(level, 0, 1);
+    }
+}
+
+public sealed class RuntimeStateJsonConverter : JsonConverter<RuntimeState>
+{
+    public override RuntimeState Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException("RuntimeState must be a string.");
+        }
+
+        return reader.GetString() switch
+        {
+            "stopped" => RuntimeState.Stopped,
+            "starting" => RuntimeState.Starting,
+            "running" => RuntimeState.Running,
+            "stopping" => RuntimeState.Stopping,
+            "degraded" => RuntimeState.Degraded,
+            "failed" => RuntimeState.Failed,
+            _ => throw new JsonException("Unknown RuntimeState value."),
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, RuntimeState value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        string stableValue = value switch
+        {
+            RuntimeState.Stopped => "stopped",
+            RuntimeState.Starting => "starting",
+            RuntimeState.Running => "running",
+            RuntimeState.Stopping => "stopping",
+            RuntimeState.Degraded => "degraded",
+            RuntimeState.Failed => "failed",
+            _ => throw new JsonException("Undefined RuntimeState value."),
+        };
+        writer.WriteStringValue(stableValue);
+    }
+}
+
+public sealed class ChannelStateJsonConverter : JsonConverter<ChannelState>
+{
+    public override ChannelState Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException("ChannelState must be a string.");
+        }
+
+        return reader.GetString() switch
+        {
+            "inactive" => ChannelState.Inactive,
+            "connecting" => ChannelState.Connecting,
+            "connected" => ChannelState.Connected,
+            "reconnecting" => ChannelState.Reconnecting,
+            "bypassed" => ChannelState.Bypassed,
+            "degraded" => ChannelState.Degraded,
+            "failed" => ChannelState.Failed,
+            _ => throw new JsonException("Unknown ChannelState value."),
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, ChannelState value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        string stableValue = value switch
+        {
+            ChannelState.Inactive => "inactive",
+            ChannelState.Connecting => "connecting",
+            ChannelState.Connected => "connected",
+            ChannelState.Reconnecting => "reconnecting",
+            ChannelState.Bypassed => "bypassed",
+            ChannelState.Degraded => "degraded",
+            ChannelState.Failed => "failed",
+            _ => throw new JsonException("Undefined ChannelState value."),
+        };
+        writer.WriteStringValue(stableValue);
+    }
+}
+
+public sealed class InboundRouteJsonConverter : JsonConverter<InboundRoute>
+{
+    public override InboundRoute Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException("InboundRoute must be a string.");
+        }
+
+        return reader.GetString() switch
+        {
+            "stopped" => InboundRoute.Stopped,
+            "translated" => InboundRoute.Translated,
+            "originalFailOpen" => InboundRoute.OriginalFailOpen,
+            "originalBypass" => InboundRoute.OriginalBypass,
+            _ => throw new JsonException("Unknown InboundRoute value."),
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, InboundRoute value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        string stableValue = value switch
+        {
+            InboundRoute.Stopped => "stopped",
+            InboundRoute.Translated => "translated",
+            InboundRoute.OriginalFailOpen => "originalFailOpen",
+            InboundRoute.OriginalBypass => "originalBypass",
+            _ => throw new JsonException("Undefined InboundRoute value."),
+        };
+        writer.WriteStringValue(stableValue);
+    }
+}
+
+public sealed class OutboundRouteJsonConverter : JsonConverter<OutboundRoute>
+{
+    public override OutboundRoute Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+        {
+            throw new JsonException("OutboundRoute must be a string.");
+        }
+
+        return reader.GetString() switch
+        {
+            "stopped" => OutboundRoute.Stopped,
+            "translated" => OutboundRoute.Translated,
+            "mutedFailClosed" => OutboundRoute.MutedFailClosed,
+            "originalBypass" => OutboundRoute.OriginalBypass,
+            _ => throw new JsonException("Unknown OutboundRoute value."),
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, OutboundRoute value, JsonSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        string stableValue = value switch
+        {
+            OutboundRoute.Stopped => "stopped",
+            OutboundRoute.Translated => "translated",
+            OutboundRoute.MutedFailClosed => "mutedFailClosed",
+            OutboundRoute.OriginalBypass => "originalBypass",
+            _ => throw new JsonException("Undefined OutboundRoute value."),
+        };
+        writer.WriteStringValue(stableValue);
+    }
+}
