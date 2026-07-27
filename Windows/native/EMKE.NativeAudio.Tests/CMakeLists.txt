@@ -137,6 +137,7 @@ add_test(
 # earlier in the native build.
 add_library(EMKE.DriverBridge.KernelBoundary OBJECT
   ../../driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp
+  ../../driver/tests/kernel-compile-shim-types.cpp
 )
 target_include_directories(EMKE.DriverBridge.KernelBoundary PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/tests/kernel-compile-shim"

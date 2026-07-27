@@ -439,3 +439,63 @@ and private seven-day artifact upload. No such success is claimed locally.
 
 No signing, installation, loading, removal, elevation, secret use, push, or
 public release occurred in fix round 1.
+
+### Controller follow-up: cross-compiler shim correction
+
+Controller review flagged that the new CMake kernel boundary must compile its
+test-only `ntddk.h` under real MSVC and therefore cannot expose a
+Clang/GCC-only `__SIZE_TYPE__` token to that compiler.
+
+Inspection of commit `b88f43c73aec83b90a2ce3269e701002fbd210e1`
+showed that its `SIZE_T` was already expressed as `decltype(sizeof(0))`, not
+`__SIZE_TYPE__`. A narrower compiled type-width test nevertheless found a real
+cross-ABI defect: on the local LP64 host, the shim's `long` and
+`unsigned long` aliases were 8 bytes rather than the Windows 4-byte
+`LONG`/`ULONG` contract.
+
+The test was added first:
+
+```text
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  -I Windows/driver/tests/kernel-compile-shim \
+  -c Windows/driver/tests/kernel-compile-shim-types.cpp \
+  -o /tmp/emke-kernel-shim-types.o
+```
+
+RED:
+
+```text
+static assertion failed: Windows ULONG must be 32-bit
+expression evaluates to '8 == 4'
+static assertion failed: Windows LONG must be 32-bit
+expression evaluates to '8 == 4'
+2 errors generated.
+```
+
+The test-only shim now has explicit compiler branches:
+
+- MSVC/clang-cl: x64 `SIZE_T = unsigned __int64`, `ULONG = unsigned long`,
+  `LONG = long`, and `LONGLONG = __int64`;
+- non-MSVC portable boundary: `SIZE_T = __SIZE_TYPE__`,
+  `ULONG = unsigned int`, `LONG = int`, and `LONGLONG = long long`.
+
+`kernel-compile-shim-types.cpp` asserts the frozen x64/Windows widths
+`8/4/4/8` and is compiled as part of
+`EMKE.DriverBridge.KernelBoundary`, so the hosted MSVC native build checks the
+MSVC branch directly.
+
+GREEN:
+
+```text
+kernel shim type-width compile
+  PASS: exit 0
+
+kernel-shaped production bridge compile
+  PASS: exit 0
+
+portable bridge behavior
+  PASS: 6 cases
+```
+
+This correction changes only test infrastructure. No driver production source,
+runtime behavior, package logic, signing boundary, or install boundary changed.
