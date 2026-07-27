@@ -52,60 +52,37 @@ internal static class RealtimeFixtureAdapter
                     results.Add(await DriveSessionAsync(socket.GetProperty("steps"), name));
                 }
 
-                Assert.AreEqual(
-                    expected.GetProperty("inboundChannelState").GetString(),
-                    results[0].ChannelState,
+                AssertInbound(
+                    expected,
+                    TranslationSessionTopologyPolicy.ResolveInbound(results[0].State),
                     name);
-                Assert.AreEqual(
-                    expected.GetProperty("outboundChannelState").GetString(),
-                    results[1].ChannelState,
-                    name);
-                Assert.AreEqual(
-                    expected.GetProperty("inboundRoute").GetString(),
-                    RouteFor(results[0].ChannelState),
-                    name);
-                Assert.AreEqual(
-                    expected.GetProperty("outboundRoute").GetString(),
-                    RouteFor(results[1].ChannelState),
+                AssertOutbound(
+                    expected,
+                    TranslationSessionTopologyPolicy.ResolveOutbound(results[1].State),
                     name);
             }
             else if (fixtureCase.GetProperty("steps")[0]
                          .GetProperty("direction").GetString() == "local")
             {
                 Assert.IsTrue(plan.OutboundBypassed, name);
-                Assert.AreEqual(
-                    "connected",
-                    expected.GetProperty("inboundChannelState").GetString(),
-                    name);
-                Assert.AreEqual(
-                    "translated",
-                    expected.GetProperty("inboundRoute").GetString(),
-                    name);
-                Assert.AreEqual(
-                    "bypassed",
-                    expected.GetProperty("outboundChannelState").GetString(),
-                    name);
-                Assert.AreEqual(
-                    "originalBypass",
-                    expected.GetProperty("outboundRoute").GetString(),
-                    name);
+                AssertInbound(expected, plan.Inbound, name);
+                AssertOutbound(expected, plan.Outbound, name);
             }
             else
             {
                 HandshakeResult result = await DriveSessionAsync(
                     fixtureCase.GetProperty("steps"),
                     name);
-                Assert.AreEqual(
-                    expected.GetProperty("inboundChannelState").GetString(),
-                    result.ChannelState,
-                    name);
-                Assert.AreEqual(
-                    expected.GetProperty("inboundRoute").GetString(),
-                    RouteFor(result.ChannelState),
+                AssertInbound(
+                    expected,
+                    TranslationSessionTopologyPolicy.ResolveInbound(result.State),
                     name);
                 if (expected.TryGetProperty("errorCategory", out JsonElement errorCategory))
                 {
-                    Assert.AreEqual(errorCategory.GetString(), result.ErrorCategory, name);
+                    Assert.AreEqual(
+                        errorCategory.GetString(),
+                        JsonNamingPolicy.CamelCase.ConvertName(result.ErrorCategory!.Value.ToString()),
+                        name);
                 }
             }
         }
@@ -259,6 +236,7 @@ internal static class RealtimeFixtureAdapter
                         await Assert.ThrowsExactlyAsync<TranslationSessionException>(
                             () => connect);
                     Assert.AreEqual(ErrorCategory.Protocol, failure.Error.Category, name);
+                    Assert.AreEqual(0, transport.SendCount, name);
                 }
                 else
                 {
@@ -266,6 +244,7 @@ internal static class RealtimeFixtureAdapter
                         () => session.State == ParseState(expectedState),
                         name);
                     Assert.AreEqual(WebSocketMessageType.Text, transport.LastClientFrameType, name);
+                    Assert.AreEqual(1, transport.SendCount, name);
                 }
             }
         }
@@ -277,10 +256,8 @@ internal static class RealtimeFixtureAdapter
         }
 
         HandshakeResult result = new(
-            session.State == TranslationSessionState.Connected ? "connected" : "failed",
-            session.LastError is null
-                ? null
-                : StableErrorCategory(session.LastError.Category));
+            session.State,
+            session.LastError?.Category);
         await session.DisposeAsync();
         return result;
     }
@@ -556,25 +533,38 @@ internal static class RealtimeFixtureAdapter
         };
     }
 
-    private static string RouteFor(string channelState)
+    private static void AssertInbound(
+        JsonElement expected,
+        TranslationInboundChannelPlan actual,
+        string name)
     {
-        return channelState switch
-        {
-            "connected" => "translated",
-            "failed" => "originalFailOpen",
-            "bypassed" => "originalBypass",
-            _ => throw new InvalidDataException("Unknown fixture channel state."),
-        };
+        Assert.AreEqual(
+            JsonSerializer.Deserialize<ChannelState>(
+                expected.GetProperty("inboundChannelState").GetRawText()),
+            actual.ChannelState,
+            name);
+        Assert.AreEqual(
+            JsonSerializer.Deserialize<InboundRoute>(
+                expected.GetProperty("inboundRoute").GetRawText()),
+            actual.Route,
+            name);
     }
 
-    private static string StableErrorCategory(ErrorCategory category)
+    private static void AssertOutbound(
+        JsonElement expected,
+        TranslationOutboundChannelPlan actual,
+        string name)
     {
-        return category switch
-        {
-            ErrorCategory.Protocol => "protocol",
-            ErrorCategory.Network => "network",
-            _ => throw new InvalidDataException("Unexpected handshake error category."),
-        };
+        Assert.AreEqual(
+            JsonSerializer.Deserialize<ChannelState>(
+                expected.GetProperty("outboundChannelState").GetRawText()),
+            actual.ChannelState,
+            name);
+        Assert.AreEqual(
+            JsonSerializer.Deserialize<OutboundRoute>(
+                expected.GetProperty("outboundRoute").GetRawText()),
+            actual.Route,
+            name);
     }
 
     private static LanguageCode ParseLanguage(JsonElement value)
@@ -611,8 +601,8 @@ internal static class RealtimeFixtureAdapter
     }
 
     private sealed record HandshakeResult(
-        string ChannelState,
-        string? ErrorCategory);
+        TranslationSessionState State,
+        ErrorCategory? ErrorCategory);
 
 #pragma warning disable CA2213 // TranslationSocket takes ownership of the fixture adapter.
 
@@ -633,7 +623,11 @@ internal static class RealtimeFixtureAdapter
         public int UpdateCount { get; private set; }
 
         public WebSocketMessageType? LastClientFrameType =>
-            _adapter.Sends.LastOrDefault().MessageType;
+            _adapter.Sends.Count == 0
+                ? null
+                : _adapter.Sends[^1].MessageType;
+
+        public int SendCount => _adapter.Sends.Count;
 
         public Task<RuntimeError?> ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
@@ -646,10 +640,9 @@ internal static class RealtimeFixtureAdapter
         {
             UpdateCount++;
             await _releaseUpdate.Task.WaitAsync(cancellationToken);
-            RuntimeError? frameError =
-                TranslationClientFramePolicy.Validate(_sessionUpdateFrameType);
-            return frameError ?? await _socket.SendSessionUpdateAsync(
-                targetLanguage,
+            return await _socket.SendClientEventAsync(
+                TranslationEventCodec.EncodeSessionUpdate(targetLanguage),
+                _sessionUpdateFrameType,
                 cancellationToken);
         }
 

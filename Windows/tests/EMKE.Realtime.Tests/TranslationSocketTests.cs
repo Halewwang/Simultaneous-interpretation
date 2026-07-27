@@ -39,6 +39,22 @@ public sealed class TranslationSocketTests
     }
 
     [TestMethod]
+    public async Task BinaryClientEventIsRejectedByTheSocketBeforeAdapterSend()
+    {
+        FakeClientWebSocket adapter = new();
+        TranslationSocket socket = new(adapter, receiveLimit: 256);
+
+        RuntimeError? error = await socket.SendClientEventAsync(
+            TranslationEventCodec.EncodeSessionUpdate(LanguageCode.Zh),
+            WebSocketMessageType.Binary,
+            CancellationToken.None);
+
+        Assert.AreEqual(ErrorCategory.Protocol, error!.Category);
+        Assert.AreEqual("binaryTranslationEvent", error.Code);
+        Assert.HasCount(0, adapter.Sends);
+    }
+
+    [TestMethod]
     public async Task ReceiveAssemblesFragmentedTextAndClearsUsedBuffer()
     {
         FakeClientWebSocket adapter = new(

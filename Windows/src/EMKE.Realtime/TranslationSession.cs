@@ -45,7 +45,20 @@ public static class TranslationSessionCreationPolicy
         return new TranslationSessionCreationPlan(
             InboundSocketCount: 1,
             OutboundSocketCount: requestOutbound && requiresOutbound ? 1 : 0,
-            OutboundBypassed: requestOutbound && !requiresOutbound);
+            Inbound: new TranslationInboundChannelPlan(
+                ChannelState.Connected,
+                InboundRoute.Translated),
+            Outbound: requestOutbound
+                ? requiresOutbound
+                    ? new TranslationOutboundChannelPlan(
+                        ChannelState.Connected,
+                        OutboundRoute.Translated)
+                    : new TranslationOutboundChannelPlan(
+                        ChannelState.Bypassed,
+                        OutboundRoute.OriginalBypass)
+                : new TranslationOutboundChannelPlan(
+                    ChannelState.Inactive,
+                    OutboundRoute.Stopped));
     }
 
     public static bool RequiresOutboundSession(
@@ -69,7 +82,73 @@ public static class TranslationSessionCreationPolicy
 public sealed record TranslationSessionCreationPlan(
     int InboundSocketCount,
     int OutboundSocketCount,
-    bool OutboundBypassed);
+    TranslationInboundChannelPlan Inbound,
+    TranslationOutboundChannelPlan Outbound)
+{
+    public bool OutboundBypassed =>
+        Outbound.ChannelState == ChannelState.Bypassed;
+}
+
+public sealed record TranslationInboundChannelPlan(
+    ChannelState ChannelState,
+    InboundRoute Route);
+
+public sealed record TranslationOutboundChannelPlan(
+    ChannelState ChannelState,
+    OutboundRoute Route);
+
+public static class TranslationSessionTopologyPolicy
+{
+    public static TranslationInboundChannelPlan ResolveInbound(
+        TranslationSessionState state)
+    {
+        return state switch
+        {
+            TranslationSessionState.Disconnected => new(
+                ChannelState.Inactive,
+                InboundRoute.Stopped),
+            TranslationSessionState.Connecting
+                or TranslationSessionState.Created
+                or TranslationSessionState.Updating => new(
+                    ChannelState.Connecting,
+                    InboundRoute.Stopped),
+            TranslationSessionState.Connected
+                or TranslationSessionState.Closing
+                or TranslationSessionState.Closed => new(
+                    ChannelState.Connected,
+                    InboundRoute.Translated),
+            TranslationSessionState.Failed => new(
+                ChannelState.Failed,
+                InboundRoute.OriginalFailOpen),
+            _ => throw new ArgumentOutOfRangeException(nameof(state)),
+        };
+    }
+
+    public static TranslationOutboundChannelPlan ResolveOutbound(
+        TranslationSessionState state)
+    {
+        return state switch
+        {
+            TranslationSessionState.Disconnected => new(
+                ChannelState.Inactive,
+                OutboundRoute.Stopped),
+            TranslationSessionState.Connecting
+                or TranslationSessionState.Created
+                or TranslationSessionState.Updating => new(
+                    ChannelState.Connecting,
+                    OutboundRoute.Stopped),
+            TranslationSessionState.Connected
+                or TranslationSessionState.Closing
+                or TranslationSessionState.Closed => new(
+                    ChannelState.Connected,
+                    OutboundRoute.Translated),
+            TranslationSessionState.Failed => new(
+                ChannelState.Failed,
+                OutboundRoute.MutedFailClosed),
+            _ => throw new ArgumentOutOfRangeException(nameof(state)),
+        };
+    }
+}
 
 public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyncDisposable
 {
@@ -99,8 +178,10 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
     private Task? _closeTask;
     private Task? _audioStopTask;
     private Task? _shutdownTask;
+    private Task? _shutdownObservation;
     private int _pendingSendCount;
-    private int _released;
+    private int _managedResourcesReleased;
+    private int _transportReleased;
 
     public TranslationSession(Uri endpoint, TranslationSessionConfiguration configuration)
         : this(
@@ -322,6 +403,17 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
     internal int RetainedPcmByteCountForTest => _batcher.RetainedByteCount;
 
     internal int PendingSendCountForTest => Volatile.Read(ref _pendingSendCount);
+
+    internal Task? ShutdownTaskForTest
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _shutdownTask;
+            }
+        }
+    }
 
     private async Task ConnectCoreAsync()
     {
@@ -590,9 +682,18 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
                 .ConfigureAwait(false);
         if (sendError is not null)
         {
+            if (_audioToken.IsCancellationRequested
+                && cancellationToken.IsCancellationRequested
+                && sendError.Code == "translationSocket.sendCanceled")
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+
             Fail(sendError);
             throw new TranslationSessionException(sendError);
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task CloseCoreAsync()
@@ -642,6 +743,18 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
         _handshake.TrySetException(new TranslationSessionException(finalError));
         _remoteClosed.TrySetResult();
         await CancelLifetimeAsync().ConfigureAwait(false);
+        if (outcome.Completion == SessionCloseCompletion.CloseTimeout)
+        {
+            await AwaitReceiveLoopAsync().ConfigureAwait(false);
+            ReleaseTransport();
+            // A real transport is released after receive settles so disposal can
+            // interrupt in-flight I/O. A sender that ignores both cancellation
+            // and disposal may delay only managed-resource reclamation in the
+            // observed shutdown; it cannot delay public close past the deadline.
+            EnsureShutdownObserved(drainQueuedEvents: true);
+            throw new TranslationSessionException(finalError);
+        }
+
         await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
         await AwaitReceiveObservationAsync().ConfigureAwait(false);
         throw new TranslationSessionException(finalError);
@@ -757,7 +870,8 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
 
         if (State == TranslationSessionState.Failed)
         {
-            await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
+            await ObserveTaskAsync(
+                EnsureShutdownAsync(drainQueuedEvents: true)).ConfigureAwait(false);
         }
     }
 
@@ -784,6 +898,20 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
         }
     }
 
+    private async Task AwaitReceiveLoopAsync()
+    {
+        Task? receiveLoop;
+        lock (_sync)
+        {
+            receiveLoop = _receiveLoop;
+        }
+
+        if (receiveLoop is not null)
+        {
+            await receiveLoop.ConfigureAwait(false);
+        }
+    }
+
     private async Task StopAudioCoreAsync()
     {
         await _sendGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -804,6 +932,27 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
             _shutdownTask ??= ShutdownCoreAsync(drainQueuedEvents);
             return _shutdownTask;
         }
+    }
+
+    private void EnsureShutdownObserved(bool drainQueuedEvents)
+    {
+        Task shutdown = EnsureShutdownAsync(drainQueuedEvents);
+        lock (_sync)
+        {
+            _shutdownObservation ??= ObserveTaskAsync(shutdown);
+        }
+    }
+
+    private static Task ObserveTaskAsync(Task task)
+    {
+        return task.ContinueWith(
+            static completed =>
+            {
+                _ = completed.Exception;
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private async Task ShutdownCoreAsync(bool drainQueuedEvents)
@@ -861,15 +1010,23 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
 
     private void ReleaseResources()
     {
-        if (Interlocked.Exchange(ref _released, 1) != 0)
+        ReleaseTransport();
+        if (Interlocked.Exchange(ref _managedResourcesReleased, 1) != 0)
         {
             return;
         }
 
-        _transport.Dispose();
         _audioCancellation.Dispose();
         _lifetime.Dispose();
         _sendGate.Dispose();
+    }
+
+    private void ReleaseTransport()
+    {
+        if (Interlocked.Exchange(ref _transportReleased, 1) == 0)
+        {
+            _transport.Dispose();
+        }
     }
 
     private static RuntimeError Error(ErrorCategory category, string code)

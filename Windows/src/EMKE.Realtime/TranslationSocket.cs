@@ -153,8 +153,9 @@ public sealed class TranslationSocket : ITranslationTransport
         LanguageCode targetLanguage,
         CancellationToken cancellationToken)
     {
-        return SendTextAsync(
+        return SendClientEventAsync(
             TranslationEventCodec.EncodeSessionUpdate(targetLanguage),
+            WebSocketMessageType.Text,
             cancellationToken);
     }
 
@@ -165,8 +166,9 @@ public sealed class TranslationSocket : ITranslationTransport
         ObjectDisposedException.ThrowIf(_disposed, this);
         try
         {
-            return SendTextAsync(
+            return SendClientEventAsync(
                 TranslationEventCodec.EncodeAudioAppend(pcm16),
+                WebSocketMessageType.Text,
                 cancellationToken);
         }
         catch (ArgumentException)
@@ -186,8 +188,9 @@ public sealed class TranslationSocket : ITranslationTransport
     public ValueTask<RuntimeError?> SendSessionCloseAsync(
         CancellationToken cancellationToken)
     {
-        return SendTextAsync(
+        return SendClientEventAsync(
             TranslationEventCodec.EncodeSessionClose(),
+            WebSocketMessageType.Text,
             cancellationToken);
     }
 
@@ -291,13 +294,13 @@ public sealed class TranslationSocket : ITranslationTransport
         _adapter.Dispose();
     }
 
-    private async ValueTask<RuntimeError?> SendTextAsync(
+    internal async ValueTask<RuntimeError?> SendClientEventAsync(
         ReadOnlyMemory<byte> payload,
+        WebSocketMessageType messageType,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        RuntimeError? frameError =
-            TranslationClientFramePolicy.Validate(WebSocketMessageType.Text);
+        RuntimeError? frameError = TranslationClientFramePolicy.Validate(messageType);
         if (frameError is not null)
         {
             return frameError;
@@ -307,7 +310,7 @@ public sealed class TranslationSocket : ITranslationTransport
         {
             await _adapter.SendAsync(
                 payload,
-                WebSocketMessageType.Text,
+                messageType,
                 endOfMessage: true,
                 cancellationToken).ConfigureAwait(false);
             return null;
