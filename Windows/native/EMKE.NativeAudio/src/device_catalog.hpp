@@ -186,6 +186,7 @@ enum class EndpointDiscoveryStatus : std::uint8_t {
 
 struct EndpointDiscoveryResult {
   EndpointDiscoveryStatus status = EndpointDiscoveryStatus::sourceError;
+  bool virtual_endpoints_ready = false;
   std::array<DeviceEndpoint, 4u> virtual_endpoints{};
   std::u16string default_physical_input_id;
   std::u16string default_physical_output_id;

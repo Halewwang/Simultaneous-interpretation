@@ -7,9 +7,18 @@
 #include <cstdlib>
 #include <iostream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -27,8 +36,8 @@ enum class Scenario {
 struct Options {
   Scenario scenario = Scenario::enumerate;
   std::uint32_t seconds = 10u;
-  std::string_view physical_input_override;
-  std::string_view physical_output_override;
+  std::u16string physical_input_override;
+  std::u16string physical_output_override;
 };
 
 constexpr std::string_view status_name(std::uint32_t status) noexcept {
@@ -87,6 +96,56 @@ bool parse_seconds(std::string_view value, std::uint32_t& result) noexcept {
   return true;
 }
 
+bool utf8_to_utf16(std::string_view source, std::u16string& destination) {
+  destination.clear();
+  for (std::size_t index = 0u; index < source.size();) {
+    const std::uint8_t first = static_cast<std::uint8_t>(source[index++]);
+    std::uint32_t code_point = 0u;
+    std::size_t continuation_count = 0u;
+    if (first <= 0x7fu) {
+      code_point = first;
+    } else if ((first & 0xe0u) == 0xc0u) {
+      code_point = first & 0x1fu;
+      continuation_count = 1u;
+    } else if ((first & 0xf0u) == 0xe0u) {
+      code_point = first & 0x0fu;
+      continuation_count = 2u;
+    } else if ((first & 0xf8u) == 0xf0u) {
+      code_point = first & 0x07u;
+      continuation_count = 3u;
+    } else {
+      return false;
+    }
+    if (index + continuation_count > source.size()) {
+      return false;
+    }
+    for (std::size_t continuation = 0u;
+         continuation < continuation_count;
+         ++continuation) {
+      const std::uint8_t value = static_cast<std::uint8_t>(source[index++]);
+      if ((value & 0xc0u) != 0x80u) {
+        return false;
+      }
+      code_point = (code_point << 6u) | (value & 0x3fu);
+    }
+    if ((continuation_count == 1u && code_point < 0x80u) ||
+        (continuation_count == 2u && code_point < 0x800u) ||
+        (continuation_count == 3u && code_point < 0x10000u) ||
+        (code_point >= 0xd800u && code_point <= 0xdfffu) ||
+        code_point > 0x10ffffu || code_point == 0u) {
+      return false;
+    }
+    if (code_point <= 0xffffu) {
+      destination.push_back(static_cast<char16_t>(code_point));
+    } else {
+      const std::uint32_t value = code_point - 0x10000u;
+      destination.push_back(static_cast<char16_t>(0xd800u + (value >> 10u)));
+      destination.push_back(static_cast<char16_t>(0xdc00u + (value & 0x3ffu)));
+    }
+  }
+  return !destination.empty();
+}
+
 bool parse_options(int argc, char** argv, Options& options) noexcept {
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument = argv[index];
@@ -103,9 +162,13 @@ bool parse_options(int argc, char** argv, Options& options) noexcept {
         return false;
       }
     } else if (argument == "--physical-input") {
-      options.physical_input_override = value;
+      if (!utf8_to_utf16(value, options.physical_input_override)) {
+        return false;
+      }
     } else if (argument == "--physical-output") {
-      options.physical_output_override = value;
+      if (!utf8_to_utf16(value, options.physical_output_override)) {
+        return false;
+      }
     } else {
       return false;
     }
@@ -113,18 +176,17 @@ bool parse_options(int argc, char** argv, Options& options) noexcept {
   return true;
 }
 
-bool copy_ascii_endpoint_id(
-    std::string_view source,
+bool copy_endpoint_id(
+    std::u16string_view source,
     std::uint16_t* destination) noexcept {
   if (source.empty() || source.size() >= EMKE_AUDIO_ENDPOINT_ID_CAPACITY) {
     return false;
   }
   for (std::size_t index = 0u; index < source.size(); ++index) {
-    const unsigned char character = static_cast<unsigned char>(source[index]);
-    if (character > 0x7fu) {
+    if (source[index] == u'\0') {
       return false;
     }
-    destination[index] = character;
+    destination[index] = static_cast<std::uint16_t>(source[index]);
   }
   destination[source.size()] = 0u;
   return true;
@@ -154,7 +216,7 @@ bool config_from_snapshot(
                                         snapshot.physical_input_endpoint_id,
                                         snapshot.physical_input_endpoint_id_length,
                                         config.physical_input_endpoint_id)
-                                  : copy_ascii_endpoint_id(
+                                  : copy_endpoint_id(
                                         options.physical_input_override,
                                         config.physical_input_endpoint_id);
   const bool physical_output = options.physical_output_override.empty()
@@ -162,7 +224,7 @@ bool config_from_snapshot(
                                          snapshot.physical_output_endpoint_id,
                                          snapshot.physical_output_endpoint_id_length,
                                          config.physical_output_endpoint_id)
-                                   : copy_ascii_endpoint_id(
+                                   : copy_endpoint_id(
                                          options.physical_output_override,
                                          config.physical_output_endpoint_id);
   return physical_input && physical_output &&
@@ -296,7 +358,7 @@ int run_audio_scenario(const Options& options,
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int run_main(int argc, char** argv) {
   Options options;
   if (!parse_options(argc, argv, options)) {
     std::cerr << "usage: EMKE.AudioSmoke --scenario <name> [--seconds 1..600] "
@@ -312,14 +374,62 @@ int main(int argc, char** argv) {
     return 5;
   }
   std::cout << "discovery=" << status_name(snapshot.discovery_status) << '\n';
-  if (snapshot.discovery_status != EMKE_AUDIO_ENDPOINT_DISCOVERY_READY) {
-    return snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING
-               ? 3
-               : 4;
+  if (snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING) {
+    return 3;
+  }
+  if (snapshot.discovery_status ==
+          EMKE_AUDIO_ENDPOINT_DISCOVERY_VIRTUAL_ENDPOINTS_PARTIAL ||
+      snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR) {
+    return 4;
+  }
+  if (snapshot.discovery_status ==
+          EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING &&
+      options.physical_input_override.empty()) {
+    return 4;
+  }
+  if (snapshot.discovery_status ==
+          EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_OUTPUT_MISSING &&
+      options.physical_output_override.empty()) {
+    return 4;
   }
   if (options.scenario == Scenario::enumerate) {
+    if (snapshot.discovery_status != EMKE_AUDIO_ENDPOINT_DISCOVERY_READY) {
+      return 4;
+    }
     std::cout << "result=ready\n";
     return 0;
   }
   return run_audio_scenario(options, snapshot);
 }
+
+#if !defined(EMKE_AUDIO_SMOKE_NO_ENTRYPOINT) && defined(_WIN32)
+int wmain(int argc, wchar_t** argv) {
+  std::vector<std::string> utf8_arguments;
+  utf8_arguments.reserve(static_cast<std::size_t>(argc));
+  for (int index = 0; index < argc; ++index) {
+    const int required = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, argv[index], -1, nullptr, 0, nullptr,
+        nullptr);
+    if (required <= 0) {
+      return 2;
+    }
+    std::string converted(static_cast<std::size_t>(required), '\0');
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, argv[index], -1,
+                            converted.data(), required, nullptr, nullptr) <= 0) {
+      return 2;
+    }
+    converted.resize(static_cast<std::size_t>(required - 1));
+    utf8_arguments.push_back(std::move(converted));
+  }
+  std::vector<char*> narrow_arguments;
+  narrow_arguments.reserve(utf8_arguments.size());
+  for (std::string& argument : utf8_arguments) {
+    narrow_arguments.push_back(argument.data());
+  }
+  return run_main(argc, narrow_arguments.data());
+}
+#elif !defined(EMKE_AUDIO_SMOKE_NO_ENTRYPOINT)
+int main(int argc, char** argv) {
+  return run_main(argc, argv);
+}
+#endif

@@ -605,6 +605,7 @@ EndpointDiscoveryResult discover_endpoints(DeviceCatalog& catalog) noexcept {
             endpoint;
       }
     }
+    result.virtual_endpoints_ready = true;
 
     const PhysicalEndpointSelection output_selection{
         .mode = PhysicalEndpointMode::followDefault,

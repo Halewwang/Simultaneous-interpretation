@@ -2,6 +2,7 @@ add_library(EMKE.NativeAudio SHARED
   src/audio_runtime.cpp
   src/audio_worker.cpp
   src/device_catalog.cpp
+  src/endpoint_snapshot.cpp
   src/device_notifications.cpp
   src/fake_audio_backend.cpp
   src/native_audio_api.cpp

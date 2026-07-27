@@ -6,6 +6,7 @@ set(
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp
   ../EMKE.NativeAudio/src/device_catalog.cpp
+  ../EMKE.NativeAudio/src/endpoint_snapshot.cpp
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
   ../EMKE.NativeAudio/src/native_audio_api.cpp
 )
@@ -19,6 +20,32 @@ target_include_directories(EMKE.NativeAudio.IntegrationHost
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
 )
 target_compile_features(EMKE.NativeAudio.IntegrationHost PUBLIC cxx_std_20)
+if(WIN32)
+  # IntegrationHost now owns real MMDevice/C ABI discovery objects, so it must
+  # link the same Windows system libraries as the production DLL.
+  target_link_libraries(EMKE.NativeAudio.IntegrationHost PRIVATE
+    ole32
+    propsys
+    winmm
+  )
+  get_target_property(
+    EMKE_NATIVE_AUDIO_INTEGRATION_HOST_LINK_LIBRARIES
+    EMKE.NativeAudio.IntegrationHost
+    LINK_LIBRARIES
+  )
+  foreach(EMKE_NATIVE_AUDIO_REQUIRED_LIBRARY IN ITEMS ole32 propsys winmm)
+    list(FIND
+      EMKE_NATIVE_AUDIO_INTEGRATION_HOST_LINK_LIBRARIES
+      ${EMKE_NATIVE_AUDIO_REQUIRED_LIBRARY}
+      EMKE_NATIVE_AUDIO_REQUIRED_LIBRARY_INDEX
+    )
+    if(EMKE_NATIVE_AUDIO_REQUIRED_LIBRARY_INDEX EQUAL -1)
+      message(FATAL_ERROR
+        "EMKE.NativeAudio.IntegrationHost must link ${EMKE_NATIVE_AUDIO_REQUIRED_LIBRARY}."
+      )
+    endif()
+  endforeach()
+endif()
 set_target_properties(EMKE.NativeAudio.IntegrationHost PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES
@@ -29,6 +56,7 @@ set_target_properties(EMKE.NativeAudio.IntegrationHost PROPERTIES
 
 add_executable(EMKE.NativeAudio.Tests
   ../EMKE.NativeAudio/src/device_catalog.cpp
+  ../EMKE.NativeAudio/src/endpoint_snapshot.cpp
   ../EMKE.NativeAudio/src/device_notifications.cpp
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
   ../EMKE.NativeAudio/src/pcm_converter.cpp
@@ -37,6 +65,7 @@ add_executable(EMKE.NativeAudio.Tests
   src/abi_tests.cpp
   src/audio_worker_tests.cpp
   src/device_catalog_tests.cpp
+  src/endpoint_snapshot_tests.cpp
   src/pcm_converter_tests.cpp
   src/spsc_ring_tests.cpp
   src/test_main.cpp

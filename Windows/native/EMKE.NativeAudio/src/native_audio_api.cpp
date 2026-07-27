@@ -2,6 +2,7 @@
 
 #include "audio_runtime.hpp"
 #include "device_catalog.hpp"
+#include "endpoint_snapshot.hpp"
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -43,73 +44,6 @@ emke_audio_status validate_abi_struct(const Struct* value) {
 std::span<const std::int16_t> input_pcm_span(const std::int16_t* pcm16,
                                              std::uint32_t frame_count) {
   return {pcm16, static_cast<std::size_t>(frame_count)};
-}
-
-std::uint32_t public_discovery_status(
-    emke::audio::EndpointDiscoveryStatus status) noexcept {
-  using emke::audio::EndpointDiscoveryStatus;
-  switch (status) {
-    case EndpointDiscoveryStatus::ready:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_READY;
-    case EndpointDiscoveryStatus::driverMissing:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING;
-    case EndpointDiscoveryStatus::virtualEndpointsPartial:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_VIRTUAL_ENDPOINTS_PARTIAL;
-    case EndpointDiscoveryStatus::physicalInputMissing:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_INPUT_MISSING;
-    case EndpointDiscoveryStatus::physicalOutputMissing:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_PHYSICAL_OUTPUT_MISSING;
-    case EndpointDiscoveryStatus::sourceError:
-      return EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR;
-  }
-  return EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR;
-}
-
-std::uint32_t public_data_flow(emke::audio::DeviceDataFlow flow) noexcept {
-  return flow == emke::audio::DeviceDataFlow::render
-             ? EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER
-             : EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE;
-}
-
-bool copy_endpoint_id(
-    std::span<const char16_t> source,
-    std::uint16_t* destination,
-    std::uint32_t& out_length) noexcept {
-  if (source.size() >= EMKE_AUDIO_ENDPOINT_ID_CAPACITY) {
-    return false;
-  }
-  out_length = static_cast<std::uint32_t>(source.size());
-  for (std::size_t index = 0u; index < source.size(); ++index) {
-    destination[index] = static_cast<std::uint16_t>(source[index]);
-  }
-  destination[source.size()] = 0u;
-  return true;
-}
-
-bool write_discovered_endpoint(
-    emke_audio_discovered_endpoint& destination,
-    const emke::audio::DeviceEndpoint& source,
-    std::uint32_t role) noexcept {
-  destination = {};
-  destination.size = sizeof(destination);
-  destination.abi_version = EMKE_AUDIO_ABI_VERSION;
-  destination.role = role;
-  destination.data_flow = public_data_flow(source.data_flow);
-  destination.state = source.state;
-  return copy_endpoint_id(
-      source.id,
-      destination.endpoint_id,
-      destination.endpoint_id_length);
-}
-
-void write_source_error(
-    emke_audio_endpoint_snapshot& snapshot,
-    const std::optional<emke::audio::DeviceCatalogError>& error) noexcept {
-  snapshot.discovery_status = EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR;
-  if (error.has_value()) {
-    snapshot.source_operation = static_cast<std::uint32_t>(error->operation);
-    snapshot.source_native_code = error->native_code;
-  }
 }
 
 #if defined(_WIN32)
@@ -325,12 +259,15 @@ EMKE_AUDIO_API emke_audio_status emke_audio_discover_endpoints(
 #if defined(_WIN32)
     const ScopedComApartment com;
     if (!com.usable()) {
-      write_source_error(
-          *out_snapshot,
-          emke::audio::DeviceCatalogError{
-              .operation = emke::audio::DeviceCatalogOperation::createEnumerator,
-              .native_code = com.error_code(),
-          });
+      (void)emke::audio::write_endpoint_snapshot(
+          emke::audio::EndpointDiscoveryResult{
+              .status = emke::audio::EndpointDiscoveryStatus::sourceError,
+              .error = emke::audio::DeviceCatalogError{
+                  .operation = emke::audio::DeviceCatalogOperation::createEnumerator,
+                  .native_code = com.error_code(),
+              },
+          },
+          *out_snapshot);
       return EMKE_AUDIO_OK;
     }
 #endif
@@ -339,51 +276,27 @@ EMKE_AUDIO_API emke_audio_status emke_audio_discover_endpoints(
     std::unique_ptr<emke::audio::DeviceSource> source =
         emke::audio::create_mm_device_source(creation_error);
     if (source == nullptr) {
-      write_source_error(*out_snapshot, creation_error);
+      (void)emke::audio::write_endpoint_snapshot(
+          emke::audio::EndpointDiscoveryResult{
+              .status = emke::audio::EndpointDiscoveryStatus::sourceError,
+              .error = creation_error,
+          },
+          *out_snapshot);
       return EMKE_AUDIO_OK;
     }
 
     emke::audio::DeviceCatalog catalog(*source);
     const emke::audio::EndpointDiscoveryResult result =
         emke::audio::discover_endpoints(catalog);
-    out_snapshot->discovery_status = public_discovery_status(result.status);
-    if (result.status == emke::audio::EndpointDiscoveryStatus::sourceError) {
-      write_source_error(*out_snapshot, result.error);
-      return EMKE_AUDIO_OK;
-    }
-    if (result.status != emke::audio::EndpointDiscoveryStatus::ready) {
-      return EMKE_AUDIO_OK;
-    }
-
-    for (std::size_t index = 0u;
-         index < EMKE_AUDIO_DISCOVERED_ENDPOINT_COUNT;
-         ++index) {
-      if (!write_discovered_endpoint(
-              out_snapshot->virtual_endpoints[index],
-              result.virtual_endpoints[index],
-              static_cast<std::uint32_t>(index))) {
-        write_source_error(*out_snapshot, std::nullopt);
-        return EMKE_AUDIO_OK;
-      }
-    }
-    if (!copy_endpoint_id(
-            result.default_physical_input_id,
-            out_snapshot->physical_input_endpoint_id,
-            out_snapshot->physical_input_endpoint_id_length) ||
-        !copy_endpoint_id(
-            result.default_physical_output_id,
-            out_snapshot->physical_output_endpoint_id,
-            out_snapshot->physical_output_endpoint_id_length)) {
-      write_source_error(*out_snapshot, std::nullopt);
-      return EMKE_AUDIO_OK;
-    }
+    (void)emke::audio::write_endpoint_snapshot(result, *out_snapshot);
     return EMKE_AUDIO_OK;
   } catch (...) {
     if (out_snapshot != nullptr) {
       *out_snapshot = {};
       out_snapshot->size = sizeof(*out_snapshot);
       out_snapshot->abi_version = EMKE_AUDIO_ABI_VERSION;
-      write_source_error(*out_snapshot, std::nullopt);
+      (void)emke::audio::write_endpoint_snapshot(
+          emke::audio::EndpointDiscoveryResult{}, *out_snapshot);
     }
     return EMKE_AUDIO_OK;
   }

@@ -20,6 +20,7 @@ struct RegisteredTest {
 int run_spsc_ring_tests();
 int run_pcm_converter_tests();
 int run_device_catalog_tests();
+int run_endpoint_snapshot_tests();
 int run_audio_lifecycle_tests();
 int run_audio_worker_tests();
 int run_realtime_tests();
@@ -279,6 +280,43 @@ void test_public_abi_layout(TestContext& context) {
   EXPECT(context,
          std::is_standard_layout_v<emke_audio_discovered_endpoint>,
          name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, role) == 8u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, data_flow) == 12u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, state) == 16u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, endpoint_id_length) == 20u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, endpoint_id) == 24u,
+         name);
+  EXPECT(context, sizeof(emke_audio_discovered_endpoint) == 1'048u, name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, discovery_status) == 8u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, source_operation) == 12u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, source_native_code) == 16u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, virtual_endpoints) == 24u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, physical_input_endpoint_id_length) ==
+             4'216u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, physical_output_endpoint_id_length) ==
+             5'244u,
+         name);
+  EXPECT(context, sizeof(emke_audio_endpoint_snapshot) == 6'272u, name);
   EXPECT(context,
          (std::is_same_v<decltype(&emke_audio_discover_endpoints),
                          DiscoverFunction>),
@@ -847,6 +885,9 @@ std::span<const RegisteredTest> registered_tests() {
       RegisteredTest{
           "Device", "MMDevice catalog and notifications",
           &run_device_catalog_tests},
+      RegisteredTest{
+          "EndpointSnapshot", "bounded public endpoint snapshot",
+          &run_endpoint_snapshot_tests},
       RegisteredTest{
           "Lifecycle", "bounded native audio lifecycle",
           &run_audio_lifecycle_tests},
