@@ -442,16 +442,13 @@ public release occurred in fix round 1.
 
 ### Controller follow-up: cross-compiler shim correction
 
-Controller review flagged that the new CMake kernel boundary must compile its
-test-only `ntddk.h` under real MSVC and therefore cannot expose a
-Clang/GCC-only `__SIZE_TYPE__` token to that compiler.
-
-Inspection of commit `b88f43c73aec83b90a2ce3269e701002fbd210e1`
-showed that its `SIZE_T` was already expressed as `decltype(sizeof(0))`, not
-`__SIZE_TYPE__`. A narrower compiled type-width test nevertheless found a real
-cross-ABI defect: on the local LP64 host, the shim's `long` and
-`unsigned long` aliases were 8 bytes rather than the Windows 4-byte
-`LONG`/`ULONG` contract.
+Controller review correctly required the new CMake kernel boundary's test-only
+`SIZE_T` definition to be unambiguously valid under real MSVC rather than
+depending on a Clang/GCC-only builtin or host-dependent type inference. The
+correction makes that compiler boundary explicit. A narrower compiled
+type-width test simultaneously found another real cross-ABI defect: on the
+local LP64 host, the shim's `long` and `unsigned long` aliases were 8 bytes
+rather than the Windows 4-byte `LONG`/`ULONG` contract.
 
 The test was added first:
 
