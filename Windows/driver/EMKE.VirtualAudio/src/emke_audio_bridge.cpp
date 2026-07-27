@@ -126,7 +126,7 @@ void initialize_bridge(EmkeAudioBridge* bridge) noexcept {
   atomic_store_32(&bridge->access_state, bridge_reset_active);
   atomic_store_64(&bridge->read_frame, 0);
   atomic_store_64(&bridge->write_frame, 0);
-  for (std::size_t index = 0;
+  for (EmkeSize index = 0;
        index < EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES * EMKE_AUDIO_CHANNEL_COUNT;
        ++index) {
     bridge->samples[index] = 0.0f;
@@ -146,11 +146,11 @@ void EmkeAudioBridgeInitialize(EmkeAudioBridgeSet* bridges) noexcept {
   initialize_bridge(&bridges->app_microphone_to_meeting_capture);
 }
 
-std::size_t EmkeAudioBridgeWrite(
+EmkeSize EmkeAudioBridgeWrite(
     EmkeAudioBridgeSet* bridges,
     EmkeBridgeEndpoint endpoint,
     const float* samples,
-    std::size_t frame_count) noexcept {
+    EmkeSize frame_count) noexcept {
   EmkeAudioBridge* bridge = bridge_for_endpoint(bridges, endpoint);
   if (bridge == nullptr || !is_render_producer(endpoint) ||
       samples == nullptr || frame_count == 0u ||
@@ -172,16 +172,16 @@ std::size_t EmkeAudioBridgeWrite(
     return 0u;
   }
 
-  const std::size_t available_frames =
+  const EmkeSize available_frames =
       EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES -
-      static_cast<std::size_t>(used_frames);
-  const std::size_t accepted_frames =
+      static_cast<EmkeSize>(used_frames);
+  const EmkeSize accepted_frames =
       frame_count < available_frames ? frame_count : available_frames;
-  for (std::size_t frame = 0; frame < accepted_frames; ++frame) {
-    const std::size_t destination_frame =
-        (static_cast<std::size_t>(write_frame) + frame) %
+  for (EmkeSize frame = 0; frame < accepted_frames; ++frame) {
+    const EmkeSize destination_frame =
+        (static_cast<EmkeSize>(write_frame) + frame) %
         EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES;
-    for (std::size_t channel = 0; channel < EMKE_AUDIO_CHANNEL_COUNT;
+    for (EmkeSize channel = 0; channel < EMKE_AUDIO_CHANNEL_COUNT;
          ++channel) {
       bridge->samples[
           destination_frame * EMKE_AUDIO_CHANNEL_COUNT + channel] =
@@ -198,15 +198,15 @@ std::size_t EmkeAudioBridgeWrite(
   return accepted_frames;
 }
 
-std::size_t EmkeAudioBridgeRead(
+EmkeSize EmkeAudioBridgeRead(
     EmkeAudioBridgeSet* bridges,
     EmkeBridgeEndpoint endpoint,
     float* samples,
-    std::size_t frame_count) noexcept {
+    EmkeSize frame_count) noexcept {
   if (samples == nullptr) {
     return 0u;
   }
-  for (std::size_t index = 0;
+  for (EmkeSize index = 0;
        index < frame_count * EMKE_AUDIO_CHANNEL_COUNT;
        ++index) {
     samples[index] = 0.0f;
@@ -233,15 +233,15 @@ std::size_t EmkeAudioBridgeRead(
     return 0u;
   }
 
-  const std::size_t delivered_frames =
-      frame_count < static_cast<std::size_t>(available)
+  const EmkeSize delivered_frames =
+      frame_count < static_cast<EmkeSize>(available)
       ? frame_count
-      : static_cast<std::size_t>(available);
-  for (std::size_t frame = 0; frame < delivered_frames; ++frame) {
-    const std::size_t source_frame =
-        (static_cast<std::size_t>(read_frame) + frame) %
+      : static_cast<EmkeSize>(available);
+  for (EmkeSize frame = 0; frame < delivered_frames; ++frame) {
+    const EmkeSize source_frame =
+        (static_cast<EmkeSize>(read_frame) + frame) %
         EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES;
-    for (std::size_t channel = 0; channel < EMKE_AUDIO_CHANNEL_COUNT;
+    for (EmkeSize channel = 0; channel < EMKE_AUDIO_CHANNEL_COUNT;
          ++channel) {
       samples[frame * EMKE_AUDIO_CHANNEL_COUNT + channel] =
           bridge->samples[

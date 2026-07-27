@@ -20,6 +20,7 @@ Abstract:
 #define PUT_GUIDS_HERE
 
 #include "definitions.h"
+#include "emke_audio_bridge.h"
 #include "endpoints.h"
 #include "minipairs.h"
 

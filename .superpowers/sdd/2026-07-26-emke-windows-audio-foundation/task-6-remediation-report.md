@@ -306,3 +306,136 @@ acceptance remain pending even if the hosted build passes.
 No signing, driver installation, driver loading, driver removal, administrator
 elevation, secret creation/use, self-hosted runner, public GitHub Release, push,
 or public publication occurred during this remediation.
+
+## Remediation cycle 2 — fix round 1
+
+### Remote RED
+
+Authorized GitHub Actions run `30230340453` tested report commit
+`7c3d38de59e44e582113c42123d22893289ce28f`.
+
+- `hosted-toolchain-proof`, job `89867894383`: passed.
+- `driver-build-proof`, job `89867894346`: failed during WDK C++ compilation,
+  before link/package/catalog verification.
+- MSBuild summary: `20 Warning(s)`, `42 Error(s)`.
+- `adapter.cpp:641` failed because `g_EmkeAudioBridges` and
+  `EmkeAudioBridgeInitialize` were undeclared at their use.
+- `emke_audio_bridge.h` unconditionally included `<cstddef>` and `<cstdint>`.
+  Under WDK `/kernel /W4 /WX`, that pulled user-mode Visual C++ runtime headers
+  into the kernel CRT include environment, produced macro-redefinition
+  warnings promoted to errors, and left `std::size_t` unavailable.
+
+This is a source defect, not a hosted-toolchain failure. Microsoft documents
+that `/kernel` predefines `_KERNEL_MODE=1`, which is the boundary used by the
+fix:
+<https://learn.microsoft.com/en-us/cpp/build/reference/kernel-create-kernel-mode-binary?view=msvc-170>.
+
+### Root cause and minimal production fix
+
+- `adapter.cpp` used the bridge global/function without directly including
+  `emke_audio_bridge.h`; the existing miniport include graph did not provide
+  that declaration.
+- The bridge header/source exposed user-mode standard-library types in every
+  build mode. The kernel branch now uses only WDK-native `SIZE_T`, `ULONG`,
+  `LONG`, and `LONGLONG`. The portable branch retains `<cstddef>`, `<cstdint>`,
+  and `std::*` types.
+- The bridge implementation now uses the cross-mode `EmkeSize` alias rather
+  than `std::size_t`, so no standard namespace appears in the kernel-compiled
+  implementation.
+- No bridge routing, capacity, overrun, underrun, reset, format, package,
+  catalog, signing, or installation behavior changed.
+
+### TDD RED: kernel include boundary
+
+Before the production change, four test shim headers were added:
+
+- `Windows/driver/tests/kernel-compile-shim/ntddk.h`
+- `Windows/driver/tests/kernel-compile-shim/devpropdef.h`
+- `Windows/driver/tests/kernel-compile-shim/cstddef`
+- `Windows/driver/tests/kernel-compile-shim/cstdint`
+
+The two standard-header shims fail compilation if the kernel bridge reaches
+user-mode `<cstddef>` or `<cstdint>`.
+
+Command:
+
+```text
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  -D_WIN32 -D_KERNEL_MODE \
+  -I Windows/driver/tests/kernel-compile-shim \
+  -I Windows/shared \
+  -I Windows/driver/EMKE.VirtualAudio/src \
+  -c Windows/driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp \
+  -o /tmp/emke-kernel-bridge.o
+```
+
+Expected RED:
+
+```text
+kernel-compile-shim/cstddef: error: kernel bridge compilation must not include
+the user-mode C++ cstddef header
+kernel-compile-shim/cstdint: error: kernel bridge compilation must not include
+the user-mode C++ cstdint header
+emke_audio_bridge.h: error: use of undeclared identifier 'std'
+20 errors generated.
+```
+
+### GREEN and regression boundary
+
+The same kernel-shaped compile command now exits `0` with no output.
+
+`EMKE.DriverBridge.KernelBoundary` was added to native CMake. It recompiles the
+production bridge with `_WIN32`, `_KERNEL_MODE`, the rejecting shims, and
+`/W4 /WX` on MSVC (`-Wall -Wextra -Werror` elsewhere). The actual WDK
+`/kernel` build remains authoritative.
+
+The static driver-contract suite additionally requires:
+
+- an explicit standard-library-free `_KERNEL_MODE` branch;
+- no `std::` use in `emke_audio_bridge.cpp`;
+- a direct bridge include at the adapter use site.
+
+The portable compiled behavior test remains intact:
+
+```text
+EMKE driver bridge behavior tests passed (6 cases).
+```
+
+### Fresh local verification after fix round 1
+
+```text
+kernel-shaped production bridge compile
+  PASS: exit 0, no output
+
+portable production bridge behavior executable
+  PASS: 6 cases
+
+driver/package Node suites
+  PASS: 18 tests, 18 pass, 0 fail
+
+shared contracts
+  PASS: contract v1: 3 schemas, 8 fixtures
+
+portable device_catalog compile
+  PASS: exit 0
+
+driver project XML
+  PASS: xmllint exit 0
+
+git diff --check
+  PASS: no output
+```
+
+`cmake`, `pwsh`, MSVC, and WDK remain unavailable on this macOS host. The
+fix-round commit SHA is supplied in the controller handoff because a commit
+cannot embed its own SHA.
+
+### Remaining remote gate and safety boundary
+
+A new controller-pushed run must prove the pinned Release x64 WDK build passes
+the prior compiler boundary and then continue through Universal ApiValidator,
+stamped INF/SYS staging, Inf2Cat, exact catalog membership, mutation rejection,
+and private seven-day artifact upload. No such success is claimed locally.
+
+No signing, installation, loading, removal, elevation, secret use, push, or
+public release occurred in fix round 1.

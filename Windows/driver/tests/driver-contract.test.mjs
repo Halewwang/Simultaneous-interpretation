@@ -150,6 +150,22 @@ test("WaveRT tables and stream movement use the compiled Float32 bridge contract
   assert.doesNotMatch(stream, /GenerateSine|SaveData|WriteData/);
 });
 
+test("kernel bridge boundary excludes user-mode C++ headers and is declared at adapter use", async () => {
+  const bridgeHeader = await text("src/emke_audio_bridge.h");
+  const bridgeSource = await text("src/emke_audio_bridge.cpp");
+  const adapter = await text("src/adapter.cpp");
+  const kernelBranch = bridgeHeader.match(
+    /#if defined\(_KERNEL_MODE\)(?<body>[\s\S]*?)#else/,
+  )?.groups?.body;
+
+  assert.ok(kernelBranch, "bridge header must define an explicit kernel branch");
+  assert.doesNotMatch(kernelBranch, /#include\s*</);
+  assert.doesNotMatch(kernelBranch, /\bstd::/);
+  assert.match(kernelBranch, /using EmkeSize = SIZE_T;/);
+  assert.doesNotMatch(bridgeSource, /\bstd::/);
+  assert.match(adapter, /#include "emke_audio_bridge\.h"/);
+});
+
 test("build script is Release x64 only, uses MSBuild and Inf2Cat, and never installs", async () => {
   const script = await readFile(path.join(toolsDirectory, "build-driver.ps1"), "utf8");
   assert.match(script, /MSBuild\.exe/);

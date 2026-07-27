@@ -3,11 +3,17 @@
 
 #include "emke_endpoint_contract.h"
 
+#if defined(_KERNEL_MODE)
+using EmkeSize = SIZE_T;
+using EmkeUInt32 = ULONG;
+using EmkeAtomic32 = LONG;
+using EmkeAtomic64 = LONGLONG;
+#else
 #include <cstddef>
 #include <cstdint>
 
-#define EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES 4800u
-
+using EmkeSize = std::size_t;
+using EmkeUInt32 = std::uint32_t;
 #if defined(_MSC_VER)
 using EmkeAtomic32 = long;
 using EmkeAtomic64 = __int64;
@@ -15,8 +21,11 @@ using EmkeAtomic64 = __int64;
 using EmkeAtomic32 = std::int32_t;
 using EmkeAtomic64 = std::int64_t;
 #endif
+#endif
 
-enum class EmkeBridgeEndpoint : std::uint32_t {
+#define EMKE_AUDIO_BRIDGE_CAPACITY_FRAMES 4800u
+
+enum class EmkeBridgeEndpoint : EmkeUInt32 {
   meetingSpeakerRender = 0u,
   appSpeakerCapture = 1u,
   appMicrophoneRender = 2u,
@@ -39,17 +48,17 @@ extern EmkeAudioBridgeSet g_EmkeAudioBridges;
 
 void EmkeAudioBridgeInitialize(EmkeAudioBridgeSet* bridges) noexcept;
 
-std::size_t EmkeAudioBridgeWrite(
+EmkeSize EmkeAudioBridgeWrite(
     EmkeAudioBridgeSet* bridges,
     EmkeBridgeEndpoint endpoint,
     const float* samples,
-    std::size_t frame_count) noexcept;
+    EmkeSize frame_count) noexcept;
 
-std::size_t EmkeAudioBridgeRead(
+EmkeSize EmkeAudioBridgeRead(
     EmkeAudioBridgeSet* bridges,
     EmkeBridgeEndpoint endpoint,
     float* samples,
-    std::size_t frame_count) noexcept;
+    EmkeSize frame_count) noexcept;
 
 void EmkeAudioBridgeReset(
     EmkeAudioBridgeSet* bridges,

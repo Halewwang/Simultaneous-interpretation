@@ -130,3 +130,28 @@ add_test(
   NAME EMKE.DriverBridge.Behavior
   COMMAND EMKE.DriverBridge.Tests
 )
+
+# Compile the production bridge through a kernel-shaped include boundary that
+# rejects user-mode C++ standard headers. The WDK driver build remains the
+# authoritative /kernel proof; this target catches the same include regression
+# earlier in the native build.
+add_library(EMKE.DriverBridge.KernelBoundary OBJECT
+  ../../driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp
+)
+target_include_directories(EMKE.DriverBridge.KernelBoundary PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/tests/kernel-compile-shim"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/EMKE.VirtualAudio/src"
+)
+target_compile_definitions(EMKE.DriverBridge.KernelBoundary PRIVATE
+  _WIN32
+  _KERNEL_MODE
+)
+target_compile_features(EMKE.DriverBridge.KernelBoundary PRIVATE cxx_std_17)
+if(MSVC)
+  target_compile_options(EMKE.DriverBridge.KernelBoundary PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    EMKE.DriverBridge.KernelBoundary PRIVATE -Wall -Wextra -Werror
+  )
+endif()
