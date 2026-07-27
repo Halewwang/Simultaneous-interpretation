@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using EMKE.Realtime;
 
 namespace EMKE.Contract.Tests;
@@ -230,6 +231,30 @@ public sealed class SharedFixtureTests
     {
         using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
         await RealtimeFixtureAdapter.ValidateHandshakeAsync(fixture.RootElement)
+            .ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
+    [TestCategory("Realtime")]
+    public async Task RealtimeHandshakeAdapterDoesNotConsumeTask6ChannelOrRouteExpectations()
+    {
+        using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
+        JsonObject root = JsonNode.Parse(fixture.RootElement.GetRawText())!.AsObject();
+        foreach (JsonNode? fixtureCase in root["cases"]!.AsArray())
+        {
+            JsonObject expected = fixtureCase!["expected"]!.AsObject();
+            expected["inboundChannelState"] = "task6-owned-channel";
+            expected["inboundRoute"] = "task6-owned-route";
+            if (expected.ContainsKey("outboundChannelState"))
+            {
+                expected["outboundChannelState"] = "task6-owned-channel";
+                expected["outboundRoute"] = "task6-owned-route";
+            }
+        }
+
+        using JsonDocument task6Projection = JsonDocument.Parse(root.ToJsonString());
+        await RealtimeFixtureAdapter.ValidateHandshakeAsync(task6Projection.RootElement)
             .ConfigureAwait(false);
     }
 

@@ -46,24 +46,10 @@ internal static class RealtimeFixtureAdapter
             if (fixtureCase.TryGetProperty("sockets", out sockets))
             {
                 Assert.AreEqual(2, sockets.GetArrayLength(), name);
-                List<HandshakeResult> results = [];
                 foreach (JsonElement socket in sockets.EnumerateArray())
                 {
-                    results.Add(await DriveSessionAsync(socket.GetProperty("steps"), name));
+                    _ = await DriveSessionAsync(socket.GetProperty("steps"), name);
                 }
-
-                Assert.AreEqual(
-                    Enum.Parse<TranslationSessionState>(
-                        expected.GetProperty("inboundChannelState").GetString()!,
-                        ignoreCase: true),
-                    results[0].State,
-                    name);
-                Assert.AreEqual(
-                    Enum.Parse<TranslationSessionState>(
-                        expected.GetProperty("outboundChannelState").GetString()!,
-                        ignoreCase: true),
-                    results[1].State,
-                    name);
             }
             else if (fixtureCase.GetProperty("steps")[0]
                          .GetProperty("direction").GetString() == "local")
@@ -74,12 +60,6 @@ internal static class RealtimeFixtureAdapter
             {
                 HandshakeResult result = await DriveSessionAsync(
                     fixtureCase.GetProperty("steps"),
-                    name);
-                Assert.AreEqual(
-                    Enum.Parse<TranslationSessionState>(
-                        expected.GetProperty("inboundChannelState").GetString()!,
-                        ignoreCase: true),
-                    result.State,
                     name);
                 if (expected.TryGetProperty("errorCategory", out JsonElement errorCategory))
                 {
@@ -260,7 +240,6 @@ internal static class RealtimeFixtureAdapter
         }
 
         HandshakeResult result = new(
-            session.State,
             session.LastError?.Category);
         await session.DisposeAsync();
         return result;
@@ -570,9 +549,7 @@ internal static class RealtimeFixtureAdapter
         Assert.IsTrue(predicate(), message);
     }
 
-    private sealed record HandshakeResult(
-        TranslationSessionState State,
-        ErrorCategory? ErrorCategory);
+    private sealed record HandshakeResult(ErrorCategory? ErrorCategory);
 
 #pragma warning disable CA2213 // TranslationSocket takes ownership of the fixture adapter.
 
