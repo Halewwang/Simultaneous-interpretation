@@ -103,6 +103,7 @@ public sealed class TranslationRuntime :
     private readonly ConcurrentDictionary<Task, byte> _startOutcomeCleanup = new();
     private readonly Task _actorStartBarrier;
     private readonly Func<ValueTask> _startOutcomeBarrier;
+    private readonly Func<ValueTask> _startCommitBarrier;
     private readonly Task _actor;
     private AppSnapshot _currentSnapshot;
     private Task<RuntimeError?>? _activeStart;
@@ -154,6 +155,7 @@ public sealed class TranslationRuntime :
         : this(
             dependencies,
             actorStartBarrier,
+            static () => ValueTask.CompletedTask,
             static () => ValueTask.CompletedTask)
     {
     }
@@ -162,6 +164,19 @@ public sealed class TranslationRuntime :
         TranslationRuntimeDependencies dependencies,
         Task actorStartBarrier,
         Func<ValueTask> startOutcomeBarrier)
+        : this(
+            dependencies,
+            actorStartBarrier,
+            startOutcomeBarrier,
+            static () => ValueTask.CompletedTask)
+    {
+    }
+
+    internal TranslationRuntime(
+        TranslationRuntimeDependencies dependencies,
+        Task actorStartBarrier,
+        Func<ValueTask> startOutcomeBarrier,
+        Func<ValueTask> startCommitBarrier)
     {
         _dependencies =
             dependencies ?? throw new ArgumentNullException(nameof(dependencies));
@@ -169,6 +184,8 @@ public sealed class TranslationRuntime :
             actorStartBarrier ?? throw new ArgumentNullException(nameof(actorStartBarrier));
         _startOutcomeBarrier =
             startOutcomeBarrier ?? throw new ArgumentNullException(nameof(startOutcomeBarrier));
+        _startCommitBarrier =
+            startCommitBarrier ?? throw new ArgumentNullException(nameof(startCommitBarrier));
         _routingSnapshot = _routingPolicy.Snapshot;
         _currentSnapshot = _reducer.Current;
         _mailbox = new RuntimeCommandMailbox<RuntimeMessage>(
@@ -509,6 +526,11 @@ public sealed class TranslationRuntime :
                 }
                 else
                 {
+                    if (read.Item is StartCompletedMessage)
+                    {
+                        await _startCommitBarrier().ConfigureAwait(false);
+                    }
+
                     HandleMessage(read.Item);
                 }
             }
@@ -829,6 +851,20 @@ public sealed class TranslationRuntime :
     }
 
     private void HandleStartCompleted(StartCompletedMessage message)
+    {
+        lock (_submissionSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                message.Terminate(DisposedError());
+                return;
+            }
+
+            HandleStartCompletedLocked(message);
+        }
+    }
+
+    private void HandleStartCompletedLocked(StartCompletedMessage message)
     {
         bool stopping = CurrentSnapshot.RuntimeState == RuntimeState.Stopping
             && _waitingForStartBeforeStop;

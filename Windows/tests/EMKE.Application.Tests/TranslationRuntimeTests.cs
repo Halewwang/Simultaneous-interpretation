@@ -1293,6 +1293,68 @@ public sealed class TranslationRuntimeTests
         Assert.AreEqual(1, harness.AudioStopCount);
     }
 
+    [TestMethod]
+    public async Task DisposeAsyncWaitsWhenDequeuedStartOutcomeHasNotCommittedOwnership()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        ControlledAsyncGate startCommitGate = new();
+        startCommitGate.Block();
+        harness.Audio.StopGate.Block();
+        TranslationRuntime runtime = harness.CreateRuntime(
+            startCommitBarrier: () =>
+                new ValueTask(startCommitGate.WaitAsync(CancellationToken.None)));
+        Task? disposal = null;
+        try
+        {
+            Task<RuntimeError?> start = runtime.StartAsync();
+            await startCommitGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
+            Assert.AreEqual(1, harness.AudioStartCount);
+
+#pragma warning disable CA1849 // This test verifies the synchronous IDisposable handoff.
+            runtime.Dispose();
+#pragma warning restore CA1849
+            disposal = runtime.DisposeAsync().AsTask();
+            Assert.AreEqual(
+                "translationRuntime.disposed",
+                (await start.WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false))?.Code);
+            startCommitGate.Release();
+            Task stopOrTimeout = await Task.WhenAny(
+                    harness.Audio.StopEntered.Task,
+                    Task.Delay(TimeSpan.FromSeconds(5)))
+                .ConfigureAwait(false);
+
+            Assert.AreSame(
+                harness.Audio.StopEntered.Task,
+                stopOrTimeout,
+                "Dequeued StartOutcome ownership was lost after disposal.");
+            Assert.IsFalse(
+                disposal.IsCompleted,
+                "DisposeAsync returned before late StartOutcome native cleanup.");
+        }
+        finally
+        {
+            startCommitGate.Release();
+            harness.Audio.StopGate.Release();
+            if (disposal is not null)
+            {
+                await disposal.WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+#pragma warning disable CA1849 // Failure cleanup for the synchronous contract probe.
+                runtime.Dispose();
+#pragma warning restore CA1849
+            }
+        }
+
+        Assert.AreEqual(1, harness.AudioStopCount);
+        Assert.AreEqual(1, harness.InboundSession.DisposeCount);
+        Assert.AreEqual(1, harness.OutboundSession.DisposeCount);
+    }
+
     private static async Task AssertStartFailureAsync(
         Action<RuntimeHarness> configure,
         ErrorCategory expectedCategory,
@@ -1498,7 +1560,8 @@ internal sealed class RuntimeHarness
 
     public TranslationRuntime CreateRuntime(
         Task? actorStartBarrier = null,
-        Func<ValueTask>? startOutcomeBarrier = null)
+        Func<ValueTask>? startOutcomeBarrier = null,
+        Func<ValueTask>? startCommitBarrier = null)
     {
         TranslationRuntimeDependencies dependencies = new(
             new FakeWindowsBuildGate(this),
@@ -1511,12 +1574,13 @@ internal sealed class RuntimeHarness
             new FakeLanguageClassifier(),
             Clock,
             RuntimeLog);
-        if (startOutcomeBarrier is not null)
+        if (startOutcomeBarrier is not null || startCommitBarrier is not null)
         {
             return new TranslationRuntime(
                 dependencies,
                 actorStartBarrier ?? Task.CompletedTask,
-                startOutcomeBarrier);
+                startOutcomeBarrier ?? (static () => ValueTask.CompletedTask),
+                startCommitBarrier ?? (static () => ValueTask.CompletedTask));
         }
 
         return actorStartBarrier is null
@@ -2048,6 +2112,7 @@ internal sealed class FakeTranslationSession(string direction) :
     private ConcurrentQueue<string>? _trace;
     private int _closeCount;
     private int _sendCount;
+    private int _disposeCount;
     private int _disposed;
 
     public RuntimeError? ConnectError { get; set; }
@@ -2063,6 +2128,8 @@ internal sealed class FakeTranslationSession(string direction) :
     public int CloseCount => Volatile.Read(ref _closeCount);
 
     public int SendCount => Volatile.Read(ref _sendCount);
+
+    public int DisposeCount => Volatile.Read(ref _disposeCount);
 
     public TaskCompletionSource SendEntered { get; } =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -2131,6 +2198,7 @@ internal sealed class FakeTranslationSession(string direction) :
 
     public void Dispose()
     {
+        Interlocked.Increment(ref _disposeCount);
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 0)
         {
             TailEvent?.Dispose();
