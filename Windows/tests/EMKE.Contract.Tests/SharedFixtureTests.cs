@@ -42,10 +42,39 @@ public sealed class SharedFixtureTests
             contractManifest.RootElement.GetProperty("schemas"));
 
         Assert.HasCount(3, schemaPaths);
-        foreach (string schemaPath in schemaPaths)
+        ValidateSchemaIdentities(schemaPaths);
+    }
+
+    [TestMethod]
+    [TestCategory("Inventory")]
+    public void SchemaInventoryRejectsDuplicateSchemaIdentities()
+    {
+        string temporaryRoot = CreateTemporaryRoot();
+
+        try
         {
-            using JsonDocument schema = LoadJson(schemaPath);
-            Assert.AreEqual(JsonValueKind.Object, schema.RootElement.ValueKind);
+            string schemaDirectory = Directory.CreateDirectory(
+                Path.Combine(temporaryRoot, "Shared", "Contracts", "v1")).FullName;
+            File.WriteAllText(
+                Path.Combine(schemaDirectory, "first.schema.json"),
+                """{"$id":"urn:emke:test:duplicate"}""");
+            File.WriteAllText(
+                Path.Combine(schemaDirectory, "second.schema.json"),
+                """{"$id":"urn:emke:test:duplicate"}""");
+            string contractManifestPath = WriteContractManifest(
+                temporaryRoot,
+                ["v1/first.schema.json", "v1/second.schema.json"]);
+            using JsonDocument contractManifest = LoadJson(contractManifestPath);
+            IReadOnlyList<string> schemaPaths = RepositoryPaths.ResolveSchemaFiles(
+                contractManifestPath,
+                contractManifest.RootElement.GetProperty("schemas"));
+
+            Assert.ThrowsExactly<InvalidDataException>(
+                () => ValidateSchemaIdentities(schemaPaths));
+        }
+        finally
+        {
+            Directory.Delete(temporaryRoot, recursive: true);
         }
     }
 
@@ -280,6 +309,37 @@ public sealed class SharedFixtureTests
         Assert.IsNotEmpty(fixtureRoots);
         Assert.IsTrue(
             fixtureRoots.All(static root => root.ValueKind == JsonValueKind.Object));
+    }
+
+    private static void ValidateSchemaIdentities(IReadOnlyList<string> schemaPaths)
+    {
+        HashSet<string> schemaIds = new(StringComparer.Ordinal);
+
+        foreach (string schemaPath in schemaPaths)
+        {
+            using JsonDocument schema = LoadJson(schemaPath);
+            JsonElement root = schema.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("$id", out JsonElement idElement)
+                || idElement.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidDataException(
+                    "Shared schemas must declare a string $id.");
+            }
+
+            string schemaId = idElement.GetString()!;
+            if (string.IsNullOrWhiteSpace(schemaId))
+            {
+                throw new InvalidDataException(
+                    "Shared schema $id values must not be empty.");
+            }
+
+            if (!schemaIds.Add(schemaId))
+            {
+                throw new InvalidDataException(
+                    "Shared schema $id values must be unique.");
+            }
+        }
     }
 
     private static string CreateTemporaryRoot()
