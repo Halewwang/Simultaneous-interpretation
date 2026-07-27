@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="EMKE.Realtime.Tests" />
+    <InternalsVisibleTo Include="EMKE.Contract.Tests" />
   </ItemGroup>
 
 </Project>

@@ -69,7 +69,24 @@ internal interface IClientWebSocket : IDisposable
         CancellationToken cancellationToken);
 }
 
-public sealed class TranslationSocket : IDisposable
+internal interface ITranslationTransport : IDisposable
+{
+    Task<RuntimeError?> ConnectAsync(Uri endpoint, CancellationToken cancellationToken);
+
+    ValueTask<RuntimeError?> SendSessionUpdateAsync(
+        LanguageCode targetLanguage,
+        CancellationToken cancellationToken);
+
+    ValueTask<RuntimeError?> SendAudioAppendAsync(
+        ReadOnlyMemory<byte> pcm16,
+        CancellationToken cancellationToken);
+
+    ValueTask<RuntimeError?> SendSessionCloseAsync(CancellationToken cancellationToken);
+
+    ValueTask<TranslationReceiveResult> ReceiveEventAsync(CancellationToken cancellationToken);
+}
+
+public sealed class TranslationSocket : ITranslationTransport
 {
     public const int DefaultReceiveLimit = 64 * 1024;
 
@@ -143,6 +160,13 @@ public sealed class TranslationSocket : IDisposable
             return ValueTask.FromResult<RuntimeError?>(
                 ProtocolError("translationEvent.invalidPcm16"));
         }
+    }
+
+    ValueTask<RuntimeError?> ITranslationTransport.SendAudioAppendAsync(
+        ReadOnlyMemory<byte> pcm16,
+        CancellationToken cancellationToken)
+    {
+        return SendAudioAppendAsync(pcm16.Span, cancellationToken);
     }
 
     public ValueTask<RuntimeError?> SendSessionCloseAsync(

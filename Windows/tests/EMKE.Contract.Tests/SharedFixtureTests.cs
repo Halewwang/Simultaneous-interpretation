@@ -223,16 +223,24 @@ public sealed class SharedFixtureTests
             TranslationEventCodec.EventTypes.ToArray());
     }
 
-    // TODO(Runtime Task 10): Remove any fixture-adapter inconclusive results that remain.
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Realtime")]
-    public void RealtimeHandshakeFixtureAwaitsOwnedSessionAdapter()
+    public async Task RealtimeHandshakeFixtureUsesOwnedSessionAdapter()
     {
-        AssertFixtureCategoryIsReadable("realtime");
+        using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
+        await RealtimeFixtureAdapter.ValidateHandshakeAsync(fixture.RootElement)
+            .ConfigureAwait(false);
+    }
 
-        Assert.Inconclusive(
-            "Protocol registry parity is enforced; the handshake fixture awaits the session adapter (Runtime Task 5).");
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
+    [TestCategory("Realtime")]
+    public async Task RealtimeCloseDeadlineFixtureUsesOwnedCoordinatorAdapter()
+    {
+        using JsonDocument fixture = LoadFixture("Realtime/close-deadline.json");
+        await RealtimeFixtureAdapter.ValidateCloseDeadlineAsync(fixture.RootElement)
+            .ConfigureAwait(false);
     }
 
     [TestMethod]
@@ -300,6 +308,15 @@ public sealed class SharedFixtureTests
             path => string.Equals(Path.GetFileName(path), fileName, StringComparison.Ordinal));
 
         return LoadJson(schemaPath);
+    }
+
+    internal static JsonDocument LoadFixture(string suffix)
+    {
+        FixtureInventory inventory = LoadFixtureInventory();
+        string normalizedSuffix = suffix.Replace('/', Path.DirectorySeparatorChar);
+        string fixturePath = inventory.Paths.Single(
+            path => path.EndsWith(normalizedSuffix, StringComparison.Ordinal));
+        return LoadJson(fixturePath);
     }
 
     private static void AssertInvalidSchemaEntries(
