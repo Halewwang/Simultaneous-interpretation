@@ -198,19 +198,25 @@ function Get-StrictCollectorPackage {
 function Get-CollectorPackageSha256 {
     param(
         [Parameter(Mandatory)]
-        [psobject]$Package
+        [byte[]]$InfBytes,
+
+        [Parameter(Mandatory)]
+        [byte[]]$SysBytes,
+
+        [Parameter(Mandatory)]
+        [byte[]]$CatBytes
     )
 
     try {
-        $infHash = (Get-FileHash `
-            -LiteralPath $Package.Inf.FullName `
-            -Algorithm SHA256).Hash.ToUpperInvariant()
-        $sysHash = (Get-FileHash `
-            -LiteralPath $Package.Sys.FullName `
-            -Algorithm SHA256).Hash.ToUpperInvariant()
-        $catHash = (Get-FileHash `
-            -LiteralPath $Package.Cat.FullName `
-            -Algorithm SHA256).Hash.ToUpperInvariant()
+        $infHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($InfBytes)
+        )
+        $sysHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($SysBytes)
+        )
+        $catHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($CatBytes)
+        )
         $manifest = (
             "EMKE-DRIVER-PACKAGE-SHA256-V1`n" +
             "INF=$infHash`n" +
@@ -242,57 +248,229 @@ function Test-CollectorSha256Equal {
     )
 }
 
+function ConvertTo-CollectorInfSectionMap {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text
+    )
+
+    $sections =
+        [Collections.Generic.Dictionary[string, object]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+    $current = $null
+    foreach ($rawLine in ($Text -split "\r?\n")) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or
+            $line.StartsWith(";", [StringComparison]::Ordinal)) {
+            continue
+        }
+        if ($line -match "^\[(?<name>[^\[\]]+)\]$") {
+            $name = $Matches["name"].Trim()
+            if ([string]::IsNullOrWhiteSpace($name) -or
+                $sections.ContainsKey($name)) {
+                throw [InvalidOperationException]::new()
+            }
+            $current = [Collections.Generic.List[string]]::new()
+            $sections.Add($name, $current)
+            continue
+        }
+        if ($null -eq $current) {
+            throw [InvalidOperationException]::new()
+        }
+        $current.Add($line)
+    }
+    return $sections
+}
+
+function ConvertTo-CollectorInfKeyValueMap {
+    param(
+        [Parameter(Mandatory)]
+        [object]$Lines
+    )
+
+    $values =
+        [Collections.Generic.Dictionary[string, string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+    foreach ($line in $Lines) {
+        $separator = $line.IndexOf("=")
+        if ($separator -le 0) {
+            throw [InvalidOperationException]::new()
+        }
+        $key = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        if ([string]::IsNullOrWhiteSpace($key) -or
+            [string]::IsNullOrWhiteSpace($value) -or
+            $values.ContainsKey($key)) {
+            throw [InvalidOperationException]::new()
+        }
+        $values.Add($key, $value)
+    }
+    return $values
+}
+
+function ConvertFrom-CollectorInfString {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    if ($Value -match '^"(?<value>[^"]*)"$') {
+        return $Matches["value"]
+    }
+    return $Value
+}
+
 function Get-CollectorInfMetadata {
     param(
         [Parameter(Mandatory)]
-        [IO.FileInfo]$Inf
+        [string]$Text,
+
+        [Parameter(Mandatory)]
+        [int]$WindowsBuild
     )
 
     try {
-        $text = [IO.File]::ReadAllText($Inf.FullName)
-        $driverVer = [regex]::Matches(
-            $text,
-            "^[ \t]*DriverVer[ \t]*=[ \t]*" +
-                "(?<date>[0-9]{2}/[0-9]{2}/[0-9]{4})," +
-                "(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)[ \t]*$",
-            [Text.RegularExpressions.RegexOptions]::Multiline
-        )
-        $provider = [regex]::Matches(
-            $text,
-            '^[ \t]*ProviderName[ \t]*=[ \t]*"EMKE"[ \t]*$',
-            [Text.RegularExpressions.RegexOptions]::Multiline
-        )
-        $versionProvider = [regex]::Matches(
-            $text,
-            "^[ \t]*Provider[ \t]*=[ \t]*%ProviderName%[ \t]*$",
-            [Text.RegularExpressions.RegexOptions]::Multiline
-        )
-        $hardware = [regex]::Matches(
-            $text,
-            "^[^;`r`n=]+=[^,`r`n]+,[ \t]*" +
-                "ROOT\\EMKEVIRTUALAUDIO[ \t]*$",
-            [Text.RegularExpressions.RegexOptions]::Multiline
-        )
-        $abi = [regex]::Matches(
-            $text,
-            "^[ \t]*HKR,,DriverAbi,0x00010001,0x00000001[ \t]*$",
-            [Text.RegularExpressions.RegexOptions]::Multiline
-        )
-        if ($driverVer.Count -ne 1 -or
-            $provider.Count -ne 1 -or
-            $versionProvider.Count -ne 1 -or
-            $hardware.Count -ne 1 -or
-            $abi.Count -ne 1) {
+        $sections = ConvertTo-CollectorInfSectionMap -Text $Text
+        foreach ($required in @(
+            "Version",
+            "Manufacturer",
+            "Strings"
+        )) {
+            if (-not $sections.ContainsKey($required)) {
+                throw [InvalidOperationException]::new()
+            }
+        }
+
+        $strings = ConvertTo-CollectorInfKeyValueMap `
+            -Lines $sections["Strings"]
+        if (-not $strings.ContainsKey("ProviderName") -or
+            -not $strings.ContainsKey("ManufacturerName") -or
+            (ConvertFrom-CollectorInfString `
+                -Value $strings["ProviderName"]) -cne "EMKE" -or
+            (ConvertFrom-CollectorInfString `
+                -Value $strings["ManufacturerName"]) -cne "EMKE") {
             throw [InvalidOperationException]::new()
         }
-        $version = ([version]$driverVer[0].Groups["version"].Value).
-            ToString()
+
+        $version = ConvertTo-CollectorInfKeyValueMap `
+            -Lines $sections["Version"]
+        if (-not $version.ContainsKey("Provider") -or
+            $version["Provider"] -cne "%ProviderName%" -or
+            -not $version.ContainsKey("DriverVer") -or
+            $version["DriverVer"] -notmatch (
+                "^(?<date>[0-9]{2}/[0-9]{2}/[0-9]{4})," +
+                "(?<version>[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$"
+            )) {
+            throw [InvalidOperationException]::new()
+        }
+        $driverVer = $version["DriverVer"]
+        $driverVersion = ([version]$Matches["version"]).ToString()
+
+        if ($WindowsBuild -lt 26200) {
+            throw [InvalidOperationException]::new()
+        }
+        $manufacturer = ConvertTo-CollectorInfKeyValueMap `
+            -Lines $sections["Manufacturer"]
+        if ($manufacturer.Count -ne 1 -or
+            -not $manufacturer.ContainsKey("%ManufacturerName%")) {
+            throw [InvalidOperationException]::new()
+        }
+        $manufacturerParts = @(
+            $manufacturer["%ManufacturerName%"].Split(",") |
+                ForEach-Object { $_.Trim() }
+        )
+        if ($manufacturerParts.Count -ne 2 -or
+            $manufacturerParts[0] -cne "EMKE" -or
+            $manufacturerParts[1] -notmatch (
+                "^NTamd64\.10\.0\.\.\.(?<build>[0-9]+)$"
+            )) {
+            throw [InvalidOperationException]::new()
+        }
+        $minimumBuild = [int]$Matches["build"]
+        if ($minimumBuild -lt 26200 -or
+            $minimumBuild -gt $WindowsBuild) {
+            throw [InvalidOperationException]::new()
+        }
+        $modelSection = "EMKE.$($manufacturerParts[1])"
+        if (-not $sections.ContainsKey($modelSection)) {
+            throw [InvalidOperationException]::new()
+        }
+        foreach ($sectionName in $sections.Keys) {
+            if ($sectionName -imatch "^EMKE\.NT" -and
+                $sectionName -ine $modelSection) {
+                throw [InvalidOperationException]::new()
+            }
+        }
+
+        $models = ConvertTo-CollectorInfKeyValueMap `
+            -Lines $sections[$modelSection]
+        if ($models.Count -ne 1 -or
+            -not $models.ContainsKey("%DeviceDescription%")) {
+            throw [InvalidOperationException]::new()
+        }
+        $modelParts = @(
+            $models["%DeviceDescription%"].Split(",") |
+                ForEach-Object { $_.Trim() }
+        )
+        if ($modelParts.Count -ne 2 -or
+            $modelParts[0] -cne "EMKE_Install" -or
+            $modelParts[1] -cne "ROOT\EMKEVIRTUALAUDIO") {
+            throw [InvalidOperationException]::new()
+        }
+
+        $installSection = "$($modelParts[0]).NT"
+        if (-not $sections.ContainsKey($installSection)) {
+            throw [InvalidOperationException]::new()
+        }
+        $install = ConvertTo-CollectorInfKeyValueMap `
+            -Lines $sections[$installSection]
+        if (-not $install.ContainsKey("AddReg")) {
+            throw [InvalidOperationException]::new()
+        }
+        $addRegParts = @(
+            $install["AddReg"].Split(",") |
+                ForEach-Object { $_.Trim() }
+        )
+        if ($addRegParts.Count -ne 1 -or
+            $addRegParts[0] -cne "EMKE.Device.AddReg" -or
+            -not $sections.ContainsKey($addRegParts[0])) {
+            throw [InvalidOperationException]::new()
+        }
+
+        $driverAbiEntries = @(
+            $sections[$addRegParts[0]] | Where-Object {
+                $parts = @($_.Split(",") |
+                    ForEach-Object { $_.Trim() })
+                $parts.Count -ge 3 -and
+                $parts[2] -ieq "DriverAbi"
+            }
+        )
+        if ($driverAbiEntries.Count -ne 1) {
+            throw [InvalidOperationException]::new()
+        }
+        $driverAbiParts = @(
+            $driverAbiEntries[0].Split(",") |
+                ForEach-Object { $_.Trim() }
+        )
+        if ($driverAbiParts.Count -ne 5 -or
+            $driverAbiParts[0] -ine "HKR" -or
+            $driverAbiParts[1] -cne "" -or
+            $driverAbiParts[2] -ine "DriverAbi" -or
+            $driverAbiParts[3] -ine "0x00010001" -or
+            $driverAbiParts[4] -ine "0x00000001") {
+            throw [InvalidOperationException]::new()
+        }
+
         return [pscustomobject]@{
-            DriverVer = $driverVer[0].Value.Split("=")[1].Trim()
-            Version = $version
+            DriverVer = $driverVer
+            Version = $driverVersion
             Provider = "EMKE"
             HardwareId = "ROOT\EMKEVIRTUALAUDIO"
             Abi = 1
+            ModelSection = $modelSection
+            InstallSection = $installSection
         }
     } catch {
         throw "Collector INF is invalid."
@@ -330,6 +508,107 @@ function Get-CollectorCatalogMetadata {
         }
     } catch {
         throw "Collector catalog signature is invalid."
+    }
+}
+
+function Open-CollectorPackageReadHandle {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    try {
+        return [IO.FileStream]::new(
+            $Path,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read,
+            4096,
+            [IO.FileOptions]::SequentialScan
+        )
+    } catch {
+        throw "Collector package transaction is invalid."
+    }
+}
+
+function Read-CollectorPackageHandleBytes {
+    param(
+        [Parameter(Mandatory)]
+        [IO.FileStream]$Stream
+    )
+
+    $memory = [IO.MemoryStream]::new()
+    try {
+        $Stream.Position = 0
+        $Stream.CopyTo($memory)
+        return ,$memory.ToArray()
+    } catch {
+        throw "Collector package transaction is invalid."
+    } finally {
+        $memory.Dispose()
+    }
+}
+
+function Get-CollectorPackageEvidence {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Directory,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+        [string]$ExpectedPackageSha256,
+
+        [Parameter(Mandatory)]
+        [int]$WindowsBuild
+    )
+
+    $package = Get-StrictCollectorPackage -Directory $Directory
+    $handles = [Collections.Generic.List[IO.FileStream]]::new()
+    try {
+        foreach ($file in @($package.Inf, $package.Sys, $package.Cat)) {
+            $handle = Open-CollectorPackageReadHandle `
+                -Path $file.FullName
+            $handles.Add($handle)
+        }
+        $infBytes = Read-CollectorPackageHandleBytes `
+            -Stream $handles[0]
+        $sysBytes = Read-CollectorPackageHandleBytes `
+            -Stream $handles[1]
+        $catBytes = Read-CollectorPackageHandleBytes `
+            -Stream $handles[2]
+        $packageSha256 = Get-CollectorPackageSha256 `
+            -InfBytes $infBytes `
+            -SysBytes $sysBytes `
+            -CatBytes $catBytes
+        if (-not (Test-CollectorSha256Equal `
+            -Expected $ExpectedPackageSha256 `
+            -Actual $packageSha256)) {
+            throw "Collector package digest does not match."
+        }
+
+        try {
+            $encoding = [Text.UTF8Encoding]::new($false, $true)
+            $infText = $encoding.GetString($infBytes)
+        } catch {
+            throw "Collector INF is invalid."
+        }
+        $driverMetadata = Get-CollectorInfMetadata `
+            -Text $infText `
+            -WindowsBuild $WindowsBuild
+        $catalogMetadata =
+            Get-CollectorCatalogMetadata -Catalog $package.Cat
+        return [pscustomobject]@{
+            PackageSha256 = $packageSha256
+            DriverMetadata = $driverMetadata
+            CatalogMetadata = $catalogMetadata
+        }
+    } finally {
+        for ($index = $handles.Count - 1; $index -ge 0; $index -= 1) {
+            try {
+                $handles[$index].Dispose()
+            } catch {
+            }
+        }
     }
 }
 
@@ -577,27 +856,100 @@ function Read-CollectorObservation {
 
     try {
         $resolved = Resolve-CollectorInputPath -Path $Path -Type Leaf
-        $encoding = [Text.UTF8Encoding]::new($false, $true)
-        $text = [IO.File]::ReadAllText($resolved, $encoding)
-        $inputObject = ConvertFrom-CollectorJsonText -Text $text
-        return Read-CollectorObservationObject -InputObject $inputObject
+        $bytes = Read-CollectorObservationBytes -Path $resolved
+        $inputObject = ConvertFrom-CollectorJsonBytes -Bytes $bytes
+        return [pscustomobject]@{
+            Observation = Read-CollectorObservationObject `
+                -InputObject $inputObject
+            RawSha256 = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData($bytes)
+            )
+        }
     } catch {
         throw "Collector observation is invalid."
     }
 }
 
-function ConvertFrom-CollectorJsonText {
+function Read-CollectorObservationBytes {
     param(
         [Parameter(Mandatory)]
-        [string]$Text
+        [string]$Path
     )
 
-    $command = Get-Command ConvertFrom-Json
-    if ($command.Parameters.ContainsKey("DateKind")) {
-        return $Text |
-            ConvertFrom-Json -Depth 12 -DateKind String
+    return [IO.File]::ReadAllBytes($Path)
+}
+
+function ConvertFrom-CollectorJsonBytes {
+    param(
+        [Parameter(Mandatory)]
+        [byte[]]$Bytes
+    )
+
+    $options = [Text.Json.JsonDocumentOptions]::new()
+    $options.CommentHandling =
+        [Text.Json.JsonCommentHandling]::Disallow
+    $options.AllowTrailingCommas = $false
+    $memory = [ReadOnlyMemory[byte]]::new($Bytes)
+    $document = [Text.Json.JsonDocument]::Parse($memory, $options)
+    try {
+        return ConvertFrom-CollectorJsonElement `
+            -Element $document.RootElement
+    } finally {
+        $document.Dispose()
     }
-    return $Text | ConvertFrom-Json -Depth 12
+}
+
+function ConvertFrom-CollectorJsonElement {
+    param(
+        [Parameter(Mandatory)]
+        [Text.Json.JsonElement]$Element
+    )
+
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::Object) {
+        $names = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal
+        )
+        $result = [ordered]@{}
+        foreach ($property in $Element.EnumerateObject()) {
+            if (-not $names.Add($property.Name)) {
+                throw [InvalidOperationException]::new()
+            }
+            $result[$property.Name] =
+                ConvertFrom-CollectorJsonElement `
+                    -Element $property.Value
+        }
+        return [pscustomobject]$result
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::Array) {
+        $result = [object[]]::new($Element.GetArrayLength())
+        $index = 0
+        foreach ($item in $Element.EnumerateArray()) {
+            $result[$index] =
+                ConvertFrom-CollectorJsonElement -Element $item
+            $index += 1
+        }
+        return ,$result
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::String) {
+        return $Element.GetString()
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::Number) {
+        $integer = [int64]0
+        if ($Element.TryGetInt64([ref]$integer)) {
+            return $integer
+        }
+        return $Element.GetDouble()
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::True) {
+        return $true
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::False) {
+        return $false
+    }
+    if ($Element.ValueKind -eq [Text.Json.JsonValueKind]::Null) {
+        return $null
+    }
+    throw [InvalidOperationException]::new()
 }
 
 function Read-CollectorObservationObject {
@@ -610,7 +962,8 @@ function Read-CollectorObservationObject {
         if ($InputObject -is [Collections.IDictionary]) {
             $json = $InputObject |
                 ConvertTo-Json -Depth 12 -Compress
-            $InputObject = ConvertFrom-CollectorJsonText -Text $json
+            $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+            $InputObject = ConvertFrom-CollectorJsonBytes -Bytes $bytes
         }
         Assert-CollectorObjectShape `
             -InputObject $InputObject `
@@ -1117,21 +1470,13 @@ function Invoke-CollectAudioEvidence {
     if ($sourceCommit -cne $ExpectedSourceCommit.ToLowerInvariant()) {
         throw "Collector source commit does not match."
     }
-    $package = Get-StrictCollectorPackage -Directory $packageDirectory
-    $packageSha256 = Get-CollectorPackageSha256 -Package $package
-    if (-not (Test-CollectorSha256Equal `
-        -Expected $ExpectedPackageSha256 `
-        -Actual $packageSha256)) {
-        throw "Collector package digest does not match."
-    }
-    $driverMetadata = Get-CollectorInfMetadata -Inf $package.Inf
-    $catalogMetadata =
-        Get-CollectorCatalogMetadata -Catalog $package.Cat
-    $observation =
+    $packageEvidence = Get-CollectorPackageEvidence `
+        -Directory $packageDirectory `
+        -ExpectedPackageSha256 $ExpectedPackageSha256 `
+        -WindowsBuild $hostInfo.OsBuild
+    $observationSnapshot =
         Read-CollectorObservation -Path $observationFile
     $salt = Read-CollectorSalt -Path $saltFile
-    $rawObservationSha256 =
-        Get-CollectorFileSha256 -Path $observationFile
     $recordingBundleSha256 = $null
     if ($null -ne $recordingFile) {
         $recordingBundleSha256 =
@@ -1142,12 +1487,12 @@ function Invoke-CollectAudioEvidence {
         -CollectedAtUtc (Get-CollectorUtcNow) `
         -OsBuild $hostInfo.OsBuild `
         -Architecture $hostInfo.Architecture `
-        -DriverMetadata $driverMetadata `
-        -PackageSha256 $packageSha256 `
-        -CatalogMetadata $catalogMetadata `
-        -Observation $observation `
+        -DriverMetadata $packageEvidence.DriverMetadata `
+        -PackageSha256 $packageEvidence.PackageSha256 `
+        -CatalogMetadata $packageEvidence.CatalogMetadata `
+        -Observation $observationSnapshot.Observation `
         -Salt $salt `
-        -RawObservationSha256 $rawObservationSha256 `
+        -RawObservationSha256 $observationSnapshot.RawSha256 `
         -RecordingBundleSha256 $recordingBundleSha256
     $json = ConvertTo-CollectorJson -Evidence $evidence
     Write-AtomicEvidenceFile -OutputPath $OutputPath -JsonText $json

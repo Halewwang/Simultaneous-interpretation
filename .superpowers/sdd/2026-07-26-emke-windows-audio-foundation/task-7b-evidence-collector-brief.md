@@ -16,6 +16,11 @@ only enforces confirmation and host gates, resolves local non-reparse inputs,
 reads bytes, and commits one output with a same-directory owned temporary file
 and a non-overwriting atomic rename.
 
+Observation parsing and hashing consume one immutable raw byte snapshot.
+Package digest, active INF metadata, and catalog signature consume one
+transaction that holds read-only INF/SYS/CAT handles without write/delete
+sharing until Authenticode validation finishes.
+
 The script rejects dot-sourcing before strict mode or function definitions.
 Tests import function definitions through the PowerShell AST only after a
 separate Node contract proves the production guard order and caller-state
@@ -37,9 +42,13 @@ checks exercise production functions.
 - Repository validation reads only exact `HEAD`; a dirty tree is allowed and
   no other Git state is read or changed.
 - The driver package is one flat INF/SYS/CAT set with no extra entries. Its
-  digest uses `EMKE-DRIVER-PACKAGE-SHA256-V1` and fixed-time comparison.
-- INF metadata must prove exact `DriverVer`, provider `EMKE`, hardware ID
-  `ROOT\EMKEVIRTUALAUDIO`, and `DriverAbi=1`.
+  digest uses `EMKE-DRIVER-PACKAGE-SHA256-V1` and fixed-time comparison. The
+  three exact files stay open with `FileShare.Read` while their byte hashes,
+  INF metadata, and catalog signature are validated.
+- INF metadata uses unique section/key maps rather than whole-file matching.
+  It resolves the active x64 build-26200-or-newer Manufacturer/Models mapping,
+  follows its install and AddReg chain, and accepts only provider `EMKE`,
+  one exact `ROOT\EMKEVIRTUALAUDIO` mapping, and one `DriverAbi=1`.
 - Catalog status must be `Valid` with a signer certificate. Output retains only
   the signer certificate SHA-256 and the boundary `host Authenticode only;
   Microsoft/WHQL not established`.
@@ -53,6 +62,13 @@ rejects extra keys. Times are strict UTC RFC3339 and ordered; counters are
 non-negative safe integers; all state strings use explicit allowlists. If present,
 `operatorNotesDigest` is exactly 64 hexadecimal characters and is normalized
 to lowercase; no note text, path, or other operator-supplied value is accepted.
+
+The raw observation is parsed directly from strict UTF-8 bytes with
+System.Text.Json. Comments, trailing commas, and exact duplicate property names
+at every nested object are rejected. Strings, including timestamps, remain
+strings independently of the installed PowerShell minor version. The raw
+observation SHA-256 is calculated from the same byte array that produced the
+sanitized observation.
 
 Every scenario requires `name`, `startedAtUtc`, `completedAtUtc`, `exitCode`,
 `discovery`, `result`, and `externalObservation`. `discovery` is always
@@ -131,7 +147,11 @@ the collector independently established the fact. `driverInstalled` is always
   privacy constants, hash domain, output boundary, and independent CI gates.
 - Portable PowerShell validation tests cover paths, package/INF/schema rules,
   exact endpoint hashes, deterministic field order, acceptance, no-BOM output,
-  atomic failure cleanup, and privacy canaries.
+  atomic failure cleanup, and privacy canaries. The Windows execution of the
+  package transaction test attempts writes and deletes during Authenticode and
+  requires all attempts to be denied with the original bytes still present;
+  portable runs verify byte snapshots and call boundaries without claiming
+  Windows file-sharing proof.
 - Portable PowerShell behavior tests call the real top-level orchestration with
   only host, HEAD, signature, time, and rename seams replaced. They cover
   confirmation, host/build/architecture, commit, package, signature, schema,

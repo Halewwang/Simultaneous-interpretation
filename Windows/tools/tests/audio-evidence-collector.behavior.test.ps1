@@ -516,6 +516,111 @@ Invoke-Case -Name "commit package signature and input failures stay private" -Ac
     }
 }
 
+Invoke-Case -Name "orchestration uses one package evidence transaction" -Action {
+    $fixture = New-BehaviorFixture
+    try {
+        Import-CollectorFunctions
+        Set-SafeCollectorSeams
+        $script:behaviorPackageTransactionCalls = 0
+        $script:behaviorPackageDigest = $fixture.PackageSha256
+        Set-TestFunction -Name Get-CollectorPackageEvidence -Body {
+            param(
+                [string]$Directory,
+                [string]$ExpectedPackageSha256,
+                [int]$WindowsBuild
+            )
+            $script:behaviorPackageTransactionCalls += 1
+            if ($ExpectedPackageSha256 -cne
+                $script:behaviorPackageDigest -or
+                $WindowsBuild -ne 26200) {
+                throw "transaction inputs diverged"
+            }
+            return [pscustomobject]@{
+                PackageSha256 = $script:behaviorPackageDigest
+                DriverMetadata = [pscustomobject]@{
+                    Version = "1.0.0.1"
+                    Abi = 1
+                }
+                CatalogMetadata = [pscustomobject]@{
+                    Status = "Valid"
+                    SigningCertificateSha256 = "B" * 64
+                    SignatureProofBoundary = (
+                        "host Authenticode only; " +
+                        "Microsoft/WHQL not established"
+                    )
+                }
+            }
+        }
+        foreach ($legacyFunction in @(
+            "Get-StrictCollectorPackage",
+            "Get-CollectorPackageSha256",
+            "Get-CollectorInfMetadata",
+            "Get-CollectorCatalogMetadata"
+        )) {
+            Set-TestFunction -Name $legacyFunction -Body {
+                throw "dispersed package read reached"
+            }
+        }
+
+        [void](Invoke-FixtureCollection -Fixture $fixture)
+        $evidence = [IO.File]::ReadAllText($fixture.Output) |
+            ConvertFrom-Json -Depth 12
+        if ($script:behaviorPackageTransactionCalls -ne 1 -or
+            $evidence.driver.packageSha256 -cne
+            $fixture.PackageSha256) {
+            throw "Top-level collection did not use one package transaction."
+        }
+    } finally {
+        Import-CollectorFunctions
+        Remove-BehaviorFixture -Fixture $fixture
+    }
+}
+
+Invoke-Case -Name "orchestration binds observation and digest to one read" -Action {
+    $fixture = New-BehaviorFixture
+    try {
+        Import-CollectorFunctions
+        Set-SafeCollectorSeams
+        $script:behaviorOriginalObservationBytes =
+            [IO.File]::ReadAllBytes($fixture.Observation)
+        $expectedSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+                $script:behaviorOriginalObservationBytes
+            )
+        )
+        $replacement = New-BehaviorObservation
+        $replacement.observedAtUtc = "2026-07-27T03:05:00.000Z"
+        $script:behaviorReplacementObservationBytes =
+            [Text.Encoding]::UTF8.GetBytes(
+                ($replacement | ConvertTo-Json -Depth 12 -Compress)
+            )
+        $script:behaviorObservationReadCount = 0
+        Set-TestFunction -Name Read-CollectorObservationBytes -Body {
+            param([string]$Path)
+            $script:behaviorObservationReadCount += 1
+            [IO.File]::WriteAllBytes(
+                $Path,
+                $script:behaviorReplacementObservationBytes
+            )
+            return $script:behaviorOriginalObservationBytes
+        }
+
+        [void](Invoke-FixtureCollection -Fixture $fixture)
+        $json = [IO.File]::ReadAllText($fixture.Output)
+        $evidence = $json |
+            ConvertFrom-Json -Depth 12
+        if ($script:behaviorObservationReadCount -ne 1 -or
+            $json -notmatch
+            '"observedAtUtc":"2026-07-27T01:05:00\.000Z"' -or
+            $evidence.rawObservationSha256 -cne $expectedSha256) {
+            throw "Top-level collection mixed observation path versions."
+        }
+    } finally {
+        Import-CollectorFunctions
+        Remove-BehaviorFixture -Fixture $fixture
+    }
+}
+
 Invoke-Case -Name "happy path emits deterministic sanitized evidence" -Action {
     $fixture = New-BehaviorFixture
     try {
