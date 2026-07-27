@@ -236,22 +236,12 @@ protected:
             : FALSE;
     }
 
-    EmkeBridgeEndpoint GetBridgeEndpoint()
+    bool GetBridgeEndpoint(
+        _Out_ EmkeBridgeEndpoint* Endpoint)
     {
-        switch (m_DeviceType)
-        {
-            case eMeetingSpeakerRenderDevice:
-                return EmkeBridgeEndpoint::meetingSpeakerRender;
-            case eAppSpeakerCaptureDevice:
-                return EmkeBridgeEndpoint::appSpeakerCapture;
-            case eAppMicrophoneRenderDevice:
-                return EmkeBridgeEndpoint::appMicrophoneRender;
-            case eMeetingMicrophoneCaptureDevice:
-                return EmkeBridgeEndpoint::meetingMicrophoneCapture;
-            default:
-                ASSERT(FALSE);
-                return EmkeBridgeEndpoint::meetingSpeakerRender;
-        }
+        return EmkeBridgeEndpointForDeviceType(
+            m_DeviceType,
+            Endpoint);
     }
 
     BOOL IsSystemRenderPin(ULONG nPinId);

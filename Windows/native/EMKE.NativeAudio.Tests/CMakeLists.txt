@@ -131,12 +131,56 @@ add_test(
   COMMAND EMKE.DriverBridge.Tests
 )
 
+add_executable(EMKE.DriverBridgeRouting.Tests
+  ../../driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp
+  ../../driver/EMKE.VirtualAudio/src/emke_bridge_routing.cpp
+  ../../driver/tests/bridge-routing-tests.cpp
+)
+target_include_directories(EMKE.DriverBridgeRouting.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/EMKE.VirtualAudio/src"
+)
+target_compile_features(EMKE.DriverBridgeRouting.Tests PRIVATE cxx_std_17)
+add_test(
+  NAME EMKE.DriverBridge.Routing
+  COMMAND EMKE.DriverBridgeRouting.Tests
+)
+
+add_executable(EMKE.DriverWaveBufferContract.Tests
+  ../../driver/tests/wave-buffer-contract-tests.cpp
+)
+target_include_directories(EMKE.DriverWaveBufferContract.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../driver/EMKE.VirtualAudio/src"
+)
+target_compile_features(
+  EMKE.DriverWaveBufferContract.Tests PRIVATE cxx_std_17
+)
+add_test(
+  NAME EMKE.DriverWaveBuffer.Contract
+  COMMAND EMKE.DriverWaveBufferContract.Tests
+)
+
+add_executable(EMKE.VirtualFormatContract.Tests
+  src/virtual_format_contract_tests.cpp
+)
+target_include_directories(EMKE.VirtualFormatContract.Tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../shared"
+)
+target_compile_features(EMKE.VirtualFormatContract.Tests PRIVATE cxx_std_20)
+add_test(
+  NAME EMKE.NativeAudio.VirtualFormatContract
+  COMMAND EMKE.VirtualFormatContract.Tests
+)
+
 # Compile the production bridge through a kernel-shaped include boundary that
 # rejects user-mode C++ standard headers. The WDK driver build remains the
 # authoritative /kernel proof; this target catches the same include regression
 # earlier in the native build.
 add_library(EMKE.DriverBridge.KernelBoundary OBJECT
   ../../driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp
+  ../../driver/EMKE.VirtualAudio/src/emke_bridge_routing.cpp
   ../../driver/tests/kernel-compile-shim-types.cpp
 )
 target_include_directories(EMKE.DriverBridge.KernelBoundary PRIVATE

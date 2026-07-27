@@ -39,6 +39,58 @@ function runNode(script, args) {
   });
 }
 
+function mutateCompiledGuidComponent(header, componentIndex) {
+  const definition = header.match(
+    /DEFINE_DEVPROPKEY\(\s*DEVPKEY_EMKE_EndpointRole\s*,([\s\S]*?)\);/,
+  );
+  assert.notEqual(
+    definition,
+    null,
+    "shared header must compile DEVPKEY_EMKE_EndpointRole",
+  );
+  const arguments_ = definition[1]
+    .split(",")
+    .map((value) => value.trim());
+  assert.equal(arguments_.length, 12, "property key must have 11 GUID components and one PID");
+  const authority = arguments_[componentIndex];
+  assert.match(
+    authority,
+    /^(?:0x[0-9a-f]+|[A-Z][A-Z0-9_]*)$/i,
+    `GUID component ${componentIndex} must be a numeric literal or macro`,
+  );
+
+  const mutateHex = (value) => {
+    const width = value.length - 2;
+    const mutated = (Number.parseInt(value.slice(2), 16) ^ 1)
+      .toString(16)
+      .padStart(width, "0");
+    return `0x${mutated}`;
+  };
+
+  if (/^0x[0-9a-f]+$/i.test(authority)) {
+    const mutatedDefinition = definition[0].replace(
+      authority,
+      mutateHex(authority),
+    );
+    return header.replace(definition[0], mutatedDefinition);
+  }
+
+  const macro = new RegExp(
+    `(^\\s*#define\\s+${authority}\\s+)(0x[0-9a-f]+)(\\s*$)`,
+    "im",
+  );
+  const macroDefinition = header.match(macro);
+  assert.notEqual(
+    macroDefinition,
+    null,
+    `GUID authority macro ${authority} must be numeric`,
+  );
+  return header.replace(
+    macro,
+    `${macroDefinition[1]}${mutateHex(macroDefinition[2])}${macroDefinition[3]}`,
+  );
+}
+
 async function makePackageFixture(infText) {
   const root = await mkdtemp(path.join(os.tmpdir(), "emke-driver-package-"));
   const repository = path.join(root, "repository");
@@ -215,4 +267,34 @@ test("INF validator rejects ABI and property-key divergence", async () => {
   ]);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /ABI|property key|shared header/i);
+});
+
+test("INF validator derives the GUID from every compiled numeric component", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "emke-guid-authority-"));
+  const header = await readFile(sharedHeader, "utf8");
+
+  for (let componentIndex = 0; componentIndex < 11; componentIndex += 1) {
+    const mutatedHeader = path.join(
+      root,
+      `emke_endpoint_contract-${componentIndex}.h`,
+    );
+    await writeFile(
+      mutatedHeader,
+      mutateCompiledGuidComponent(header, componentIndex),
+      "utf8",
+    );
+    const result = runNode(contractValidator, [
+      "--header",
+      mutatedHeader,
+      "--inf",
+      sourceInf,
+    ]);
+    assert.notEqual(
+      result.status,
+      0,
+      `mutating compiled GUID component ${componentIndex} must invalidate the INF; ` +
+        `stdout: ${result.stdout}`,
+    );
+    assert.match(result.stderr, /property key|shared header|GUID/i);
+  }
 });

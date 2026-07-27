@@ -4,6 +4,7 @@
 #include "endpoints.h"
 #include "minwavert.h"
 #include "minwavertstream.h"
+#include "emke_wave_buffer_contract.h"
 #define MINWAVERTSTREAM_POOLTAG 'SRWM'
 
 #pragma warning (disable : 4127)
@@ -202,12 +203,11 @@ Return Value:
     {
         return STATUS_INVALID_PARAMETER;
     }
-    m_pMiniport->AddRef();
-    m_BridgeEndpoint = m_pMiniport->GetBridgeEndpoint();
-    if (!NT_SUCCESS(ntStatus))
+    if (!m_pMiniport->GetBridgeEndpoint(&m_BridgeEndpoint))
     {
-        return ntStatus;
+        return STATUS_INVALID_PARAMETER;
     }
+    m_pMiniport->AddRef();
     m_ulPin = Pin_;
     m_bCapture = Capture_;
     m_ulDmaMovementRate = pWfEx->nAvgBytesPerSec;
@@ -346,12 +346,13 @@ NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification
         return STATUS_UNSUCCESSFUL;
     }
 
-    if ((NotificationCount_ == 0) || (RequestedSize_ % NotificationCount_ != 0))
+    if (!EmkeIsNotificationBufferValid(
+            RequestedSize_,
+            NotificationCount_,
+            m_pWfExt->Format.nBlockAlign))
     {
         return STATUS_INVALID_PARAMETER;
     }
-
-    RequestedSize_ -= RequestedSize_ % (m_pWfExt->Format.nBlockAlign);
 
     PHYSICAL_ADDRESS highAddress;
     highAddress.HighPart = 0;
@@ -1272,25 +1273,14 @@ ByteDisplacement - # of bytes to process.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
-
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
-    while (ByteDisplacement > 0)
-    {
-        ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        ASSERT((runWrite % EMKE_AUDIO_BLOCK_ALIGN) == 0);
-        ULONG frameCount = runWrite / EMKE_AUDIO_BLOCK_ALIGN;
-
-        EmkeAudioBridgeRead(
-            &g_EmkeAudioBridges,
-            m_BridgeEndpoint,
-            reinterpret_cast<float*>(m_pDmaBuffer + bufferOffset),
-            frameCount);
-
-        bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
-        ByteDisplacement -= runWrite;
-    }
+    static_cast<void>(EmkeBridgeTransferDma(
+        &g_EmkeAudioBridges,
+        m_BridgeEndpoint,
+        EmkeBridgeDmaDirection::bridgeToCapture,
+        m_pDmaBuffer,
+        m_ulDmaBufferSize,
+        static_cast<EmkeSize>(m_ullLinearPosition),
+        ByteDisplacement));
 }
 
 //=============================================================================
@@ -1311,23 +1301,14 @@ ByteDisplacement - # of bytes to process.
 
 --*/
 {
-    ULONG bufferOffset = m_ullLinearPosition % m_ulDmaBufferSize;
-
-    // Normally this will loop no more than once for a single wrap, but if
-    // many bytes have been displaced then this may loops many times.
-    while (ByteDisplacement > 0)
-    {
-        ULONG runWrite = min(ByteDisplacement, m_ulDmaBufferSize - bufferOffset);
-        ASSERT((runWrite % EMKE_AUDIO_BLOCK_ALIGN) == 0);
-        ULONG frameCount = runWrite / EMKE_AUDIO_BLOCK_ALIGN;
-        EmkeAudioBridgeWrite(
-            &g_EmkeAudioBridges,
-            m_BridgeEndpoint,
-            reinterpret_cast<const float*>(m_pDmaBuffer + bufferOffset),
-            frameCount);
-        bufferOffset = (bufferOffset + runWrite) % m_ulDmaBufferSize;
-        ByteDisplacement -= runWrite;
-    }
+    static_cast<void>(EmkeBridgeTransferDma(
+        &g_EmkeAudioBridges,
+        m_BridgeEndpoint,
+        EmkeBridgeDmaDirection::renderToBridge,
+        m_pDmaBuffer,
+        m_ulDmaBufferSize,
+        static_cast<EmkeSize>(m_ullLinearPosition),
+        ByteDisplacement));
 }
 
 //=============================================================================

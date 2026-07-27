@@ -9,7 +9,9 @@ namespace {
 constexpr EmkeAtomic32 bridge_idle = 0;
 constexpr EmkeAtomic32 bridge_producer_active = 1;
 constexpr EmkeAtomic32 bridge_consumer_active = 2;
-constexpr EmkeAtomic32 bridge_reset_active = 4;
+constexpr EmkeAtomic32 bridge_realtime_active =
+    bridge_producer_active | bridge_consumer_active;
+constexpr EmkeAtomic32 bridge_reset_pending = 4;
 
 EmkeAtomic32 atomic_load_32(volatile EmkeAtomic32* value) noexcept {
 #if defined(_MSC_VER)
@@ -51,7 +53,7 @@ bool acquire_realtime_access(
     EmkeAtomic32 access_bit) noexcept {
   for (;;) {
     const EmkeAtomic32 current = atomic_load_32(state);
-    if ((current & (bridge_reset_active | access_bit)) != 0) {
+    if ((current & (bridge_reset_pending | access_bit)) != 0) {
       return false;
     }
     if (atomic_compare_exchange_32(
@@ -123,7 +125,7 @@ bool is_capture_consumer(EmkeBridgeEndpoint endpoint) noexcept {
 }
 
 void initialize_bridge(EmkeAudioBridge* bridge) noexcept {
-  atomic_store_32(&bridge->access_state, bridge_reset_active);
+  atomic_store_32(&bridge->access_state, bridge_reset_pending);
   atomic_store_64(&bridge->read_frame, 0);
   atomic_store_64(&bridge->write_frame, 0);
   for (EmkeSize index = 0;
@@ -266,10 +268,25 @@ void EmkeAudioBridgeReset(
     return;
   }
 
-  while (!atomic_compare_exchange_32(
-      &bridge->access_state,
-      bridge_idle,
-      bridge_reset_active)) {
+  for (;;) {
+    const EmkeAtomic32 current =
+        atomic_load_32(&bridge->access_state);
+    if ((current & bridge_reset_pending) != 0) {
+      while ((atomic_load_32(&bridge->access_state) &
+              bridge_reset_pending) != 0) {
+      }
+      return;
+    }
+    if (atomic_compare_exchange_32(
+        &bridge->access_state,
+        current,
+        current | bridge_reset_pending)) {
+      break;
+    }
+  }
+
+  while ((atomic_load_32(&bridge->access_state) &
+          bridge_realtime_active) != 0) {
   }
   atomic_store_64(
       &bridge->read_frame,

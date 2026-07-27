@@ -2,10 +2,17 @@
 #include "../../shared/emke_endpoint_contract.h"
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <string_view>
+#include <thread>
 #include <type_traits>
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 namespace {
 
@@ -53,6 +60,42 @@ void expect_zero(
       ++failures;
       return;
     }
+  }
+}
+
+EmkeAtomic32 load_access_state(
+    volatile EmkeAtomic32* state) noexcept {
+#if defined(_MSC_VER)
+  return _InterlockedCompareExchange(state, 0, 0);
+#else
+  return __atomic_load_n(state, __ATOMIC_ACQUIRE);
+#endif
+}
+
+void clear_access_bit(
+    volatile EmkeAtomic32* state,
+    EmkeAtomic32 bit) noexcept {
+  for (;;) {
+    const EmkeAtomic32 current = load_access_state(state);
+#if defined(_MSC_VER)
+    if (_InterlockedCompareExchange(
+            state,
+            current & ~bit,
+            current) == current) {
+      return;
+    }
+#else
+    EmkeAtomic32 expected = current;
+    if (__atomic_compare_exchange_n(
+            state,
+            &expected,
+            current & ~bit,
+            false,
+            __ATOMIC_ACQ_REL,
+            __ATOMIC_ACQUIRE)) {
+      return;
+    }
+#endif
   }
 }
 
@@ -244,6 +287,89 @@ void test_reset_discards_prior_session_samples() {
   expect_samples(output, new_session, "reset must not corrupt the new session");
 }
 
+void test_reset_publishes_pending_before_drain_and_serializes_callers() {
+  static EmkeAudioBridgeSet bridges;
+  EmkeAudioBridgeInitialize(&bridges);
+  EmkeAudioBridge& bridge =
+      bridges.meeting_speaker_to_app_capture;
+  constexpr EmkeAtomic32 producer_active = 1;
+  constexpr EmkeAtomic32 reset_pending = 4;
+
+  bridge.access_state = producer_active;
+  std::atomic<bool> first_reset_done{false};
+  std::thread first_reset([&] {
+    EmkeAudioBridgeReset(
+        &bridges,
+        EmkeBridgeEndpoint::meetingSpeakerRender);
+    first_reset_done.store(true, std::memory_order_release);
+  });
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while ((load_access_state(&bridge.access_state) & reset_pending) == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  const bool pending_was_published =
+      (load_access_state(&bridge.access_state) & reset_pending) != 0;
+  expect(
+      pending_was_published,
+      "reset must publish pending while an existing producer is active");
+  expect(
+      !first_reset_done.load(std::memory_order_acquire),
+      "reset owner must wait for the already-active producer to drain");
+
+  std::array<float, 2> capture{7.0f, 7.0f};
+  expect(
+      EmkeAudioBridgeRead(
+          &bridges,
+          EmkeBridgeEndpoint::appSpeakerCapture,
+          capture.data(),
+          1u) == 0u,
+      "new realtime access must fail fast while reset is pending");
+  expect_zero(capture, "capture must remain fail-closed during reset");
+
+  std::atomic<bool> second_reset_done{false};
+  std::thread second_reset([&] {
+    EmkeAudioBridgeReset(
+        &bridges,
+        EmkeBridgeEndpoint::appSpeakerCapture);
+    second_reset_done.store(true, std::memory_order_release);
+  });
+
+  clear_access_bit(&bridge.access_state, producer_active);
+  first_reset.join();
+  second_reset.join();
+  expect(
+      first_reset_done.load(std::memory_order_acquire) &&
+          second_reset_done.load(std::memory_order_acquire),
+      "concurrent reset callers must complete without deadlock");
+  expect(
+      load_access_state(&bridge.access_state) == 0,
+      "reset completion must restore the bridge to idle");
+
+  constexpr std::array<float, 2> post_reset{0.3f, -0.3f};
+  expect(
+      EmkeAudioBridgeWrite(
+          &bridges,
+          EmkeBridgeEndpoint::meetingSpeakerRender,
+          post_reset.data(),
+          1u) == 1u,
+      "the producer must reacquire after reset completion");
+  std::array<float, 2> output{};
+  expect(
+      EmkeAudioBridgeRead(
+          &bridges,
+          EmkeBridgeEndpoint::appSpeakerCapture,
+          output.data(),
+          1u) == 1u,
+      "the consumer must reacquire after reset completion");
+  expect_samples(
+      output,
+      post_reset,
+      "post-reset lifecycle must deliver only new frames");
+}
+
 void test_shared_format_and_role_contract() {
   static_assert(std::is_standard_layout_v<EmkeAudioBridge>);
   static_assert(std::is_trivially_destructible_v<EmkeAudioBridge>);
@@ -303,12 +429,13 @@ int main() {
   test_capture_underrun_is_zero_filled();
   test_overrun_drops_newest_frames_without_overwriting_unread_data();
   test_reset_discards_prior_session_samples();
+  test_reset_publishes_pending_before_drain_and_serializes_callers();
   test_shared_format_and_role_contract();
 
   if (failures != 0) {
     std::fprintf(stderr, "%d bridge behavior assertion(s) failed\n", failures);
     return 1;
   }
-  std::puts("EMKE driver bridge behavior tests passed (6 cases).");
+  std::puts("EMKE driver bridge behavior tests passed (7 cases).");
   return 0;
 }

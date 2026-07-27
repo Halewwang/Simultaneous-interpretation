@@ -74,6 +74,7 @@
     <ClCompile Include="src\basetopo.cpp" />
     <ClCompile Include="src\common.cpp" />
     <ClCompile Include="src\emke_audio_bridge.cpp" />
+    <ClCompile Include="src\emke_bridge_routing.cpp" />
     <ClCompile Include="src\hw.cpp" />
     <ClCompile Include="src\kshelper.cpp" />
     <ClCompile Include="src\micarraytopo.cpp" />
@@ -87,6 +88,8 @@
     <ClInclude Include="src\common.h" />
     <ClInclude Include="src\definitions.h" />
     <ClInclude Include="src\emke_audio_bridge.h" />
+    <ClInclude Include="src\emke_bridge_routing.h" />
+    <ClInclude Include="src\emke_wave_buffer_contract.h" />
     <ClInclude Include="src\endpoints.h" />
     <ClInclude Include="src\hw.h" />
     <ClInclude Include="src\kshelper.h" />

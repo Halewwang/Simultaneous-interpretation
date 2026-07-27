@@ -1,4 +1,5 @@
 #include "wasapi_stream.hpp"
+#include "virtual_audio_format.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -58,12 +59,19 @@ StreamFailure::Operation operation_for_step(std::size_t step) noexcept {
 }  // namespace
 
 bool is_exact_virtual_format(const AudioFormat& format) noexcept {
-  return format.sample_rate_hz == EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ &&
-         format.channel_count == 2u &&
-         format.sample_type == NativeSampleType::ieeeFloat32 &&
-         format.bits_per_sample == 32u &&
-         format.valid_bits_per_sample == 32u &&
-         format.block_align == 8u;
+  return matches_virtual_audio_format({
+      .sample_rate_hz = format.sample_rate_hz,
+      .channel_count = format.channel_count,
+      .bits_per_sample = format.bits_per_sample,
+      .valid_bits_per_sample = format.valid_bits_per_sample,
+      .block_align = format.block_align,
+      .average_bytes_per_second =
+          format.sample_rate_hz * format.block_align,
+      .format_tag = static_cast<std::uint16_t>(
+          format.sample_type == NativeSampleType::ieeeFloat32
+              ? EMKE_AUDIO_FORMAT_TAG
+              : 0u),
+  });
 }
 
 std::size_t bytes_per_frame(const AudioFormat& format) noexcept {
@@ -836,16 +844,20 @@ class WasapiStream::Impl final : public WasapiClientAdapter {
     if (exact_virtual) {
       virtual_format_ = {};
       virtual_format_.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-      virtual_format_.Format.nChannels = 2u;
+      virtual_format_.Format.nChannels =
+          virtualAudioFormat.channel_count;
       virtual_format_.Format.nSamplesPerSec =
-          EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ;
-      virtual_format_.Format.wBitsPerSample = 32u;
-      virtual_format_.Format.nBlockAlign = 8u;
+          virtualAudioFormat.sample_rate_hz;
+      virtual_format_.Format.wBitsPerSample =
+          virtualAudioFormat.bits_per_sample;
+      virtual_format_.Format.nBlockAlign =
+          virtualAudioFormat.block_align;
       virtual_format_.Format.nAvgBytesPerSec =
-          EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ * 8u;
+          virtualAudioFormat.average_bytes_per_second;
       virtual_format_.Format.cbSize =
           sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-      virtual_format_.Samples.wValidBitsPerSample = 32u;
+      virtual_format_.Samples.wValidBitsPerSample =
+          virtualAudioFormat.valid_bits_per_sample;
       virtual_format_.dwChannelMask =
           SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
       virtual_format_.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;

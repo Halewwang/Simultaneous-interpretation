@@ -14,6 +14,8 @@ Abstract:
 #ifndef _SIMPLEAUDIOSAMPLE_COMMON_H_
 #define _SIMPLEAUDIOSAMPLE_COMMON_H_
 
+#include "emke_bridge_routing.h"
+
 #define HNSTIME_PER_MILLISECOND 10000
 
 //=============================================================================
@@ -119,15 +121,6 @@ Abstract:
 #define MINWAVERT_POOLTAG           'RWNM'
 #define MINTOPORT_POOLTAG           'RTNM'
 #define MINADAPTER_POOLTAG          'uAyS'
-
-typedef enum
-{
-    eMeetingSpeakerRenderDevice = 0,
-    eAppSpeakerCaptureDevice,
-    eAppMicrophoneRenderDevice,
-    eMeetingMicrophoneCaptureDevice,
-    eMaxDeviceType,
-} eDeviceType;
 
 //
 // Signal processing modes and default formats structs.

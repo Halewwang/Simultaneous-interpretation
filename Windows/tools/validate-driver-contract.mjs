@@ -47,6 +47,50 @@ function readUnsignedMacro(text, name) {
   return Number.parseInt(value, 10);
 }
 
+function readHexMacro(text, name, maximum) {
+  const value = readMacro(text, name);
+  if (!/^0x[0-9a-f]+u?$/i.test(value)) {
+    throw new Error(`Shared header ${name} must be one hexadecimal integer.`);
+  }
+  const parsed = Number.parseInt(value.slice(2), 16);
+  if (!Number.isSafeInteger(parsed) || parsed > maximum) {
+    throw new Error(`Shared header ${name} is outside its GUID component range.`);
+  }
+  return parsed;
+}
+
+function formatGuidFromNumericAuthority(header) {
+  const data1 = readHexMacro(
+    header,
+    "EMKE_ENDPOINT_ROLE_PROPERTY_GUID_DATA1",
+    0xffff_ffff,
+  );
+  const data2 = readHexMacro(
+    header,
+    "EMKE_ENDPOINT_ROLE_PROPERTY_GUID_DATA2",
+    0xffff,
+  );
+  const data3 = readHexMacro(
+    header,
+    "EMKE_ENDPOINT_ROLE_PROPERTY_GUID_DATA3",
+    0xffff,
+  );
+  const data4 = Array.from({ length: 8 }, (_, index) =>
+    readHexMacro(
+      header,
+      `EMKE_ENDPOINT_ROLE_PROPERTY_GUID_DATA4_${index}`,
+      0xff,
+    ),
+  );
+  const hex = (value, width) =>
+    value.toString(16).toUpperCase().padStart(width, "0");
+  return (
+    `{${hex(data1, 8)}-${hex(data2, 4)}-${hex(data3, 4)}-` +
+    `${hex(data4[0], 2)}${hex(data4[1], 2)}-` +
+    `${data4.slice(2).map((value) => hex(value, 2)).join("")}}`
+  );
+}
+
 function readInfString(inf, name) {
   const match = inf.match(
     new RegExp(`^${name}="([^"]+)"\\s*$`, "mi"),
@@ -97,10 +141,8 @@ async function main() {
   }
 
   const expectedPropertyKey =
-    `${readStringMacro(
-      header,
-      "EMKE_ENDPOINT_ROLE_PROPERTY_GUID_LITERAL",
-    )},${readUnsignedMacro(header, "EMKE_ENDPOINT_ROLE_PROPERTY_PID")}`;
+    `${formatGuidFromNumericAuthority(header)},` +
+    `${readUnsignedMacro(header, "EMKE_ENDPOINT_ROLE_PROPERTY_PID")}`;
   requireEqual(
     readInfString(inf, "PKEY_EMKE_EndpointRole").toUpperCase(),
     expectedPropertyKey.toUpperCase(),

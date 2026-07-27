@@ -163,6 +163,8 @@ test("WaveRT tables and stream movement use the compiled Float32 bridge contract
   const speakerFormats = await text("src/speakerwavtable.h");
   const captureFormats = await text("src/micarraywavtable.h");
   const stream = await text("src/minwavertstream.cpp");
+  const miniport = await text("src/minwavert.h");
+  const routing = await text("src/emke_bridge_routing.cpp");
   for (const formats of [speakerFormats, captureFormats]) {
     assert.match(formats, /KSDATAFORMAT_SUBTYPE_IEEE_FLOAT/);
     assert.match(formats, /EMKE_AUDIO_SAMPLE_RATE/);
@@ -170,9 +172,12 @@ test("WaveRT tables and stream movement use the compiled Float32 bridge contract
     assert.match(formats, /EMKE_AUDIO_BITS_PER_SAMPLE/);
     assert.doesNotMatch(formats, /KSDATAFORMAT_SUBTYPE_PCM/);
   }
-  assert.match(stream, /EmkeAudioBridgeWrite/);
-  assert.match(stream, /EmkeAudioBridgeRead/);
+  assert.match(stream, /EmkeBridgeTransferDma/);
   assert.match(stream, /EmkeAudioBridgeReset/);
+  assert.match(miniport, /EmkeBridgeEndpointForDeviceType/);
+  assert.doesNotMatch(miniport, /switch\s*\(\s*m_DeviceType\s*\)/);
+  assert.match(routing, /EmkeAudioBridgeWrite/);
+  assert.match(routing, /EmkeAudioBridgeRead/);
   assert.doesNotMatch(stream, /GenerateSine|SaveData|WriteData/);
 });
 
