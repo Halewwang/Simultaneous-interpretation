@@ -62,7 +62,12 @@
     <PackageReference Include="Microsoft.Windows.SDK.cpp.x64" Version="10.0.28000.2526" GeneratePathProperty="true" />
   </ItemGroup>
   <ItemGroup>
-    <Inf Include="EMKE.VirtualAudio.inf" />
+    <Inf Include="EMKE.VirtualAudio.inf">
+      <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
+      <DateStamp>07/26/2026</DateStamp>
+      <SpecifyDriverVerDirectiveVersion>true</SpecifyDriverVerDirectiveVersion>
+      <TimeStamp>1.0.0.1</TimeStamp>
+    </Inf>
     <FilesToPackage Include="$(TargetPath)" Condition="'$(ConfigurationType)'=='Driver' or '$(ConfigurationType)'=='DynamicLibrary'" />
     <ResourceCompile Include="src\SimpleAudioSample.rc" />
     <ClCompile Include="src\adapter.cpp" />

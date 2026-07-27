@@ -7,9 +7,13 @@
 The locally provable remediation is implemented and committed. Compiled bridge
 behavior, package-boundary behavior, shared contracts, native-header
 compatibility, project XML, and whitespace gates pass on macOS. Windows WDK
-compilation, the runtime catalog P/Invoke verifier, the private Actions
-artifact, driver installation, and live endpoint/meeting behavior remain
-explicitly unproved.
+compilation/linking, Universal ApiValidator, DriverPackageTarget, and
+Inf2Cat signability/CAT generation have now passed in the authorized hosted
+run. That run then correctly failed the strict package verifier on a dynamically
+stamped INF/SYS version mismatch. The deterministic StampInf metadata fix is
+locally green, but its remote WDK rerun, runtime catalog P/Invoke verifier,
+private Actions artifact, driver installation, and live endpoint/meeting
+behavior remain explicitly unproved.
 
 ## Design and provenance
 
@@ -286,9 +290,11 @@ acceptance remain pending even if the hosted build passes.
 
 ## Risks and concerns
 
-- The WDK/MSVC build and handwritten C# catalog P/Invoke declarations are
-  source-reviewed but cannot be executed on macOS. A remote failure must be
-  treated as an implementation defect, not weakened validation.
+- The prior authorized WDK/MSVC run passed compilation/linking and package
+  generation, but the new deterministic StampInf metadata cannot be executed
+  on macOS. Its remote rerun and the handwritten C# catalog P/Invoke integration
+  remain required. A remote failure must be treated as an implementation
+  defect, not weakened validation.
 - The compiled portable test proves bridge semantics, but not PortCls/WaveRT
   scheduling, DMA timing, memory ordering on a live Windows audio stack, or
   audible meeting behavior.
@@ -496,3 +502,136 @@ portable bridge behavior
 
 This correction changes only test infrastructure. No driver production source,
 runtime behavior, package logic, signing boundary, or install boundary changed.
+
+## Remediation cycle 2 — fix round 2
+
+### Remote RED after the kernel fix
+
+Authorized GitHub Actions run `30230988562` tested commit
+`2ac205ec827e800fe2ab3130fe7d3e4f63ee16f2`.
+
+- `hosted-toolchain-proof`, job `89869720558`: passed completely.
+- `driver-build-proof`, job `89869720549`: passed pinned WDK restore,
+  `/kernel` compilation and linking, `ApiValidator='Universal'`,
+  `DriverPackageTarget`, and Inf2Cat signability/CAT generation.
+- The strict package verifier then failed at
+  `Windows/tools/verify-driver-package.ps1:299`:
+
+```text
+DriverVer 1.58.51.568 does not agree with FileVersion 1.0.0.1.
+```
+
+The build log identifies the cause before compilation:
+
+```text
+StampInf:
+stampinf.exe -d "*" -a "amd64" -v "*" -k "1.15" ... EMKE.VirtualAudio.inf
+Stamping [Version] section with DriverVer=07/27/2026,1.58.51.568
+```
+
+Thus the source INF's frozen `DriverVer=07/26/2026,1.0.0.1` was copied for
+stamping and then overwritten by the WDK project's default wildcard StampInf
+arguments. The compiled SYS correctly retained `FileVersion 1.0.0.1`. The
+verifier is working as designed and was not weakened.
+
+Microsoft documents that the real `Inf` project item supplies StampInf
+parameters through item metadata. `SpecifyDriverVerDirectiveDate` enables
+`-d`, `DateStamp` supplies the date, `SpecifyDriverVerDirectiveVersion` enables
+`-v`, and `TimeStamp` supplies the four-part version:
+
+- <https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/stampinf-task>
+- <https://learn.microsoft.com/en-us/windows-hardware/drivers/develop/stampinf-properties-for-driver-projects>
+
+The official package locked by this project was also inspected directly.
+WDK `10.0.28000.2526` defines the metadata defaults in
+`WindowsDriver.LateEvaluation.props` and maps
+`%(Inf.SpecifyDriverVerDirectiveVersion)` plus `%(Inf.TimeStamp)` into the
+StampInf task in `WindowsDriver.Common.targets`. This resolves the inconsistent
+shorter spelling shown in one Learn table cell in favor of the metadata the
+actual pinned WDK consumes.
+
+### TDD RED: real project StampInf metadata
+
+A project-boundary test was added first against the actual
+`EMKE.VirtualAudio.vcxproj` `Inf` item. It requires the enabling metadata and
+the exact reproducible values `07/26/2026` and `1.0.0.1`, and rejects wildcard
+metadata.
+
+Command:
+
+```text
+node --test Windows/driver/tests/driver-contract.test.mjs
+```
+
+RED:
+
+```text
+tests 12
+pass 11
+fail 1
+AssertionError: the real driver INF item must declare StampInf metadata
+```
+
+The existing project used the self-closing item
+`<Inf Include="EMKE.VirtualAudio.inf" />`, so the failure was specific to the
+remote root cause.
+
+### Minimal production fix and GREEN
+
+Only the real INF item gained the official StampInf metadata:
+
+```xml
+<Inf Include="EMKE.VirtualAudio.inf">
+  <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
+  <DateStamp>07/26/2026</DateStamp>
+  <SpecifyDriverVerDirectiveVersion>true</SpecifyDriverVerDirectiveVersion>
+  <TimeStamp>1.0.0.1</TimeStamp>
+</Inf>
+```
+
+This makes the expected WDK invocation deterministic as
+`-d "07/26/2026" -v "1.0.0.1"`. The date is valid, reproducible, and matches
+the source INF; the four-part version matches both the source INF and SYS
+resource. `verify-driver-package.ps1`, staging, catalog validation, signing,
+installation, audio runtime, and shared contracts are unchanged.
+
+GREEN:
+
+```text
+driver/package Node suites
+  PASS: 19 tests, 19 pass, 0 fail
+
+kernel shim type-width compile
+  PASS: exit 0
+
+kernel-shaped production bridge compile
+  PASS: exit 0
+
+portable bridge behavior
+  PASS: 6 cases
+
+shared contracts
+  PASS: contract v1: 3 schemas, 8 fixtures
+
+portable device_catalog compile
+  PASS: exit 0
+
+driver project XML
+  PASS: xmllint exit 0
+
+git diff --check
+  PASS: no output
+```
+
+The fix-round commit SHA is supplied in the controller handoff because a commit
+cannot embed its own SHA.
+
+### Remaining gate and safety boundary
+
+A controller-pushed run must still show StampInf using the fixed date/version,
+then pass the unchanged strict package verifier, independent INF/SYS mutation
+rejection, and private seven-day artifact upload. No remote GREEN for this
+metadata change is claimed yet.
+
+No signing, installation, loading, removal, elevation, secret use, push, or
+public release occurred in fix round 2.

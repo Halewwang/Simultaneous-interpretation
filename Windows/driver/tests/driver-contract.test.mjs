@@ -72,6 +72,32 @@ test("project is a pinned x64 Windows 11 KMDF driver built by MSBuild", async ()
   );
 });
 
+test("WDK StampInf metadata freezes the packaged INF version and date", async () => {
+  const project = await text("EMKE.VirtualAudio.vcxproj");
+  const inf = await text("EMKE.VirtualAudio.inf");
+  const resource = await text("src/SimpleAudioSample.rc");
+  const infItem = project.match(
+    /<Inf Include="EMKE\.VirtualAudio\.inf">(?<metadata>[\s\S]*?)<\/Inf>/,
+  );
+
+  assert.ok(infItem, "the real driver INF item must declare StampInf metadata");
+  assert.match(
+    infItem.groups.metadata,
+    /<SpecifyDriverVerDirectiveDate>true<\/SpecifyDriverVerDirectiveDate>/,
+  );
+  assert.match(infItem.groups.metadata, /<DateStamp>07\/26\/2026<\/DateStamp>/);
+  assert.match(
+    infItem.groups.metadata,
+    /<SpecifyDriverVerDirectiveVersion>true<\/SpecifyDriverVerDirectiveVersion>/,
+  );
+  assert.match(infItem.groups.metadata, /<TimeStamp>1\.0\.0\.1<\/TimeStamp>/);
+  assert.doesNotMatch(infItem.groups.metadata, /<SpecifyDriverDirectiveVersion>/);
+  assert.doesNotMatch(infItem.groups.metadata, />\s*\*\s*</);
+  assert.match(inf, /^DriverVer=07\/26\/2026,1\.0\.0\.1$/m);
+  assert.match(resource, /^\s*FILEVERSION 1,0,0,1$/m);
+  assert.match(resource, /VALUE "FileVersion", "1\.0\.0\.1\\0"/);
+});
+
 test("INF freezes the root identity, driver ABI, roles, and endpoint names", async () => {
   const inf = await text("EMKE.VirtualAudio.inf");
   assert.match(inf, /ROOT\\EMKEVIRTUALAUDIO/i);
