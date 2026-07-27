@@ -312,6 +312,106 @@ function Set-InstallOrchestratorExternalBoundaries {
     Set-TestFunction -Name Invoke-SmokeEnumeration -Body {}
 }
 
+function Set-StagingCreationTestSeams {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ProgramData,
+
+        [string]$ReplacementAfterCreate
+    )
+
+    $base = Join-Path $ProgramData "EMKE"
+    $root = Join-Path $base "DriverLabStaging"
+    $token = "1" * 32
+    $child = Join-Path $root $token
+    $script:stagingTrustedAcl = @{}
+    $script:stagingAtomicCalls =
+        [Collections.Generic.List[string]]::new()
+    $script:stagingSetAclCalls =
+        [Collections.Generic.List[string]]::new()
+    $script:stagingReplacementAfterCreate =
+        $ReplacementAfterCreate
+    $script:stagingReplacementArmed = $false
+
+    Set-TestFunction -Name Get-SystemProgramDataPath -Body ({
+        $ProgramData
+    }.GetNewClosure())
+    Set-TestFunction -Name Get-SystemStagingBase -Body ({
+        $base
+    }.GetNewClosure())
+    Set-TestFunction -Name Get-SystemStagingRoot -Body ({
+        $root
+    }.GetNewClosure())
+    Set-TestFunction -Name New-StagingDirectoryToken -Body ({
+        $token
+    }.GetNewClosure())
+    Set-TestFunction -Name Test-StagingDirectoryExists -Body {
+        param($Path)
+        Test-Path -LiteralPath $Path -PathType Container
+    }
+    Set-TestFunction -Name Assert-LocalNonReparsePath -Body {
+        param($Path, $ExpectedType)
+        $fullPath = [IO.Path]::GetFullPath($Path)
+        if ($script:stagingReplacementArmed -and
+            [StringComparer]::OrdinalIgnoreCase.Equals(
+                $fullPath,
+                $script:stagingReplacementAfterCreate
+            )) {
+            throw "staging replacement detected"
+        }
+        if (-not (Test-Path `
+            -LiteralPath $fullPath `
+            -PathType $ExpectedType)) {
+            throw "Required $ExpectedType path does not exist: $Path"
+        }
+        return $fullPath
+    }
+    Set-TestFunction -Name Assert-ProtectedStagingAcl -Body {
+        param($Path)
+        $fullPath = [IO.Path]::GetFullPath($Path)
+        if (-not $script:stagingTrustedAcl.ContainsKey($fullPath) -or
+            $script:stagingTrustedAcl[$fullPath] -ne $true) {
+            throw "weak protected staging ACL: $Path"
+        }
+    }
+    Set-TestFunction -Name Set-ProtectedStagingAcl -Body {
+        param($Path)
+        [void]$script:stagingSetAclCalls.Add(
+            [IO.Path]::GetFullPath($Path)
+        )
+    }
+    Set-TestFunction `
+        -Name New-ProtectedStagingDirectoryAtomically `
+        -Body {
+            param($Path)
+            $fullPath = [IO.Path]::GetFullPath($Path)
+            [void]$script:stagingAtomicCalls.Add($fullPath)
+            if (Test-Path -LiteralPath $fullPath -PathType Container) {
+                return $false
+            }
+            [IO.Directory]::CreateDirectory($fullPath) | Out-Null
+            $script:stagingTrustedAcl[$fullPath] = $true
+            if (-not [string]::IsNullOrWhiteSpace(
+                $script:stagingReplacementAfterCreate
+            ) -and
+                [StringComparer]::OrdinalIgnoreCase.Equals(
+                    $fullPath,
+                    $script:stagingReplacementAfterCreate
+                )) {
+                $script:stagingReplacementArmed = $true
+            }
+            return $true
+        }
+
+    return [pscustomobject]@{
+        ProgramData = [IO.Path]::GetFullPath($ProgramData)
+        Base = [IO.Path]::GetFullPath($base)
+        Root = [IO.Path]::GetFullPath($root)
+        Child = [IO.Path]::GetFullPath($child)
+        Token = $token
+    }
+}
+
 Import-LifecycleFunctions -Path $installScript
 
 Invoke-Case -Name "local input rejects UNC and reparse paths" -Action {
@@ -408,6 +508,183 @@ Invoke-Case -Name "protected staging ACL contract and cleanup guard" -Action {
         }
     }
 }
+
+Invoke-Case `
+    -Name "embedded protected directory creator compiles without mutation" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        Initialize-ProtectedDirectoryCreator
+        $creator = "Emke.DriverLab.ProtectedDirectoryCreator" -as [type]
+        if ($null -eq $creator -or
+            $null -eq $creator.GetMethod("Create")) {
+            throw "Atomic protected directory creator did not compile."
+        }
+    }
+
+Invoke-Case `
+    -Name "existing weak staging base is rejected before every ACL write" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-weak-base"
+        try {
+            $programData = Join-Path $testRoot "ProgramData"
+            [IO.Directory]::CreateDirectory(
+                (Join-Path $programData "EMKE")
+            ) | Out-Null
+            $paths = Set-StagingCreationTestSeams `
+                -ProgramData $programData
+            Assert-Throws -Pattern "weak protected staging ACL" -Action {
+                New-ProtectedStagingDirectory
+            }
+            if ($script:stagingSetAclCalls.Count -ne 0 -or
+                $script:stagingAtomicCalls.Count -ne 0 -or
+                (Test-Path -LiteralPath $paths.Root)) {
+                throw (
+                    "Weak existing base was modified or reached child " +
+                    "directory creation."
+                )
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
+
+Invoke-Case `
+    -Name "existing weak staging root is rejected before every ACL write" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-weak-root"
+        try {
+            $programData = Join-Path $testRoot "ProgramData"
+            $root = Join-Path `
+                (Join-Path $programData "EMKE") `
+                "DriverLabStaging"
+            [IO.Directory]::CreateDirectory($root) | Out-Null
+            $paths = Set-StagingCreationTestSeams `
+                -ProgramData $programData
+            $script:stagingTrustedAcl[$paths.Base] = $true
+            Assert-Throws -Pattern "weak protected staging ACL" -Action {
+                New-ProtectedStagingDirectory
+            }
+            if ($script:stagingSetAclCalls.Count -ne 0 -or
+                $script:stagingAtomicCalls.Count -ne 0 -or
+                (Test-Path -LiteralPath $paths.Child)) {
+                throw (
+                    "Weak existing root was modified or reached GUID child " +
+                    "creation."
+                )
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
+
+Invoke-Case `
+    -Name "trusted existing staging parents create only a protected GUID child" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-trusted-parent"
+        try {
+            $programData = Join-Path $testRoot "ProgramData"
+            $root = Join-Path `
+                (Join-Path $programData "EMKE") `
+                "DriverLabStaging"
+            [IO.Directory]::CreateDirectory($root) | Out-Null
+            $paths = Set-StagingCreationTestSeams `
+                -ProgramData $programData
+            $script:stagingTrustedAcl[$paths.Base] = $true
+            $script:stagingTrustedAcl[$paths.Root] = $true
+            $result = New-ProtectedStagingDirectory
+            if ($result.Path -cne $paths.Child -or
+                $result.Token -cne $paths.Token -or
+                $script:stagingSetAclCalls.Count -ne 0 -or
+                [string]::Join(
+                    "`n",
+                    $script:stagingAtomicCalls
+                ) -cne $paths.Child) {
+                throw "Trusted existing parent lifecycle was not exact."
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
+
+Invoke-Case `
+    -Name "fresh staging chain is atomically protected at creation" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-fresh-chain"
+        try {
+            $programData = Join-Path $testRoot "ProgramData"
+            [IO.Directory]::CreateDirectory($programData) | Out-Null
+            $paths = Set-StagingCreationTestSeams `
+                -ProgramData $programData
+            $result = New-ProtectedStagingDirectory
+            $expectedCalls = @(
+                $paths.Base,
+                $paths.Root,
+                $paths.Child
+            )
+            if ($result.Path -cne $paths.Child -or
+                $script:stagingSetAclCalls.Count -ne 0 -or
+                [string]::Join(
+                    "`n",
+                    $script:stagingAtomicCalls
+                ) -cne
+                [string]::Join("`n", $expectedCalls)) {
+                throw "Fresh staging chain was not atomically created."
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
+
+Invoke-Case `
+    -Name "staging replacement after atomic create fails closed" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-replacement"
+        try {
+            $programData = Join-Path $testRoot "ProgramData"
+            [IO.Directory]::CreateDirectory($programData) | Out-Null
+            $expectedChild = Join-Path `
+                (Join-Path `
+                    (Join-Path $programData "EMKE") `
+                    "DriverLabStaging") `
+                ("1" * 32)
+            $paths = Set-StagingCreationTestSeams `
+                -ProgramData $programData `
+                -ReplacementAfterCreate (
+                    [IO.Path]::GetFullPath($expectedChild)
+                )
+            Assert-Throws -Pattern "replacement detected" -Action {
+                New-ProtectedStagingDirectory
+            }
+            if ($script:stagingSetAclCalls.Count -ne 0 -or
+                [string]::Join(
+                    "`n",
+                    $script:stagingAtomicCalls
+                ) -cne
+                [string]::Join(
+                    "`n",
+                    @($paths.Base, $paths.Root, $paths.Child)
+                )) {
+                throw "Replacement path crossed an unexpected mutation."
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
 
 Invoke-Case `
     -Name "protected staging chain rejects weak parent and replacement" `

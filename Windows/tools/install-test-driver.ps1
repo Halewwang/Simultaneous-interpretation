@@ -250,6 +250,125 @@ function Get-ProtectedStagingSddl {
     return "O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 }
 
+function Get-ProtectedDirectoryCreatorSource {
+    return @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+
+namespace Emke.DriverLab
+{
+    public static class ProtectedDirectoryCreator
+    {
+        private const int ErrorAlreadyExists = 183;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SecurityAttributes
+        {
+            public uint Length;
+            public IntPtr SecurityDescriptor;
+
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool InheritHandle;
+        }
+
+        [DllImport(
+            "kernel32.dll",
+            CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(
+            string path,
+            ref SecurityAttributes securityAttributes);
+
+        public static bool Create(string path, string sddl)
+        {
+            if (String.IsNullOrWhiteSpace(path))
+            {
+                throw new ArgumentException(
+                    "Protected directory path is required.",
+                    nameof(path));
+            }
+            if (String.IsNullOrWhiteSpace(sddl))
+            {
+                throw new ArgumentException(
+                    "Protected directory SDDL is required.",
+                    nameof(sddl));
+            }
+
+            var security = new DirectorySecurity();
+            security.SetSecurityDescriptorSddlForm(
+                sddl,
+                AccessControlSections.Owner |
+                AccessControlSections.Group |
+                AccessControlSections.Access);
+            byte[] descriptor =
+                security.GetSecurityDescriptorBinaryForm();
+            IntPtr descriptorBuffer =
+                Marshal.AllocHGlobal(descriptor.Length);
+            try
+            {
+                Marshal.Copy(
+                    descriptor,
+                    0,
+                    descriptorBuffer,
+                    descriptor.Length);
+                var attributes = new SecurityAttributes
+                {
+                    Length =
+                        (uint)Marshal.SizeOf<SecurityAttributes>(),
+                    SecurityDescriptor = descriptorBuffer,
+                    InheritHandle = false
+                };
+                if (CreateDirectoryW(path, ref attributes))
+                {
+                    return true;
+                }
+                int error = Marshal.GetLastWin32Error();
+                if (error == ErrorAlreadyExists)
+                {
+                    return false;
+                }
+                throw new Win32Exception(
+                    error,
+                    "Atomic protected directory creation failed.");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(descriptorBuffer);
+            }
+        }
+    }
+}
+'@
+}
+
+function Initialize-ProtectedDirectoryCreator {
+    if ($null -ne (
+        "Emke.DriverLab.ProtectedDirectoryCreator" -as [type]
+    )) {
+        return
+    }
+    Add-Type `
+        -TypeDefinition (Get-ProtectedDirectoryCreatorSource) `
+        -Language CSharp `
+        -ErrorAction Stop
+}
+
+function New-ProtectedStagingDirectoryAtomically {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Initialize-ProtectedDirectoryCreator
+    return [Emke.DriverLab.ProtectedDirectoryCreator]::Create(
+        $Path,
+        (Get-ProtectedStagingSddl)
+    )
+}
+
 function Assert-ProtectedStagingSecurityDescriptor {
     param(
         [Parameter(Mandatory)]
@@ -293,15 +412,19 @@ function Assert-ProtectedStagingSecurityDescriptor {
     }
 }
 
-function Get-SystemStagingBase {
+function Get-SystemProgramDataPath {
     $programData = [Environment]::GetFolderPath(
         [Environment+SpecialFolder]::CommonApplicationData
     )
     if ([string]::IsNullOrWhiteSpace($programData)) {
         throw "The local system staging base could not be resolved."
     }
+    return [IO.Path]::GetFullPath($programData)
+}
+
+function Get-SystemStagingBase {
     return [IO.Path]::GetFullPath(
-        (Join-Path $programData "EMKE")
+        (Join-Path (Get-SystemProgramDataPath) "EMKE")
     )
 }
 
@@ -342,6 +465,129 @@ function Assert-ProtectedStagingAcl {
     Assert-ProtectedStagingSecurityDescriptor -Sddl $acl.Sddl
 }
 
+function Assert-ExactLocalContainerPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $expected = [IO.Path]::GetFullPath($Path)
+    $resolved = Assert-LocalNonReparsePath `
+        -Path $expected `
+        -ExpectedType Container
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        ([IO.Path]::GetFullPath($resolved)),
+        $expected
+    )) {
+        throw "Staging container resolved to an unexpected path."
+    }
+    return $expected
+}
+
+function Assert-SystemProgramDataPath {
+    return Assert-ExactLocalContainerPath `
+        -Path (Get-SystemProgramDataPath)
+}
+
+function Assert-ProtectedStagingParent {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $resolved = Assert-ExactLocalContainerPath -Path $Path
+    Assert-ProtectedStagingAcl -Path $resolved
+    return $resolved
+}
+
+function Test-StagingDirectoryExists {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    return Test-Path -LiteralPath $Path
+}
+
+function New-StagingDirectoryToken {
+    return [guid]::NewGuid().ToString("N")
+}
+
+function Assert-StagingCreationParent {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ParentPath,
+
+        [switch]$SystemProgramData
+    )
+
+    $expected = [IO.Path]::GetFullPath($ParentPath)
+    $resolved = if ($SystemProgramData) {
+        Assert-SystemProgramDataPath
+    } else {
+        Assert-ProtectedStagingParent -Path $expected
+    }
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        ([IO.Path]::GetFullPath($resolved)),
+        $expected
+    )) {
+        throw "Staging creation parent is not the exact trusted path."
+    }
+    return $expected
+}
+
+function Ensure-ProtectedStagingDirectory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$ParentPath,
+
+        [switch]$SystemProgramData,
+
+        [switch]$RequireCreated
+    )
+
+    $expected = [IO.Path]::GetFullPath($Path)
+    $expectedParent = [IO.Path]::GetFullPath($ParentPath)
+    $actualParent = [IO.DirectoryInfo]::new($expected).Parent.FullName
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        $actualParent,
+        $expectedParent
+    )) {
+        throw "Protected staging directory is not one exact child."
+    }
+    [void](Assert-StagingCreationParent `
+        -ParentPath $expectedParent `
+        -SystemProgramData:$SystemProgramData)
+
+    if (Test-StagingDirectoryExists -Path $expected) {
+        $resolvedExisting =
+            Assert-ExactLocalContainerPath -Path $expected
+        Assert-ProtectedStagingAcl -Path $resolvedExisting
+        if ($RequireCreated) {
+            throw "Owned GUID staging directory unexpectedly already exists."
+        }
+        return $false
+    }
+
+    $created =
+        New-ProtectedStagingDirectoryAtomically -Path $expected
+    [void](Assert-StagingCreationParent `
+        -ParentPath $expectedParent `
+        -SystemProgramData:$SystemProgramData)
+    $resolved = Assert-ExactLocalContainerPath -Path $expected
+    Assert-ProtectedStagingAcl -Path $resolved
+    if ($RequireCreated -and -not $created) {
+        throw (
+            "Owned GUID staging directory raced an existing path; " +
+            "refusing uncertain ownership."
+        )
+    }
+    return $created
+}
+
 function Assert-ProtectedStagingChain {
     param(
         [Parameter(Mandatory)]
@@ -374,30 +620,28 @@ function Assert-ProtectedStagingChain {
 }
 
 function New-ProtectedStagingDirectory {
+    $programData = Assert-SystemProgramDataPath
     $base = Get-SystemStagingBase
-    [IO.Directory]::CreateDirectory($base) | Out-Null
-    [void](Assert-LocalNonReparsePath `
+    [void](Ensure-ProtectedStagingDirectory `
         -Path $base `
-        -ExpectedType Container)
-    Set-ProtectedStagingAcl -Path $base
-    Assert-ProtectedStagingAcl -Path $base
+        -ParentPath $programData `
+        -SystemProgramData)
 
     $root = Get-SystemStagingRoot
-    [IO.Directory]::CreateDirectory($root) | Out-Null
-    [void](Assert-LocalNonReparsePath `
+    [void](Ensure-ProtectedStagingDirectory `
         -Path $root `
-        -ExpectedType Container)
-    Set-ProtectedStagingAcl -Path $root
-    Assert-ProtectedStagingAcl -Path $root
+        -ParentPath $base)
 
-    $token = [guid]::NewGuid().ToString("N")
+    $token = New-StagingDirectoryToken
+    $parsedToken = [guid]::Empty
+    if (-not [guid]::TryParseExact($token, "N", [ref]$parsedToken)) {
+        throw "Owned staging creation requires an exact GUID token."
+    }
     $path = Join-Path $root $token
-    [IO.Directory]::CreateDirectory($path) | Out-Null
-    [void](Assert-LocalNonReparsePath `
+    [void](Ensure-ProtectedStagingDirectory `
         -Path $path `
-        -ExpectedType Container)
-    Set-ProtectedStagingAcl -Path $path
-    Assert-ProtectedStagingAcl -Path $path
+        -ParentPath $root `
+        -RequireCreated)
     [void](Assert-ProtectedStagingChain -StagingPath $path)
     return [pscustomobject]@{
         Path = $path
