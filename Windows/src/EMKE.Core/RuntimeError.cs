@@ -33,7 +33,7 @@ public enum RecoveryAction
     ReportCompatibility,
 }
 
-public sealed record RuntimeError
+public sealed class RuntimeError : IEquatable<RuntimeError>
 {
     private static readonly HashSet<string> ReservedParameterKeys =
         new(StringComparer.OrdinalIgnoreCase)
@@ -54,6 +54,8 @@ public sealed record RuntimeError
         IReadOnlyDictionary<string, string> parameters,
         RecoveryAction recoveryAction)
     {
+        DomainEnum.ThrowIfUndefined(category, nameof(category));
+        DomainEnum.ThrowIfUndefined(recoveryAction, nameof(recoveryAction));
         if (string.IsNullOrWhiteSpace(code))
         {
             throw new ArgumentException("Error code must not be empty.", nameof(code));
@@ -108,6 +110,51 @@ public sealed record RuntimeError
 
     [JsonPropertyName("recoveryAction")]
     public RecoveryAction RecoveryAction { get; }
+
+    public bool Equals(RuntimeError? other)
+    {
+        if (other is null
+            || Category != other.Category
+            || RecoveryAction != other.RecoveryAction
+            || !string.Equals(Code, other.Code, StringComparison.Ordinal)
+            || Parameters.Count != other.Parameters.Count)
+        {
+            return false;
+        }
+
+        foreach ((string key, string value) in Parameters)
+        {
+            if (!other.Parameters.TryGetValue(key, out string? otherValue)
+                || !string.Equals(value, otherValue, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return Equals(obj as RuntimeError);
+    }
+
+    public override int GetHashCode()
+    {
+        HashCode hash = new();
+        hash.Add(Category);
+        hash.Add(Code, StringComparer.Ordinal);
+        hash.Add(RecoveryAction);
+        foreach ((string key, string value) in Parameters.OrderBy(
+                     static pair => pair.Key,
+                     StringComparer.Ordinal))
+        {
+            hash.Add(key, StringComparer.Ordinal);
+            hash.Add(value, StringComparer.Ordinal);
+        }
+
+        return hash.ToHashCode();
+    }
 }
 
 public sealed class ErrorCategoryJsonConverter : JsonConverter<ErrorCategory>

@@ -112,6 +112,59 @@ public sealed class RuntimeErrorTests
     }
 
     [TestMethod]
+    public void ConstructorRejectsUndefinedEnums()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => new RuntimeError(
+                (ErrorCategory)int.MaxValue,
+                "protocol.failed",
+                new Dictionary<string, string>(),
+                RecoveryAction.Retry));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => new RuntimeError(
+                ErrorCategory.Protocol,
+                "protocol.failed",
+                new Dictionary<string, string>(),
+                (RecoveryAction)int.MaxValue));
+    }
+
+    [TestMethod]
+    public void EqualityUsesParameterContentInsteadOfDictionaryIdentityOrOrder()
+    {
+        RuntimeError left = new(
+            ErrorCategory.Protocol,
+            "protocol.failed",
+            new Dictionary<string, string>
+            {
+                ["first"] = "1",
+                ["second"] = "2",
+            },
+            RecoveryAction.Retry);
+        RuntimeError same = new(
+            ErrorCategory.Protocol,
+            "protocol.failed",
+            new Dictionary<string, string>
+            {
+                ["second"] = "2",
+                ["first"] = "1",
+            },
+            RecoveryAction.Retry);
+        RuntimeError different = new(
+            ErrorCategory.Protocol,
+            "protocol.failed",
+            new Dictionary<string, string>
+            {
+                ["first"] = "1",
+                ["second"] = "different",
+            },
+            RecoveryAction.Retry);
+
+        Assert.AreEqual(left, same);
+        Assert.AreEqual(left.GetHashCode(), same.GetHashCode());
+        Assert.AreNotEqual(left, different);
+    }
+
+    [TestMethod]
     public void JsonContainsOnlySchemaFieldsAndCannotAcquireASecretFromTheSourceDictionary()
     {
         Dictionary<string, string> source = new()

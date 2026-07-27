@@ -70,7 +70,7 @@ public sealed record DriverCompatibility
     public string StatusLabel { get; }
 }
 
-public sealed record TranslationCompatibilityReport
+public sealed class TranslationCompatibilityReport : IEquatable<TranslationCompatibilityReport>
 {
     public TranslationCompatibilityReport(bool isCompatible, IEnumerable<string> findings)
     {
@@ -89,6 +89,30 @@ public sealed record TranslationCompatibilityReport
     public bool IsCompatible { get; }
 
     public IReadOnlyList<string> Findings { get; }
+
+    public bool Equals(TranslationCompatibilityReport? other)
+    {
+        return other is not null
+            && IsCompatible == other.IsCompatible
+            && Findings.SequenceEqual(other.Findings, StringComparer.Ordinal);
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return Equals(obj as TranslationCompatibilityReport);
+    }
+
+    public override int GetHashCode()
+    {
+        HashCode hash = new();
+        hash.Add(IsCompatible);
+        foreach (string finding in Findings)
+        {
+            hash.Add(finding, StringComparer.Ordinal);
+        }
+
+        return hash.ToHashCode();
+    }
 }
 
 public sealed record AudioDiagnostics
@@ -142,6 +166,12 @@ public sealed record AppSnapshot
         {
             throw new ArgumentOutOfRangeException(nameof(contractVersion), contractVersion, "Only contract version 1 is supported.");
         }
+
+        DomainEnum.ThrowIfUndefined(runtimeState, nameof(runtimeState));
+        DomainEnum.ThrowIfUndefined(inboundChannelState, nameof(inboundChannelState));
+        DomainEnum.ThrowIfUndefined(outboundChannelState, nameof(outboundChannelState));
+        DomainEnum.ThrowIfUndefined(inboundRoute, nameof(inboundRoute));
+        DomainEnum.ThrowIfUndefined(outboundRoute, nameof(outboundRoute));
 
         ContractVersion = contractVersion;
         Version = version;
@@ -216,10 +246,7 @@ public sealed record AppSnapshot
 
     public AppSnapshot WithNextVersion()
     {
-        ulong nextVersion = checked(Version + 1UL);
-        return new AppSnapshot(
-            ContractVersion,
-            nextVersion,
+        return Next(
             RuntimeState,
             InboundChannelState,
             OutboundChannelState,
@@ -235,6 +262,44 @@ public sealed record AppSnapshot
             AudioDiagnostics,
             UpdateAvailability,
             Error);
+    }
+
+    public AppSnapshot Next(
+        RuntimeState runtimeState,
+        ChannelState inboundChannelState,
+        ChannelState outboundChannelState,
+        InboundRoute inboundRoute,
+        OutboundRoute outboundRoute,
+        double inboundLevel,
+        double outboundLevel,
+        string sourceCaption,
+        string translatedCaption,
+        AudioSelection audioSelection,
+        DriverCompatibility driverCompatibility,
+        TranslationCompatibilityReport? connectionReport,
+        AudioDiagnostics audioDiagnostics,
+        UpdateAvailability updateAvailability,
+        RuntimeError? error)
+    {
+        ulong nextVersion = checked(Version + 1UL);
+        return new AppSnapshot(
+            ContractVersion,
+            nextVersion,
+            runtimeState,
+            inboundChannelState,
+            outboundChannelState,
+            inboundRoute,
+            outboundRoute,
+            inboundLevel,
+            outboundLevel,
+            sourceCaption,
+            translatedCaption,
+            audioSelection,
+            driverCompatibility,
+            connectionReport,
+            audioDiagnostics,
+            updateAvailability,
+            error);
     }
 
     private static double ClampLevel(double level, string parameterName)
