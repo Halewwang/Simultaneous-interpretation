@@ -986,7 +986,7 @@ public sealed class TranslationRuntime :
                 ObserveDetached(graceful);
                 Task<RuntimeError?> deferredStop =
                     FinishTimedOutStopAsync(StopAudioOnce);
-                TrackDeferredCleanup(deferredStop);
+                TrackDeferredCleanup(Task.WhenAll(graceful, deferredStop));
                 if (deferredStop.IsCompleted)
                 {
                     _ = await deferredStop.ConfigureAwait(false);

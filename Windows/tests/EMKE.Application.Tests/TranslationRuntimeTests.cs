@@ -429,6 +429,83 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task TimedOutPollKeepsRestartClosedUntilEntireOldCleanupFinishes()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        FakeTranslationSession restartedInbound = new("inbound");
+        FakeTranslationSession restartedOutbound = new("outbound");
+        harness.Factory.Queue(restartedInbound, restartedOutbound);
+        TranslationRuntime runtime = harness.CreateRuntime();
+        try
+        {
+            Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+            harness.Audio.PollReturnGate.Block();
+            TrackingPcmLease oldLease = new([1, 0]);
+            harness.Audio.Emit(AudioEngineEvent.CreatePcm(
+                oldLease,
+                AudioDirection.Inbound,
+                AudioEngineRoute.Translated,
+                AudioEngineStatus.Ok,
+                frameCount: 1,
+                sequence: 704));
+            await harness.Audio.PollRead.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
+            Task<RuntimeError?> stop = runtime.StopAsync();
+            await harness.Clock.DelayEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            harness.Clock.ReleaseAll();
+            Assert.AreEqual(
+                ErrorCategory.CloseTimeout,
+                (await stop.WaitAsync(TimeSpan.FromSeconds(2))
+                    .ConfigureAwait(false))?.Category);
+            await harness.Audio.StopEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+            RuntimeError? earlyRestart =
+                await runtime.StartAsync().ConfigureAwait(false);
+
+            Assert.AreEqual(ErrorCategory.CloseTimeout, earlyRestart?.Category);
+            Assert.AreEqual(1, harness.AudioStartCount);
+            harness.Audio.PollReturnGate.Release();
+            await oldLease.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
+
+            RuntimeError? restart = await StartWhenCleanupFinishesAsync(runtime)
+                .ConfigureAwait(false);
+
+            Assert.IsNull(restart);
+            Assert.AreEqual(2, harness.AudioStartCount);
+            TrackingPcmLease captured = new([2, 0]);
+            harness.Audio.Emit(AudioEngineEvent.CreatePcm(
+                captured,
+                AudioDirection.Inbound,
+                AudioEngineRoute.Translated,
+                AudioEngineStatus.Ok,
+                frameCount: 1,
+                sequence: 705));
+            await restartedInbound.SendEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            Assert.AreEqual(1, restartedInbound.SendCount);
+            TrackingPcmLease translatedLease = new([3, 0]);
+            restartedOutbound.Emit(
+                new TranslationSessionEvent.AudioDelta(translatedLease));
+            await harness.Audio.OutboundEnqueueEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await translatedLease.Disposed.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            Assert.AreEqual(1, translatedLease.DisposeCount);
+            Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+        }
+        finally
+        {
+            harness.Audio.PollReturnGate.Release();
+            harness.Clock.ReleaseAll();
+            await runtime.DisposeAsync().AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public async Task StopDeadlineCompletesLocallyButDefersEngineStopUntilTailEnqueueDrains()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -843,6 +920,25 @@ public sealed class TranslationRuntimeTests
             RecoveryAction.Retry);
     }
 
+    private static async Task<RuntimeError?> StartWhenCleanupFinishesAsync(
+        TranslationRuntime runtime)
+    {
+        for (int attempt = 0; attempt < 1_000; attempt++)
+        {
+            RuntimeError? result =
+                await runtime.StartAsync().ConfigureAwait(false);
+            if (result?.Code != "translationRuntime.stopCleanupPending")
+            {
+                return result;
+            }
+
+            await Task.Yield();
+        }
+
+        Assert.Fail("Old runtime cleanup did not finish.");
+        return null;
+    }
+
     private sealed class RecordingObserver : IObserver<AppSnapshot>
     {
         public TaskCompletionSource<AppSnapshot> Next { get; } =
@@ -1166,6 +1262,12 @@ internal sealed class RuntimeHarness
         public TaskCompletionSource StopEntered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource InboundEnqueueEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource OutboundEnqueueEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public RuntimeError? StartError { get; set; }
 
         public Exception? StopException { get; set; }
@@ -1247,6 +1349,7 @@ internal sealed class RuntimeHarness
             CancellationToken cancellationToken)
         {
             owner.Trace.Enqueue("audio.enqueue.inbound");
+            InboundEnqueueEntered.TrySetResult();
             await InboundEnqueueGate.WaitAsync(cancellationToken)
                 .ConfigureAwait(false);
             owner.Trace.Enqueue("audio.enqueue.inbound.complete");
@@ -1257,6 +1360,7 @@ internal sealed class RuntimeHarness
             CancellationToken cancellationToken)
         {
             owner.Trace.Enqueue("audio.enqueue.outbound");
+            OutboundEnqueueEntered.TrySetResult();
             return ValueTask.CompletedTask;
         }
 
@@ -1314,19 +1418,34 @@ internal sealed class RuntimeHarness
     internal sealed class FakeSessionFactory(
         RuntimeHarness owner) : ITranslationSessionFactory
     {
+        private readonly ConcurrentQueue<FakeTranslationSession> _sessions =
+            new([owner.InboundSession, owner.OutboundSession]);
         private int _count;
 
         public int CreateCount => Volatile.Read(ref _count);
+
+        public void Queue(params FakeTranslationSession[] sessions)
+        {
+            foreach (FakeTranslationSession session in sessions)
+            {
+                _sessions.Enqueue(session);
+            }
+        }
 
         public ValueTask<ITranslationSession> CreateAsync(
             TranslationSessionConfiguration configuration,
             CancellationToken cancellationToken)
         {
             int count = Interlocked.Increment(ref _count);
-            string direction = count == 1 ? "inbound" : "outbound";
+            string direction = (count & 1) == 1 ? "inbound" : "outbound";
             owner.Trace.Enqueue($"session.{direction}.create");
-            FakeTranslationSession session =
-                count == 1 ? owner.InboundSession : owner.OutboundSession;
+#pragma warning disable CA2000 // Ownership transfers from the fake queue into the runtime supervisor.
+            if (!_sessions.TryDequeue(out FakeTranslationSession? session))
+#pragma warning restore CA2000
+            {
+                throw new InvalidOperationException("No fake session remains.");
+            }
+
             session.Attach(owner.Trace);
             return ValueTask.FromResult<ITranslationSession>(session);
         }
@@ -1512,6 +1631,19 @@ internal sealed class FakeTranslationSession(string direction) :
         CancellationToken cancellationToken)
     {
         return _events.Reader.ReadAllAsync(cancellationToken);
+    }
+
+    public void Emit(TranslationSessionEvent sessionEvent)
+    {
+        if (!_events.Writer.TryWrite(sessionEvent))
+        {
+            if (sessionEvent is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+
+            throw new InvalidOperationException("Fake session event queue is closed.");
+        }
     }
 
     public async Task CloseAsync(CancellationToken cancellationToken)
