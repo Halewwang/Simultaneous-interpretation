@@ -9,7 +9,7 @@ Windows hosted workflow are green. The hosted proof covers deterministic
 StampInf `1.0.0.1`, Release x64 WDK compilation/linking with zero warnings and
 errors, Universal ApiValidator, DriverPackageTarget, Inf2Cat catalog
 generation, exact SHA-1/SHA-256 reference membership for the staged INF/SYS,
-independent mutated-INF and mutated-SYS rejection, and private three-file
+independent mutated-INF and mutated-SYS rejection, and three-file Actions
 artifact upload. The artifact has also been downloaded by the controller and
 its three file sizes and SHA-256 digests verified locally.
 
@@ -59,10 +59,12 @@ the artifact is not a Windows application installer.
   symlink/reparse point. Cleanup is rechecked immediately before recursion.
 - Catalog membership uses the Windows catalog APIs `CryptCATOpen`,
   `CryptCATEnumerateMember`, `CryptCATAdminAcquireContext2`, and
-  `CryptCATAdminCalcHashFromFileHandle2`. It requires exactly two catalog
-  members and matches both member filename and catalog hash against the staged
-  INF/SYS bytes. A Windows-only integration test requires the original package
-  to pass and independently mutated INF and SYS copies to fail.
+  `CryptCATAdminCalcHashFromFileHandle2`. It requires the exact unordered
+  four-reference-tag multiset: SHA-1 and SHA-256 hashes for each staged INF and
+  SYS. It does not depend on the four empty Inf2Cat v2 `pwszFileName` fields,
+  and it fails closed on missing, duplicate, unknown, or extra tags. A
+  Windows-only integration test requires the original package to pass and
+  independently mutated INF and SYS copies to fail.
 
 Microsoft API references consulted:
 
@@ -276,7 +278,7 @@ Authorized run `30232259380` closes the Task 6 build/package gates: locked
 WDK/SDK restore, Release x64 WDK build, Universal ApiValidator, native CTest,
 deterministic stamped INF and matching SYS, Inf2Cat CAT generation, strict
 original-package verification, independent INF/SYS mutation rejection, and
-private three-file artifact upload all passed.
+three-file Actions artifact upload all passed.
 
 Driver signing, installation, loading, removal, device enumeration, live
 WaveRT timing, endpoint audio routing, meeting-app behavior, Windows
@@ -299,8 +301,8 @@ proof.
 - The fixed 100 ms capacity and drop-newest overflow policy meet this task's
   bounded deterministic contract; production latency/glitch behavior still
   needs live measurement.
-- No install/live proof is implied by a successful package build or private
-  artifact.
+- No install/live proof is implied by a successful package build or retained
+  Actions artifact.
 
 ## Safety boundary
 
@@ -436,7 +438,7 @@ cannot embed its own SHA.
 A new controller-pushed run must prove the pinned Release x64 WDK build passes
 the prior compiler boundary and then continue through Universal ApiValidator,
 stamped INF/SYS staging, Inf2Cat, exact catalog membership, mutation rejection,
-and private seven-day artifact upload. No such success is claimed locally.
+and seven-day Actions artifact upload. No such success is claimed locally.
 
 No signing, installation, loading, removal, elevation, secret use, push, or
 public release occurred in fix round 1.
@@ -625,7 +627,7 @@ cannot embed its own SHA.
 
 A controller-pushed run must still show StampInf using the fixed date/version,
 then pass the unchanged strict package verifier, independent INF/SYS mutation
-rejection, and private seven-day artifact upload. No remote GREEN for this
+rejection, and seven-day Actions artifact upload. No remote GREEN for this
 metadata change is claimed yet.
 
 No signing, installation, loading, removal, elevation, secret use, push, or
@@ -678,7 +680,8 @@ This disproves both the nested PowerShell-array hypothesis and a structure
 marshalling failure. CryptCAT successfully enumerates four Inf2Cat v2 members.
 The 40/64/64/40 hexadecimal lengths establish SHA-1 and SHA-256 reference
 members for each of the two packaged files, while `pwszFileName` is empty for
-all four. The prior verifier incorrectly required exactly two named members.
+all four. That evidence rejected the pre-fix assumption of one named member per
+packaged file; the final verifier uses the four-reference-tag model above.
 
 The official API model used for the correction is:
 
@@ -777,7 +780,7 @@ supplied in the controller handoff because a commit cannot embed its own SHA.
 
 A controller-pushed run must execute the two hash algorithms against the real
 staged INF/SYS, accept the original catalog, reject both independent mutations,
-and upload only the private seven-day unsigned artifact. No final remote GREEN
+and upload only the seven-day unsigned Actions artifact. No final remote GREEN
 or artifact is claimed yet.
 
 No signing, installation, loading, removal, elevation, secret use, or public
@@ -815,7 +818,7 @@ GitHub Actions run `30232259380` tested final implementation commit
     `original valid; mutated INF/SYS rejected`;
   - `actions/upload-artifact` uploaded exactly three files.
 
-### Private Actions artifact
+### Actions run artifact
 
 ```text
 name:
