@@ -2,20 +2,21 @@
 
 ## Status
 
-`DONE_WITH_CONCERNS`
+`READY_FOR_TASK_REVIEW`
 
-The locally provable remediation is implemented and committed. Compiled bridge
-behavior, package-boundary behavior, shared contracts, native-header
-compatibility, project XML, and whitespace gates pass on macOS. Windows WDK
-compilation/linking, Universal ApiValidator, DriverPackageTarget, and
-Inf2Cat signability/CAT generation have now passed in the authorized hosted
-run. A later run proved the deterministic StampInf fix and reached the catalog
-membership verifier. A diagnostic run then proved that CryptCAT returns four
-Inf2Cat v2 reference members for the two staged files: SHA-1 and SHA-256 for
-each, with empty file-name fields. The corrected exact reference-tag multiset
-model is locally green, but its remote Windows hash/API and mutation-integration
-rerun, private Actions artifact, driver installation, and live endpoint/meeting
-behavior remain explicitly unproved.
+The Task 6 remediation is ready for task review. Local gates and the authorized
+Windows hosted workflow are green. The hosted proof covers deterministic
+StampInf `1.0.0.1`, Release x64 WDK compilation/linking with zero warnings and
+errors, Universal ApiValidator, DriverPackageTarget, Inf2Cat catalog
+generation, exact SHA-1/SHA-256 reference membership for the staged INF/SYS,
+independent mutated-INF and mutated-SYS rejection, and private three-file
+artifact upload. The artifact has also been downloaded by the controller and
+its three file sizes and SHA-256 digests verified locally.
+
+This is build/package evidence, not release or runtime acceptance. The catalog
+is explicitly unsigned; no driver or Windows application was installed, no
+virtual endpoint was loaded or exercised, no meeting behavior was tested, and
+the artifact is not a Windows application installer.
 
 ## Design and provenance
 
@@ -269,35 +270,26 @@ git diff --check
 inferred for MSVC, WDK, PowerShell parsing/execution, Catalog APIs, or CTest on
 Windows.
 
-## Remote-only checks still pending
+## Remote checks completed
 
-After the controller pushes the branch, the authorized hosted workflow must
-prove:
-
-1. locked restore of WDK/SDK `10.0.28000.2526`;
-2. Release x64 WDK compile with zero errors;
-3. ApiValidator reports `Universal`;
-4. the compiled bridge/format CTest passes under MSVC;
-5. WDK emits one stamped INF and matching SYS;
-6. Inf2Cat emits one CAT for those exact bytes;
-7. the flat verifier accepts the original package;
-8. independently mutated INF and SYS copies are rejected by catalog
-   membership;
-9. the package contains exactly one INF, one SYS, and one CAT and uploads only
-   as a private Actions artifact with seven-day retention.
+Authorized run `30232259380` closes the Task 6 build/package gates: locked
+WDK/SDK restore, Release x64 WDK build, Universal ApiValidator, native CTest,
+deterministic stamped INF and matching SYS, Inf2Cat CAT generation, strict
+original-package verification, independent INF/SYS mutation rejection, and
+private three-file artifact upload all passed.
 
 Driver signing, installation, loading, removal, device enumeration, live
-WaveRT timing, endpoint audio routing, meeting-app behavior, and release
-acceptance remain pending even if the hosted build passes.
+WaveRT timing, endpoint audio routing, meeting-app behavior, Windows
+application packaging/installation, and release acceptance remain outside this
+proof.
 
 ## Risks and concerns
 
-- Authorized WDK/MSVC runs have passed compilation/linking, deterministic
-  StampInf, package generation, and raw CryptCAT member enumeration. The new
-  SHA-1/SHA-256 hash calculations and exact multiset match cannot call Wintrust
-  on macOS; their remote original/mutation integration remains required. A
-  remote failure must be treated as an implementation defect, not weakened
-  validation.
+- The final authorized Windows run passed compilation/linking, deterministic
+  StampInf, package generation, CryptCAT enumeration, SHA-1/SHA-256 exact
+  multiset matching, original verification, and independent INF/SYS mutation
+  rejection. This still proves package integrity only, not signing trust,
+  installability, driver loading, or runtime audio behavior.
 - The compiled portable test proves bridge semantics, but not PortCls/WaveRT
   scheduling, DMA timing, memory ordering on a live Windows audio stack, or
   audible meeting behavior.
@@ -781,7 +773,7 @@ git diff --check
 The final fix-round commit SHA and complete fresh local gate results are
 supplied in the controller handoff because a commit cannot embed its own SHA.
 
-### Remaining remote gate and safety boundary
+### Remote gate requested after local GREEN
 
 A controller-pushed run must execute the two hash algorithms against the real
 staged INF/SYS, accept the original catalog, reject both independent mutations,
@@ -790,3 +782,85 @@ or artifact is claimed yet.
 
 No signing, installation, loading, removal, elevation, secret use, or public
 release occurred in fix round 3.
+
+The requested gate was subsequently closed by final run `30232259380`; the
+evidence and artifact handoff are recorded below.
+
+## Final remote GREEN and artifact handoff
+
+### Authorized hosted proof
+
+GitHub Actions run `30232259380` tested final implementation commit
+`44c3d08c0380d1bf48684034b42f4349ce14c398` and completed successfully.
+
+- `hosted-toolchain-proof`, job `89873213950`: passed. The Windows native
+  scaffold built, the kernel-shaped boundary compiled under MSVC, and all 10
+  CTest cases passed, including `EMKE.DriverBridge.Behavior`.
+- `driver-build-proof`, job `89873213931`: passed. Its evidence includes:
+  - the PowerShell/C# reference-set boundary accepted the unordered exact set
+    and rejected duplicate, unknown, missing, and extra members;
+  - StampInf ran with `-d "07/26/2026" -v "1.0.0.1"` and emitted
+    `DriverVer=07/26/2026,1.0.0.1`;
+  - the Release x64 WDK `/kernel` build completed with `0 Warning(s)` and
+    `0 Error(s)`;
+  - ApiValidator reported `Driver is 'Universal'`;
+  - DriverPackageTarget and Inf2Cat generated the package and catalog;
+  - the shared INF contract passed for ABI 1 and all four endpoint roles;
+  - CryptCAT enumerated four members and the exact staged INF/SYS
+    SHA-1/SHA-256 reference multiset passed;
+  - the original package passed strict verification with
+    `signature status: NotSigned`;
+  - independently mutated INF and SYS packages were both rejected, after which
+    the integration test reported
+    `original valid; mutated INF/SYS rejected`;
+  - `actions/upload-artifact` uploaded exactly three files.
+
+### Private Actions artifact
+
+```text
+name:
+  emke-virtual-audio-unsigned-44c3d08c0380d1bf48684034b42f4349ce14c398
+artifact ID:
+  8640495603
+uploaded ZIP size:
+  27200 bytes
+uploaded ZIP SHA-256:
+  6afd054093cdb9aefe9924716b023ff3492e7e01cc1715a352b4559e2ba4f45a
+expires:
+  2026-08-03T02:31:10Z
+```
+
+GitHub reports the artifact as unexpired. It is an Actions artifact attached to
+the run, not a public GitHub Release asset, and has seven-day retention.
+
+### Controller download and file verification
+
+The controller downloaded the artifact contents to:
+
+```text
+.superpowers/sdd/2026-07-26-emke-windows-audio-foundation/artifacts/emke-virtual-audio-unsigned-44c3d08/
+```
+
+Fresh local size and SHA-256 verification:
+
+| File | Size (bytes) | SHA-256 |
+| --- | ---: | --- |
+| `EMKE.VirtualAudio.sys` | 56,320 | `67029f12f54af3b29b3c78dc0b8f985970ae63667304fd8f2d3693885b68f986` |
+| `EMKE.VirtualAudio.inf` | 8,210 | `d00e70465d4bdc1ad386cab5a516cdb923245270f173371f54f544cdb7318362` |
+| `emke.virtualaudio.cat` | 1,188 | `82d4cf9a602396e2b7330cdb9860f3d991c04493408c400e480b85054fd983ba` |
+
+The downloaded directory contains the raw unsigned driver package files only.
+It is not an MSIX, EXE, MSI, or other Windows application installer.
+
+### Final proof boundary
+
+- No signing certificate was used; the verifier observed `NotSigned`.
+- No driver installation, loading, removal, administrator elevation, or
+  endpoint enumeration occurred.
+- No virtual endpoint audio routing, WaveRT live timing, conference client, or
+  meeting behavior was exercised.
+- No distributable Windows application installer was built or installed as part
+  of this artifact.
+- No public GitHub Release or public artifact publication occurred.
+
+Within those boundaries, Task 6 is ready for task review.
