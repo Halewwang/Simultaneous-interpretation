@@ -2,16 +2,15 @@
 
 ## Status
 
-`READY_FOR_TASK_REVIEW`
+`DONE_WITH_CONCERNS`
 
-The Task 6 remediation is ready for task review. Local gates and the authorized
-Windows hosted workflow are green. The hosted proof covers deterministic
-StampInf `1.0.0.1`, Release x64 WDK compilation/linking with zero warnings and
-errors, Universal ApiValidator, DriverPackageTarget, Inf2Cat catalog
-generation, exact SHA-1/SHA-256 reference membership for the staged INF/SYS,
-independent mutated-INF and mutated-SYS rejection, and three-file Actions
-artifact upload. The artifact has also been downloaded by the controller and
-its three file sizes and SHA-256 digests verified locally.
+Task-review fix round 4 is locally complete in implementation commit
+`8a3daeb4af4f7962bc8d995e9096674d96cc539c`. Every new production behavior has
+an observed compiled or executable RED and a fresh local GREEN. The prior
+authorized hosted proof remains valid historical evidence for base commit
+`44c3d08c0380d1bf48684034b42f4349ce14c398`, but it is not remote proof for the
+new round-4 commit. A controller push and a fresh Windows hosted run are still
+required for MSVC, WDK, CTest, package, catalog-mutation, and artifact gates.
 
 This is build/package evidence, not release or runtime acceptance. The catalog
 is explicitly unsigned; no driver or Windows application was installed, no
@@ -867,3 +866,324 @@ It is not an MSIX, EXE, MSI, or other Windows application installer.
 - No public GitHub Release or public artifact publication occurred.
 
 Within those boundaries, Task 6 is ready for task review.
+
+## Task-review fix round 4
+
+### Status and implementation commit
+
+`DONE_WITH_CONCERNS`
+
+Implementation commit:
+
+```text
+8a3daeb4af4f7962bc8d995e9096674d96cc539c
+fix: close Windows audio driver review gaps
+```
+
+The five Important findings are resolved locally. The two Minor findings are
+explicitly deferred below because neither can be changed with trustworthy local
+behavioral proof on this macOS host without increasing package-verifier or
+staging risk. The report is committed separately, so its commit SHA is supplied
+in the controller handoff rather than embedded in itself.
+
+### Important 1: one numeric property-GUID authority
+
+`Windows/shared/emke_endpoint_contract.h` no longer contains an independently
+editable GUID string. Its eleven numeric GUID components are the sole
+authority: `DEFINE_DEVPROPKEY` consumes those macros directly, and
+`validate-driver-contract.mjs` reads the same numeric macros, range-checks
+them, and formats the INF comparison value.
+
+Executable RED before the production change:
+
+```text
+node --test --test-name-pattern='INF validator derives the GUID' \
+  Windows/driver/tests/package-boundary.test.mjs
+
+FAIL: mutating compiled GUID component 0 must invalidate the INF
+stdout: Driver INF contract validation passed: ABI 1, 4 endpoint roles.
+tests 1; pass 0; fail 1
+```
+
+Fresh GREEN:
+
+```text
+node --test --test-name-pattern='INF validator derives the GUID' \
+  Windows/driver/tests/package-boundary.test.mjs
+
+tests 1; pass 1; fail 0
+```
+
+The executable regression iterates all eleven compiled components. For each
+component it mutates the actual numeric authority used by
+`DEFINE_DEVPROPKEY`, runs the real INF validator, and requires fail-closed
+rejection.
+
+### Important 2: shared virtual-format authority reaches WASAPI
+
+`virtual_audio_format.hpp` defines the native host's exact virtual-format value
+directly from `emke_endpoint_contract.h`: 48,000 Hz, two channels, 32
+container/valid bits, eight-byte block alignment, 384,000 bytes/second, and
+IEEE Float tag 3. `is_exact_virtual_format` delegates to that value, and the
+Windows `WAVEFORMATEXTENSIBLE` construction uses the same fields. The prior
+independent `2u`, `32u`, and `8u` construction literals are removed.
+
+Compiled RED before the production boundary existed:
+
+```text
+clang++ -std=c++20 -Wall -Wextra -Werror \
+  Windows/native/EMKE.NativeAudio.Tests/src/virtual_format_contract_tests.cpp \
+  -I Windows/shared -I Windows/native/EMKE.NativeAudio/src \
+  -o /tmp/emke-virtual-format-contract-tests
+
+fatal error: 'virtual_audio_format.hpp' file not found
+```
+
+Fresh GREEN:
+
+```text
+EMKE virtual format authority tests passed.
+```
+
+The compiled test asserts every construction field against the shared macros
+and behaviorally rejects sample-rate, channel, format-tag, container-bit,
+valid-bit, block-align, and byte-rate mutations. The production
+`wasapi_stream.cpp` also compiles locally with `-std=c++20 -Wall -Wextra
+-Werror`.
+
+### Important 3: reset progress, ownership, and realtime fail-fast
+
+The reset owner now atomically adds `bridge_reset_pending` to the current state
+before waiting. That successful CAS both publishes the realtime gate and
+selects the owner. New producer/consumer acquisition returns immediately while
+the bit is present. The owner waits only for already-active producer/consumer
+bits, resets the frame boundary, and releases the gate. Concurrent reset
+callers observe the existing owner, wait for its completion, and return without
+competing for idle before pending is visible.
+
+Deterministic compiled RED against the old order:
+
+```text
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  Windows/driver/tests/bridge-behavior-tests.cpp \
+  Windows/driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp \
+  -I Windows/shared -I Windows/driver/EMKE.VirtualAudio/src \
+  -o /tmp/emke-driver-bridge-tests &&
+  /tmp/emke-driver-bridge-tests
+
+FAIL: reset must publish pending while an existing producer is active
+1 bridge behavior assertion(s) failed
+```
+
+The test is deterministic: it holds the real bridge's producer-active state,
+starts reset, and observes the state boundary. It does not depend on a
+probabilistic large-copy race. On RED it atomically releases the held bit before
+joining, so the test itself cannot strand the old implementation.
+
+Fresh GREEN:
+
+```text
+EMKE driver bridge behavior tests passed (7 cases).
+```
+
+GREEN additionally proves a new capture attempt returns immediately with
+silence while reset is pending, two concurrent reset callers join without
+deadlock after the held producer drains, the bridge returns to idle, and only
+post-reset frames reach the new capture session.
+
+### Important 4: notification buffer and packet frame alignment
+
+`AllocateBufferWithNotification` now calls the production
+`EmkeIsNotificationBufferValid` boundary before allocating. It rejects an
+unaligned requested buffer and requires both total-buffer divisibility and
+every notification packet to be an integral number of complete frames. It no
+longer truncates the buffer after checking notification divisibility.
+
+Compiled RED before the production boundary existed:
+
+```text
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  Windows/driver/tests/wave-buffer-contract-tests.cpp \
+  -I Windows/shared -I Windows/driver/EMKE.VirtualAudio/src \
+  -o /tmp/emke-wave-buffer-contract-tests
+
+fatal error: '../EMKE.VirtualAudio/src/emke_wave_buffer_contract.h' file not found
+```
+
+Fresh GREEN:
+
+```text
+EMKE WaveRT buffer contract tests passed.
+```
+
+The executable includes the exact old-order counterexample: 18 requested bytes
+are divisible by three notifications but are not aligned to the eight-byte
+Float32 stereo frame. It must fail closed rather than truncate to 16 bytes and
+create non-frame-aligned notification packets. Zero counts/alignment,
+unaligned total buffers, and incomplete-frame packets are also rejected.
+
+### Important 5: production identity mapping and DMA routing
+
+The real `eDeviceType` definition and mapping now live in the lightweight
+production unit `emke_bridge_routing.{h,cpp}`. `CMiniportWaveRT` calls that
+mapping and returns `STATUS_INVALID_PARAMETER` for an invalid identity; the old
+meeting-speaker fallback is removed. `CMiniportWaveRTStream::ReadBytes` and
+`WriteBytes` now call the production `EmkeBridgeTransferDma` unit, so compiled
+tests traverse the same mapping and frame-wrap loop as the driver hookup.
+
+Compiled RED before the production unit existed:
+
+```text
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  Windows/driver/tests/bridge-routing-tests.cpp \
+  Windows/driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp \
+  Windows/driver/EMKE.VirtualAudio/src/emke_bridge_routing.cpp \
+  -I Windows/shared -I Windows/driver/EMKE.VirtualAudio/src \
+  -o /tmp/emke-driver-routing-tests
+
+error: no such file or directory:
+'Windows/driver/EMKE.VirtualAudio/src/emke_bridge_routing.cpp'
+```
+
+Fresh GREEN:
+
+```text
+EMKE production bridge routing tests passed (3 cases).
+```
+
+The compiled suite covers all four `eDeviceType` identities, forward and
+reverse production mapping, invalid values without output mutation, both DMA
+directions, Bridge A render/capture frame order across DMA wrap, Bridge B
+render/capture movement, capture silence after reset, and post-reset new-session
+delivery. The WDK project and hosted CMake/CTest graph compile the same
+production routing unit; there is no test-only mapping.
+
+### Minor adjudication
+
+1. **Catalog cleanup return values — deferred.**
+   `CryptCATClose` and `CryptCATAdminReleaseContext` return values remain
+   unchecked. The calls remain in `finally`, and their return values are
+   ignored, so a cleanup failure cannot replace the primary catalog
+   enumeration/hash exception. The residual risk is a silently unreported
+   handle-release failure in the short-lived verifier process. A trustworthy
+   RED requires Windows Catalog APIs/PowerShell, which are unavailable on this
+   host. This does not weaken strict four-tag SHA-1/SHA-256 membership,
+   original-package acceptance, or independent INF/SYS mutation rejection and
+   does not block a single-invocation hosted verifier. A later Windows-only
+   change should use SafeHandle or report cleanup failure only when no primary
+   exception is active.
+
+2. **Staging await-based TOCTOU — deferred.**
+   `stage-driver-package.mjs` retains the final repo-bound, resolved-path, and
+   reparse/symlink checks before recursive cleanup. A safe atomic replacement
+   must also preserve those checks for the unique staging directory, every
+   parent segment, the destination at swap time, same-volume rename, and
+   rollback/cleanup. A simple atomic rename would create a new opportunity to
+   cross the repo/reparse boundary and was therefore not introduced. The
+   residual risk is an attacker with concurrent filesystem-write access
+   swapping a checked path during an `await`. The authorized GitHub-hosted job
+   is single-tenant, uses a repository-owned artifact root, and exposes no
+   concurrent untrusted writer; staged bytes are subsequently checked by the
+   INF contract, exact catalog membership, and independent INF/SYS mutations.
+   The residual local-adversary race therefore does not invalidate this hosted
+   single-tenant build proof.
+
+### Files changed in fix round 4
+
+- Shared authority and validators:
+  - `Windows/shared/emke_endpoint_contract.h`
+  - `Windows/tools/validate-driver-contract.mjs`
+  - `Windows/native/EMKE.NativeAudio/src/virtual_audio_format.hpp`
+  - `Windows/native/EMKE.NativeAudio/src/wasapi_stream.cpp`
+- Driver bridge, lifecycle, routing, and buffer validation:
+  - `Windows/driver/EMKE.VirtualAudio/src/emke_audio_bridge.cpp`
+  - `Windows/driver/EMKE.VirtualAudio/src/emke_bridge_routing.h`
+  - `Windows/driver/EMKE.VirtualAudio/src/emke_bridge_routing.cpp`
+  - `Windows/driver/EMKE.VirtualAudio/src/emke_wave_buffer_contract.h`
+  - `Windows/driver/EMKE.VirtualAudio/src/common.h`
+  - `Windows/driver/EMKE.VirtualAudio/src/minwavert.h`
+  - `Windows/driver/EMKE.VirtualAudio/src/minwavertstream.cpp`
+  - `Windows/driver/EMKE.VirtualAudio/EMKE.VirtualAudio.vcxproj`
+- Compiled/executable tests and hosted registration:
+  - `Windows/driver/tests/bridge-behavior-tests.cpp`
+  - `Windows/driver/tests/bridge-routing-tests.cpp`
+  - `Windows/driver/tests/wave-buffer-contract-tests.cpp`
+  - `Windows/driver/tests/package-boundary.test.mjs`
+  - `Windows/driver/tests/driver-contract.test.mjs`
+  - `Windows/native/EMKE.NativeAudio.Tests/src/virtual_format_contract_tests.cpp`
+  - `Windows/native/EMKE.NativeAudio.Tests/CMakeLists.txt`
+
+### Fresh local verification after implementation
+
+All commands ran from the required worktree. Results:
+
+```text
+compiled bridge behavior
+  PASS: EMKE driver bridge behavior tests passed (7 cases).
+
+compiled production identity/DMA routing
+  PASS: EMKE production bridge routing tests passed (3 cases).
+
+compiled notification buffer contract
+  PASS: EMKE WaveRT buffer contract tests passed.
+
+compiled shared/native virtual format
+  PASS: EMKE virtual format authority tests passed.
+
+production wasapi_stream.cpp portable compile
+  PASS: clang++ C++20 -Wall -Wextra -Werror, exit 0
+
+kernel-shaped emke_audio_bridge.cpp compile
+  PASS: clang++ C++17 -D_WIN32 -D_KERNEL_MODE -Wall -Wextra -Werror, exit 0
+
+kernel-shaped emke_bridge_routing.cpp compile
+  PASS: clang++ C++17 -D_WIN32 -D_KERNEL_MODE -Wall -Wextra -Werror, exit 0
+
+kernel shim type-width compile
+  PASS: exit 0
+
+driver/package Node suites
+  PASS: 20 tests, 20 pass, 0 fail
+
+shared contracts
+  PASS: contract v1: 3 schemas, 8 fixtures
+
+portable device_catalog.cpp compile
+  PASS: clang++ C++20 -Wall -Wextra -Werror, exit 0
+
+driver project XML
+  PASS: xmllint exit 0
+
+git diff --check
+  PASS: no output
+```
+
+`cmake`, `pwsh`, MSVC, WDK, and Windows Catalog APIs are unavailable on this
+macOS host. No result is inferred for those tools.
+
+### Remaining remote and live gates
+
+A controller push must run the unchanged authorized workflow against
+`8a3daeb4af4f7962bc8d995e9096674d96cc539c` plus this report commit and prove:
+
+- hosted MSVC builds and all CTest targets, including the new format, reset,
+  routing/DMA, and WaveRT buffer-contract executables;
+- pinned Release x64 WDK `/kernel` compile/link with zero errors;
+- deterministic StampInf `1.0.0.1`, Universal ApiValidator,
+  DriverPackageTarget, and Inf2Cat;
+- exact flat INF/SYS/CAT staging;
+- strict four-tag SHA-1/SHA-256 catalog membership;
+- independent mutated-INF and mutated-SYS rejection;
+- exactly the three unsigned package files in a private seven-day Actions
+  artifact.
+
+Signing, installation, driver loading/removal, Windows 11 25H2 physical-machine
+acceptance, live endpoint enumeration/routing, WaveRT timing, human listening,
+conference application behavior, and real meeting acceptance remain pending
+and cannot be inferred from hosted build/package proof.
+
+### Safety boundary for fix round 4
+
+No push, signing, driver installation, driver loading/removal, administrator
+elevation, secret creation/use, self-hosted runner, public GitHub Release, or
+public artifact publication occurred in fix round 4.
