@@ -1,1 +1,29 @@
-<Solution />
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EMKE.Application/EMKE.Application.csproj" />
+    <Project Path="src/EMKE.Core/EMKE.Core.csproj" />
+    <Project Path="src/EMKE.Platform/EMKE.Platform.csproj" />
+    <Project Path="src/EMKE.Realtime/EMKE.Realtime.csproj" />
+    <Project Path="src/EMKE.Routing/EMKE.Routing.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EMKE.Application.Tests/EMKE.Application.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/EMKE.Contract.Tests/EMKE.Contract.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/EMKE.Core.Tests/EMKE.Core.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/EMKE.Realtime.Tests/EMKE.Realtime.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="tests/EMKE.Routing.Tests/EMKE.Routing.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+</Solution>

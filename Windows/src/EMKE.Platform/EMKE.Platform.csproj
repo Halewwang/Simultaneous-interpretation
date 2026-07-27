@@ -1,0 +1,8 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../EMKE.Core/EMKE.Core.csproj" />
+    <ProjectReference Include="../EMKE.Application/EMKE.Application.csproj" />
+  </ItemGroup>
+
+</Project>
