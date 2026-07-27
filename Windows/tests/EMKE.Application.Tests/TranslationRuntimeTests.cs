@@ -431,6 +431,84 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task SessionSourceCaptionsRespectDirectionAndOnlyInboundRunsClassifier()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        harness.InboundSession.Emit(new TranslationSessionEvent.SourceCaption(
+            "meeting-source-caption",
+            LanguageCode.Zh,
+            isFinal: false));
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.SourceCaption
+                    == "meeting-source-caption"
+                && harness.LanguageClassifier.CallCount == 1);
+
+        harness.OutboundSession.Emit(new TranslationSessionEvent.SourceCaption(
+            "local-outbound-caption",
+            LanguageCode.En,
+            isFinal: false));
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.TranslatedCaption
+                    == "local-outbound-caption"
+                || runtime.CurrentSnapshot.SourceCaption
+                    == "local-outbound-caption");
+
+        Assert.AreEqual(
+            "meeting-source-caption",
+            runtime.CurrentSnapshot.SourceCaption);
+        Assert.AreEqual(
+            "local-outbound-caption",
+            runtime.CurrentSnapshot.TranslatedCaption);
+        CollectionAssert.AreEqual(
+            new[] { "meeting-source-caption" },
+            harness.LanguageClassifier.Texts);
+    }
+
+    [TestMethod]
+    public async Task OutboundSourceCaptionCannotChooseInboundOriginalRoute()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        harness.OutboundSession.Emit(new TranslationSessionEvent.SourceCaption(
+            "first-outbound-caption",
+            LanguageCode.En,
+            isFinal: false));
+        harness.OutboundSession.Emit(new TranslationSessionEvent.SourceCaption(
+            "second-outbound-caption",
+            LanguageCode.En,
+            isFinal: false));
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.TranslatedCaption
+                    == "second-outbound-caption"
+                || runtime.CurrentSnapshot.SourceCaption
+                    == "second-outbound-caption");
+
+        TrackingPcmLease translatedLease = new([1, 0, 2, 0]);
+        harness.InboundSession.Emit(
+            new TranslationSessionEvent.AudioDelta(translatedLease));
+        harness.InboundSession.Emit(new TranslationSessionEvent.Completed());
+        Task observed = await Task.WhenAny(
+                harness.Audio.InboundEnqueueEntered.Task,
+                Task.Delay(TimeSpan.FromSeconds(1)))
+            .ConfigureAwait(false);
+
+        Assert.AreSame(
+            harness.Audio.InboundEnqueueEntered.Task,
+            observed,
+            "Outbound captions must not steer the inbound language gate.");
+        Assert.AreEqual(0, harness.LanguageClassifier.CallCount);
+        Assert.AreEqual(string.Empty, runtime.CurrentSnapshot.SourceCaption);
+        Assert.AreEqual(
+            "second-outbound-caption",
+            runtime.CurrentSnapshot.TranslatedCaption);
+    }
+
+    [TestMethod]
     public async Task InboundEnqueueFailureCommitsFailOpenRouteThroughActor()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -1493,6 +1571,7 @@ internal sealed class RuntimeHarness
     {
         Audio = new FakeAudioEngine(this);
         Factory = new FakeSessionFactory(this);
+        LanguageClassifier = new FakeLanguageClassifier();
         Clock = new ManualClock();
     }
 
@@ -1547,6 +1626,8 @@ internal sealed class RuntimeHarness
 
     public FakeSessionFactory Factory { get; }
 
+    public FakeLanguageClassifier LanguageClassifier { get; }
+
     public ManualClock Clock { get; }
 
     public IRuntimeLog RuntimeLog { get; set; } = new NullRuntimeLog();
@@ -1571,7 +1652,7 @@ internal sealed class RuntimeHarness
             new FakeDeviceCatalog(this),
             Audio,
             Factory,
-            new FakeLanguageClassifier(),
+            LanguageClassifier,
             Clock,
             RuntimeLog);
         if (startOutcomeBarrier is not null || startCommitBarrier is not null)
@@ -1981,10 +2062,19 @@ internal sealed class RuntimeHarness
 
     internal sealed class FakeLanguageClassifier : ILanguageClassifier
     {
+        private readonly ConcurrentQueue<string> _texts = new();
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public string[] Texts => _texts.ToArray();
+
         public ValueTask<LanguageProbabilities> ClassifyAsync(
             string text,
             CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _callCount);
+            _texts.Enqueue(text);
             return ValueTask.FromResult(new LanguageProbabilities(1, 0, 0));
         }
     }

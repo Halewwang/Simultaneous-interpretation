@@ -1463,15 +1463,24 @@ public sealed class TranslationRuntime :
 
         if (notification.Event is TranslationSessionEvent.SourceCaption source)
         {
-            string translated = CurrentSnapshot.TranslatedCaption;
-            Publish(_reducer.UpdateCaptions(
-                _reducer.Generation,
-                source.Text,
-                translated));
-            _inboundBuffer?.AppendTranscript(source.Text);
-            _ = ClassifyAsync(
-                notification.Generation,
-                source.Text);
+            if (notification.Direction == AudioDirection.Inbound)
+            {
+                Publish(_reducer.UpdateCaptions(
+                    _reducer.Generation,
+                    source.Text,
+                    CurrentSnapshot.TranslatedCaption));
+                _inboundBuffer?.AppendTranscript(source.Text);
+                _ = ClassifyAsync(
+                    notification.Generation,
+                    source.Text);
+            }
+            else
+            {
+                Publish(_reducer.UpdateCaptions(
+                    _reducer.Generation,
+                    CurrentSnapshot.SourceCaption,
+                    source.Text));
+            }
         }
         else if (notification.Event is TranslationSessionEvent.TranslatedCaption translated)
         {
