@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 namespace EMKE.Core.Tests;
 
 #pragma warning disable CA1515 // MSTest requires discoverable public test classes.
+#pragma warning disable CA2000 // Tests verify that ownership-transfer APIs dispose received leases.
 
 [TestClass]
 public sealed class AppSnapshotTests
@@ -275,7 +276,7 @@ public sealed class AppSnapshotTests
             new TranslationSessionEvent.TranslatedCaption("你好", LanguageCode.Zh, true),
             new TranslationSessionEvent.Completed(),
         ];
-        using FakePcmBufferLease lease = new([0x01, 0x00, 0x02, 0x00]);
+        FakePcmBufferLease lease = new([0x01, 0x00, 0x02, 0x00]);
         TranslationSessionEvent.AudioDelta audioDelta = new(lease);
 
         Assert.IsTrue(typeof(TranslationSessionEvent).IsAbstract);
@@ -298,17 +299,23 @@ public sealed class AppSnapshotTests
     }
 
     [TestMethod]
-    public void TranslationAudioDeltaRejectsNullEmptyAndOddPcmLeases()
+    public void TranslationAudioDeltaConsumesEveryNonNullLeaseOnFailure()
     {
-        using FakePcmBufferLease empty = new([]);
-        using FakePcmBufferLease odd = new([0x01]);
+        FakePcmBufferLease memoryFailure = new([0x01, 0x00], throwOnMemoryAccess: true);
+        FakePcmBufferLease empty = new([]);
+        FakePcmBufferLease odd = new([0x01]);
 
         Assert.ThrowsExactly<ArgumentNullException>(
             () => new TranslationSessionEvent.AudioDelta(null!));
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => new TranslationSessionEvent.AudioDelta(memoryFailure));
+        Assert.AreEqual(1, memoryFailure.DisposeCount);
         Assert.ThrowsExactly<ArgumentException>(
             () => new TranslationSessionEvent.AudioDelta(empty));
+        Assert.AreEqual(1, empty.DisposeCount);
         Assert.ThrowsExactly<ArgumentException>(
             () => new TranslationSessionEvent.AudioDelta(odd));
+        Assert.AreEqual(1, odd.DisposeCount);
     }
 
     [TestMethod]
@@ -326,7 +333,7 @@ public sealed class AppSnapshotTests
     [TestMethod]
     public void AudioEnginePcmEventsValidateDirectionRouteFrameCountAndLeaseLifetime()
     {
-        using FakePcmBufferLease inboundLease = new([0x01, 0x00, 0x02, 0x00]);
+        FakePcmBufferLease inboundLease = new([0x01, 0x00, 0x02, 0x00]);
         AudioEngineEvent inbound = AudioEngineEvent.CreatePcm(
             inboundLease,
             AudioDirection.Inbound,
@@ -334,7 +341,7 @@ public sealed class AppSnapshotTests
             AudioEngineStatus.Ok,
             2,
             41);
-        using FakePcmBufferLease outboundLease = new([0x03, 0x00]);
+        FakePcmBufferLease outboundLease = new([0x03, 0x00]);
         AudioEngineEvent outbound = AudioEngineEvent.CreatePcm(
             outboundLease,
             AudioDirection.Outbound,
@@ -378,12 +385,8 @@ public sealed class AppSnapshotTests
     }
 
     [TestMethod]
-    public void AudioEngineEventsRejectImpossibleStates()
+    public void AudioEnginePcmFailuresConsumeTheLeaseExactlyOnce()
     {
-        using FakePcmBufferLease empty = new([]);
-        using FakePcmBufferLease odd = new([0x01]);
-        using FakePcmBufferLease oneFrame = new([0x01, 0x00]);
-
         Assert.ThrowsExactly<ArgumentNullException>(
             () => AudioEngineEvent.CreatePcm(
                 null!,
@@ -392,69 +395,139 @@ public sealed class AppSnapshotTests
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentException>(
-            () => AudioEngineEvent.CreatePcm(
-                empty,
+
+        AssertPcmCreationFailureConsumesLease<InvalidOperationException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
+                AudioDirection.Inbound,
+                AudioEngineRoute.Translated,
+                AudioEngineStatus.Ok,
+                1,
+                1),
+            throwOnMemoryAccess: true);
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 AudioEngineRoute.Translated,
                 AudioEngineStatus.Ok,
                 0,
                 1));
-        Assert.ThrowsExactly<ArgumentException>(
-            () => AudioEngineEvent.CreatePcm(
-                odd,
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [0x01],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 AudioEngineRoute.Translated,
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 AudioEngineRoute.Translated,
                 AudioEngineStatus.Ok,
                 2,
                 1));
-        Assert.ThrowsExactly<ArgumentException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 AudioEngineRoute.MutedFailClosed,
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Outbound,
                 AudioEngineRoute.OriginalFailOpen,
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentOutOfRangeException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 (AudioDirection)int.MaxValue,
                 AudioEngineRoute.Translated,
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentOutOfRangeException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 (AudioEngineRoute)int.MaxValue,
                 AudioEngineStatus.Ok,
                 1,
                 1));
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
-            () => AudioEngineEvent.CreatePcm(
-                oneFrame,
+        AssertPcmCreationFailureConsumesLease<ArgumentOutOfRangeException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
                 AudioDirection.Inbound,
                 AudioEngineRoute.Translated,
                 (AudioEngineStatus)int.MaxValue,
                 1,
+                1));
+        AssertPcmCreationFailureConsumesLease<ArgumentException>(
+            [0x01, 0x00],
+            static lease => AudioEngineEvent.CreatePcm(
+                lease,
+                AudioDirection.Inbound,
+                AudioEngineRoute.Translated,
+                AudioEngineStatus.QueueFull,
+                1,
+                1));
+    }
+
+    [TestMethod]
+    public void AudioEngineControlEventsEnforceNativeProducerStatusAndRouteCombinations()
+    {
+        using AudioEngineEvent streamError = AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.StreamError,
+            AudioEngineStatus.InternalError,
+            AudioEngineRoute.OriginalFailOpen,
+            1);
+        using AudioEngineEvent backpressure = AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.Backpressure,
+            AudioEngineStatus.QueueFull,
+            AudioEngineRoute.MutedFailClosed,
+            2);
+
+        Assert.AreEqual(AudioEngineStatus.InternalError, streamError.Status);
+        Assert.AreEqual(AudioEngineStatus.QueueFull, backpressure.Status);
+        Assert.ThrowsExactly<ArgumentException>(
+            () => AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.DeviceChanged,
+                AudioEngineStatus.InternalError,
+                AudioEngineRoute.Stopped,
+                1));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.DeviceChanged,
+                AudioEngineStatus.DeviceMissing,
+                AudioEngineRoute.Translated,
+                1));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.StreamError,
+                AudioEngineStatus.Ok,
+                AudioEngineRoute.Translated,
+                1));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.Backpressure,
+                AudioEngineStatus.InternalError,
+                AudioEngineRoute.Translated,
                 1));
         Assert.ThrowsExactly<ArgumentException>(
             () => AudioEngineEvent.CreateControl(
@@ -720,20 +793,47 @@ public sealed class AppSnapshotTests
     {
         private readonly byte[] _bytes;
 
-        public FakePcmBufferLease(byte[] bytes)
+        private readonly bool _throwOnMemoryAccess;
+
+        public FakePcmBufferLease(byte[] bytes, bool throwOnMemoryAccess = false)
         {
             _bytes = bytes;
+            _throwOnMemoryAccess = throwOnMemoryAccess;
         }
 
         public int DisposeCount { get; private set; }
 
-        public ReadOnlyMemory<byte> Memory => _bytes;
+        public ReadOnlyMemory<byte> Memory
+        {
+            get
+            {
+                if (_throwOnMemoryAccess)
+                {
+                    throw new InvalidOperationException("Synthetic memory access failure.");
+                }
+
+                return _bytes;
+            }
+        }
 
         public void Dispose()
         {
             DisposeCount++;
         }
     }
+
+    private static void AssertPcmCreationFailureConsumesLease<TException>(
+        byte[] bytes,
+        Func<FakePcmBufferLease, AudioEngineEvent> create,
+        bool throwOnMemoryAccess = false)
+        where TException : Exception
+    {
+        FakePcmBufferLease lease = new(bytes, throwOnMemoryAccess);
+
+        Assert.ThrowsExactly<TException>(() => create(lease));
+        Assert.AreEqual(1, lease.DisposeCount);
+    }
 }
 
+#pragma warning restore CA2000
 #pragma warning restore CA1515

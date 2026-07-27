@@ -148,15 +148,36 @@ public abstract class TranslationSessionEvent
         private readonly ReadOnlyMemory<byte> _pcm16;
         private IPcmBufferLease? _lease;
 
+        /// <summary>
+        /// Creates an audio delta and takes unconditional ownership of a
+        /// non-null lease.
+        /// </summary>
+        /// <remarks>
+        /// If construction fails while reading or validating the lease, the
+        /// constructor disposes it exactly once. On success, this event owns the
+        /// lease and the caller must not dispose the original reference.
+        /// </remarks>
         public AudioDelta(IPcmBufferLease lease)
             : base(TranslationSessionEventKind.AudioDelta)
         {
             ArgumentNullException.ThrowIfNull(lease);
 
-            ReadOnlyMemory<byte> pcm16 = lease.Memory;
-            ValidatePcm16(pcm16, nameof(lease));
-            _pcm16 = pcm16;
-            _lease = lease;
+            bool ownershipTransferred = false;
+            try
+            {
+                ReadOnlyMemory<byte> pcm16 = lease.Memory;
+                ValidatePcm16(pcm16, nameof(lease));
+                _pcm16 = pcm16;
+                _lease = lease;
+                ownershipTransferred = true;
+            }
+            finally
+            {
+                if (!ownershipTransferred)
+                {
+                    lease.Dispose();
+                }
+            }
         }
 
         public ReadOnlyMemory<byte> Pcm16
@@ -252,6 +273,15 @@ public sealed class AudioEngineEvent : IDisposable
         }
     }
 
+    /// <summary>
+    /// Creates a PCM event and takes unconditional ownership of a non-null
+    /// lease.
+    /// </summary>
+    /// <remarks>
+    /// Any validation or memory-access failure disposes the lease exactly once.
+    /// On success, the returned event owns the lease and the caller must not
+    /// dispose the original reference.
+    /// </remarks>
     public static AudioEngineEvent CreatePcm(
         IPcmBufferLease lease,
         AudioDirection direction,
@@ -261,33 +291,52 @@ public sealed class AudioEngineEvent : IDisposable
         ulong sequence)
     {
         ArgumentNullException.ThrowIfNull(lease);
-        DomainEnum.ThrowIfUndefined(direction, nameof(direction));
-        DomainEnum.ThrowIfUndefined(route, nameof(route));
-        DomainEnum.ThrowIfUndefined(status, nameof(status));
 
-        ReadOnlyMemory<byte> pcm16 = lease.Memory;
-        if (pcm16.IsEmpty || (pcm16.Length & 1) != 0)
+        bool ownershipTransferred = false;
+        try
         {
-            throw new ArgumentException("PCM16 buffers must contain a non-empty, even number of bytes.", nameof(lease));
+            DomainEnum.ThrowIfUndefined(direction, nameof(direction));
+            DomainEnum.ThrowIfUndefined(route, nameof(route));
+            DomainEnum.ThrowIfUndefined(status, nameof(status));
+            if (status != AudioEngineStatus.Ok)
+            {
+                throw new ArgumentException("PCM events must have an OK status.", nameof(status));
+            }
+
+            ReadOnlyMemory<byte> pcm16 = lease.Memory;
+            if (pcm16.IsEmpty || (pcm16.Length & 1) != 0)
+            {
+                throw new ArgumentException("PCM16 buffers must contain a non-empty, even number of bytes.", nameof(lease));
+            }
+
+            if (frameCount != (uint)(pcm16.Length / sizeof(short)))
+            {
+                throw new ArgumentException("Frame count must match the mono PCM16 byte count.", nameof(frameCount));
+            }
+
+            if (!IsRouteValidForDirection(direction, route))
+            {
+                throw new ArgumentException("The route is not valid for the PCM direction.", nameof(route));
+            }
+
+            AudioEngineEventKind kind = direction switch
+            {
+                AudioDirection.Inbound => AudioEngineEventKind.InboundPcm16,
+                AudioDirection.Outbound => AudioEngineEventKind.OutboundPcm16,
+                _ => throw new ArgumentOutOfRangeException(nameof(direction)),
+            };
+            AudioEngineEvent result =
+                new(kind, direction, route, status, frameCount, sequence, lease, pcm16);
+            ownershipTransferred = true;
+            return result;
         }
-
-        if (frameCount != (uint)(pcm16.Length / sizeof(short)))
+        finally
         {
-            throw new ArgumentException("Frame count must match the mono PCM16 byte count.", nameof(frameCount));
+            if (!ownershipTransferred)
+            {
+                lease.Dispose();
+            }
         }
-
-        if (!IsRouteValidForDirection(direction, route))
-        {
-            throw new ArgumentException("The route is not valid for the PCM direction.", nameof(route));
-        }
-
-        AudioEngineEventKind kind = direction switch
-        {
-            AudioDirection.Inbound => AudioEngineEventKind.InboundPcm16,
-            AudioDirection.Outbound => AudioEngineEventKind.OutboundPcm16,
-            _ => throw new ArgumentOutOfRangeException(nameof(direction)),
-        };
-        return new AudioEngineEvent(kind, direction, route, status, frameCount, sequence, lease, pcm16);
     }
 
     public static AudioEngineEvent CreateControl(
@@ -299,11 +348,22 @@ public sealed class AudioEngineEvent : IDisposable
         DomainEnum.ThrowIfUndefined(kind, nameof(kind));
         DomainEnum.ThrowIfUndefined(status, nameof(status));
         DomainEnum.ThrowIfUndefined(route, nameof(route));
-        if (kind is not AudioEngineEventKind.DeviceChanged
-            and not AudioEngineEventKind.StreamError
-            and not AudioEngineEventKind.Backpressure)
+        bool isValidProducerState = kind switch
         {
-            throw new ArgumentException("Control events cannot use none or PCM event kinds.", nameof(kind));
+            AudioEngineEventKind.DeviceChanged =>
+                status == AudioEngineStatus.DeviceMissing
+                && route == AudioEngineRoute.Stopped,
+            AudioEngineEventKind.StreamError =>
+                status == AudioEngineStatus.InternalError,
+            AudioEngineEventKind.Backpressure =>
+                status == AudioEngineStatus.QueueFull,
+            _ => throw new ArgumentException("Control events cannot use none or PCM event kinds.", nameof(kind)),
+        };
+        if (!isValidProducerState)
+        {
+            throw new ArgumentException(
+                "The status and route do not match the native control-event kind.",
+                nameof(status));
         }
 
         return new AudioEngineEvent(kind, null, route, status, 0, sequence, null, ReadOnlyMemory<byte>.Empty);
@@ -491,6 +551,10 @@ public interface ITranslationAudioEngine
 
     Task StopAsync(CancellationToken cancellationToken);
 
+    /// <returns>
+    /// The next typed event, or <see langword="null"/> only when the native
+    /// producer reports NONE because no event is queued.
+    /// </returns>
     ValueTask<AudioEngineEvent?> PollEventAsync(CancellationToken cancellationToken);
 
     /// <remarks>
