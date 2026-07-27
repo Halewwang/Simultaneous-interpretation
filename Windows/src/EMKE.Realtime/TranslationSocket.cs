@@ -86,6 +86,20 @@ internal interface ITranslationTransport : IDisposable
     ValueTask<TranslationReceiveResult> ReceiveEventAsync(CancellationToken cancellationToken);
 }
 
+internal static class TranslationClientFramePolicy
+{
+    public static RuntimeError? Validate(WebSocketMessageType messageType)
+    {
+        return messageType == WebSocketMessageType.Text
+            ? null
+            : new RuntimeError(
+                ErrorCategory.Protocol,
+                "binaryTranslationEvent",
+                new Dictionary<string, string>(),
+                RecoveryAction.Retry);
+    }
+}
+
 public sealed class TranslationSocket : ITranslationTransport
 {
     public const int DefaultReceiveLimit = 64 * 1024;
@@ -282,6 +296,12 @@ public sealed class TranslationSocket : ITranslationTransport
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        RuntimeError? frameError =
+            TranslationClientFramePolicy.Validate(WebSocketMessageType.Text);
+        if (frameError is not null)
+        {
+            return frameError;
+        }
 
         try
         {

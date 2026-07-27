@@ -34,6 +34,20 @@ public sealed class TranslationSessionException : Exception
 
 public static class TranslationSessionCreationPolicy
 {
+    public static TranslationSessionCreationPlan CreatePlan(
+        LanguageCode nativeLanguage,
+        LanguageCode meetingLanguage,
+        bool requestOutbound)
+    {
+        bool requiresOutbound = RequiresOutboundSession(
+            nativeLanguage,
+            meetingLanguage);
+        return new TranslationSessionCreationPlan(
+            InboundSocketCount: 1,
+            OutboundSocketCount: requestOutbound && requiresOutbound ? 1 : 0,
+            OutboundBypassed: requestOutbound && !requiresOutbound);
+    }
+
     public static bool RequiresOutboundSession(
         LanguageCode nativeLanguage,
         LanguageCode meetingLanguage)
@@ -52,7 +66,12 @@ public static class TranslationSessionCreationPolicy
     }
 }
 
-public sealed class TranslationSession : ITranslationSession, IDisposable
+public sealed record TranslationSessionCreationPlan(
+    int InboundSocketCount,
+    int OutboundSocketCount,
+    bool OutboundBypassed);
+
+public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyncDisposable
 {
     private const int DefaultEventCapacity = 32;
 
@@ -60,11 +79,13 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
     private readonly ITranslationTransport _transport;
     private readonly Uri _endpoint;
     private readonly TranslationSessionConfiguration _configuration;
-    private readonly IClock _clock;
     private readonly ArrayPool<byte> _pool;
     private readonly Channel<TranslationSessionEvent> _events;
     private readonly PcmFrameBatcher _batcher = new();
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly CancellationTokenSource _audioCancellation = new();
+    private readonly CancellationToken _audioToken;
     private readonly TaskCompletionSource _handshake =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _remoteClosed =
@@ -74,8 +95,11 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
     private RuntimeError? _lastError;
     private Task? _connectTask;
     private Task? _receiveLoop;
+    private Task? _receiveObservation;
     private Task? _closeTask;
-    private Task<int>? _discardTask;
+    private Task? _audioStopTask;
+    private Task? _shutdownTask;
+    private int _pendingSendCount;
     private int _released;
 
     public TranslationSession(Uri endpoint, TranslationSessionConfiguration configuration)
@@ -101,8 +125,9 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
         _endpoint = endpoint ?? throw new ArgumentNullException(nameof(endpoint));
         _configuration =
             configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        ArgumentNullException.ThrowIfNull(clock);
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        _audioToken = _audioCancellation.Token;
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(eventCapacity);
 
         _events = Channel.CreateBounded<TranslationSessionEvent>(
@@ -113,7 +138,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
                 FullMode = BoundedChannelFullMode.Wait,
                 AllowSynchronousContinuations = false,
             });
-        _closeCoordinator = new SessionCloseCoordinator(_clock, _ => ReleaseResources());
+        _closeCoordinator = new SessionCloseCoordinator(clock);
         _state = TranslationSessionState.Disconnected;
     }
 
@@ -172,10 +197,53 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
         CancellationToken cancellationToken)
     {
         ThrowIfNotConnected();
-        await _batcher.AppendAsync(
-            pcm,
-            SendFrameAsync,
-            cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _pendingSendCount);
+        try
+        {
+            using CancellationTokenSource sendCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    _audioToken);
+            try
+            {
+                await _sendGate.WaitAsync(sendCancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                _audioToken.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TranslationSessionException(Error(
+                    ErrorCategory.Protocol,
+                    "translationSession.audioStopped"));
+            }
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfAudioStopped();
+                ThrowIfNotConnected();
+                await _batcher.AppendAsync(
+                    pcm,
+                    SendFrameAsync,
+                    sendCancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                _audioToken.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TranslationSessionException(Error(
+                    ErrorCategory.Protocol,
+                    "translationSession.audioStopped"));
+            }
+            finally
+            {
+                _sendGate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _pendingSendCount);
+        }
     }
 
     public IAsyncEnumerable<TranslationSessionEvent> ReceiveAsync(
@@ -217,19 +285,43 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
 
     public void Dispose()
     {
-        ReleaseResources();
-        _events.Writer.TryComplete();
-        _handshake.TrySetException(
-            new TranslationSessionException(Error(
-                ErrorCategory.Network,
-                "translationSession.disposed")));
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        RuntimeError disposed = Error(
+            ErrorCategory.Network,
+            "translationSession.disposed");
+        lock (_sync)
+        {
+            if (_state is not (
+                TranslationSessionState.Closed
+                or TranslationSessionState.Failed))
+            {
+                _lastError = disposed;
+                _state = TranslationSessionState.Failed;
+            }
+        }
+
+        _handshake.TrySetException(new TranslationSessionException(disposed));
         _remoteClosed.TrySetResult();
+        _events.Writer.TryComplete();
+        await CancelAudioAsync().ConfigureAwait(false);
+        await CancelLifetimeAsync().ConfigureAwait(false);
+        await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
+        await AwaitReceiveObservationAsync().ConfigureAwait(false);
+        DrainQueuedEvents();
     }
 
     internal void CompleteEventChannelForTest()
     {
         _events.Writer.TryComplete();
     }
+
+    internal int RetainedPcmByteCountForTest => _batcher.RetainedByteCount;
+
+    internal int PendingSendCountForTest => Volatile.Read(ref _pendingSendCount);
 
     private async Task ConnectCoreAsync()
     {
@@ -238,77 +330,99 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
         if (connectError is not null)
         {
             Fail(connectError);
+            await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
             throw new TranslationSessionException(connectError);
         }
 
-        _receiveLoop = ReceiveLoopAsync();
+        Task receiveLoop = ReceiveLoopAsync();
+        lock (_sync)
+        {
+            _receiveLoop = receiveLoop;
+            _receiveObservation = ObserveReceiveLoopAsync(receiveLoop);
+        }
+
         await _handshake.Task.ConfigureAwait(false);
     }
 
     private async Task ReceiveLoopAsync()
     {
-        try
+        while (!_lifetime.IsCancellationRequested)
         {
-            while (!_lifetime.IsCancellationRequested)
+            TranslationReceiveResult received;
+            try
             {
-                TranslationReceiveResult received;
-                try
-                {
-                    received = await _transport.ReceiveEventAsync(
-                        _lifetime.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (ChannelClosedException) when (_lifetime.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception exception) when (
-                    exception is IOException
-                        or InvalidOperationException
-                        or ChannelClosedException)
-                {
-                    Fail(Error(
-                        ErrorCategory.Network,
-                        "translationSocket.receiveFailed"));
-                    return;
-                }
+                received = await _transport.ReceiveEventAsync(
+                    _lifetime.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ChannelClosedException) when (_lifetime.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or InvalidOperationException
+                    or ChannelClosedException)
+            {
+                Fail(Error(
+                    ErrorCategory.Network,
+                    "translationSocket.receiveFailed"));
+                return;
+            }
 
-                if (received.Status == TranslationReceiveStatus.Failed)
+            if (received.Status == TranslationReceiveStatus.Failed)
+            {
+                if (!_lifetime.IsCancellationRequested)
                 {
                     Fail(received.Error!);
-                    return;
                 }
 
-                if (received.Status == TranslationReceiveStatus.Closed)
-                {
-                    if (State == TranslationSessionState.Closing)
-                    {
-                        CompleteRemoteClose();
-                    }
-                    else
-                    {
-                        Fail(Error(
-                            ErrorCategory.Protocol,
-                            "translationSession.unexpectedSocketClose"));
-                    }
-
-                    return;
-                }
-
-                if (!await HandleEventAsync(received.Event!).ConfigureAwait(false))
-                {
-                    return;
-                }
+                return;
             }
-        }
-        finally
-        {
-            if (State == TranslationSessionState.Failed)
+
+            if (received.Status == TranslationReceiveStatus.Closed)
             {
-                ReleaseResources();
+                if (State == TranslationSessionState.Closing)
+                {
+                    CompleteRemoteClose();
+                }
+                else if (!_lifetime.IsCancellationRequested)
+                {
+                    Fail(Error(
+                        ErrorCategory.Protocol,
+                        "translationSession.unexpectedSocketClose"));
+                }
+
+                return;
+            }
+
+            bool shouldContinue;
+            try
+            {
+                shouldContinue =
+                    await HandleEventAsync(received.Event!).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException
+                    or InvalidOperationException
+                    or ArgumentException)
+            {
+                Fail(Error(
+                    ErrorCategory.Network,
+                    "translationSession.eventHandlingFailed"));
+                return;
+            }
+
+            if (!shouldContinue)
+            {
+                return;
             }
         }
     }
@@ -487,7 +601,8 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
             1,
             _transport.SendSessionCloseAsync,
             _remoteClosed.Task);
-        _discardTask = _batcher.DiscardAsync(CancellationToken.None).AsTask();
+        await CancelAudioAsync().ConfigureAwait(false);
+        _ = EnsureAudioStoppedAsync();
         SessionCloseOutcome outcome = await close.ConfigureAwait(false);
 
         if (outcome.Completion == SessionCloseCompletion.Closed)
@@ -506,17 +621,30 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
 
             if (concurrentFailure is not null)
             {
+                await CancelLifetimeAsync().ConfigureAwait(false);
+                await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
+                await AwaitReceiveObservationAsync().ConfigureAwait(false);
                 throw new TranslationSessionException(concurrentFailure);
             }
 
+            await CancelLifetimeAsync().ConfigureAwait(false);
+            await EnsureShutdownAsync(drainQueuedEvents: false).ConfigureAwait(false);
+            await AwaitReceiveObservationAsync().ConfigureAwait(false);
             return;
         }
 
         RuntimeError error = outcome.Error ?? Error(
             ErrorCategory.CloseTimeout,
             "translationSession.closeTimeout");
-        Fail(error);
-        throw new TranslationSessionException(error);
+        SetFailure(error, overwriteExisting: outcome.Completion == SessionCloseCompletion.CloseTimeout);
+        RuntimeError finalError = LastError ?? error;
+        _events.Writer.TryComplete();
+        _handshake.TrySetException(new TranslationSessionException(finalError));
+        _remoteClosed.TrySetResult();
+        await CancelLifetimeAsync().ConfigureAwait(false);
+        await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
+        await AwaitReceiveObservationAsync().ConfigureAwait(false);
+        throw new TranslationSessionException(finalError);
     }
 
     private void CompleteRemoteClose()
@@ -535,25 +663,16 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
 
     private void Fail(RuntimeError error)
     {
-        lock (_sync)
+        if (!SetFailure(error, overwriteExisting: false))
         {
-            if (_state is TranslationSessionState.Closed
-                or TranslationSessionState.Failed)
-            {
-                return;
-            }
-
-            _lastError = error;
-            _state = TranslationSessionState.Failed;
+            return;
         }
 
         _handshake.TrySetException(new TranslationSessionException(error));
         _events.Writer.TryComplete();
         _remoteClosed.TrySetResult();
-        if (Volatile.Read(ref _released) == 0)
-        {
-            _lifetime.Cancel();
-        }
+        _audioCancellation.Cancel();
+        _lifetime.Cancel();
     }
 
     private void ThrowIfNotConnected()
@@ -574,6 +693,16 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
         throw new TranslationSessionException(error);
     }
 
+    private void ThrowIfAudioStopped()
+    {
+        if (_audioToken.IsCancellationRequested)
+        {
+            throw new TranslationSessionException(Error(
+                ErrorCategory.Protocol,
+                "translationSession.audioStopped"));
+        }
+    }
+
     private bool TryTransition(
         TranslationSessionState expected,
         TranslationSessionState next)
@@ -590,6 +719,146 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
         }
     }
 
+    private bool SetFailure(RuntimeError error, bool overwriteExisting)
+    {
+        lock (_sync)
+        {
+            if (_state == TranslationSessionState.Closed)
+            {
+                return false;
+            }
+
+            if (_state == TranslationSessionState.Failed && !overwriteExisting)
+            {
+                return false;
+            }
+
+            _lastError = error;
+            _state = TranslationSessionState.Failed;
+            return true;
+        }
+    }
+
+    private async Task ObserveReceiveLoopAsync(Task receiveLoop)
+    {
+        try
+        {
+            await receiveLoop.ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or InvalidOperationException
+                or ChannelClosedException)
+        {
+            Fail(Error(
+                ErrorCategory.Network,
+                "translationSocket.receiveFailed"));
+        }
+
+        if (State == TranslationSessionState.Failed)
+        {
+            await EnsureShutdownAsync(drainQueuedEvents: true).ConfigureAwait(false);
+        }
+    }
+
+    private Task EnsureAudioStoppedAsync()
+    {
+        lock (_sync)
+        {
+            _audioStopTask ??= StopAudioCoreAsync();
+            return _audioStopTask;
+        }
+    }
+
+    private async Task AwaitReceiveObservationAsync()
+    {
+        Task? observation;
+        lock (_sync)
+        {
+            observation = _receiveObservation;
+        }
+
+        if (observation is not null)
+        {
+            await observation.ConfigureAwait(false);
+        }
+    }
+
+    private async Task StopAudioCoreAsync()
+    {
+        await _sendGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            _ = _batcher.Discard();
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
+    }
+
+    private Task EnsureShutdownAsync(bool drainQueuedEvents)
+    {
+        lock (_sync)
+        {
+            _shutdownTask ??= ShutdownCoreAsync(drainQueuedEvents);
+            return _shutdownTask;
+        }
+    }
+
+    private async Task ShutdownCoreAsync(bool drainQueuedEvents)
+    {
+        await CancelAudioAsync().ConfigureAwait(false);
+        await CancelLifetimeAsync().ConfigureAwait(false);
+
+        Task? receiveLoop;
+        lock (_sync)
+        {
+            receiveLoop = _receiveLoop;
+        }
+
+        if (receiveLoop is not null)
+        {
+            await receiveLoop.ConfigureAwait(false);
+        }
+
+        await EnsureAudioStoppedAsync().ConfigureAwait(false);
+        _events.Writer.TryComplete();
+        if (drainQueuedEvents)
+        {
+            DrainQueuedEvents();
+        }
+
+        ReleaseResources();
+    }
+
+    private async ValueTask CancelAudioAsync()
+    {
+        if (!_audioCancellation.IsCancellationRequested)
+        {
+            await _audioCancellation.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask CancelLifetimeAsync()
+    {
+        if (!_lifetime.IsCancellationRequested)
+        {
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void DrainQueuedEvents()
+    {
+        while (_events.Reader.TryRead(out TranslationSessionEvent? sessionEvent))
+        {
+            if (sessionEvent is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+    }
+
     private void ReleaseResources()
     {
         if (Interlocked.Exchange(ref _released, 1) != 0)
@@ -597,9 +866,10 @@ public sealed class TranslationSession : ITranslationSession, IDisposable
             return;
         }
 
-        _lifetime.Cancel();
         _transport.Dispose();
+        _audioCancellation.Dispose();
         _lifetime.Dispose();
+        _sendGate.Dispose();
     }
 
     private static RuntimeError Error(ErrorCategory category, string code)

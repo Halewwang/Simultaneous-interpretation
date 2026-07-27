@@ -19,16 +19,13 @@ internal sealed class SessionCloseCoordinator
     public const int DeadlineMilliseconds = 1_000;
 
     private readonly IClock _clock;
-    private readonly Action<long> _releaseResources;
     private readonly object _sync = new();
     private readonly Dictionary<long, Task<SessionCloseOutcome>> _completions = [];
     private long _activeGeneration;
 
-    public SessionCloseCoordinator(IClock clock, Action<long> releaseResources)
+    public SessionCloseCoordinator(IClock clock)
     {
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
-        _releaseResources =
-            releaseResources ?? throw new ArgumentNullException(nameof(releaseResources));
     }
 
     public long ActiveGeneration
@@ -63,6 +60,9 @@ internal sealed class SessionCloseCoordinator
         Func<CancellationToken, ValueTask<RuntimeError?>> sendClose,
         Task remoteClosed)
     {
+        // The sender must observe the supplied token. Local close still completes
+        // at the deadline for a non-cooperative sender, but its CTS remains owned
+        // by the observer until that sender eventually converges.
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(generation);
         ArgumentNullException.ThrowIfNull(sendClose);
         ArgumentNullException.ThrowIfNull(remoteClosed);
@@ -92,11 +92,14 @@ internal sealed class SessionCloseCoordinator
         Func<CancellationToken, ValueTask<RuntimeError?>> sendClose,
         Task remoteClosed)
     {
-        using CancellationTokenSource deadlineCancellation = new();
+        CancellationTokenSource deadlineCancellation = new();
+        CancellationTokenSource sendCancellation = new();
         Task deadline = _clock.DelayAsync(
             TimeSpan.FromMilliseconds(DeadlineMilliseconds),
             deadlineCancellation.Token).AsTask();
-        Task<RuntimeError?> send = InvokeSendAsync(sendClose);
+        Task<RuntimeError?> send = InvokeSendAsync(
+            sendClose,
+            sendCancellation.Token);
 
         try
         {
@@ -104,7 +107,6 @@ internal sealed class SessionCloseCoordinator
             if (first == remoteClosed)
             {
                 await remoteClosed.ConfigureAwait(false);
-                await deadlineCancellation.CancelAsync().ConfigureAwait(false);
                 return new SessionCloseOutcome(
                     generation,
                     SessionCloseCompletion.Closed,
@@ -126,7 +128,6 @@ internal sealed class SessionCloseCoordinator
             RuntimeError? sendError = await send.ConfigureAwait(false);
             if (sendError is not null)
             {
-                await deadlineCancellation.CancelAsync().ConfigureAwait(false);
                 return new SessionCloseOutcome(
                     generation,
                     SessionCloseCompletion.Failed,
@@ -137,7 +138,6 @@ internal sealed class SessionCloseCoordinator
             if (first == remoteClosed)
             {
                 await remoteClosed.ConfigureAwait(false);
-                await deadlineCancellation.CancelAsync().ConfigureAwait(false);
                 return new SessionCloseOutcome(
                     generation,
                     SessionCloseCompletion.Closed,
@@ -153,16 +153,24 @@ internal sealed class SessionCloseCoordinator
                     "translationSession.closeTimeout",
                     RecoveryAction.Retry));
         }
-        catch (OperationCanceledException) when (deadlineCancellation.IsCancellationRequested)
-        {
-            return new SessionCloseOutcome(
-                generation,
-                SessionCloseCompletion.Closed,
-                null);
-        }
         finally
         {
-            _releaseResources(generation);
+            await sendCancellation.CancelAsync().ConfigureAwait(false);
+            await deadlineCancellation.CancelAsync().ConfigureAwait(false);
+            await ObserveCancellationAsync(deadline).ConfigureAwait(false);
+            if (send.IsCompleted)
+            {
+                _ = await send.ConfigureAwait(false);
+                sendCancellation.Dispose();
+            }
+            else
+            {
+#pragma warning disable CA2025 // A non-cooperative sender cannot delay local close; the observer owns the CTS until it converges.
+                _ = DisposeAfterSendCompletesAsync(send, sendCancellation);
+#pragma warning restore CA2025
+            }
+
+            deadlineCancellation.Dispose();
             lock (_sync)
             {
                 if (_activeGeneration == generation)
@@ -174,11 +182,12 @@ internal sealed class SessionCloseCoordinator
     }
 
     private static async Task<RuntimeError?> InvokeSendAsync(
-        Func<CancellationToken, ValueTask<RuntimeError?>> sendClose)
+        Func<CancellationToken, ValueTask<RuntimeError?>> sendClose,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await sendClose(CancellationToken.None).ConfigureAwait(false);
+            return await sendClose(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -196,6 +205,31 @@ internal sealed class SessionCloseCoordinator
                 ErrorCategory.Network,
                 "translationSocket.sendFailed",
                 RecoveryAction.Retry);
+        }
+    }
+
+    private static async Task ObserveCancellationAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static async Task DisposeAfterSendCompletesAsync(
+        Task<RuntimeError?> send,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            _ = await send.ConfigureAwait(false);
+        }
+        finally
+        {
+            cancellation.Dispose();
         }
     }
 

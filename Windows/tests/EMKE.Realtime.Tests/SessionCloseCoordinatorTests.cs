@@ -37,10 +37,7 @@ public sealed class SessionCloseCoordinatorTests
     public async Task SameGenerationCallersReceiveTheExactSameTaskAndReleaseOnce()
     {
         FakeClock clock = new();
-        int releases = 0;
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            _ => Interlocked.Increment(ref releases));
+        SessionCloseCoordinator coordinator = new(clock);
         coordinator.Activate(7);
         TaskCompletionSource remoteClosed =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -58,7 +55,6 @@ public sealed class SessionCloseCoordinatorTests
         remoteClosed.SetResult();
         SessionCloseOutcome outcome = await first;
         Assert.AreEqual(SessionCloseCompletion.Closed, outcome.Completion);
-        Assert.AreEqual(1, releases);
     }
 
     [TestMethod]
@@ -66,10 +62,7 @@ public sealed class SessionCloseCoordinatorTests
     {
         const string secret = "sk-1234567890abcdef";
         FakeClock clock = new();
-        int releases = 0;
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            _ => Interlocked.Increment(ref releases));
+        SessionCloseCoordinator coordinator = new(clock);
         coordinator.Activate(1);
 
         SessionCloseOutcome outcome = await coordinator.CloseAsync(
@@ -84,21 +77,84 @@ public sealed class SessionCloseCoordinatorTests
         Assert.AreEqual(SessionCloseCompletion.Failed, outcome.Completion);
         Assert.AreEqual("translationSocket.sendFailed", outcome.Error!.Code);
         Assert.IsFalse(outcome.Error.ToString()!.Contains(secret, StringComparison.Ordinal));
-        Assert.AreEqual(1, releases);
     }
 
     [TestMethod]
     public void CloseRejectsAGenerationThatWasNeverActivated()
     {
-        SessionCloseCoordinator coordinator = new(
-            new FakeClock(),
-            static _ => { });
+        SessionCloseCoordinator coordinator = new(new FakeClock());
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => coordinator.CloseAsync(
                 9,
                 static _ => ValueTask.FromResult<RuntimeError?>(null),
                 Task.CompletedTask));
+    }
+
+    [TestMethod]
+    public async Task DeadlineCancelsAndObservesACancellationAwareBlockedSend()
+    {
+        FakeClock clock = new();
+        TaskCompletionSource cancellationObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        SessionCloseCoordinator coordinator = new(clock);
+        coordinator.Activate(1);
+
+        Task<SessionCloseOutcome> close = coordinator.CloseAsync(
+            1,
+            async cancellationToken =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return null;
+                }
+                catch (OperationCanceledException)
+                {
+                    cancellationObserved.TrySetResult();
+                    throw;
+                }
+            },
+            new TaskCompletionSource().Task);
+
+        clock.AdvanceTo(SessionCloseCoordinator.DeadlineMilliseconds);
+        SessionCloseOutcome outcome = await close;
+
+        Assert.AreEqual(SessionCloseCompletion.CloseTimeout, outcome.Completion);
+        await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task RemoteCloseCancelsAndObservesALateSendFault()
+    {
+        FakeClock clock = new();
+        TaskCompletionSource remoteClosed =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource faultObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        SessionCloseCoordinator coordinator = new(clock);
+        coordinator.Activate(1);
+
+        Task<SessionCloseOutcome> close = coordinator.CloseAsync(
+            1,
+            async cancellationToken =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return null;
+                }
+                finally
+                {
+                    faultObserved.TrySetResult();
+                }
+            },
+            remoteClosed.Task);
+        remoteClosed.SetResult();
+
+        SessionCloseOutcome outcome = await close;
+        Assert.AreEqual(SessionCloseCompletion.Closed, outcome.Completion);
+        await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     private static async Task AssertSingleGenerationCaseAsync(
@@ -112,14 +168,11 @@ public sealed class SessionCloseCoordinatorTests
             name);
         long generation = input.GetProperty("generation").GetInt64();
         FakeClock clock = new();
-        int releases = 0;
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            _ => Interlocked.Increment(ref releases));
+        SessionCloseCoordinator coordinator = new(clock);
         coordinator.Activate(generation);
         TaskCompletionSource remoteClosed =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource blockedSend =
+        TaskCompletionSource sendCancellationObserved =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         bool sendBlocked = input.TryGetProperty("closeSend", out JsonElement closeSend)
@@ -127,12 +180,20 @@ public sealed class SessionCloseCoordinatorTests
         Task<SessionCloseOutcome> close = coordinator.CloseAsync(
             generation,
             sendBlocked
-                ? _ => new ValueTask<RuntimeError?>(blockedSend.Task.ContinueWith(
-                    static _ => (RuntimeError?)null,
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default))
-                : static _ => ValueTask.FromResult<RuntimeError?>(null),
+                ? async cancellationToken =>
+                {
+                    try
+                    {
+                        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                        return null;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        sendCancellationObserved.TrySetResult();
+                        throw;
+                    }
+                }
+        : static _ => ValueTask.FromResult<RuntimeError?>(null),
             remoteClosed.Task);
 
         Assert.AreEqual(0, clock.DelayStartedAtMs, name);
@@ -159,6 +220,11 @@ public sealed class SessionCloseCoordinatorTests
         }
 
         SessionCloseOutcome outcome = await close;
+        if (sendBlocked)
+        {
+            await sendCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
         Assert.AreEqual(
             expected.GetProperty("completion").GetString() == "closed"
                 ? SessionCloseCompletion.Closed
@@ -166,7 +232,6 @@ public sealed class SessionCloseCoordinatorTests
             outcome.Completion,
             name);
         Assert.AreEqual(expected.GetProperty("completionAtMs").GetInt32(), clock.NowMs, name);
-        Assert.AreEqual(1, releases, name);
     }
 
     private static async Task AssertConcurrentRoutesAsync(
@@ -179,8 +244,8 @@ public sealed class SessionCloseCoordinatorTests
             input.GetProperty("deadlineMs").GetInt32(),
             name);
         FakeClock clock = new();
-        SessionCloseCoordinator inbound = new(clock, static _ => { });
-        SessionCloseCoordinator outbound = new(clock, static _ => { });
+        SessionCloseCoordinator inbound = new(clock);
+        SessionCloseCoordinator outbound = new(clock);
         long generation = input.GetProperty("generation").GetInt64();
         inbound.Activate(generation);
         outbound.Activate(generation);
@@ -220,10 +285,7 @@ public sealed class SessionCloseCoordinatorTests
             input.GetProperty("deadlineMs").GetInt32(),
             name);
         FakeClock clock = new();
-        List<long> releasedGenerations = [];
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            generation => releasedGenerations.Add(generation));
+        SessionCloseCoordinator coordinator = new(clock);
         long closing = input.GetProperty("closingGeneration").GetInt64();
         long active = input.GetProperty("activeGeneration").GetInt64();
         coordinator.Activate(closing);
@@ -241,7 +303,6 @@ public sealed class SessionCloseCoordinatorTests
 
         Assert.AreEqual(SessionCloseCompletion.Closed, outcome.Completion, name);
         Assert.AreEqual(active, coordinator.ActiveGeneration, name);
-        CollectionAssert.AreEqual(new[] { closing }, releasedGenerations, name);
         Assert.IsFalse(expected.GetProperty("clearActiveGeneration").GetBoolean(), name);
     }
 

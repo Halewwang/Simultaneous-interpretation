@@ -88,9 +88,9 @@ public sealed class TranslationSessionTests
                         name);
                     if (frameType == "binary")
                     {
-                        transport.SessionUpdateError = Error(
-                            ErrorCategory.Protocol,
-                            "binaryTranslationEvent");
+                        transport.SessionUpdateError =
+                            TranslationClientFramePolicy.Validate(
+                                System.Net.WebSockets.WebSocketMessageType.Binary);
                         transport.ReleaseSessionUpdate();
                         TranslationSessionException exception =
                             await Assert.ThrowsExactlyAsync<TranslationSessionException>(
@@ -184,6 +184,9 @@ public sealed class TranslationSessionTests
         Assert.AreEqual(TranslationSessionState.Failed, session.State);
         Assert.IsFalse(sendFailure.ToString().Contains(secret, StringComparison.Ordinal));
         Assert.HasCount(0, sendFailure.Error.Parameters);
+        await WaitUntilAsync(() => transport.DisposeCount == 1, "send failure shutdown");
+        Assert.AreEqual(0, transport.ActiveReceiveCount);
+        Assert.IsFalse(transport.DisposedWhileReceiveActive);
     }
 
     [TestMethod]
@@ -264,6 +267,8 @@ public sealed class TranslationSessionTests
         Assert.AreEqual(TranslationSessionState.Closed, session.State);
         Assert.AreEqual(1, pool.ReturnCount);
         Assert.AreEqual(1, transport.DisposeCount);
+        Assert.AreEqual(0, transport.ActiveReceiveCount);
+        Assert.IsFalse(transport.DisposedWhileReceiveActive);
     }
 
     [TestMethod]
@@ -363,8 +368,15 @@ public sealed class TranslationSessionTests
         TranslationSessionException timeout =
             await Assert.ThrowsExactlyAsync<TranslationSessionException>(() => close);
         Assert.AreEqual(ErrorCategory.CloseTimeout, timeout.Error.Category);
-        transport.ReleaseAudioSend();
-        await audio;
+        TranslationSessionException stopped =
+            await Assert.ThrowsExactlyAsync<TranslationSessionException>(() => audio);
+        Assert.AreEqual("translationSession.audioStopped", stopped.Error.Code);
+        Assert.AreEqual(ErrorCategory.CloseTimeout, session.LastError!.Category);
+        Assert.AreEqual("translationSession.closeTimeout", session.LastError.Code);
+        Assert.AreEqual(TranslationSessionState.Failed, session.State);
+        Assert.AreEqual(1, transport.DisposeCount);
+        Assert.AreEqual(0, transport.ActiveReceiveCount);
+        Assert.IsFalse(transport.DisposedWhileReceiveActive);
     }
 
     [TestMethod]
@@ -390,6 +402,99 @@ public sealed class TranslationSessionTests
     }
 
     [TestMethod]
+    public async Task PartialPcmIsDiscardedOnCloseFailureAndDispose()
+    {
+        await AssertPartialDiscardAsync(StopPath.Close);
+        await AssertPartialDiscardAsync(StopPath.Failure);
+        await AssertPartialDiscardAsync(StopPath.Dispose);
+    }
+
+    [TestMethod]
+    public async Task SendQueuedBeforeCloseCannotAppendAfterTheSessionStartsClosing()
+    {
+        FakeTranslationTransport transport = new()
+        {
+            BlockAudioSend = true,
+        };
+        TranslationSession session = CreateSession(transport);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        await connect;
+
+        Task first = session.SendPcmAsync(
+            new byte[PcmFrameBatcher.FrameBytes],
+            CancellationToken.None).AsTask();
+        await WaitUntilAsync(() => transport.AudioSendCount == 1, "first send");
+        Task queued = session.SendPcmAsync(
+            new byte[PcmFrameBatcher.FrameBytes],
+            CancellationToken.None).AsTask();
+        await WaitUntilAsync(
+            () => session.PendingSendCountForTest == 2,
+            "queued send passed connected check");
+
+        Task close = session.CloseAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.closed"));
+        await close;
+
+        TranslationSessionException firstStopped =
+            await Assert.ThrowsExactlyAsync<TranslationSessionException>(() => first);
+        TranslationSessionException queuedStopped =
+            await Assert.ThrowsExactlyAsync<TranslationSessionException>(() => queued);
+        Assert.AreEqual("translationSession.audioStopped", firstStopped.Error.Code);
+        Assert.AreEqual("translationSession.audioStopped", queuedStopped.Error.Code);
+        Assert.AreEqual(1, transport.AudioSendCount);
+        Assert.AreEqual(0, session.RetainedPcmByteCountForTest);
+    }
+
+    [TestMethod]
+    public async Task DisposeDrainsQueuedAudioLeaseAndAwaitsReceiveBeforeTransportRelease()
+    {
+        FakeTranslationTransport transport = new();
+        TrackingArrayPool pool = new();
+        TranslationSession session = CreateSession(transport, pool: pool);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        await connect;
+        transport.Enqueue(Event(
+            "translation_audio.delta",
+            pcm16: new byte[] { 1, 2 }));
+        await WaitUntilAsync(() => pool.RentCount == 1, "queued audio");
+
+        await session.DisposeAsync();
+
+        Assert.AreEqual(1, pool.ReturnCount);
+        Assert.AreEqual(0, transport.ActiveReceiveCount);
+        Assert.IsFalse(transport.DisposedWhileReceiveActive);
+        Assert.AreEqual(1, transport.DisposeCount);
+    }
+
+    [TestMethod]
+    public async Task GracefulCloseLeavesQueuedAudioOwnedByReaderUntilDisposeDrainsIt()
+    {
+        FakeTranslationTransport transport = new();
+        TrackingArrayPool pool = new();
+        TranslationSession session = CreateSession(transport, pool: pool);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        await connect;
+        transport.Enqueue(Event(
+            "translation_audio.delta",
+            pcm16: new byte[] { 1, 2 }));
+        await WaitUntilAsync(() => pool.RentCount == 1, "queued audio");
+
+        Task close = session.CloseAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.closed"));
+        await close;
+
+        Assert.AreEqual(0, pool.ReturnCount);
+        await session.DisposeAsync();
+        Assert.AreEqual(1, pool.ReturnCount);
+    }
+
+    [TestMethod]
     public async Task DuplicateConnectCloseAndDisposeAreDeterministic()
     {
         FakeTranslationTransport transport = new();
@@ -406,12 +511,52 @@ public sealed class TranslationSessionTests
         Task secondClose = session.CloseAsync(CancellationToken.None);
         transport.Enqueue(Event("session.closed"));
         await Task.WhenAll(firstClose, secondClose);
-        session.Dispose();
-        session.Dispose();
+        await session.DisposeAsync();
+        await session.DisposeAsync();
 
         Assert.AreEqual(1, transport.ConnectCount);
         Assert.AreEqual(1, transport.CloseCount);
         Assert.AreEqual(1, transport.DisposeCount);
+    }
+
+    private static async Task AssertPartialDiscardAsync(StopPath path)
+    {
+        FakeTranslationTransport transport = new();
+        TranslationSession session = CreateSession(transport);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        await connect;
+        await session.SendPcmAsync(new byte[2400], CancellationToken.None);
+        Assert.AreEqual(2400, session.RetainedPcmByteCountForTest, path.ToString());
+
+        switch (path)
+        {
+            case StopPath.Close:
+                Task close = session.CloseAsync(CancellationToken.None);
+                transport.Enqueue(Event("session.closed"));
+                await close;
+                break;
+            case StopPath.Failure:
+                transport.Enqueue(TranslationReceiveResult.Failed(Error(
+                    ErrorCategory.Network,
+                    "translationSocket.receiveFailed")));
+                await WaitUntilAsync(
+                    () => transport.DisposeCount == 1,
+                    "failure shutdown");
+                break;
+            case StopPath.Dispose:
+                await session.DisposeAsync();
+                break;
+            default:
+                Assert.Fail("Unknown stop path.");
+                break;
+        }
+
+        Assert.AreEqual(0, session.RetainedPcmByteCountForTest, path.ToString());
+        Assert.AreEqual(0, transport.ActiveReceiveCount, path.ToString());
+        Assert.IsFalse(transport.DisposedWhileReceiveActive, path.ToString());
+        Assert.AreEqual(1, transport.DisposeCount, path.ToString());
     }
 
     private static TranslationSession CreateSession(
@@ -507,6 +652,7 @@ public sealed class TranslationSessionTests
         private readonly Channel<TranslationReceiveResult> _receives =
             Channel.CreateUnbounded<TranslationReceiveResult>();
         private int _disposed;
+        private int _activeReceiveCount;
 
         public int ConnectCount { get; private set; }
 
@@ -515,6 +661,10 @@ public sealed class TranslationSessionTests
         public int CloseCount { get; private set; }
 
         public int AudioSendCount { get; private set; }
+
+        public int ActiveReceiveCount => Volatile.Read(ref _activeReceiveCount);
+
+        public bool DisposedWhileReceiveActive { get; private set; }
 
         public int DisposeCount => Volatile.Read(ref _disposed);
 
@@ -574,10 +724,18 @@ public sealed class TranslationSessionTests
             return ValueTask.FromResult<RuntimeError?>(null);
         }
 
-        public ValueTask<TranslationReceiveResult> ReceiveEventAsync(
+        public async ValueTask<TranslationReceiveResult> ReceiveEventAsync(
             CancellationToken cancellationToken)
         {
-            return _receives.Reader.ReadAsync(cancellationToken);
+            Interlocked.Increment(ref _activeReceiveCount);
+            try
+            {
+                return await _receives.Reader.ReadAsync(cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReceiveCount);
+            }
         }
 
         public void Enqueue(TranslationReceiveResult result)
@@ -599,6 +757,7 @@ public sealed class TranslationSessionTests
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
             {
+                DisposedWhileReceiveActive = ActiveReceiveCount != 0;
                 _receives.Writer.TryComplete();
             }
         }
@@ -606,12 +765,16 @@ public sealed class TranslationSessionTests
 
     private sealed class TrackingArrayPool : ArrayPool<byte>
     {
+        private int _rentCount;
         private int _returnCount;
+
+        public int RentCount => Volatile.Read(ref _rentCount);
 
         public int ReturnCount => Volatile.Read(ref _returnCount);
 
         public override byte[] Rent(int minimumLength)
         {
+            Interlocked.Increment(ref _rentCount);
             return new byte[minimumLength];
         }
 
@@ -659,5 +822,12 @@ public sealed class TranslationSessionTests
                 }
             }
         }
+    }
+
+    private enum StopPath
+    {
+        Close,
+        Failure,
+        Dispose,
     }
 }

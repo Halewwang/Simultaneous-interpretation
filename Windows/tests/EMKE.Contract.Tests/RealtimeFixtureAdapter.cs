@@ -1,3 +1,5 @@
+using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using EMKE.Core;
@@ -23,29 +25,88 @@ internal static class RealtimeFixtureAdapter
             LanguageCode meeting = ParseLanguage(configuration.GetProperty("meetingLanguage"));
             JsonElement expected = fixtureCase.GetProperty("expected");
             string name = fixtureCase.GetProperty("name").GetString()!;
+            bool requestOutbound =
+                fixtureCase.TryGetProperty("sockets", out JsonElement sockets)
+                || fixtureCase.GetProperty("steps")[0]
+                    .GetProperty("direction").GetString() == "local";
+            TranslationSessionCreationPlan plan =
+                TranslationSessionCreationPolicy.CreatePlan(
+                    native,
+                    meeting,
+                    requestOutbound);
+            Assert.AreEqual(
+                expected.GetProperty("inboundSocketCount").GetInt32(),
+                plan.InboundSocketCount,
+                name);
+            Assert.AreEqual(
+                expected.GetProperty("outboundSocketCount").GetInt32(),
+                plan.OutboundSocketCount,
+                name);
 
-            if (fixtureCase.TryGetProperty("sockets", out JsonElement sockets))
+            if (fixtureCase.TryGetProperty("sockets", out sockets))
             {
-                Assert.IsTrue(
-                    TranslationSessionCreationPolicy.RequiresOutboundSession(native, meeting),
-                    name);
                 Assert.AreEqual(2, sockets.GetArrayLength(), name);
+                List<HandshakeResult> results = [];
                 foreach (JsonElement socket in sockets.EnumerateArray())
                 {
-                    await DriveSessionAsync(socket.GetProperty("steps"), name);
+                    results.Add(await DriveSessionAsync(socket.GetProperty("steps"), name));
                 }
+
+                Assert.AreEqual(
+                    expected.GetProperty("inboundChannelState").GetString(),
+                    results[0].ChannelState,
+                    name);
+                Assert.AreEqual(
+                    expected.GetProperty("outboundChannelState").GetString(),
+                    results[1].ChannelState,
+                    name);
+                Assert.AreEqual(
+                    expected.GetProperty("inboundRoute").GetString(),
+                    RouteFor(results[0].ChannelState),
+                    name);
+                Assert.AreEqual(
+                    expected.GetProperty("outboundRoute").GetString(),
+                    RouteFor(results[1].ChannelState),
+                    name);
             }
             else if (fixtureCase.GetProperty("steps")[0]
                          .GetProperty("direction").GetString() == "local")
             {
-                Assert.IsFalse(
-                    TranslationSessionCreationPolicy.RequiresOutboundSession(native, meeting),
+                Assert.IsTrue(plan.OutboundBypassed, name);
+                Assert.AreEqual(
+                    "connected",
+                    expected.GetProperty("inboundChannelState").GetString(),
                     name);
-                Assert.AreEqual(0, expected.GetProperty("outboundSocketCount").GetInt32(), name);
+                Assert.AreEqual(
+                    "translated",
+                    expected.GetProperty("inboundRoute").GetString(),
+                    name);
+                Assert.AreEqual(
+                    "bypassed",
+                    expected.GetProperty("outboundChannelState").GetString(),
+                    name);
+                Assert.AreEqual(
+                    "originalBypass",
+                    expected.GetProperty("outboundRoute").GetString(),
+                    name);
             }
             else
             {
-                await DriveSessionAsync(fixtureCase.GetProperty("steps"), name);
+                HandshakeResult result = await DriveSessionAsync(
+                    fixtureCase.GetProperty("steps"),
+                    name);
+                Assert.AreEqual(
+                    expected.GetProperty("inboundChannelState").GetString(),
+                    result.ChannelState,
+                    name);
+                Assert.AreEqual(
+                    expected.GetProperty("inboundRoute").GetString(),
+                    RouteFor(result.ChannelState),
+                    name);
+                if (expected.TryGetProperty("errorCategory", out JsonElement errorCategory))
+                {
+                    Assert.AreEqual(errorCategory.GetString(), result.ErrorCategory, name);
+                }
             }
         }
     }
@@ -73,15 +134,90 @@ internal static class RealtimeFixtureAdapter
         }
     }
 
-    private static async Task DriveSessionAsync(JsonElement steps, string name)
+    public static async Task ValidatePcmBatchingAsync(JsonElement fixture)
     {
-        FixtureTransport transport = new();
+        Assert.AreEqual("audio.pcm-batching.v1", fixture.GetProperty("fixtureId").GetString());
+        Assert.AreEqual(
+            PcmFrameBatcher.FrameBytes,
+            fixture.GetProperty("metadata")
+                .GetProperty("networkBatch")
+                .GetProperty("byteCount")
+                .GetInt32());
+        foreach (JsonElement fixtureCase in fixture.GetProperty("cases").EnumerateArray())
+        {
+            PcmFrameBatcher batcher = new();
+            List<int> emitted = [];
+            JsonElement expected = fixtureCase.GetProperty("expected");
+            foreach (JsonElement countElement in fixtureCase
+                         .GetProperty("input")
+                         .GetProperty("appendByteCounts")
+                         .EnumerateArray())
+            {
+                int count = countElement.GetInt32();
+                if (expected.TryGetProperty("errorCode", out JsonElement errorCode))
+                {
+                    PcmFrameBatcherException failure =
+                        await Assert.ThrowsExactlyAsync<PcmFrameBatcherException>(
+                            () => batcher.AppendAsync(
+                                new byte[count],
+                                CaptureAsync,
+                                CancellationToken.None).AsTask());
+                    Assert.AreEqual(errorCode.GetString(), failure.Error.Code);
+                }
+                else
+                {
+                    await batcher.AppendAsync(
+                        new byte[count],
+                        CaptureAsync,
+                        CancellationToken.None);
+                }
+            }
+
+            int[] expectedFrames = expected.TryGetProperty(
+                "emittedFrameByteCounts",
+                out JsonElement frameCounts)
+                ? frameCounts.EnumerateArray()
+                    .Select(static value => value.GetInt32())
+                    .ToArray()
+                : [];
+            CollectionAssert.AreEqual(expectedFrames, emitted);
+            if (expected.TryGetProperty("retainedByteCountBeforeFlush", out JsonElement before))
+            {
+                Assert.AreEqual(before.GetInt32(), batcher.RetainedByteCount);
+                Assert.AreEqual(expected.GetProperty("discardedByteCount").GetInt32(), batcher.Stop());
+                Assert.AreEqual(
+                    expected.GetProperty("retainedByteCountAfterFlush").GetInt32(),
+                    batcher.RetainedByteCount);
+            }
+            else
+            {
+                Assert.AreEqual(
+                    expected.GetProperty("retainedByteCount").GetInt32(),
+                    batcher.RetainedByteCount);
+            }
+
+            ValueTask CaptureAsync(ReadOnlyMemory<byte> frame, CancellationToken _)
+            {
+                emitted.Add(frame.Length);
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private static async Task<HandshakeResult> DriveSessionAsync(
+        JsonElement steps,
+        string name)
+    {
         JsonElement updatePayload = steps.EnumerateArray()
             .FirstOrDefault(static step =>
                 step.GetProperty("eventType").GetString() == "session.update");
         LanguageCode target = updatePayload.ValueKind == JsonValueKind.Undefined
             ? LanguageCode.Zh
             : ParseLanguage(updatePayload.GetProperty("payload").GetProperty("target_language"));
+        WebSocketMessageType updateFrameType = updatePayload.ValueKind == JsonValueKind.Undefined
+            ? WebSocketMessageType.Text
+            : ParseFrameType(updatePayload.GetProperty("frameType"));
+        FixtureTransport transport = new(updateFrameType);
         TranslationSession session = new(
             transport,
             Endpoint,
@@ -98,7 +234,7 @@ internal static class RealtimeFixtureAdapter
             string expectedState = step.GetProperty("expectedState").GetString()!;
             if (direction == "serverToClient")
             {
-                transport.Enqueue(Event(eventType));
+                transport.EnqueueEvent(eventType);
                 if (expectedState == "protocolFailure")
                 {
                     TranslationSessionException failure =
@@ -116,12 +252,9 @@ internal static class RealtimeFixtureAdapter
             else
             {
                 await WaitUntilAsync(() => transport.UpdateCount == 1, name);
-                if (step.GetProperty("frameType").GetString() == "binary")
+                transport.ReleaseUpdate();
+                if (updateFrameType == WebSocketMessageType.Binary)
                 {
-                    transport.UpdateError = Error(
-                        ErrorCategory.Protocol,
-                        "binaryTranslationEvent");
-                    transport.ReleaseUpdate();
                     TranslationSessionException failure =
                         await Assert.ThrowsExactlyAsync<TranslationSessionException>(
                             () => connect);
@@ -129,10 +262,10 @@ internal static class RealtimeFixtureAdapter
                 }
                 else
                 {
-                    transport.ReleaseUpdate();
                     await WaitUntilAsync(
                         () => session.State == ParseState(expectedState),
                         name);
+                    Assert.AreEqual(WebSocketMessageType.Text, transport.LastClientFrameType, name);
                 }
             }
         }
@@ -143,7 +276,13 @@ internal static class RealtimeFixtureAdapter
             Assert.AreEqual(TranslationSessionState.Connected, session.State, name);
         }
 
-        session.Dispose();
+        HandshakeResult result = new(
+            session.State == TranslationSessionState.Connected ? "connected" : "failed",
+            session.LastError is null
+                ? null
+                : StableErrorCategory(session.LastError.Category));
+        await session.DisposeAsync();
+        return result;
     }
 
     private static async Task ValidateOneCloseAsync(
@@ -157,26 +296,40 @@ internal static class RealtimeFixtureAdapter
             name);
         long generation = input.GetProperty("generation").GetInt64();
         FixtureClock clock = new();
-        int releases = 0;
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            _ => Interlocked.Increment(ref releases));
+        SessionCloseCoordinator coordinator = new(clock);
         coordinator.Activate(generation);
         TaskCompletionSource remoteClosed =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource blockedSend =
+        TaskCompletionSource sendCancellationObserved =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         bool blocked = input.TryGetProperty("closeSend", out JsonElement closeSend)
             && closeSend.GetString() == "blocked";
+        int sendInvocationCount = 0;
+        int deadlineAtSend = -1;
         Task<SessionCloseOutcome> close = coordinator.CloseAsync(
             generation,
             blocked
-                ? _ => new ValueTask<RuntimeError?>(blockedSend.Task.ContinueWith(
-                    static _ => (RuntimeError?)null,
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default))
-                : static _ => ValueTask.FromResult<RuntimeError?>(null),
+                ? async cancellationToken =>
+                {
+                    Interlocked.Increment(ref sendInvocationCount);
+                    deadlineAtSend = clock.DelayStartedAtMs;
+                    try
+                    {
+                        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                        return null;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        sendCancellationObserved.TrySetResult();
+                        throw;
+                    }
+                }
+        : _ =>
+        {
+            Interlocked.Increment(ref sendInvocationCount);
+            deadlineAtSend = clock.DelayStartedAtMs;
+            return ValueTask.FromResult<RuntimeError?>(null);
+        },
             remoteClosed.Task);
 
         Assert.IsTrue(
@@ -188,15 +341,15 @@ internal static class RealtimeFixtureAdapter
                 : 0,
             clock.DelayStartedAtMs,
             name);
+        Assert.AreEqual(0, deadlineAtSend, name);
         if (input.TryGetProperty("closeCallerCount", out _))
         {
-            Assert.AreSame(
-                close,
-                coordinator.CloseAsync(
-                    generation,
-                    static _ => throw new InvalidOperationException(),
-                    Task.CompletedTask),
-                name);
+            Task<SessionCloseOutcome> second = coordinator.CloseAsync(
+                generation,
+                static _ => throw new InvalidOperationException(),
+                Task.CompletedTask);
+            Assert.AreSame(close, second, name);
+            Assert.IsTrue(expected.GetProperty("sameCompletion").GetBoolean(), name);
         }
 
         if (input.TryGetProperty("sessionClosedAtMs", out JsonElement closedAt))
@@ -206,10 +359,19 @@ internal static class RealtimeFixtureAdapter
         }
         else
         {
-            clock.AdvanceTo(expected.GetProperty("completionAtMs").GetInt32());
+            clock.AdvanceTo(input.GetProperty("deadlineMs").GetInt32());
         }
 
         SessionCloseOutcome outcome = await close;
+        if (blocked)
+        {
+            await sendCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (expected.TryGetProperty("localCompletion", out JsonElement localCompletion))
+            {
+                Assert.IsTrue(localCompletion.GetBoolean(), name);
+            }
+        }
+
         Assert.AreEqual(
             expected.GetProperty("completion").GetString() == "closed"
                 ? SessionCloseCompletion.Closed
@@ -220,7 +382,12 @@ internal static class RealtimeFixtureAdapter
             expected.GetProperty("completionAtMs").GetInt32(),
             clock.NowMs,
             name);
-        Assert.AreEqual(1, releases, name);
+        Assert.AreEqual(1, sendInvocationCount, name);
+        if (expected.TryGetProperty("completionCount", out JsonElement completionCount))
+        {
+            int actualCompletionCount = outcome.Generation == generation ? 1 : 0;
+            Assert.AreEqual(completionCount.GetInt32(), actualCompletionCount, name);
+        }
         if (input.TryGetProperty("queuedTailAudio", out JsonElement queuedTailAudio)
             && queuedTailAudio.GetBoolean())
         {
@@ -237,14 +404,16 @@ internal static class RealtimeFixtureAdapter
         JsonElement expected,
         string name)
     {
+        const int InboundCompletionMs = 300;
+        const int OutboundCompletionMs = 400;
         Assert.AreEqual(
             SessionCloseCoordinator.DeadlineMilliseconds,
             input.GetProperty("deadlineMs").GetInt32(),
             name);
         long generation = input.GetProperty("generation").GetInt64();
         FixtureClock clock = new();
-        SessionCloseCoordinator inbound = new(clock, static _ => { });
-        SessionCloseCoordinator outbound = new(clock, static _ => { });
+        SessionCloseCoordinator inbound = new(clock);
+        SessionCloseCoordinator outbound = new(clock);
         inbound.Activate(generation);
         outbound.Activate(generation);
         TaskCompletionSource inboundClosed =
@@ -261,10 +430,14 @@ internal static class RealtimeFixtureAdapter
             outboundClosed.Task);
 
         Assert.AreEqual(2, clock.PendingDelayCount, name);
-        JsonElement completions = expected.GetProperty("routeCompletions");
-        clock.AdvanceTo(completions.GetProperty("inbound").GetInt32());
+        Assert.IsFalse(inboundClose.IsCompleted, name);
+        Assert.IsFalse(outboundClose.IsCompleted, name);
+        Assert.IsTrue(expected.GetProperty("concurrent").GetBoolean(), name);
+        clock.AdvanceTo(InboundCompletionMs);
+        int actualInboundCompletionMs = clock.NowMs;
         inboundClosed.SetResult();
-        clock.AdvanceTo(completions.GetProperty("outbound").GetInt32());
+        clock.AdvanceTo(OutboundCompletionMs);
+        int actualOutboundCompletionMs = clock.NowMs;
         outboundClosed.SetResult();
 
         SessionCloseOutcome[] outcomes =
@@ -272,6 +445,27 @@ internal static class RealtimeFixtureAdapter
         Assert.IsTrue(
             outcomes.All(static outcome =>
                 outcome.Completion == SessionCloseCompletion.Closed),
+            name);
+        string actualCompletion = outcomes.All(static outcome =>
+            outcome.Completion == SessionCloseCompletion.Closed)
+            ? "closed"
+            : "closeTimeout";
+        Assert.AreEqual(
+            expected.GetProperty("completion").GetString(),
+            actualCompletion,
+            name);
+        Assert.AreEqual(
+            expected.GetProperty("completionAtMs").GetInt32(),
+            clock.NowMs,
+            name);
+        JsonElement completions = expected.GetProperty("routeCompletions");
+        Assert.AreEqual(
+            completions.GetProperty("inbound").GetInt32(),
+            actualInboundCompletionMs,
+            name);
+        Assert.AreEqual(
+            completions.GetProperty("outbound").GetInt32(),
+            actualOutboundCompletionMs,
             name);
     }
 
@@ -287,10 +481,7 @@ internal static class RealtimeFixtureAdapter
         long oldGeneration = input.GetProperty("closingGeneration").GetInt64();
         long activeGeneration = input.GetProperty("activeGeneration").GetInt64();
         FixtureClock clock = new();
-        List<long> releasedGenerations = [];
-        SessionCloseCoordinator coordinator = new(
-            clock,
-            generation => releasedGenerations.Add(generation));
+        SessionCloseCoordinator coordinator = new(clock);
         coordinator.Activate(oldGeneration);
         TaskCompletionSource oldClosed =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -303,15 +494,21 @@ internal static class RealtimeFixtureAdapter
         oldClosed.SetResult();
 
         SessionCloseOutcome outcome = await oldClose;
-        Assert.AreEqual(oldGeneration, outcome.Generation, name);
+        Assert.AreEqual(
+            expected.GetProperty("completionGeneration").GetInt64(),
+            outcome.Generation,
+            name);
+        Assert.AreEqual(
+            expected.GetProperty("completion").GetString(),
+            outcome.Completion == SessionCloseCompletion.Closed ? "closed" : "closeTimeout",
+            name);
         Assert.AreEqual(activeGeneration, coordinator.ActiveGeneration, name);
-        CollectionAssert.AreEqual(new[] { oldGeneration }, releasedGenerations, name);
         Assert.IsFalse(expected.GetProperty("clearActiveGeneration").GetBoolean(), name);
     }
 
     private static async Task ValidateTailDrainAsync(string name)
     {
-        FixtureTransport transport = new();
+        FixtureTransport transport = new(WebSocketMessageType.Text);
         TranslationSession session = new(
             transport,
             Endpoint,
@@ -323,17 +520,17 @@ internal static class RealtimeFixtureAdapter
             eventCapacity: 1,
             System.Buffers.ArrayPool<byte>.Shared);
         Task connect = session.ConnectAsync(CancellationToken.None);
-        transport.Enqueue(Event("session.created"));
+        transport.EnqueueEvent("session.created");
         await WaitUntilAsync(() => transport.UpdateCount == 1, name);
         transport.ReleaseUpdate();
-        transport.Enqueue(Event("session.updated"));
+        transport.EnqueueEvent("session.updated");
         await connect;
 
-        transport.Enqueue(Event("translation_audio.done"));
-        transport.Enqueue(Event(
+        transport.EnqueueEvent("translation_audio.done");
+        transport.EnqueueEvent(
             "translation_audio.delta",
-            new byte[] { 1, 2 }));
-        transport.Enqueue(Event("session.closed"));
+            new byte[] { 1, 2 });
+        transport.EnqueueEvent("session.closed");
         Task close = session.CloseAsync(CancellationToken.None);
 
         await using IAsyncEnumerator<TranslationSessionEvent> events =
@@ -349,28 +546,35 @@ internal static class RealtimeFixtureAdapter
         Assert.AreEqual(TranslationSessionState.Closed, session.State, name);
     }
 
-    private static TranslationReceiveResult Event(
-        string type,
-        ReadOnlyMemory<byte> pcm16 = default)
+    private static WebSocketMessageType ParseFrameType(JsonElement value)
     {
-        return TranslationReceiveResult.Received(
-            new TranslationProtocolEvent(
-                type,
-                null,
-                null,
-                pcm16,
-                null,
-                null,
-                null));
+        return value.GetString() switch
+        {
+            "text" => WebSocketMessageType.Text,
+            "binary" => WebSocketMessageType.Binary,
+            _ => throw new InvalidDataException("Unknown realtime fixture frame type."),
+        };
     }
 
-    private static RuntimeError Error(ErrorCategory category, string code)
+    private static string RouteFor(string channelState)
     {
-        return new RuntimeError(
-            category,
-            code,
-            new Dictionary<string, string>(),
-            RecoveryAction.Retry);
+        return channelState switch
+        {
+            "connected" => "translated",
+            "failed" => "originalFailOpen",
+            "bypassed" => "originalBypass",
+            _ => throw new InvalidDataException("Unknown fixture channel state."),
+        };
+    }
+
+    private static string StableErrorCategory(ErrorCategory category)
+    {
+        return category switch
+        {
+            ErrorCategory.Protocol => "protocol",
+            ErrorCategory.Network => "network",
+            _ => throw new InvalidDataException("Unexpected handshake error category."),
+        };
     }
 
     private static LanguageCode ParseLanguage(JsonElement value)
@@ -406,20 +610,34 @@ internal static class RealtimeFixtureAdapter
         Assert.IsTrue(predicate(), message);
     }
 
+    private sealed record HandshakeResult(
+        string ChannelState,
+        string? ErrorCategory);
+
+#pragma warning disable CA2213 // TranslationSocket takes ownership of the fixture adapter.
+
     private sealed class FixtureTransport : ITranslationTransport
     {
-        private readonly Channel<TranslationReceiveResult> _receives =
-            Channel.CreateUnbounded<TranslationReceiveResult>();
+        private readonly WebSocketMessageType _sessionUpdateFrameType;
+        private readonly FixtureClientWebSocket _adapter = new();
+        private readonly TranslationSocket _socket;
         private readonly TaskCompletionSource _releaseUpdate =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public FixtureTransport(WebSocketMessageType sessionUpdateFrameType)
+        {
+            _sessionUpdateFrameType = sessionUpdateFrameType;
+            _socket = new TranslationSocket(_adapter, receiveLimit: 1024);
+        }
+
         public int UpdateCount { get; private set; }
 
-        public RuntimeError? UpdateError { get; set; }
+        public WebSocketMessageType? LastClientFrameType =>
+            _adapter.Sends.LastOrDefault().MessageType;
 
         public Task<RuntimeError?> ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
-            return Task.FromResult<RuntimeError?>(null);
+            return _socket.ConnectAsync(endpoint, cancellationToken);
         }
 
         public async ValueTask<RuntimeError?> SendSessionUpdateAsync(
@@ -428,31 +646,46 @@ internal static class RealtimeFixtureAdapter
         {
             UpdateCount++;
             await _releaseUpdate.Task.WaitAsync(cancellationToken);
-            return UpdateError;
+            RuntimeError? frameError =
+                TranslationClientFramePolicy.Validate(_sessionUpdateFrameType);
+            return frameError ?? await _socket.SendSessionUpdateAsync(
+                targetLanguage,
+                cancellationToken);
         }
 
         public ValueTask<RuntimeError?> SendAudioAppendAsync(
             ReadOnlyMemory<byte> pcm16,
             CancellationToken cancellationToken)
         {
-            return ValueTask.FromResult<RuntimeError?>(null);
+            return ((ITranslationTransport)_socket).SendAudioAppendAsync(
+                pcm16,
+                cancellationToken);
         }
 
         public ValueTask<RuntimeError?> SendSessionCloseAsync(
             CancellationToken cancellationToken)
         {
-            return ValueTask.FromResult<RuntimeError?>(null);
+            return _socket.SendSessionCloseAsync(cancellationToken);
         }
 
         public ValueTask<TranslationReceiveResult> ReceiveEventAsync(
             CancellationToken cancellationToken)
         {
-            return _receives.Reader.ReadAsync(cancellationToken);
+            return _socket.ReceiveEventAsync(cancellationToken);
         }
 
-        public void Enqueue(TranslationReceiveResult result)
+        public void EnqueueEvent(
+            string type,
+            ReadOnlyMemory<byte> pcm16 = default)
         {
-            Assert.IsTrue(_receives.Writer.TryWrite(result));
+            string json = type == "translation_audio.delta"
+                ? JsonSerializer.Serialize(new
+                {
+                    type,
+                    delta = Convert.ToBase64String(pcm16.Span),
+                })
+                : JsonSerializer.Serialize(new { type });
+            _adapter.EnqueueText(json);
         }
 
         public void ReleaseUpdate()
@@ -462,7 +695,53 @@ internal static class RealtimeFixtureAdapter
 
         public void Dispose()
         {
-            _receives.Writer.TryComplete();
+            _socket.Dispose();
+        }
+    }
+
+#pragma warning restore CA2213
+
+    private sealed class FixtureClientWebSocket : IClientWebSocket
+    {
+        private readonly Channel<byte[]> _frames = Channel.CreateUnbounded<byte[]>();
+
+        public List<(WebSocketMessageType MessageType, bool EndOfMessage)> Sends { get; } = [];
+
+        public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public ValueTask SendAsync(
+            ReadOnlyMemory<byte> payload,
+            WebSocketMessageType messageType,
+            bool endOfMessage,
+            CancellationToken cancellationToken)
+        {
+            Sends.Add((messageType, endOfMessage));
+            return ValueTask.CompletedTask;
+        }
+
+        public async ValueTask<ValueWebSocketReceiveResult> ReceiveAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            byte[] frame = await _frames.Reader.ReadAsync(cancellationToken);
+            frame.CopyTo(buffer);
+            return new ValueWebSocketReceiveResult(
+                frame.Length,
+                WebSocketMessageType.Text,
+                endOfMessage: true);
+        }
+
+        public void EnqueueText(string json)
+        {
+            Assert.IsTrue(_frames.Writer.TryWrite(Encoding.UTF8.GetBytes(json)));
+        }
+
+        public void Dispose()
+        {
+            _frames.Writer.TryComplete();
         }
     }
 

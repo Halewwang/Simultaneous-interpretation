@@ -245,6 +245,16 @@ public sealed class SharedFixtureTests
 
     [TestMethod]
     [TestCategory("FixtureAdapter")]
+    [TestCategory("Audio")]
+    public async Task AudioPcmBatchingFixtureUsesOwnedBatcherAdapter()
+    {
+        using JsonDocument fixture = LoadFixture("Audio/pcm-batching.json");
+        await RealtimeFixtureAdapter.ValidatePcmBatchingAsync(fixture.RootElement)
+            .ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
     [TestCategory("Routing")]
     public void RoutingFixturesAwaitOwnedAdapter()
     {
@@ -256,11 +266,12 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Audio")]
-    public void AudioFixturesAwaitOwnedNativeAdapter()
+    public void AudioPcmConversionFixtureAwaitsOwnedNativeAdapter()
     {
-        AssertFixtureCategoryIsReadable("audio");
+        using JsonDocument fixture = LoadFixture("Audio/pcm-conversion.json");
+        Assert.AreEqual("audio.pcm-conversion.v1", fixture.RootElement.GetProperty("fixtureId").GetString());
         Assert.Inconclusive(
-            "Awaiting native-audio fixture adapter validation (Runtime Task 7).");
+            "Awaiting native-audio PCM conversion fixture adapter validation (Runtime Task 7).");
     }
 
     [TestMethod]
