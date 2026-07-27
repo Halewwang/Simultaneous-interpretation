@@ -57,15 +57,17 @@ test('Windows Internal metadata keeps the version and compatibility contract', a
     readJson(compatibilityFile),
   ]);
 
-  assert.equal(version.productVersion, '0.1.0');
-  assert.equal(version.packageVersion, '0.1.0.0');
-  assert.equal(version.expectedTag, 'windows-v0.1.0');
-  assert.equal(version.contractVersion, 1);
-  assert.equal(version.settingsSchemaVersion, 1);
-  assert.equal(version.driverAbiVersion, 1);
-  assert.equal(version.minimumWindowsBuild, 26200);
-  assert.equal(version.architecture, 'x64');
-  assert.equal(version.channel, 'internal');
+  assert.deepEqual(version, {
+    productVersion: '0.1.0',
+    packageVersion: '0.1.0.0',
+    expectedTag: 'windows-v0.1.0',
+    contractVersion: 1,
+    settingsSchemaVersion: 1,
+    driverAbiVersion: 1,
+    minimumWindowsBuild: 26200,
+    architecture: 'x64',
+    channel: 'internal',
+  });
 
   assert.equal(
     channels.channels.internal.packageIdentity,
@@ -80,20 +82,32 @@ test('Windows Internal metadata keeps the version and compatibility contract', a
     channels.channels.stable.packageIdentity,
     'EMKE.Translation',
   );
-
-  assert.equal(compatibility.appVersion, '0.1.0');
-  assert.equal(compatibility.contractVersion, 1);
-  assert.equal(compatibility.settingsSchemaVersion, 1);
-  assert.equal(compatibility.driverAbiVersion, 1);
-  assert.equal(compatibility.minimumDriverVersion, '0.1.0');
-  assert.equal(compatibility.recommendedDriverVersion, '0.1.0');
-  assert.equal(compatibility.driverPackageAvailable, false);
-  assert.equal(compatibility.channel, 'internal');
   assert.equal(
-    Object.hasOwn(compatibility, 'driverPackageSha256'),
-    false,
+    channels.channels.internal.appId,
+    'EMKE.Translation.Internal',
   );
-  assert.equal(Object.hasOwn(compatibility, 'driverPackageUrl'), false);
+  assert.equal(
+    channels.channels.internal.credentialTarget,
+    'EMKE.Translation.Internal.ApiKey',
+  );
+  assert.equal(channels.channels.internal.mutexSuffix, 'Internal');
+  assert.equal(channels.channels.internal.pipeSuffix, 'Internal');
+  assert.equal(
+    channels.channels.internal.appInstallerPath,
+    'windows/internal/EMKE.Translation.Internal.appinstaller',
+  );
+  assert.equal(channels.channels.internal.driverFeedPath, null);
+
+  assert.deepEqual(compatibility, {
+    appVersion: '0.1.0',
+    contractVersion: 1,
+    settingsSchemaVersion: 1,
+    driverAbiVersion: 1,
+    minimumDriverVersion: '0.1.0',
+    recommendedDriverVersion: '0.1.0',
+    driverPackageAvailable: false,
+    channel: 'internal',
+  });
 });
 
 test(
