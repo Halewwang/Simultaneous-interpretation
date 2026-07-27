@@ -50,6 +50,340 @@ function runResolver(versionPath, requireTag) {
   });
 }
 
+async function runMutatedResolver(mutate) {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), 'emke-version-contract-'),
+  );
+
+  try {
+    const fixtureWindowsRoot = path.join(fixtureRoot, 'Windows');
+    const fixturePackagingRoot = path.join(fixtureWindowsRoot, 'packaging');
+    await mkdir(fixturePackagingRoot, { recursive: true });
+
+    const [version, channels, compatibility] = await Promise.all([
+      readJson(versionFile),
+      readJson(channelsFile),
+      readJson(compatibilityFile),
+    ]);
+    mutate({ version, channels, compatibility });
+
+    const compatibilityChannel =
+      typeof version.channel === 'string'
+      && /^[A-Za-z0-9!-]+$/.test(version.channel)
+        ? version.channel
+        : 'internal';
+    const fixtureVersionFile = path.join(
+      fixtureWindowsRoot,
+      'version.json',
+    );
+    await Promise.all([
+      writeFile(
+        fixtureVersionFile,
+        `${JSON.stringify(version, null, 2)}\n`,
+      ),
+      writeFile(
+        path.join(fixturePackagingRoot, 'channels.json'),
+        `${JSON.stringify(channels, null, 2)}\n`,
+      ),
+      writeFile(
+        path.join(
+          fixturePackagingRoot,
+          `compatibility.${compatibilityChannel}.json`,
+        ),
+        `${JSON.stringify(compatibility, null, 2)}\n`,
+      ),
+    ]);
+
+    return runResolver(fixtureVersionFile);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+const invalidSchemaMutations = [
+  {
+    name: 'missing productVersion',
+    mutate: ({ version }) => delete version.productVersion,
+  },
+  {
+    name: 'non-string productVersion',
+    mutate: ({ version, compatibility }) => {
+      version.productVersion = 1;
+      version.expectedTag = 'windows-v1';
+      compatibility.appVersion = 1;
+    },
+  },
+  {
+    name: 'two-segment productVersion',
+    mutate: ({ version, compatibility }) => {
+      version.productVersion = '0.1';
+      version.expectedTag = 'windows-v0.1';
+      compatibility.appVersion = '0.1';
+    },
+  },
+  {
+    name: 'missing packageVersion',
+    mutate: ({ version }) => delete version.packageVersion,
+  },
+  {
+    name: 'three-segment packageVersion',
+    mutate: ({ version }) => {
+      version.packageVersion = '0.1.0';
+    },
+  },
+  {
+    name: 'packageVersion component above 65535',
+    mutate: ({ version }) => {
+      version.packageVersion = '0.1.0.65536';
+    },
+  },
+  {
+    name: 'packageVersion not aligned with productVersion',
+    mutate: ({ version }) => {
+      version.packageVersion = '0.2.0.0';
+    },
+  },
+  {
+    name: 'missing expectedTag',
+    mutate: ({ version }) => delete version.expectedTag,
+  },
+  {
+    name: 'expectedTag not derived from productVersion',
+    mutate: ({ version }) => {
+      version.expectedTag = 'windows-v9.9.9';
+    },
+  },
+  {
+    name: 'string contractVersion',
+    mutate: ({ version, compatibility }) => {
+      version.contractVersion = '1';
+      compatibility.contractVersion = '1';
+    },
+  },
+  {
+    name: 'null settingsSchemaVersion',
+    mutate: ({ version, compatibility }) => {
+      version.settingsSchemaVersion = null;
+      compatibility.settingsSchemaVersion = null;
+    },
+  },
+  {
+    name: 'Boolean driverAbiVersion',
+    mutate: ({ version, compatibility }) => {
+      version.driverAbiVersion = true;
+      compatibility.driverAbiVersion = true;
+    },
+  },
+  {
+    name: 'missing minimumWindowsBuild',
+    mutate: ({ version }) => delete version.minimumWindowsBuild,
+  },
+  {
+    name: 'string minimumWindowsBuild',
+    mutate: ({ version }) => {
+      version.minimumWindowsBuild = '26200';
+    },
+  },
+  {
+    name: 'fractional minimumWindowsBuild',
+    mutate: ({ version }) => {
+      version.minimumWindowsBuild = 26200.5;
+    },
+  },
+  {
+    name: 'minimumWindowsBuild below 26200',
+    mutate: ({ version }) => {
+      version.minimumWindowsBuild = 26199;
+    },
+  },
+  {
+    name: 'blank architecture',
+    mutate: ({ version }) => {
+      version.architecture = ' ';
+    },
+  },
+  {
+    name: 'unsupported architecture',
+    mutate: ({ version }) => {
+      version.architecture = 'arm64';
+    },
+  },
+  {
+    name: 'case-mismatched channel',
+    mutate: ({ version, compatibility }) => {
+      version.channel = 'Internal';
+      compatibility.channel = 'Internal';
+    },
+  },
+  {
+    name: 'case-mismatched channels key',
+    mutate: ({ channels }) => {
+      channels.channels.Internal = {
+        ...channels.channels.internal,
+      };
+      delete channels.channels.internal;
+    },
+  },
+  {
+    name: 'unsafe channel identifier',
+    mutate: ({ version, channels, compatibility }) => {
+      version.channel = 'Internal!';
+      compatibility.channel = 'Internal!';
+      channels.channels['Internal!'] = {
+        ...channels.channels.internal,
+      };
+    },
+  },
+  {
+    name: 'blank packageIdentity',
+    mutate: ({ channels }) => {
+      channels.channels.internal.packageIdentity = ' ';
+    },
+  },
+  {
+    name: 'missing publisher',
+    mutate: ({ channels }) => {
+      delete channels.channels.internal.publisher;
+    },
+  },
+  {
+    name: 'missing credentialTarget',
+    mutate: ({ channels }) => {
+      delete channels.channels.internal.credentialTarget;
+    },
+  },
+  {
+    name: 'non-string appInstallerPath',
+    mutate: ({ channels }) => {
+      channels.channels.internal.appInstallerPath = 42;
+    },
+  },
+  {
+    name: 'missing compatibility appVersion',
+    mutate: ({ compatibility }) => delete compatibility.appVersion,
+  },
+  {
+    name: 'missing compatibility channel',
+    mutate: ({ compatibility }) => delete compatibility.channel,
+  },
+  {
+    name: 'mismatched compatibility contractVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.contractVersion = 999;
+    },
+  },
+  {
+    name: 'mismatched compatibility settingsSchemaVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.settingsSchemaVersion = 999;
+    },
+  },
+  {
+    name: 'mismatched compatibility driverAbiVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.driverAbiVersion = 999;
+    },
+  },
+  {
+    name: 'string compatibility contractVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.contractVersion = '1';
+    },
+  },
+  {
+    name: 'null compatibility settingsSchemaVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.settingsSchemaVersion = null;
+    },
+  },
+  {
+    name: 'Boolean compatibility driverAbiVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.driverAbiVersion = true;
+    },
+  },
+  {
+    name: 'missing minimumDriverVersion',
+    mutate: ({ compatibility }) => {
+      delete compatibility.minimumDriverVersion;
+    },
+  },
+  {
+    name: 'invalid minimumDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.minimumDriverVersion = '0.1';
+    },
+  },
+  {
+    name: 'blank recommendedDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.recommendedDriverVersion = ' ';
+    },
+  },
+];
+
+const invalidDriverPackageMutations = [
+  {
+    name: 'false with driverPackageUrl',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageUrl =
+        'https://invalid.example/driver.zip';
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'false with driverPackageSha256',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageSha256 = 'a'.repeat(64);
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'false with null driverPackageUrl',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageUrl = null;
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'false with empty driverPackageSha256',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageSha256 = '';
+    },
+    expectsLocationError: true,
+  },
+  {
+    name: 'driverPackageAvailable true',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageAvailable = true;
+    },
+  },
+  {
+    name: 'missing driverPackageAvailable',
+    mutate: ({ compatibility }) => {
+      delete compatibility.driverPackageAvailable;
+    },
+  },
+  {
+    name: 'null driverPackageAvailable',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageAvailable = null;
+    },
+  },
+  {
+    name: 'string driverPackageAvailable',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageAvailable = 'false';
+    },
+  },
+  {
+    name: 'numeric driverPackageAvailable',
+    mutate: ({ compatibility }) => {
+      compatibility.driverPackageAvailable = 0;
+    },
+  },
+];
+
 test('Windows Internal metadata keeps the version and compatibility contract', async () => {
   const [version, channels, compatibility] = await Promise.all([
     readJson(versionFile),
@@ -147,67 +481,57 @@ test(
   },
 );
 
-for (const forbiddenProperty of [
-  'driverPackageUrl',
-  'driverPackageSha256',
-]) {
-  test(
-    `resolver rejects ${forbiddenProperty} when the driver package is unavailable`,
-    { skip: !pwshAvailable },
-    async () => {
-      const fixtureRoot = await mkdtemp(
-        path.join(tmpdir(), 'emke-version-contract-'),
-      );
+test(
+  'resolver rejects malformed or inconsistent metadata',
+  { skip: !pwshAvailable },
+  async () => {
+    const unexpectedSuccesses = [];
 
-      try {
-        const fixtureWindowsRoot = path.join(fixtureRoot, 'Windows');
-        const fixturePackagingRoot = path.join(
-          fixtureWindowsRoot,
-          'packaging',
-        );
-        await mkdir(fixturePackagingRoot, { recursive: true });
-
-        const [version, channels, compatibility] = await Promise.all([
-          readJson(versionFile),
-          readJson(channelsFile),
-          readJson(compatibilityFile),
-        ]);
-        compatibility[forbiddenProperty] =
-          forbiddenProperty === 'driverPackageUrl'
-            ? 'https://invalid.example/driver.zip'
-            : 'a'.repeat(64);
-
-        const fixtureVersionFile = path.join(
-          fixtureWindowsRoot,
-          'version.json',
-        );
-        await Promise.all([
-          writeFile(
-            fixtureVersionFile,
-            `${JSON.stringify(version, null, 2)}\n`,
-          ),
-          writeFile(
-            path.join(fixturePackagingRoot, 'channels.json'),
-            `${JSON.stringify(channels, null, 2)}\n`,
-          ),
-          writeFile(
-            path.join(
-              fixturePackagingRoot,
-              'compatibility.internal.json',
-            ),
-            `${JSON.stringify(compatibility, null, 2)}\n`,
-          ),
-        ]);
-
-        const result = runResolver(fixtureVersionFile);
-        assert.notEqual(result.status, 0);
-        const errorOutput = `${result.stdout}\n${result.stderr}`;
-        assert.match(errorOutput, /driverPackageAvailable=false/);
-        assert.match(errorOutput, /driverPackageUrl/);
-        assert.match(errorOutput, /driverPackageSha256/);
-      } finally {
-        await rm(fixtureRoot, { recursive: true, force: true });
+    for (const { name, mutate } of invalidSchemaMutations) {
+      const result = await runMutatedResolver(mutate);
+      if (result.status === 0) {
+        unexpectedSuccesses.push(name);
       }
-    },
-  );
-}
+    }
+
+    assert.deepEqual(unexpectedSuccesses, []);
+  },
+);
+
+test(
+  'resolver rejects unsupported driver package metadata',
+  { skip: !pwshAvailable },
+  async () => {
+    const unexpectedSuccesses = [];
+    const incompleteLocationErrors = [];
+
+    for (
+      const {
+        name,
+        mutate,
+        expectsLocationError,
+      } of invalidDriverPackageMutations
+    ) {
+      const result = await runMutatedResolver(mutate);
+      if (result.status === 0) {
+        unexpectedSuccesses.push(name);
+      }
+
+      if (expectsLocationError) {
+        const errorOutput = `${result.stdout}\n${result.stderr}`;
+        for (const expectedText of [
+          /driverPackageAvailable=false/,
+          /driverPackageUrl/,
+          /driverPackageSha256/,
+        ]) {
+          if (!expectedText.test(errorOutput)) {
+            incompleteLocationErrors.push(name);
+          }
+        }
+      }
+    }
+
+    assert.deepEqual(unexpectedSuccesses, []);
+    assert.deepEqual(incompleteLocationErrors, []);
+  },
+);
