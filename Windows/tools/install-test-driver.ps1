@@ -1573,13 +1573,22 @@ function Get-RootDevnodeFailureMetadata {
                 $current.Data.Contains("RollbackCompleted")
             ) {
                 [bool]$current.Data["RollbackCompleted"]
-            } else {
+            } elseif (
+                $null -ne
+                $current.PSObject.Properties["RollbackCompleted"]
+            ) {
                 [bool]$current.RollbackCompleted
+            } else {
+                $false
             }
             $instanceId = if ($current.Data.Contains("InstanceId")) {
                 [string]$current.Data["InstanceId"]
-            } else {
+            } elseif (
+                $null -ne $current.PSObject.Properties["InstanceId"]
+            ) {
                 [string]$current.InstanceId
+            } else {
+                $null
             }
             return [pscustomobject]@{
                 Failure = $current
@@ -2014,8 +2023,13 @@ function Invoke-CreateAndBindRootDevnode {
         }
     } catch {
         $originalFailure = $_
-        $internalInstanceId =
+        $failureMetadata = Get-RootDevnodeFailureMetadata `
+            -Exception $originalFailure.Exception
+        $internalInstanceId = if ($null -ne $failureMetadata) {
+            [string]$failureMetadata.InstanceId
+        } else {
             [string]$originalFailure.Exception.Data["InstanceId"]
+        }
         $reportedInstanceId = if (
             -not [string]::IsNullOrWhiteSpace($internalInstanceId)
         ) {
@@ -2023,7 +2037,8 @@ function Invoke-CreateAndBindRootDevnode {
         } else {
             $createdInstanceId
         }
-        if ($originalFailure.Exception.Data["RollbackCompleted"] -eq $true) {
+        if ($null -ne $failureMetadata -and
+            $failureMetadata.RollbackCompleted -eq $true) {
             throw (
                 "Root devnode creation failed for '$reportedInstanceId'; " +
                 "exact same-handle rollback completed; state recovered. " +
@@ -2031,7 +2046,8 @@ function Invoke-CreateAndBindRootDevnode {
                 $originalFailure.Exception.Message
             )
         }
-        if ($originalFailure.Exception.Data["StateUncertain"] -eq $true) {
+        if ($null -ne $failureMetadata -and
+            $failureMetadata.StateUncertain -eq $true) {
             $inventorySummary = "read-only inventory failed"
             try {
                 $inventory = @(Get-TargetDevnodes)
@@ -2045,13 +2061,21 @@ function Invoke-CreateAndBindRootDevnode {
                     $_.Exception.Message
                 )
             }
-            throw (
+            $uncertainFailure = [InvalidOperationException]::new(
                 "Root devnode creation or bind failed for " +
                 "'$reportedInstanceId'. Partial state: state uncertain; " +
                 "$inventorySummary; no cleanup mutation was attempted. " +
                 "Original error: " +
-                $originalFailure.Exception.Message
+                $originalFailure.Exception.Message,
+                $originalFailure.Exception
             )
+            $uncertainFailure.Data["StateUncertain"] = $true
+            $uncertainFailure.Data["OriginalFailure"] =
+                $originalFailure.Exception
+            if (-not [string]::IsNullOrWhiteSpace($reportedInstanceId)) {
+                $uncertainFailure.Data["InstanceId"] = $reportedInstanceId
+            }
+            throw $uncertainFailure
         }
         if ($null -eq $createdInstanceId) {
             throw
@@ -2226,11 +2250,70 @@ function Invoke-InstallTestDriver {
             "Audio smoke: discovery=ready; result=ready; " +
             "public ABI four-role contract passed."
         )
-    } finally {
-        if ($null -ne $staging) {
+    } catch {
+        $originalFailure = $_
+        if ($null -eq $staging) {
+            throw
+        }
+
+        $retainedPath = [string]$staging.Path
+        $failureMetadata = Get-RootDevnodeFailureMetadata `
+            -Exception $originalFailure.Exception
+        if ($null -ne $failureMetadata -and
+            $failureMetadata.StateUncertain -eq $true) {
+            $uncertainFailure = [InvalidOperationException]::new(
+                "Install state is uncertain; protected staging retained at " +
+                "'$retainedPath'. Perform read-only process and device " +
+                "inventory before any manual cleanup. Original error: " +
+                $originalFailure.Exception.Message,
+                $originalFailure.Exception
+            )
+            $uncertainFailure.Data["StateUncertain"] = $true
+            $uncertainFailure.Data["OriginalFailure"] =
+                $originalFailure.Exception
+            $uncertainFailure.Data["RetainedStagingPath"] = $retainedPath
+            throw $uncertainFailure
+        }
+
+        try {
             Remove-ProtectedStagingDirectory `
                 -Path $staging.Path `
                 -Token $staging.Token
+        } catch {
+            $cleanupFailure = $_.Exception
+            $combinedFailure = [InvalidOperationException]::new(
+                "Install failed and protected staging cleanup also failed; " +
+                "protected staging retained at '$retainedPath'. Original " +
+                "error: $($originalFailure.Exception.Message) Cleanup error: " +
+                $cleanupFailure.Message,
+                $originalFailure.Exception
+            )
+            $combinedFailure.Data["OriginalFailure"] =
+                $originalFailure.Exception
+            $combinedFailure.Data["CleanupFailure"] = $cleanupFailure
+            $combinedFailure.Data["RetainedStagingPath"] = $retainedPath
+            throw $combinedFailure
+        }
+        throw
+    }
+
+    if ($null -ne $staging) {
+        $retainedPath = [string]$staging.Path
+        try {
+            Remove-ProtectedStagingDirectory `
+                -Path $staging.Path `
+                -Token $staging.Token
+        } catch {
+            $cleanupFailure = $_.Exception
+            $cleanupOnlyFailure = [InvalidOperationException]::new(
+                "Install completed, but protected staging cleanup failed; " +
+                "protected staging retained at '$retainedPath'. Cleanup " +
+                "error: $($cleanupFailure.Message)",
+                $cleanupFailure
+            )
+            $cleanupOnlyFailure.Data["CleanupFailure"] = $cleanupFailure
+            $cleanupOnlyFailure.Data["RetainedStagingPath"] = $retainedPath
+            throw $cleanupOnlyFailure
         }
     }
 }

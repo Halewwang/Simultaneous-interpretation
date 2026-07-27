@@ -117,6 +117,19 @@ function Assert-Throws {
     throw "Expected action to throw '$Pattern'."
 }
 
+function Get-ExceptionChain {
+    param(
+        [Parameter(Mandatory)]
+        [Exception]$Exception
+    )
+
+    $current = $Exception
+    while ($null -ne $current) {
+        Write-Output $current
+        $current = $current.InnerException
+    }
+}
+
 function Invoke-Case {
     param(
         [Parameter(Mandatory)]
@@ -911,6 +924,226 @@ Invoke-Case -Name "install orchestrator uses only protected staged copies" -Acti
         throw "Install output overstated the host Authenticode proof boundary."
     }
 }
+
+Invoke-Case -Name "install success cleans protected staging exactly once" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Set-InstallOrchestratorExternalBoundaries
+    Set-TestFunction -Name Invoke-PnpUtilInstall -Body {}
+    $script:cleanupCalls = [Collections.Generic.List[object]]::new()
+    Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {
+        param($Path, $Token)
+        [void]$script:cleanupCalls.Add([pscustomobject]@{
+            Path = $Path
+            Token = $Token
+        })
+    }
+
+    Invoke-InstallTestDriver `
+        -PackagePath "C:\Package With Spaces" `
+        -ExpectedPackageSha256 ("A" * 64) `
+        -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+        -ExpectedSmokeSha256 ("E" * 64) `
+        -ConfirmInstall
+
+    if ($script:cleanupCalls.Count -ne 1 -or
+        $script:cleanupCalls[0].Path -cne
+        ("C:\ProgramData\EMKE\DriverLabStaging\" + ("1" * 32)) -or
+        $script:cleanupCalls[0].Token -cne ("1" * 32)) {
+        throw "Successful install did not clean the exact staging path once."
+    }
+}
+
+Invoke-Case -Name "ordinary install failure cleans staging and preserves cause" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Set-InstallOrchestratorExternalBoundaries
+    Set-TestFunction -Name Invoke-PnpUtilInstall -Body {}
+    $script:cleanupCalls = 0
+    Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {
+        $script:cleanupCalls += 1
+    }
+    Set-TestFunction -Name Invoke-SmokeEnumeration -Body {
+        $failure = [InvalidOperationException]::new(
+            "simulated ordinary Smoke failure"
+        )
+        $failure.Data["FailureCode"] = "SmokeRejected"
+        throw $failure
+    }
+
+    $caught = $null
+    try {
+        Invoke-InstallTestDriver `
+            -PackagePath "C:\Package With Spaces" `
+            -ExpectedPackageSha256 ("A" * 64) `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64) `
+            -ConfirmInstall
+    } catch {
+        $caught = $_
+    }
+
+    $original = @(Get-ExceptionChain -Exception $caught.Exception |
+        Where-Object {
+            $_.Message -ceq "simulated ordinary Smoke failure" -and
+            $_.Data["FailureCode"] -ceq "SmokeRejected"
+        })
+    if ($script:cleanupCalls -ne 1 -or $original.Count -ne 1) {
+        throw "Ordinary install failure did not clean once and preserve cause."
+    }
+}
+
+Invoke-Case `
+    -Name "ordinary failure plus cleanup failure preserves both failures" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        Set-InstallOrchestratorExternalBoundaries
+        Set-TestFunction -Name Invoke-PnpUtilInstall -Body {}
+        $script:cleanupCalls = 0
+        Set-TestFunction -Name Invoke-SmokeEnumeration -Body {
+            $failure = [InvalidOperationException]::new(
+                "simulated ordinary Smoke failure"
+            )
+            $failure.Data["FailureCode"] = "SmokeRejected"
+            throw $failure
+        }
+        Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {
+            $script:cleanupCalls += 1
+            throw "simulated protected staging cleanup failure"
+        }
+
+        $caught = $null
+        try {
+            Invoke-InstallTestDriver `
+                -PackagePath "C:\Package With Spaces" `
+                -ExpectedPackageSha256 ("A" * 64) `
+                -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+                -ExpectedSmokeSha256 ("E" * 64) `
+                -ConfirmInstall
+        } catch {
+            $caught = $_
+        }
+
+        $retainedPath =
+            "C:\ProgramData\EMKE\DriverLabStaging\" + ("1" * 32)
+        $original = @(Get-ExceptionChain -Exception $caught.Exception |
+            Where-Object {
+                $_.Message -ceq "simulated ordinary Smoke failure" -and
+                $_.Data["FailureCode"] -ceq "SmokeRejected"
+            })
+        $cleanupFailure = $caught.Exception.Data["CleanupFailure"]
+        if ($script:cleanupCalls -ne 1 -or
+            $original.Count -ne 1 -or
+            $null -eq $cleanupFailure -or
+            $cleanupFailure.Message -cne
+            "simulated protected staging cleanup failure" -or
+            $caught.Exception.Data["RetainedStagingPath"] -cne $retainedPath -or
+            $caught.Exception.Message -notmatch
+            [regex]::Escape("simulated ordinary Smoke failure") -or
+            $caught.Exception.Message -notmatch
+            [regex]::Escape("simulated protected staging cleanup failure")) {
+            throw (
+                "Combined failure did not preserve the original cause, " +
+                "cleanup detail, and retained path."
+            )
+        }
+    }
+
+Invoke-Case -Name "successful install reports retained staging on cleanup failure" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Set-InstallOrchestratorExternalBoundaries
+    Set-TestFunction -Name Invoke-PnpUtilInstall -Body {}
+    $script:cleanupCalls = 0
+    Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {
+        $script:cleanupCalls += 1
+        throw "simulated protected staging cleanup failure"
+    }
+
+    $caught = $null
+    try {
+        Invoke-InstallTestDriver `
+            -PackagePath "C:\Package With Spaces" `
+            -ExpectedPackageSha256 ("A" * 64) `
+            -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+            -ExpectedSmokeSha256 ("E" * 64) `
+            -ConfirmInstall
+    } catch {
+        $caught = $_
+    }
+
+    $retainedPath = "C:\ProgramData\EMKE\DriverLabStaging\" + ("1" * 32)
+    $cleanupFailure = $caught.Exception.Data["CleanupFailure"]
+    if ($script:cleanupCalls -ne 1 -or
+        $null -eq $cleanupFailure -or
+        $cleanupFailure.Message -cne
+        "simulated protected staging cleanup failure" -or
+        $caught.Exception.Data["RetainedStagingPath"] -cne $retainedPath -or
+        $caught.Exception.Data["StateUncertain"] -eq $true -or
+        $caught.Exception.Message -notmatch [regex]::Escape($retainedPath)) {
+        throw "Successful install cleanup failure did not report retained state."
+    }
+}
+
+Invoke-Case `
+    -Name "nested uncertain pnputil timeout retains protected staging read-only" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        Set-InstallOrchestratorExternalBoundaries
+        $script:cleanupCalls = 0
+        Set-TestFunction -Name Remove-ProtectedStagingDirectory -Body {
+            $script:cleanupCalls += 1
+            throw "uncertain path attempted forbidden staging cleanup"
+        }
+        Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
+            $timeout = [TimeoutException]::new(
+                "simulated pnputil timeout with process state uncertain"
+            )
+            $timeout.Data["StateUncertain"] = $true
+            $outer = [InvalidOperationException]::new(
+                "simulated nested pnputil wrapper",
+                $timeout
+            )
+            throw $outer
+        }
+
+        $caught = $null
+        try {
+            Invoke-InstallTestDriver `
+                -PackagePath "C:\Package With Spaces" `
+                -ExpectedPackageSha256 ("A" * 64) `
+                -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
+                -ExpectedSmokeSha256 ("E" * 64) `
+                -ConfirmInstall
+        } catch {
+            $caught = $_
+        }
+
+        if ($script:cleanupCalls -ne 0) {
+            throw "Uncertain top-level failure attempted staging cleanup."
+        }
+        $retainedPath =
+            "C:\ProgramData\EMKE\DriverLabStaging\" + ("1" * 32)
+        $metadata = Get-RootDevnodeFailureMetadata `
+            -Exception $caught.Exception
+        $original = @(Get-ExceptionChain -Exception $caught.Exception |
+            Where-Object {
+                $_.Message -ceq
+                "simulated pnputil timeout with process state uncertain"
+            })
+        if ($null -eq $metadata -or
+            $metadata.StateUncertain -ne $true -or
+            $original.Count -ne 1 -or
+            $caught.Exception.Data["StateUncertain"] -ne $true -or
+            $caught.Exception.Data["RetainedStagingPath"] -cne $retainedPath -or
+            $caught.Exception.Message -notmatch [regex]::Escape($retainedPath) -or
+            $caught.Exception.Message -notmatch
+            "read-only.*before any manual cleanup" -or
+            $caught.Exception.Message -match
+            "Driver Name\.inf|EMKE\.AudioSmoke\.exe|PackageSha256") {
+            throw (
+                "Uncertain failure did not preserve machine-readable state, " +
+                "original cause, exact retained path, and read-only guidance."
+            )
+        }
+    }
 
 Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Action {
     Import-LifecycleFunctions -Path $installScript
