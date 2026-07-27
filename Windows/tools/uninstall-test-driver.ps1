@@ -285,13 +285,17 @@ function Invoke-PnpUtilDeleteDriver {
         -Executable $pnpUtil `
         -Arguments @(
             "/delete-driver",
-            $PublishedInf,
-            "/uninstall",
-            "/force"
+            $PublishedInf
         ) `
         -TimeoutSeconds 120
     if ($result.ExitCode -ne 0) {
-        throw "pnputil driver removal failed with exit code $($result.ExitCode)."
+        throw (
+            "Published package deletion failed with exit code " +
+            "$($result.ExitCode); the package remains or its package state " +
+            "is unproven. A new reference may have raced the prior " +
+            "read-only check; no forced uninstall or device mutation was " +
+            "requested."
+        )
     }
 }
 

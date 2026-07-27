@@ -293,7 +293,7 @@ function Assert-ProtectedStagingSecurityDescriptor {
     }
 }
 
-function Get-SystemStagingRoot {
+function Get-SystemStagingBase {
     $programData = [Environment]::GetFolderPath(
         [Environment+SpecialFolder]::CommonApplicationData
     )
@@ -301,7 +301,13 @@ function Get-SystemStagingRoot {
         throw "The local system staging base could not be resolved."
     }
     return [IO.Path]::GetFullPath(
-        (Join-Path $programData "EMKE\DriverLabStaging")
+        (Join-Path $programData "EMKE")
+    )
+}
+
+function Get-SystemStagingRoot {
+    return [IO.Path]::GetFullPath(
+        (Join-Path (Get-SystemStagingBase) "DriverLabStaging")
     )
 }
 
@@ -336,7 +342,46 @@ function Assert-ProtectedStagingAcl {
     Assert-ProtectedStagingSecurityDescriptor -Sddl $acl.Sddl
 }
 
+function Assert-ProtectedStagingChain {
+    param(
+        [Parameter(Mandatory)]
+        [string]$StagingPath
+    )
+
+    $base = [IO.Path]::GetFullPath((Get-SystemStagingBase))
+    $root = [IO.Path]::GetFullPath((Get-SystemStagingRoot))
+    $actual = [IO.Path]::GetFullPath($StagingPath)
+    $expectedParent = [IO.DirectoryInfo]::new($actual).Parent.FullName
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        $expectedParent,
+        $root
+    )) {
+        throw "Protected staging path is outside the exact GUID child root."
+    }
+    foreach ($path in @($base, $root, $actual)) {
+        $resolved = Assert-LocalNonReparsePath `
+            -Path $path `
+            -ExpectedType Container
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+            ([IO.Path]::GetFullPath($resolved)),
+            $path
+        )) {
+            throw "Protected staging chain resolved to an unexpected path."
+        }
+        Assert-ProtectedStagingAcl -Path $path
+    }
+    return $actual
+}
+
 function New-ProtectedStagingDirectory {
+    $base = Get-SystemStagingBase
+    [IO.Directory]::CreateDirectory($base) | Out-Null
+    [void](Assert-LocalNonReparsePath `
+        -Path $base `
+        -ExpectedType Container)
+    Set-ProtectedStagingAcl -Path $base
+    Assert-ProtectedStagingAcl -Path $base
+
     $root = Get-SystemStagingRoot
     [IO.Directory]::CreateDirectory($root) | Out-Null
     [void](Assert-LocalNonReparsePath `
@@ -353,6 +398,7 @@ function New-ProtectedStagingDirectory {
         -ExpectedType Container)
     Set-ProtectedStagingAcl -Path $path
     Assert-ProtectedStagingAcl -Path $path
+    [void](Assert-ProtectedStagingChain -StagingPath $path)
     return [pscustomobject]@{
         Path = $path
         Token = $token
@@ -381,10 +427,7 @@ function Remove-ProtectedStagingDirectory {
     if (-not (Test-Path -LiteralPath $actual)) {
         return
     }
-    [void](Assert-LocalNonReparsePath `
-        -Path $actual `
-        -ExpectedType Container)
-    Assert-ProtectedStagingAcl -Path $actual
+    [void](Assert-ProtectedStagingChain -StagingPath $actual)
     Remove-Item -LiteralPath $actual -Recurse -Force -ErrorAction Stop
 }
 
@@ -403,6 +446,7 @@ function Copy-InstallInputsToStaging {
     $resolvedRoot = Assert-LocalNonReparsePath `
         -Path $StagingRoot `
         -ExpectedType Container
+    [void](Assert-ProtectedStagingChain -StagingPath $resolvedRoot)
     if (@(Get-ChildItem -LiteralPath $resolvedRoot -Force).Count -ne 0) {
         throw "Owned staging directory must be empty before copying inputs."
     }
@@ -423,6 +467,7 @@ function Copy-InstallInputsToStaging {
     return [pscustomobject]@{
         Package = $stagedPackage
         Smoke = $stagedSmoke
+        StagingRoot = $resolvedRoot
         PackageSha256 = Get-DriverPackageSha256 -Package $stagedPackage
         SmokeSha256 = Get-FileSha256 -Path $stagedSmoke.FullName
     }
@@ -434,6 +479,8 @@ function Assert-StagedInputsUnchanged {
         [psobject]$StagedInputs
     )
 
+    [void](Assert-ProtectedStagingChain `
+        -StagingPath $StagedInputs.StagingRoot)
     $package = Get-StrictDriverPackage `
         -Directory $StagedInputs.Package.Directory
     $packageSha256 = Get-DriverPackageSha256 -Package $package
@@ -807,6 +854,85 @@ namespace Emke.DriverLab
         }
     }
 
+    public static class RootDevnodeRegistrationTransaction
+    {
+        public static string Complete(
+            string expectedInstanceId,
+            Action register,
+            Func<string> readRegisteredInstanceId,
+            Action rollback)
+        {
+            if (String.IsNullOrWhiteSpace(expectedInstanceId))
+            {
+                throw new ArgumentException(
+                    "Expected instance ID is required.",
+                    nameof(expectedInstanceId));
+            }
+            if (register == null)
+            {
+                throw new ArgumentNullException(nameof(register));
+            }
+            if (readRegisteredInstanceId == null)
+            {
+                throw new ArgumentNullException(nameof(readRegisteredInstanceId));
+            }
+            if (rollback == null)
+            {
+                throw new ArgumentNullException(nameof(rollback));
+            }
+
+            bool registered = false;
+            try
+            {
+                register();
+                registered = true;
+                string observedInstanceId = readRegisteredInstanceId();
+                if (!String.Equals(
+                    observedInstanceId,
+                    expectedInstanceId,
+                    StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "Post-registration instance ID changed unexpectedly.");
+                }
+                return observedInstanceId;
+            }
+            catch (Exception originalFailure)
+            {
+                if (!registered)
+                {
+                    throw;
+                }
+                try
+                {
+                    rollback();
+                }
+                catch (Exception cleanupFailure)
+                {
+                    throw new RootDevnodeCreateException(
+                        message:
+                            "Root device creation failed after registration; " +
+                            "exact same-handle rollback failed; " +
+                            "state uncertain.",
+                        instanceId: expectedInstanceId,
+                        stateUncertain: true,
+                        rollbackCompleted: false,
+                        originalFailure: originalFailure,
+                        cleanupFailure: cleanupFailure);
+                }
+                throw new RootDevnodeCreateException(
+                    message:
+                        "Root device creation failed after registration; " +
+                        "exact same-handle rollback completed.",
+                    instanceId: expectedInstanceId,
+                    stateUncertain: false,
+                    rollbackCompleted: true,
+                    originalFailure: originalFailure,
+                    cleanupFailure: null);
+            }
+        }
+    }
+
     public static class RootDevnodeSetupApi
     {
         private static readonly IntPtr InvalidHandleValue = new IntPtr(-1);
@@ -1008,8 +1134,9 @@ namespace Emke.DriverLab
             }
         }
 
-        public static string Create(string infPath, string hardwareId)
+        public static string GetRootDeviceName(string hardwareId)
         {
+            const string prefix = "ROOT\\";
             if (!String.Equals(
                     hardwareId,
                     "ROOT\\EMKEVIRTUALAUDIO",
@@ -1019,6 +1146,39 @@ namespace Emke.DriverLab
                     "Only the exact EMKE root hardware ID is allowed.",
                     nameof(hardwareId));
             }
+            string deviceName = hardwareId.Substring(prefix.Length);
+            if (deviceName.Length == 0 || deviceName.Contains("\\"))
+            {
+                throw new ArgumentException(
+                    "Root hardware ID has an invalid device name.",
+                    nameof(hardwareId));
+            }
+            return deviceName;
+        }
+
+        private static string GetDeviceInstanceIdFromInfoElement(
+            IntPtr deviceInfoSet,
+            ref SpDevinfoData deviceInfoData)
+        {
+            uint requiredSize;
+            var instanceId = new StringBuilder(512);
+            if (!SetupDiGetDeviceInstanceIdW(
+                deviceInfoSet,
+                ref deviceInfoData,
+                instanceId,
+                (uint)instanceId.Capacity,
+                out requiredSize))
+            {
+                ThrowLastError("SetupDiGetDeviceInstanceId");
+            }
+            string result = instanceId.ToString();
+            ValidateExactInstanceId(result);
+            return result;
+        }
+
+        public static string Create(string infPath, string hardwareId)
+        {
+            string deviceName = GetRootDeviceName(hardwareId);
 
             Guid classGuid;
             uint requiredSize;
@@ -1043,49 +1203,39 @@ namespace Emke.DriverLab
             try
             {
                 SpDevinfoData deviceInfoData = NewDeviceInfoData();
-                bool registered = false;
-                string result = null;
-                try
+                if (!SetupDiCreateDeviceInfoW(
+                    deviceInfoSet,
+                    deviceName,
+                    ref classGuid,
+                    null,
+                    IntPtr.Zero,
+                    DicdGenerateId,
+                    ref deviceInfoData))
                 {
-                    if (!SetupDiCreateDeviceInfoW(
-                        deviceInfoSet,
-                        className.ToString(),
-                        ref classGuid,
-                        null,
-                        IntPtr.Zero,
-                        DicdGenerateId,
-                        ref deviceInfoData))
-                    {
-                        ThrowLastError("SetupDiCreateDeviceInfo");
-                    }
+                    ThrowLastError("SetupDiCreateDeviceInfo");
+                }
 
-                    byte[] multiString = Encoding.Unicode.GetBytes(
-                        hardwareId + "\0\0");
-                    if (!SetupDiSetDeviceRegistryPropertyW(
-                        deviceInfoSet,
-                        ref deviceInfoData,
-                        SpdrpHardwareId,
-                        multiString,
-                        (uint)multiString.Length))
-                    {
-                        ThrowLastError(
-                            "SetupDiSetDeviceRegistryProperty" +
-                            "(SPDRP_HARDWAREID)");
-                    }
+                byte[] multiString = Encoding.Unicode.GetBytes(
+                    hardwareId + "\0\0");
+                if (!SetupDiSetDeviceRegistryPropertyW(
+                    deviceInfoSet,
+                    ref deviceInfoData,
+                    SpdrpHardwareId,
+                    multiString,
+                    (uint)multiString.Length))
+                {
+                    ThrowLastError(
+                        "SetupDiSetDeviceRegistryProperty" +
+                        "(SPDRP_HARDWAREID)");
+                }
 
-                    var instanceId = new StringBuilder(512);
-                    if (!SetupDiGetDeviceInstanceIdW(
-                        deviceInfoSet,
-                        ref deviceInfoData,
-                        instanceId,
-                        (uint)instanceId.Capacity,
-                        out requiredSize))
+                string result = GetDeviceInstanceIdFromInfoElement(
+                    deviceInfoSet,
+                    ref deviceInfoData);
+                return RootDevnodeRegistrationTransaction.Complete(
+                    result,
+                    delegate
                     {
-                        ThrowLastError("SetupDiGetDeviceInstanceId");
-                    }
-                    result = instanceId.ToString();
-                    ValidateExactInstanceId(result);
-
                     if (!SetupDiCallClassInstaller(
                         DifRegisterDevice,
                         deviceInfoSet,
@@ -1094,44 +1244,19 @@ namespace Emke.DriverLab
                         ThrowLastError(
                             "SetupDiCallClassInstaller(DIF_REGISTERDEVICE)");
                     }
-                    registered = true;
-                    return result;
-                }
-                catch (Exception originalFailure)
-                {
-                    if (!registered)
+                    },
+                    delegate
                     {
-                        throw;
-                    }
-                    try
+                        return GetDeviceInstanceIdFromInfoElement(
+                            deviceInfoSet,
+                            ref deviceInfoData);
+                    },
+                    delegate
                     {
                         RemoveRegisteredDeviceFromInfoElement(
                             deviceInfoSet,
                             ref deviceInfoData);
-                    }
-                    catch (Exception cleanupFailure)
-                    {
-                        throw new RootDevnodeCreateException(
-                            message:
-                                "Root device creation failed after registration; " +
-                                "exact same-handle rollback failed; " +
-                                "state uncertain.",
-                            instanceId: result,
-                            stateUncertain: true,
-                            rollbackCompleted: false,
-                            originalFailure: originalFailure,
-                            cleanupFailure: cleanupFailure);
-                    }
-                    throw new RootDevnodeCreateException(
-                        message:
-                            "Root device creation failed after registration; " +
-                            "exact same-handle rollback completed.",
-                        instanceId: result,
-                        stateUncertain: false,
-                        rollbackCompleted: true,
-                        originalFailure: originalFailure,
-                        cleanupFailure: null);
-                }
+                    });
             }
             finally
             {
@@ -1422,13 +1547,133 @@ function Assert-InstalledDevnodeHealthy {
     }
 }
 
+function Get-DriverStoreFileRepositoryRoot {
+    $systemDirectory = [Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::System
+    )
+    if ([string]::IsNullOrWhiteSpace($systemDirectory)) {
+        throw "Windows system directory could not be resolved."
+    }
+    return Assert-LocalNonReparsePath `
+        -Path (Join-Path $systemDirectory "DriverStore\FileRepository") `
+        -ExpectedType Container
+}
+
+function Get-InstalledDriverStorePackage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PublishedInf,
+
+        [Parameter(Mandatory)]
+        [psobject]$TrustedPackage
+    )
+
+    if ($PublishedInf -notmatch "^oem[0-9]+\.inf$") {
+        throw "Installed package has a non-allow-listed published INF."
+    }
+    $driverRecords = @(Get-WindowsDriver `
+        -Online `
+        -Driver $PublishedInf `
+        -ErrorAction Stop)
+    if ($driverRecords.Count -ne 1) {
+        throw (
+            "Expected one Driver Store package for '$PublishedInf'; " +
+            "found $($driverRecords.Count)."
+        )
+    }
+    $driverRecord = $driverRecords[0]
+    $recordPublishedName = if (
+        $null -ne $driverRecord.PSObject.Properties["Driver"]
+    ) {
+        [string]$driverRecord.Driver
+    } elseif (
+        $null -ne $driverRecord.PSObject.Properties["PublishedName"]
+    ) {
+        [string]$driverRecord.PublishedName
+    } else {
+        ""
+    }
+    if ([string]::IsNullOrWhiteSpace($recordPublishedName)) {
+        throw "Driver Store inventory has no published INF identity."
+    }
+    if ($recordPublishedName -ine $PublishedInf) {
+        throw "Driver Store inventory returned the wrong published INF."
+    }
+
+    $originalInf = [string]$driverRecord.OriginalFileName
+    if ([string]::IsNullOrWhiteSpace($originalInf)) {
+        throw "Driver Store inventory has no original INF path."
+    }
+    $installedInfPath = Resolve-RequiredFile -Path $originalInf
+    $repositoryRoot = [IO.Path]::GetFullPath(
+        (Get-DriverStoreFileRepositoryRoot)
+    ).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+    $packageDirectory = [IO.Path]::GetFullPath(
+        ([IO.FileInfo]::new($installedInfPath).DirectoryName)
+    )
+    $repositoryPrefix =
+        $repositoryRoot + [IO.Path]::DirectorySeparatorChar
+    if (-not $packageDirectory.StartsWith(
+        $repositoryPrefix,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Installed package INF is outside Driver Store FileRepository."
+    }
+
+    foreach ($file in @(
+        $TrustedPackage.Inf,
+        $TrustedPackage.Sys,
+        $TrustedPackage.Cat
+    )) {
+        if ([string]::IsNullOrWhiteSpace([string]$file.Name) -or
+            [IO.Path]::GetFileName([string]$file.Name) -cne
+            [string]$file.Name) {
+            throw "Trusted package contains an invalid exact file name."
+        }
+    }
+    if ([IO.Path]::GetFileName($installedInfPath) -ine
+        [string]$TrustedPackage.Inf.Name) {
+        throw "Driver Store original INF name differs from the trusted package."
+    }
+
+    $installedInf = Get-Item `
+        -LiteralPath (Resolve-RequiredFile -Path $installedInfPath) `
+        -Force
+    $installedSys = Get-Item `
+        -LiteralPath (Resolve-RequiredFile -Path (
+            Join-Path $packageDirectory $TrustedPackage.Sys.Name
+        )) `
+        -Force
+    $installedCat = Get-Item `
+        -LiteralPath (Resolve-RequiredFile -Path (
+            Join-Path $packageDirectory $TrustedPackage.Cat.Name
+        )) `
+        -Force
+    return [pscustomobject]@{
+        Directory = $packageDirectory
+        Inf = $installedInf
+        Sys = $installedSys
+        Cat = $installedCat
+    }
+}
+
 function Assert-InstalledDriverPackageIdentity {
     param(
         [Parameter(Mandatory)]
         [psobject]$Devnode,
 
         [Parameter(Mandatory)]
-        [psobject]$InfMetadata
+        [psobject]$InfMetadata,
+
+        [Parameter(Mandatory)]
+        [psobject]$TrustedPackage,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+        [string]$ExpectedPackageSha256
     )
 
     $signedDrivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver)
@@ -1453,10 +1698,24 @@ function Assert-InstalledDriverPackageIdentity {
         [string]$InfMetadata.ProviderName -cne "EMKE") {
         throw "Installed package provider does not match trusted EMKE INF."
     }
+    $installedPackage = Get-InstalledDriverStorePackage `
+        -PublishedInf ([string]$identity.InfName) `
+        -TrustedPackage $TrustedPackage
+    $installedPackageSha256 =
+        Get-DriverPackageSha256 -Package $installedPackage
+    if (-not (Test-FixedSha256Equal `
+        -Expected $ExpectedPackageSha256 `
+        -Actual $installedPackageSha256)) {
+        throw (
+            "Installed Driver Store package content SHA-256 does not match " +
+            "the trusted staged package."
+        )
+    }
     return [pscustomobject]@{
         InfName = [string]$identity.InfName
         DriverVersion = [string]$identity.DriverVersion
         ProviderName = [string]$identity.ProviderName
+        PackageSha256 = $installedPackageSha256
     }
 }
 
@@ -1466,7 +1725,14 @@ function Invoke-CreateAndBindRootDevnode {
         [psobject]$StagedInf,
 
         [Parameter(Mandatory)]
-        [psobject]$InfMetadata
+        [psobject]$InfMetadata,
+
+        [Parameter(Mandatory)]
+        [psobject]$TrustedPackage,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern("^[0-9A-Fa-f]{64}$")]
+        [string]$ExpectedPackageSha256
     )
 
     $existing = @(Get-TargetDevnodes)
@@ -1494,7 +1760,9 @@ function Invoke-CreateAndBindRootDevnode {
         Assert-InstalledDevnodeHealthy -Devnodes @($installedDevnode)
         $identity = Assert-InstalledDriverPackageIdentity `
             -Devnode $installedDevnode `
-            -InfMetadata $InfMetadata
+            -InfMetadata $InfMetadata `
+            -TrustedPackage $TrustedPackage `
+            -ExpectedPackageSha256 $ExpectedPackageSha256
         return [pscustomobject]@{
             CreatedInstanceId = $createdInstanceId
             Devnode = $installedDevnode
@@ -1696,12 +1964,15 @@ function Invoke-InstallTestDriver {
         Assert-StagedInputsUnchanged -StagedInputs $staged
         $binding = Invoke-CreateAndBindRootDevnode `
             -StagedInf $package.Inf `
-            -InfMetadata $infMetadata
+            -InfMetadata $infMetadata `
+            -TrustedPackage $package `
+            -ExpectedPackageSha256 $actualPackageSha256
         $installedIdentity = $binding.Identity
         Write-Host (
             "Installed package: $($installedIdentity.InfName); " +
             "version=$($installedIdentity.DriverVersion); " +
-            "provider=$($installedIdentity.ProviderName)"
+            "provider=$($installedIdentity.ProviderName); " +
+            "package SHA-256=$($installedIdentity.PackageSha256)"
         )
         Assert-StagedInputsUnchanged -StagedInputs $staged
         Invoke-SmokeEnumeration `

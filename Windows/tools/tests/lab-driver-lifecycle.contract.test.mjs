@@ -135,33 +135,64 @@ test("install lifecycle is fail-closed before the one exact pnputil install", as
   assert.match(source, /DifRegisterDevice/);
   assert.match(source, /DiRemoveDeviceGlobal/);
   assert.match(source, /class\s+RootDevnodeCreateException/);
+  assert.match(source, /class\s+RootDevnodeRegistrationTransaction/);
   assert.match(source, /bool\s+StateUncertain\s*{\s*get;/);
   assert.match(source, /bool\s+RollbackCompleted\s*{\s*get;/);
   assert.match(source, /string\s+InstanceId\s*{\s*get;/);
+  assert.match(
+    source,
+    /GetRootDeviceName\s*\(\s*hardwareId\s*\)/,
+    "DICD_GENERATE_ID DeviceName must be derived from the hardware ID",
+  );
+  assert.match(
+    source,
+    /string\s+deviceName\s*=\s*GetRootDeviceName\s*\(\s*hardwareId\s*\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /SetupDiCreateDeviceInfoW\([^]*?className\.ToString\(\)/,
+    "INF class name must never be passed as the root DeviceName",
+  );
   const createMethod = source.match(
     /public static string Create\([^]*?(?<body>\{[^]*?)\n        public static void RemoveExact/,
   );
   assert.ok(createMethod, "embedded SetupAPI Create method is missing");
   const createBody = createMethod.groups.body;
-  const getInstanceId = createBody.indexOf(
-    "if (!SetupDiGetDeviceInstanceIdW(",
-  );
-  const validateInstanceId = createBody.indexOf(
-    "ValidateExactInstanceId(result);",
-  );
-  const registerDevice = createBody.indexOf("DifRegisterDevice,");
-  assert.ok(
-    getInstanceId >= 0 &&
-      validateInstanceId > getInstanceId &&
-      registerDevice > validateInstanceId,
-    "generated instance ID must be retrieved and validated before DIF_REGISTERDEVICE",
-  );
-  assert.match(createBody, /bool\s+registered\s*=\s*false/);
-  assert.match(createBody, /registered\s*=\s*true/);
-  assert.match(createBody, /catch\s*\(\s*Exception\s+originalFailure\s*\)/);
+  assert.match(createBody, /RootDevnodeRegistrationTransaction\.Complete/);
+  assert.match(createBody, /GetDeviceInstanceIdFromInfoElement/);
   assert.match(createBody, /RemoveRegisteredDeviceFromInfoElement/);
-  assert.match(createBody, /rollbackCompleted:\s*true/);
-  assert.match(createBody, /stateUncertain:\s*true/);
+  const transactionMethod = source.match(
+    /class RootDevnodeRegistrationTransaction[^]*?public static string Complete\([^]*?(?<body>\{[^]*?)\n    }\n\n    public static class RootDevnodeSetupApi/,
+  );
+  assert.ok(
+    transactionMethod,
+    "embedded post-registration transaction is missing",
+  );
+  const transactionBody = transactionMethod.groups.body;
+  assert.match(transactionBody, /bool\s+registered\s*=\s*false/);
+  assert.match(transactionBody, /registered\s*=\s*true/);
+  assert.match(transactionBody, /readRegisteredInstanceId\(\)/);
+  assert.match(transactionBody, /catch\s*\(\s*Exception\s+originalFailure\s*\)/);
+  assert.match(transactionBody, /rollback\(\)/);
+  assert.match(transactionBody, /rollbackCompleted:\s*true/);
+  assert.match(transactionBody, /stateUncertain:\s*true/);
+  assert.match(source, /function\s+Get-SystemStagingBase/);
+  assert.match(source, /function\s+Assert-ProtectedStagingChain/);
+  assert.match(
+    source,
+    /Assert-ProtectedStagingChain\s+-StagingPath\s+\$resolvedRoot/,
+  );
+  assert.match(source, /Get-WindowsDriver[^]*-Online[^]*-Driver/);
+  assert.match(source, /DriverStore[^]*FileRepository/);
+  assert.match(source, /Get-InstalledDriverStorePackage/);
+  assert.match(
+    source,
+    /Get-DriverPackageSha256\s+-Package\s+\$installedPackage/,
+  );
+  assert.match(
+    source,
+    /Test-FixedSha256Equal[^]*ExpectedPackageSha256[^]*installedPackageSha256/,
+  );
   assert.doesNotMatch(
     source,
     /AccessControlSections\]::All/,
@@ -209,8 +240,16 @@ test("uninstall lifecycle resolves one exact published INF from PnP metadata", a
   assert.match(source, /\$matching\.Count\s+-ne\s+1/);
   assert.match(source, /\^oem\[0-9\]\+\\\.inf\$/);
   assert.match(source, /\/delete-driver/);
-  assert.match(source, /\/uninstall/);
-  assert.match(source, /\/force/);
+  assert.doesNotMatch(source, /["']\/uninstall["']/);
+  assert.doesNotMatch(source, /["']\/force["']/);
+  assert.match(
+    source,
+    /Arguments\s+@\(\s*["']\/delete-driver["']\s*,\s*\$PublishedInf\s*\)/,
+  );
+  assert.match(
+    source,
+    /package remains|package state is unproven/i,
+  );
   assert.match(
     source,
     /Invoke-PnpUtilRemoveDevice\s+-InstanceId\s+\$devnode\.PNPDeviceID/,

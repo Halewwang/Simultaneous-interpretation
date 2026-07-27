@@ -118,12 +118,15 @@ function New-InstallPackageRecord {
         Directory = $directory
         Inf = [pscustomobject]@{
             FullName = "$directory\Driver Name.inf"
+            Name = "Driver Name.inf"
         }
         Sys = [pscustomobject]@{
             FullName = "$directory\Driver Name.sys"
+            Name = "Driver Name.sys"
         }
         Cat = [pscustomobject]@{
             FullName = "$directory\Driver Name.cat"
+            Name = "Driver Name.cat"
         }
     }
 }
@@ -190,10 +193,17 @@ function Set-SafeInstallDefaults {
         }
     }
     Set-TestFunction -Name Assert-InstalledDriverPackageIdentity -Body {
+        param(
+            $Devnode,
+            $InfMetadata,
+            $TrustedPackage,
+            $ExpectedPackageSha256
+        )
         [pscustomobject]@{
             InfName = "oem42.inf"
             DriverVersion = "1.0.0.1"
             ProviderName = "EMKE"
+            PackageSha256 = "A" * 64
         }
     }
     Set-TestFunction -Name Invoke-PnpUtilInstall -Body {
@@ -511,9 +521,7 @@ Invoke-Case -Name "one exact delete-driver command" -Action {
     Invoke-PnpUtilDeleteDriver -PublishedInf "oem42.inf"
     $expected = @(
         "/delete-driver",
-        "oem42.inf",
-        "/uninstall",
-        "/force"
+        "oem42.inf"
     )
     if ([string]::Join("`n", $script:processCall.Arguments) -cne
         [string]::Join("`n", $expected)) {
@@ -521,6 +529,32 @@ Invoke-Case -Name "one exact delete-driver command" -Action {
     }
     if ($script:processCall.TimeoutSeconds -ne 120) {
         throw "Delete-driver command did not use the bounded PnP timeout."
+    }
+}
+
+Invoke-Case -Name "delete-driver failure leaves package unproven" -Action {
+    Import-LifecycleFunctions -Path $uninstallScript
+    $script:processCall = $null
+    Set-TestFunction -Name Resolve-SystemPnpUtil -Body {
+        "C:\Windows\System32\pnputil.exe"
+    }
+    Set-TestFunction -Name Invoke-CapturedProcess -Body {
+        param($Executable, $Arguments, $TimeoutSeconds)
+        $script:processCall = [pscustomobject]@{
+            Arguments = @($Arguments)
+            TimeoutSeconds = $TimeoutSeconds
+        }
+        [pscustomobject]@{ ExitCode = 5; OutputLines = @() }
+    }
+    Assert-Throws `
+        -Pattern "package remains|package state is unproven|new reference" `
+        -Action {
+        Invoke-PnpUtilDeleteDriver -PublishedInf "oem42.inf"
+    }
+    $expected = @("/delete-driver", "oem42.inf")
+    if ([string]::Join("`n", $script:processCall.Arguments) -cne
+        [string]::Join("`n", $expected)) {
+        throw "Delete failure path used uninstall or force arguments."
     }
 }
 

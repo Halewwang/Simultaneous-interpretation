@@ -157,12 +157,15 @@ function New-InstallPackageRecord {
         Directory = $directory
         Inf = [pscustomobject]@{
             FullName = "$directory\Driver Name.inf"
+            Name = "Driver Name.inf"
         }
         Sys = [pscustomobject]@{
             FullName = "$directory\Driver Name.sys"
+            Name = "Driver Name.sys"
         }
         Cat = [pscustomobject]@{
             FullName = "$directory\Driver Name.cat"
+            Name = "Driver Name.cat"
         }
     }
 }
@@ -279,10 +282,17 @@ function Set-InstallOrchestratorExternalBoundaries {
         }
     }
     Set-TestFunction -Name Assert-InstalledDriverPackageIdentity -Body {
+        param(
+            $Devnode,
+            $InfMetadata,
+            $TrustedPackage,
+            $ExpectedPackageSha256
+        )
         [pscustomobject]@{
             InfName = "oem42.inf"
             DriverVersion = "1.0.0.1"
             ProviderName = "EMKE"
+            PackageSha256 = "A" * 64
         }
     }
     Set-TestFunction -Name Resolve-SystemPnpUtil -Body {
@@ -361,8 +371,13 @@ Invoke-Case -Name "protected staging ACL contract and cleanup guard" -Action {
         Set-TestFunction -Name Get-SystemStagingRoot -Body {
             $script:testStagingRoot
         }
+        Set-TestFunction -Name Get-SystemStagingBase -Body {
+            $script:testStagingBase
+        }
         Set-TestFunction -Name Assert-ProtectedStagingAcl -Body {}
         $script:testStagingRoot = $testRoot
+        $script:testStagingBase =
+            [IO.DirectoryInfo]::new($testRoot).Parent.FullName
         Remove-ProtectedStagingDirectory -Path $staging -Token $token
         if (Test-Path -LiteralPath $staging) {
             throw "Exact owned staging directory was not removed."
@@ -394,7 +409,53 @@ Invoke-Case -Name "protected staging ACL contract and cleanup guard" -Action {
     }
 }
 
+Invoke-Case `
+    -Name "protected staging chain rejects weak parent and replacement" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $base = Join-Path $PSScriptRoot ".protected-chain"
+        $root = Join-Path $base "DriverLabStaging"
+        $staging = Join-Path $root ("1" * 32)
+        Set-TestFunction -Name Get-SystemStagingBase -Body ({
+            $base
+        }.GetNewClosure())
+        Set-TestFunction -Name Get-SystemStagingRoot -Body ({
+            $root
+        }.GetNewClosure())
+        Set-TestFunction -Name Assert-LocalNonReparsePath -Body {
+            param($Path)
+            $Path
+        }
+        Set-TestFunction -Name Assert-ProtectedStagingAcl -Body {
+            param($Path)
+            if ($Path -ceq $script:protectedChainBase) {
+                throw "weak parent staging ACL"
+            }
+        }
+        $script:protectedChainBase = $base
+        Assert-Throws -Pattern "weak parent" -Action {
+            Assert-ProtectedStagingChain -StagingPath $staging
+        }
+
+        Set-TestFunction -Name Assert-ProtectedStagingAcl -Body {}
+        Set-TestFunction -Name Assert-LocalNonReparsePath -Body {
+            param($Path)
+            if ($Path -ceq $script:protectedChainRoot) {
+                throw "reparse replacement detected"
+            }
+            $Path
+        }
+        $script:protectedChainRoot = $root
+        Assert-Throws -Pattern "reparse replacement" -Action {
+            Assert-ProtectedStagingChain -StagingPath $staging
+        }
+    }
+
 Invoke-Case -Name "staged inputs detect package and smoke replacement" -Action {
+    Set-TestFunction -Name Assert-ProtectedStagingChain -Body {
+        param($StagingPath)
+        $StagingPath
+    }
     $testRoot = New-WorkspaceTestRootPath -Prefix "emke-staged-input"
     try {
         [IO.Directory]::CreateDirectory($testRoot) | Out-Null
@@ -523,17 +584,26 @@ Invoke-Case -Name "install orchestrator uses only protected staged copies" -Acti
     }
     $script:identityChecks = 0
     Set-TestFunction -Name Assert-InstalledDriverPackageIdentity -Body {
-        param($Devnode, $InfMetadata)
+        param(
+            $Devnode,
+            $InfMetadata,
+            $TrustedPackage,
+            $ExpectedPackageSha256
+        )
         $script:identityChecks += 1
         if ($Devnode.PNPDeviceID -cne
             "ROOT\EMKEVIRTUALAUDIO\0000" -or
-            $InfMetadata.DriverVersion -cne "1.0.0.1") {
+            $InfMetadata.DriverVersion -cne "1.0.0.1" -or
+            $TrustedPackage.Inf.FullName -cne
+            $stagedPackage.Inf.FullName -or
+            $ExpectedPackageSha256 -cne ("A" * 64)) {
             throw "Package identity received the wrong binding inputs."
         }
         [pscustomobject]@{
             InfName = "oem42.inf"
             DriverVersion = "1.0.0.1"
             ProviderName = "EMKE"
+            PackageSha256 = "A" * 64
         }
     }
     $installOutput = @(Invoke-InstallTestDriver `
@@ -727,6 +797,8 @@ Invoke-Case -Name "install devnode validation" -Action {
 Invoke-Case -Name "installed package identity matches exact devnode" -Action {
     Import-LifecycleFunctions -Path $installScript
     $devnode = New-Devnode
+    $trustedPackage = New-InstallPackageRecord
+    $trustedDigest = "A" * 64
     $metadata = [pscustomobject]@{
         DriverVersion = "1.0.0.1"
         ProviderName = "EMKE"
@@ -748,10 +820,24 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
     Set-TestFunction -Name Get-CimInstance -Body {
         @($script:signedDriverRows)
     }
+    Set-TestFunction -Name Get-InstalledDriverStorePackage -Body {
+        param($PublishedInf, $TrustedPackage)
+        if ($PublishedInf -cne "oem42.inf" -or
+            $TrustedPackage.Inf.Name -cne "Driver Name.inf") {
+            throw "Installed package resolver received the wrong identity."
+        }
+        $TrustedPackage
+    }
+    Set-TestFunction -Name Get-DriverPackageSha256 -Body {
+        "A" * 64
+    }
     $identity = Assert-InstalledDriverPackageIdentity `
         -Devnode $devnode `
-        -InfMetadata $metadata
-    if ($identity.InfName -cne "oem42.inf") {
+        -InfMetadata $metadata `
+        -TrustedPackage $trustedPackage `
+        -ExpectedPackageSha256 $trustedDigest
+    if ($identity.InfName -cne "oem42.inf" -or
+        $identity.PackageSha256 -cne $trustedDigest) {
         throw "Exact devnode package identity selected the wrong row."
     }
 
@@ -787,10 +873,118 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
             -Action {
             Assert-InstalledDriverPackageIdentity `
                 -Devnode $devnode `
-                -InfMetadata $metadata
+                -InfMetadata $metadata `
+                -TrustedPackage $trustedPackage `
+                -ExpectedPackageSha256 $trustedDigest
         }
     }
+
+    $script:signedDriverRows = @([pscustomobject]@{
+        DeviceID = $devnode.PNPDeviceID
+        InfName = "oem42.inf"
+        DriverVersion = "1.0.0.1"
+        ProviderName = "EMKE"
+    })
+    Set-TestFunction -Name Get-DriverPackageSha256 -Body {
+        "B" * 64
+    }
+    Assert-Throws -Pattern "content|digest|SHA-256" -Action {
+        Assert-InstalledDriverPackageIdentity `
+            -Devnode $devnode `
+            -InfMetadata $metadata `
+            -TrustedPackage $trustedPackage `
+            -ExpectedPackageSha256 $trustedDigest
+    }
 }
+
+Invoke-Case `
+    -Name "installed Driver Store package binds exact trusted file content" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        $testRoot = New-WorkspaceTestRootPath -Prefix "emke-driver-store"
+        try {
+            [IO.Directory]::CreateDirectory($testRoot) | Out-Null
+            $inputs = New-TemporaryInputSet -Root $testRoot
+            $repository = Join-Path $testRoot "FileRepository"
+            $installedDirectory =
+                Join-Path $repository "emke_virtualaudio_test"
+            [IO.Directory]::CreateDirectory($installedDirectory) | Out-Null
+            foreach ($file in @(
+                $inputs.Package.Inf,
+                $inputs.Package.Sys,
+                $inputs.Package.Cat
+            )) {
+                [IO.File]::Copy(
+                    $file.FullName,
+                    (Join-Path $installedDirectory $file.Name),
+                    $false
+                )
+            }
+            [IO.File]::WriteAllText(
+                (Join-Path $installedDirectory "generated.pnf"),
+                "allowed Driver Store metadata"
+            )
+            [IO.File]::AppendAllText(
+                (Join-Path $installedDirectory $inputs.Package.Sys.Name),
+                "DIFFERENT CONTENT"
+            )
+
+            $script:installedOriginalInf = Join-Path `
+                $installedDirectory `
+                $inputs.Package.Inf.Name
+            Set-TestFunction -Name Get-WindowsDriver -Body {
+                [pscustomobject]@{
+                    Driver = "oem42.inf"
+                    OriginalFileName = $script:installedOriginalInf
+                }
+            }
+            Set-TestFunction -Name Get-DriverStoreFileRepositoryRoot -Body ({
+                $repository
+            }.GetNewClosure())
+            $devnode = New-Devnode
+            Set-TestFunction -Name Get-CimInstance -Body {
+                [pscustomobject]@{
+                    DeviceID = "ROOT\EMKEVIRTUALAUDIO\0000"
+                    InfName = "oem42.inf"
+                    DriverVersion = "1.0.0.1"
+                    ProviderName = "EMKE"
+                }
+            }
+            $trustedDigest =
+                Get-DriverPackageSha256 -Package $inputs.Package
+            Assert-Throws -Pattern "content|SHA-256" -Action {
+                Assert-InstalledDriverPackageIdentity `
+                    -Devnode $devnode `
+                    -InfMetadata ([pscustomobject]@{
+                        DriverVersion = "1.0.0.1"
+                        ProviderName = "EMKE"
+                    }) `
+                    -TrustedPackage $inputs.Package `
+                    -ExpectedPackageSha256 $trustedDigest
+            }
+
+            $outsideDirectory = Join-Path $testRoot "outside"
+            [IO.Directory]::CreateDirectory($outsideDirectory) | Out-Null
+            $outsideInf = Join-Path `
+                $outsideDirectory `
+                $inputs.Package.Inf.Name
+            [IO.File]::Copy(
+                $inputs.Package.Inf.FullName,
+                $outsideInf,
+                $false
+            )
+            $script:installedOriginalInf = $outsideInf
+            Assert-Throws -Pattern "outside Driver Store" -Action {
+                Get-InstalledDriverStorePackage `
+                    -PublishedInf "oem42.inf" `
+                    -TrustedPackage $inputs.Package
+            }
+        } finally {
+            if (Test-Path -LiteralPath $testRoot) {
+                Remove-Item -LiteralPath $testRoot -Recurse -Force
+            }
+        }
+    }
 
 Invoke-Case -Name "embedded SetupAPI helper compiles without mutation" -Action {
     Import-LifecycleFunctions -Path $installScript
@@ -819,6 +1013,32 @@ Invoke-Case -Name "embedded SetupAPI helper compiles without mutation" -Action {
     )) {
         if ($null -eq $exceptionType.GetProperty($property)) {
             throw "Typed create exception is missing '$property'."
+        }
+    }
+}
+
+Invoke-Case -Name "root DeviceName is derived from exact hardware ID" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Initialize-RootDevnodeSetupApi
+    $helper = "Emke.DriverLab.RootDevnodeSetupApi" -as [type]
+    $method = $helper.GetMethod("GetRootDeviceName")
+    if ($null -eq $method) {
+        throw "Embedded SetupAPI helper has no DeviceName derivation seam."
+    }
+    $deviceName = $method.Invoke(
+        $null,
+        @("ROOT\EMKEVIRTUALAUDIO")
+    )
+    if ($deviceName -cne "EMKEVIRTUALAUDIO") {
+        throw "Root DeviceName was not the exact hardware-ID suffix."
+    }
+    foreach ($invalid in @(
+        "MEDIA",
+        "ROOT\MEDIA",
+        "ROOT\EMKEVIRTUALAUDIO\0000"
+    )) {
+        Assert-Throws -Pattern "hardware ID|root" -Action {
+            [void]$method.Invoke($null, @($invalid))
         }
     }
 }
@@ -856,6 +1076,103 @@ Invoke-Case `
     }
 
 Invoke-Case `
+    -Name "real CSharp post-register transaction exercises rollback" `
+    -Action {
+        Import-LifecycleFunctions -Path $installScript
+        Initialize-RootDevnodeSetupApi
+        $transaction =
+            "Emke.DriverLab.RootDevnodeRegistrationTransaction" -as [type]
+        if ($null -eq $transaction) {
+            throw "Embedded SetupAPI helper has no registration transaction."
+        }
+        $complete = $transaction.GetMethod("Complete")
+        if ($null -eq $complete) {
+            throw "Registration transaction has no Complete method."
+        }
+        $expectedInstanceId = "ROOT\EMKEVIRTUALAUDIO\0042"
+
+        $script:transactionSequence =
+            [Collections.Generic.List[string]]::new()
+        $register = [Action]{
+            [void]$script:transactionSequence.Add("register")
+        }
+        $readFailure = [Func[string]]{
+            [void]$script:transactionSequence.Add("post-register-read")
+            throw [InvalidOperationException]::new(
+                "simulated post-register validation failure"
+            )
+        }
+        $rollback = [Action]{
+            [void]$script:transactionSequence.Add("rollback")
+        }
+        $caught = $null
+        try {
+            [void]$complete.Invoke(
+                $null,
+                @(
+                    $expectedInstanceId,
+                    $register,
+                    $readFailure,
+                    $rollback
+                )
+            )
+        } catch {
+            $caught = $_
+        }
+        $metadata = if ($null -eq $caught) {
+            $null
+        } else {
+            Get-RootDevnodeFailureMetadata -Exception $caught.Exception
+        }
+        if ($null -eq $metadata -or
+            $metadata.RollbackCompleted -ne $true -or
+            $metadata.StateUncertain -ne $false -or
+            [string]::Join(
+                ",",
+                $script:transactionSequence
+            ) -cne "register,post-register-read,rollback") {
+            throw "Real C# transaction did not complete exact rollback."
+        }
+
+        $script:transactionSequence.Clear()
+        $rollbackFailure = [Action]{
+            [void]$script:transactionSequence.Add("rollback")
+            throw [InvalidOperationException]::new(
+                "simulated rollback failure"
+            )
+        }
+        $caught = $null
+        try {
+            [void]$complete.Invoke(
+                $null,
+                @(
+                    $expectedInstanceId,
+                    $register,
+                    $readFailure,
+                    $rollbackFailure
+                )
+            )
+        } catch {
+            $caught = $_
+        }
+        $metadata = if ($null -eq $caught) {
+            $null
+        } else {
+            Get-RootDevnodeFailureMetadata -Exception $caught.Exception
+        }
+        if ($null -eq $metadata -or
+            $metadata.RollbackCompleted -ne $false -or
+            $metadata.StateUncertain -ne $true -or
+            $null -eq $metadata.Failure.CleanupFailure -or
+            [string]::Join(
+                ",",
+                $script:transactionSequence
+            ) -cne "register,post-register-read,rollback") {
+            throw "Real C# transaction lost uncertain rollback state."
+        }
+    }
+
+Invoke-Case `
     -Name "pre-register instance ID failure performs no mutation" `
     -Action {
         Import-LifecycleFunctions -Path $installScript
@@ -873,15 +1190,15 @@ Invoke-Case `
             $removeStart - $createStart
         )
         $getId = $createBody.IndexOf(
-            "if (!SetupDiGetDeviceInstanceIdW("
+            "string result = GetDeviceInstanceIdFromInfoElement("
         )
-        $validate = $createBody.IndexOf(
-            "ValidateExactInstanceId(result);"
+        $transaction = $createBody.IndexOf(
+            "RootDevnodeRegistrationTransaction.Complete("
         )
         $register = $createBody.IndexOf("DifRegisterDevice,")
         if ($getId -lt 0 -or
-            $validate -le $getId -or
-            $register -le $validate) {
+            $transaction -le $getId -or
+            $register -le $transaction) {
             throw (
                 "Generated exact instance ID is not proven before " +
                 "DIF_REGISTERDEVICE."
@@ -914,7 +1231,9 @@ Invoke-Case `
                 -InfMetadata ([pscustomobject]@{
                     DriverVersion = "1.0.0.1"
                     ProviderName = "EMKE"
-                })
+                }) `
+                -TrustedPackage (New-InstallPackageRecord) `
+                -ExpectedPackageSha256 ("A" * 64)
         }
         if ($script:mutationCalls -ne 0 -or
             $script:inventoryCalls -ne 1) {
@@ -958,7 +1277,9 @@ Invoke-Case `
                 -InfMetadata ([pscustomobject]@{
                     DriverVersion = "1.0.0.1"
                     ProviderName = "EMKE"
-                })
+                }) `
+                -TrustedPackage (New-InstallPackageRecord) `
+                -ExpectedPackageSha256 ("A" * 64)
         }
         if ($script:externalMutationCalls -ne 0 -or
             $script:inventoryCalls -ne 1) {
@@ -1001,7 +1322,9 @@ Invoke-Case `
                 -InfMetadata ([pscustomobject]@{
                     DriverVersion = "1.0.0.1"
                     ProviderName = "EMKE"
-                })
+                }) `
+                -TrustedPackage (New-InstallPackageRecord) `
+                -ExpectedPackageSha256 ("A" * 64)
         } catch {
             $caught = $_
         }
@@ -1044,11 +1367,18 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
         [void]$script:stateSequence.Add("bind")
     }
     Set-TestFunction -Name Assert-InstalledDriverPackageIdentity -Body {
+        param(
+            $Devnode,
+            $InfMetadata,
+            $TrustedPackage,
+            $ExpectedPackageSha256
+        )
         [void]$script:stateSequence.Add("identity")
         [pscustomobject]@{
             InfName = "oem42.inf"
             DriverVersion = "1.0.0.1"
             ProviderName = "EMKE"
+            PackageSha256 = "A" * 64
         }
     }
     Set-TestFunction -Name Remove-ExactCreatedRootDevnode -Body {
@@ -1061,7 +1391,9 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
         -InfMetadata ([pscustomobject]@{
             DriverVersion = "1.0.0.1"
             ProviderName = "EMKE"
-        })
+        }) `
+        -TrustedPackage (New-InstallPackageRecord) `
+        -ExpectedPackageSha256 ("A" * 64)
     $expected = @(
         "preflight-empty",
         "create:ROOT\EMKEVIRTUALAUDIO",
@@ -1095,7 +1427,9 @@ Invoke-Case -Name "preexisting target blocks root creation" -Action {
             -InfMetadata ([pscustomobject]@{
                 DriverVersion = "1.0.0.1"
                 ProviderName = "EMKE"
-            })
+            }) `
+            -TrustedPackage (New-InstallPackageRecord) `
+            -ExpectedPackageSha256 ("A" * 64)
     }
     if ($script:createCalls -ne 0) {
         throw "Pre-existing target reached root-devnode creation."
@@ -1137,7 +1471,9 @@ Invoke-Case -Name "bind failure reports partial state and exact cleanup" -Action
                 -InfMetadata ([pscustomobject]@{
                     DriverVersion = "1.0.0.1"
                     ProviderName = "EMKE"
-                })
+                }) `
+                -TrustedPackage (New-InstallPackageRecord) `
+                -ExpectedPackageSha256 ("A" * 64)
         }
         if ($cleanupIds.Count -ne 1 -or
             $cleanupIds[0] -cne
@@ -1509,7 +1845,7 @@ Invoke-Case -Name "uninstall orchestrator exact process boundary" -Action {
     }
     $expectedCalls = @(
         ,@("/remove-device", "ROOT\EMKEVIRTUALAUDIO\0000")
-        ,@("/delete-driver", "oem42.inf", "/uninstall", "/force")
+        ,@("/delete-driver", "oem42.inf")
     )
     for ($index = 0; $index -lt $expectedCalls.Count; $index += 1) {
         if ($script:processCalls[$index].Executable -cne
@@ -1532,6 +1868,29 @@ Invoke-Case -Name "uninstall orchestrator exact process boundary" -Action {
     if ([string]::Join("`n", $script:uninstallSequence) -cne
         [string]::Join("`n", $expectedSequence)) {
         throw "Uninstall remove/unreference/delete sequence was not exact."
+    }
+}
+
+Invoke-Case -Name "delete-driver race fails closed without forced mutation" -Action {
+    Import-LifecycleFunctions -Path $uninstallScript
+    Set-TestFunction -Name Resolve-SystemPnpUtil -Body {
+        "C:\Windows\System32\pnputil.exe"
+    }
+    $script:deleteArguments = @()
+    Set-TestFunction -Name Invoke-CapturedProcess -Body {
+        param($Executable, $Arguments)
+        $script:deleteArguments = @($Arguments)
+        [pscustomobject]@{ ExitCode = 5; OutputLines = @() }
+    }
+    Assert-Throws `
+        -Pattern "package remains|package state is unproven|new reference" `
+        -Action {
+        Invoke-PnpUtilDeleteDriver -PublishedInf "oem42.inf"
+    }
+    $expected = @("/delete-driver", "oem42.inf")
+    if ([string]::Join("`n", $script:deleteArguments) -cne
+        [string]::Join("`n", $expected)) {
+        throw "Delete race used uninstall or force mutation arguments."
     }
 }
 
@@ -1727,7 +2086,9 @@ Invoke-Case -Name "process timeout permits only read-only inventory" -Action {
             -InfMetadata ([pscustomobject]@{
                 DriverVersion = "1.0.0.1"
                 ProviderName = "EMKE"
-            })
+            }) `
+            -TrustedPackage (New-InstallPackageRecord) `
+            -ExpectedPackageSha256 ("A" * 64)
     } catch {
         $caught = $_
     }
