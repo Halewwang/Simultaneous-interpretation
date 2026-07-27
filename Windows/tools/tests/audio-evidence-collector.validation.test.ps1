@@ -462,7 +462,9 @@ Invoke-Case -Name "flat package digest and INF metadata are exact" -Action {
 }
 
 Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action {
-    $valid = Get-ValidInfText
+    # Exercise the Windows checkout form on every host.
+    $valid = (Get-ValidInfText).Replace("`r`n", "`n")
+    $valid = $valid.Replace("`r", "`n").Replace("`n", "`r`n")
     $metadata = Get-CollectorInfMetadata `
         -Text $valid `
         -WindowsBuild 26200
@@ -490,6 +492,17 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
     if ($realMetadata.Version -cne "1.0.0.1" -or
         $realMetadata.Abi -ne 1) {
         throw "Real INF did not traverse the frozen active chain."
+    }
+
+    $missingInstallSectionInf = $valid.Replace(
+        (
+            "[EMKE_Install.NT]`r`n" +
+            "AddReg=EMKE.Device.AddReg`r`n`r`n"
+        ),
+        ""
+    )
+    if ($missingInstallSectionInf -ceq $valid) {
+        throw "CRLF missing-install-section mutation did not change the INF."
     }
 
     $cases = @(
@@ -576,13 +589,7 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
         },
         @{
             Name = "missing install section"
-            Text = $valid.Replace(
-                (
-                    "[EMKE_Install.NT]`n" +
-                    "AddReg=EMKE.Device.AddReg`n`n"
-                ),
-                ""
-            )
+            Text = $missingInstallSectionInf
         },
         @{
             Name = "wrong AddReg chain"
