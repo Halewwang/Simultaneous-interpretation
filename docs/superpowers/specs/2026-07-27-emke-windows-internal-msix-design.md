@@ -1,7 +1,7 @@
 # EMKE Translation Windows Internal MSIX Design
 
 **Date:** 2026-07-27
-**Status:** Approved; Microsoft trust-store correction awaiting reconfirmation
+**Status:** Approved, including elevated Internal certificate trust
 **Implementation baseline:** `dd9d3cf` (`docs: record Task 7B hosted evidence`)
 **Target:** Windows 11 25H2+, x64, Internal channel
 
