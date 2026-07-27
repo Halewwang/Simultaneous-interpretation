@@ -1,4 +1,5 @@
 using System.Text.Json;
+using EMKE.Realtime;
 
 namespace EMKE.Contract.Tests;
 
@@ -194,18 +195,44 @@ public sealed class SharedFixtureTests
         }
     }
 
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
+    [TestCategory("Realtime")]
+    public void RealtimeProtocolRegistryExactlyMatchesCanonicalSchema()
+    {
+        AssertFixtureCategoryIsReadable("realtime");
+
+        using JsonDocument schema = LoadSchema("translation-events.schema.json");
+        string[] schemaTypes = schema.RootElement
+            .GetProperty("oneOf")
+            .EnumerateArray()
+            .Select(static branch => branch
+                .GetProperty("properties")
+                .GetProperty("type")
+                .GetProperty("const")
+                .GetString()
+                ?? throw new InvalidDataException(
+                    "Translation event type const values must be strings."))
+            .ToArray();
+
+        Assert.HasCount(
+            schemaTypes.Length,
+            schemaTypes.Distinct(StringComparer.Ordinal));
+        CollectionAssert.AreEquivalent(
+            schemaTypes,
+            TranslationEventCodec.EventTypes.ToArray());
+    }
+
     // TODO(Runtime Task 10): Remove any fixture-adapter inconclusive results that remain.
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Realtime")]
-    public void RealtimeFixturesAwaitOwnedAdaptersAndProtocolRegistry()
+    public void RealtimeHandshakeFixtureAwaitsOwnedSessionAdapter()
     {
         AssertFixtureCategoryIsReadable("realtime");
 
-        // TODO(Runtime Task 4): Replace this inconclusive result with exact
-        // TranslationEventCodec/ProtocolEventRegistry parity and fixture adapter assertions.
         Assert.Inconclusive(
-            "Awaiting EMKE.Realtime fixture adapters and protocol registry validation (Runtime Tasks 4-5).");
+            "Protocol registry parity is enforced; the handshake fixture awaits the session adapter (Runtime Task 5).");
     }
 
     [TestMethod]

@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/EMKE.Core/EMKE.Core.csproj" />
+    <ProjectReference Include="../../src/EMKE.Realtime/EMKE.Realtime.csproj" />
   </ItemGroup>
 
   <ItemGroup>

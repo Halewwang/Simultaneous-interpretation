@@ -115,6 +115,12 @@
       },
       "emke.core": {
         "type": "Project"
+      },
+      "emke.realtime": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Core": "[1.0.0, )"
+        }
       }
     },
     "net10.0-windows10.0.26100/win-x64": {}

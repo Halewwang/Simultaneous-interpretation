@@ -4,4 +4,8 @@
     <ProjectReference Include="../EMKE.Core/EMKE.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="EMKE.Realtime.Tests" />
+  </ItemGroup>
+
 </Project>
