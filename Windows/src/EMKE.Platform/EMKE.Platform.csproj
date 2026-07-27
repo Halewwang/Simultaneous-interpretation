@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="EMKE.Integration.Tests" />
+    <InternalsVisibleTo Include="EMKE.SafeHandle.FinalizerProbe" />
   </ItemGroup>
 
 </Project>

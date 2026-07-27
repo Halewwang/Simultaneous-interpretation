@@ -263,6 +263,8 @@ internal sealed class FakeNativeAudioApi : INativeAudioApi
 
     public Exception? StartException { get; set; }
 
+    public Exception? DestroyException { get; set; }
+
     public bool ReturnHandleOnCreateFailure { get; set; }
 
     public int CreateCount { get; private set; }
@@ -329,6 +331,10 @@ internal sealed class FakeNativeAudioApi : INativeAudioApi
     {
         Assert.AreNotEqual(nint.Zero, handle);
         DestroyCount++;
+        if (DestroyException is not null)
+        {
+            throw DestroyException;
+        }
     }
 
     public NativeAudioStatus Start(SafeNativeAudioHandle handle)

@@ -178,8 +178,17 @@ internal sealed class SafeNativeAudioHandle : SafeHandleZeroOrMinusOneIsInvalid
 
     protected override bool ReleaseHandle()
     {
-        _owner.Destroy(handle);
-        return true;
+#pragma warning disable CA1031 // SafeHandle release and critical finalization must never propagate.
+        try
+        {
+            _owner.Destroy(handle);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+#pragma warning restore CA1031
     }
 }
 

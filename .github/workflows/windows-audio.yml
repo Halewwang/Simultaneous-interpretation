@@ -166,7 +166,7 @@ jobs:
           }
           Assert-ExactTestEvidence `
             -Path (Join-Path $managedSeamResults "native-audio-managed-seam.trx") `
-            -Expected 16 `
+            -Expected 18 `
             -Label "Managed seam native-audio integration test"
 
           $nativeFakeDll = "Windows/artifacts/native-test/x64/Release/EMKE.NativeAudio.ManagedFake.dll"

@@ -14,6 +14,9 @@
   <ItemGroup>
     <ProjectReference Include="../../src/EMKE.Application/EMKE.Application.csproj" />
     <ProjectReference Include="../../src/EMKE.Platform/EMKE.Platform.csproj" />
+    <ProjectReference
+      Include="../EMKE.SafeHandle.FinalizerProbe/EMKE.SafeHandle.FinalizerProbe.csproj"
+      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
