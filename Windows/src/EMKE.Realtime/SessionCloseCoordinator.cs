@@ -21,7 +21,9 @@ internal sealed class SessionCloseCoordinator
     private readonly IClock _clock;
     private readonly object _sync = new();
     private readonly Dictionary<long, Task<SessionCloseOutcome>> _completions = [];
+    private Task? _detachedSendObservation;
     private long _activeGeneration;
+    private int _detachedSendResourceDisposeCount;
 
     public SessionCloseCoordinator(IClock clock)
     {
@@ -38,6 +40,20 @@ internal sealed class SessionCloseCoordinator
             }
         }
     }
+
+    internal Task? DetachedSendObservationForTest
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _detachedSendObservation;
+            }
+        }
+    }
+
+    internal int DetachedSendResourceDisposeCountForTest =>
+        Volatile.Read(ref _detachedSendResourceDisposeCount);
 
     public void Activate(long generation)
     {
@@ -93,7 +109,9 @@ internal sealed class SessionCloseCoordinator
         Task remoteClosed)
     {
         CancellationTokenSource deadlineCancellation = new();
+#pragma warning disable CA2000 // Ownership transfers to the detached observer when a sender ignores cancellation.
         CancellationTokenSource sendCancellation = new();
+#pragma warning restore CA2000
         Task deadline = _clock.DelayAsync(
             TimeSpan.FromMilliseconds(DeadlineMilliseconds),
             deadlineCancellation.Token).AsTask();
@@ -165,9 +183,15 @@ internal sealed class SessionCloseCoordinator
             }
             else
             {
-#pragma warning disable CA2025 // A non-cooperative sender cannot delay local close; the observer owns the CTS until it converges.
-                _ = DisposeAfterSendCompletesAsync(send, sendCancellation);
+#pragma warning disable CA2025 // Ownership is transferred to an observer that runs after the send completes.
+                Task observation = ObserveDetachedSend(
+                    send,
+                    sendCancellation);
 #pragma warning restore CA2025
+                lock (_sync)
+                {
+                    _detachedSendObservation = observation;
+                }
             }
 
             deadlineCancellation.Dispose();
@@ -219,18 +243,22 @@ internal sealed class SessionCloseCoordinator
         }
     }
 
-    private static async Task DisposeAfterSendCompletesAsync(
+    private Task ObserveDetachedSend(
         Task<RuntimeError?> send,
         CancellationTokenSource cancellation)
     {
-        try
-        {
-            _ = await send.ConfigureAwait(false);
-        }
-        finally
-        {
-            cancellation.Dispose();
-        }
+#pragma warning disable CA2025 // This continuation is the lifetime owner and runs only after the detached send completes.
+        return send.ContinueWith(
+            completed =>
+            {
+                _ = completed.Exception;
+                cancellation.Dispose();
+                Interlocked.Increment(ref _detachedSendResourceDisposeCount);
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+#pragma warning restore CA2025
     }
 
     private static RuntimeError Error(

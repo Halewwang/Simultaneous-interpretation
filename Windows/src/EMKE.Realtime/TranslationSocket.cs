@@ -106,7 +106,10 @@ public sealed class TranslationSocket : ITranslationTransport
 
     private readonly IClientWebSocket _adapter;
     private readonly byte[] _receiveBuffer;
-    private bool _disposed;
+#pragma warning disable CA2213 // The gate must outlive detached in-flight sends during synchronous transport disposal.
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+#pragma warning restore CA2213
+    private int _disposed;
 
     public TranslationSocket()
         : this(new ClientWebSocketAdapter(), DefaultReceiveLimit)
@@ -127,7 +130,7 @@ public sealed class TranslationSocket : ITranslationTransport
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
 
         try
         {
@@ -163,7 +166,7 @@ public sealed class TranslationSocket : ITranslationTransport
         ReadOnlySpan<byte> pcm16,
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
         try
         {
             return SendClientEventAsync(
@@ -197,7 +200,7 @@ public sealed class TranslationSocket : ITranslationTransport
     public async ValueTask<TranslationReceiveResult> ReceiveEventAsync(
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
 
         int used = 0;
         try
@@ -284,12 +287,11 @@ public sealed class TranslationSocket : ITranslationTransport
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
         CryptographicOperations.ZeroMemory(_receiveBuffer);
         _adapter.Dispose();
     }
@@ -299,15 +301,19 @@ public sealed class TranslationSocket : ITranslationTransport
         WebSocketMessageType messageType,
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         RuntimeError? frameError = TranslationClientFramePolicy.Validate(messageType);
         if (frameError is not null)
         {
             return frameError;
         }
 
+        bool entered = false;
         try
         {
+            ThrowIfDisposed();
+            await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            entered = true;
+            ThrowIfDisposed();
             await _adapter.SendAsync(
                 payload,
                 messageType,
@@ -328,6 +334,20 @@ public sealed class TranslationSocket : ITranslationTransport
         {
             return NetworkError("translationSocket.sendFailed");
         }
+        finally
+        {
+            if (entered)
+            {
+                _sendGate.Release();
+            }
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
     }
 
     private static RuntimeError ProtocolError(string code)

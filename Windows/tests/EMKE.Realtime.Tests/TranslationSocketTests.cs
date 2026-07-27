@@ -55,6 +55,33 @@ public sealed class TranslationSocketTests
     }
 
     [TestMethod]
+    public async Task ClientSendsAreSerializedAndWaitingSendHonorsCancellation()
+    {
+        BlockingClientWebSocket adapter = new();
+        TranslationSocket socket = new(adapter, receiveLimit: 256);
+        using CancellationTokenSource audioCancellation = new();
+        using CancellationTokenSource closeCancellation = new();
+
+        Task<RuntimeError?> audio = socket.SendAudioAppendAsync(
+            [1, 2, 3, 4],
+            audioCancellation.Token).AsTask();
+        await adapter.FirstSendEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task<RuntimeError?> close = socket.SendSessionCloseAsync(
+            closeCancellation.Token).AsTask();
+        await closeCancellation.CancelAsync();
+
+        RuntimeError? closeError = await close;
+        Assert.AreEqual("translationSocket.sendCanceled", closeError!.Code);
+        Assert.AreEqual(1, adapter.SendCount);
+        Assert.AreEqual(1, adapter.MaxConcurrentSendCount);
+
+        await audioCancellation.CancelAsync();
+        RuntimeError? audioError = await audio;
+        Assert.AreEqual("translationSocket.sendCanceled", audioError!.Code);
+        Assert.AreEqual(1, adapter.MaxConcurrentSendCount);
+    }
+
+    [TestMethod]
     public async Task ReceiveAssemblesFragmentedTextAndClearsUsedBuffer()
     {
         FakeClientWebSocket adapter = new(
@@ -287,6 +314,68 @@ public sealed class TranslationSocketTests
                     frame.Payload.Length,
                     frame.Type,
                     frame.EndOfMessage));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class BlockingClientWebSocket : IClientWebSocket
+    {
+        private int _activeSendCount;
+        private int _maxConcurrentSendCount;
+        private int _sendCount;
+
+        public TaskCompletionSource FirstSendEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int SendCount => Volatile.Read(ref _sendCount);
+
+        public int MaxConcurrentSendCount => Volatile.Read(ref _maxConcurrentSendCount);
+
+        public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public async ValueTask SendAsync(
+            ReadOnlyMemory<byte> payload,
+            WebSocketMessageType messageType,
+            bool endOfMessage,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _sendCount);
+            int active = Interlocked.Increment(ref _activeSendCount);
+            int observed;
+            while (active > (observed = Volatile.Read(ref _maxConcurrentSendCount)))
+            {
+                if (Interlocked.CompareExchange(
+                        ref _maxConcurrentSendCount,
+                        active,
+                        observed) == observed)
+                {
+                    break;
+                }
+            }
+
+            FirstSendEntered.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeSendCount);
+            }
+        }
+
+        public ValueTask<ValueWebSocketReceiveResult> ReceiveAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromException<ValueWebSocketReceiveResult>(
+                new NotSupportedException());
         }
 
         public void Dispose()

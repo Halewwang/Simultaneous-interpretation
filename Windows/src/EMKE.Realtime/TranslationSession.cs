@@ -45,20 +45,7 @@ public static class TranslationSessionCreationPolicy
         return new TranslationSessionCreationPlan(
             InboundSocketCount: 1,
             OutboundSocketCount: requestOutbound && requiresOutbound ? 1 : 0,
-            Inbound: new TranslationInboundChannelPlan(
-                ChannelState.Connected,
-                InboundRoute.Translated),
-            Outbound: requestOutbound
-                ? requiresOutbound
-                    ? new TranslationOutboundChannelPlan(
-                        ChannelState.Connected,
-                        OutboundRoute.Translated)
-                    : new TranslationOutboundChannelPlan(
-                        ChannelState.Bypassed,
-                        OutboundRoute.OriginalBypass)
-                : new TranslationOutboundChannelPlan(
-                    ChannelState.Inactive,
-                    OutboundRoute.Stopped));
+            OutboundBypassed: requestOutbound && !requiresOutbound);
     }
 
     public static bool RequiresOutboundSession(
@@ -82,73 +69,7 @@ public static class TranslationSessionCreationPolicy
 public sealed record TranslationSessionCreationPlan(
     int InboundSocketCount,
     int OutboundSocketCount,
-    TranslationInboundChannelPlan Inbound,
-    TranslationOutboundChannelPlan Outbound)
-{
-    public bool OutboundBypassed =>
-        Outbound.ChannelState == ChannelState.Bypassed;
-}
-
-public sealed record TranslationInboundChannelPlan(
-    ChannelState ChannelState,
-    InboundRoute Route);
-
-public sealed record TranslationOutboundChannelPlan(
-    ChannelState ChannelState,
-    OutboundRoute Route);
-
-public static class TranslationSessionTopologyPolicy
-{
-    public static TranslationInboundChannelPlan ResolveInbound(
-        TranslationSessionState state)
-    {
-        return state switch
-        {
-            TranslationSessionState.Disconnected => new(
-                ChannelState.Inactive,
-                InboundRoute.Stopped),
-            TranslationSessionState.Connecting
-                or TranslationSessionState.Created
-                or TranslationSessionState.Updating => new(
-                    ChannelState.Connecting,
-                    InboundRoute.Stopped),
-            TranslationSessionState.Connected
-                or TranslationSessionState.Closing
-                or TranslationSessionState.Closed => new(
-                    ChannelState.Connected,
-                    InboundRoute.Translated),
-            TranslationSessionState.Failed => new(
-                ChannelState.Failed,
-                InboundRoute.OriginalFailOpen),
-            _ => throw new ArgumentOutOfRangeException(nameof(state)),
-        };
-    }
-
-    public static TranslationOutboundChannelPlan ResolveOutbound(
-        TranslationSessionState state)
-    {
-        return state switch
-        {
-            TranslationSessionState.Disconnected => new(
-                ChannelState.Inactive,
-                OutboundRoute.Stopped),
-            TranslationSessionState.Connecting
-                or TranslationSessionState.Created
-                or TranslationSessionState.Updating => new(
-                    ChannelState.Connecting,
-                    OutboundRoute.Stopped),
-            TranslationSessionState.Connected
-                or TranslationSessionState.Closing
-                or TranslationSessionState.Closed => new(
-                    ChannelState.Connected,
-                    OutboundRoute.Translated),
-            TranslationSessionState.Failed => new(
-                ChannelState.Failed,
-                OutboundRoute.MutedFailClosed),
-            _ => throw new ArgumentOutOfRangeException(nameof(state)),
-        };
-    }
-}
+    bool OutboundBypassed);
 
 public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyncDisposable
 {
@@ -305,7 +226,10 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
                 ThrowIfNotConnected();
                 await _batcher.AppendAsync(
                     pcm,
-                    SendFrameAsync,
+                    (frame, sendCancellationToken) => SendFrameAsync(
+                        frame,
+                        sendCancellationToken,
+                        cancellationToken),
                     sendCancellation.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (
@@ -675,24 +599,33 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
 
     private async ValueTask SendFrameAsync(
         ReadOnlyMemory<byte> frame,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken callerCancellationToken)
     {
         RuntimeError? sendError =
             await _transport.SendAudioAppendAsync(frame, cancellationToken)
                 .ConfigureAwait(false);
         if (sendError is not null)
         {
-            if (_audioToken.IsCancellationRequested
-                && cancellationToken.IsCancellationRequested
-                && sendError.Code == "translationSocket.sendCanceled")
+            if (sendError.Code == "translationSocket.sendCanceled"
+                && cancellationToken.IsCancellationRequested)
             {
-                throw new OperationCanceledException(cancellationToken);
+                if (_audioToken.IsCancellationRequested)
+                {
+                    _audioToken.ThrowIfCancellationRequested();
+                }
+
+                if (callerCancellationToken.IsCancellationRequested)
+                {
+                    callerCancellationToken.ThrowIfCancellationRequested();
+                }
             }
 
             Fail(sendError);
             throw new TranslationSessionException(sendError);
         }
 
+        callerCancellationToken.ThrowIfCancellationRequested();
         cancellationToken.ThrowIfCancellationRequested();
     }
 
@@ -745,12 +678,12 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
         await CancelLifetimeAsync().ConfigureAwait(false);
         if (outcome.Completion == SessionCloseCompletion.CloseTimeout)
         {
-            await AwaitReceiveLoopAsync().ConfigureAwait(false);
             ReleaseTransport();
-            // A real transport is released after receive settles so disposal can
-            // interrupt in-flight I/O. A sender that ignores both cancellation
-            // and disposal may delay only managed-resource reclamation in the
-            // observed shutdown; it cannot delay public close past the deadline.
+            // Release the transport immediately so disposal can interrupt
+            // in-flight I/O. A sender or receiver that ignores both
+            // cancellation and disposal may delay only managed-resource
+            // reclamation in the observed shutdown; it cannot delay public close
+            // past the deadline.
             EnsureShutdownObserved(drainQueuedEvents: true);
             throw new TranslationSessionException(finalError);
         }
@@ -895,20 +828,6 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
         if (observation is not null)
         {
             await observation.ConfigureAwait(false);
-        }
-    }
-
-    private async Task AwaitReceiveLoopAsync()
-    {
-        Task? receiveLoop;
-        lock (_sync)
-        {
-            receiveLoop = _receiveLoop;
-        }
-
-        if (receiveLoop is not null)
-        {
-            await receiveLoop.ConfigureAwait(false);
         }
     }
 

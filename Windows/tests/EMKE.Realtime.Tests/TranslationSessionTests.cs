@@ -18,7 +18,7 @@ public sealed class TranslationSessionTests
         new("wss://api.example.test/realtime/translations?model=test");
 
     [TestMethod]
-    public void CreationPlanOwnsInitialChannelTopology()
+    public void CreationPlanOwnsOnlySocketCountsAndSameLanguageBypass()
     {
         TranslationSessionCreationPlan translated =
             TranslationSessionCreationPolicy.CreatePlan(
@@ -31,12 +31,12 @@ public sealed class TranslationSessionTests
                 LanguageCode.Zh,
                 requestOutbound: true);
 
-        Assert.AreEqual(ChannelState.Connected, translated.Inbound.ChannelState);
-        Assert.AreEqual(InboundRoute.Translated, translated.Inbound.Route);
-        Assert.AreEqual(ChannelState.Connected, translated.Outbound.ChannelState);
-        Assert.AreEqual(OutboundRoute.Translated, translated.Outbound.Route);
-        Assert.AreEqual(ChannelState.Bypassed, bypassed.Outbound.ChannelState);
-        Assert.AreEqual(OutboundRoute.OriginalBypass, bypassed.Outbound.Route);
+        Assert.AreEqual(1, translated.InboundSocketCount);
+        Assert.AreEqual(1, translated.OutboundSocketCount);
+        Assert.IsFalse(translated.OutboundBypassed);
+        Assert.AreEqual(1, bypassed.InboundSocketCount);
+        Assert.AreEqual(0, bypassed.OutboundSocketCount);
+        Assert.IsTrue(bypassed.OutboundBypassed);
     }
 
     [TestMethod]
@@ -436,28 +436,29 @@ public sealed class TranslationSessionTests
         Assert.AreEqual("translationSession.audioStopped", stopped.Error.Code);
         Assert.AreEqual("translationSession.closeTimeout", session.LastError!.Code);
         Assert.AreEqual(TranslationSessionState.Failed, session.State);
+        Assert.AreEqual(1, adapter.MaxConcurrentSendCount);
     }
 
     [TestMethod]
     public async Task NonCooperativeAudioSendCannotDelayPublicClosePastDeadline()
     {
-        FakeTranslationTransport transport = new()
+        CancelAwareClientWebSocket adapter = new()
         {
-            BlockAudioSend = true,
             IgnoreAudioCancellation = true,
         };
+        TranslationSocket socket = new(adapter, receiveLimit: 1024);
         ManualClock clock = new();
-        TranslationSession session = CreateSession(transport, clock: clock);
+        TranslationSession session = CreateSession(socket, clock: clock);
         Task connect = session.ConnectAsync(CancellationToken.None);
-        transport.Enqueue(Event("session.created"));
-        transport.Enqueue(Event("session.updated"));
+        adapter.EnqueueText("""{"type":"session.created"}""");
+        await WaitUntilAsync(() => adapter.SessionUpdateCount == 1, "session update");
+        adapter.EnqueueText("""{"type":"session.updated"}""");
         await connect;
         Task audio = session.SendPcmAsync(
             new byte[PcmFrameBatcher.FrameBytes],
             CancellationToken.None).AsTask();
-        await WaitUntilAsync(() => transport.AudioSendCount == 1, "audio send");
+        await WaitUntilAsync(() => adapter.AudioSendCount == 1, "audio send");
         Task close = session.CloseAsync(CancellationToken.None);
-        await WaitUntilAsync(() => transport.CloseCount == 1, "close send");
 
         try
         {
@@ -470,17 +471,91 @@ public sealed class TranslationSessionTests
             Assert.AreEqual("translationSession.closeTimeout", session.LastError!.Code);
             Assert.IsFalse(audio.IsCompleted);
             Assert.IsFalse(session.ShutdownTaskForTest!.IsCompleted);
-            Assert.AreEqual(1, transport.DisposeCount);
+            Assert.AreEqual(0, adapter.CloseCount);
+            Assert.AreEqual(1, adapter.MaxConcurrentSendCount);
+            Assert.AreEqual(1, adapter.DisposeCount);
         }
         finally
         {
-            transport.ReleaseAudioSend();
+            adapter.ReleaseAudioSend();
         }
 
         TranslationSessionException stopped =
             await Assert.ThrowsExactlyAsync<TranslationSessionException>(() => audio);
         Assert.AreEqual("translationSession.audioStopped", stopped.Error.Code);
         await session.ShutdownTaskForTest!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(session.ShutdownTaskForTest.IsFaulted);
+    }
+
+    [TestMethod]
+    public async Task CallerCanceledRealSocketSendDoesNotFailSessionOrRepeatAttemptedFrame()
+    {
+        CancelAwareClientWebSocket adapter = new();
+        TranslationSocket socket = new(adapter, receiveLimit: 1024);
+        TranslationSession session = CreateSession(socket);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        adapter.EnqueueText("""{"type":"session.created"}""");
+        await WaitUntilAsync(() => adapter.SessionUpdateCount == 1, "session update");
+        adapter.EnqueueText("""{"type":"session.updated"}""");
+        await connect;
+        using CancellationTokenSource callerCancellation = new();
+
+        Task canceledSend = session.SendPcmAsync(
+            Enumerable.Repeat((byte)0x11, PcmFrameBatcher.FrameBytes).ToArray(),
+            callerCancellation.Token).AsTask();
+        await WaitUntilAsync(() => adapter.AudioSendCount == 1, "caller send");
+        await callerCancellation.CancelAsync();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => canceledSend);
+        Assert.AreEqual(TranslationSessionState.Connected, session.State);
+        Assert.IsNull(session.LastError);
+        Assert.AreEqual(0, session.RetainedPcmByteCountForTest);
+
+        adapter.BlockAudioSends = false;
+        await session.SendPcmAsync(
+            Enumerable.Repeat((byte)0x22, PcmFrameBatcher.FrameBytes).ToArray(),
+            CancellationToken.None);
+        Assert.AreEqual(2, adapter.AudioSendCount);
+        Assert.AreEqual(0, session.RetainedPcmByteCountForTest);
+        await session.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async Task NonCooperativeReceiveCannotDelayPublicClosePastDeadline()
+    {
+        FakeTranslationTransport transport = new()
+        {
+            IgnoreReceiveCancellation = true,
+        };
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        ManualClock clock = new();
+        TranslationSession session = CreateSession(transport, clock: clock);
+        await session.ConnectAsync(CancellationToken.None);
+        await WaitUntilAsync(() => transport.ActiveReceiveCount == 1, "blocked receive");
+        Task close = session.CloseAsync(CancellationToken.None);
+        await WaitUntilAsync(() => transport.CloseCount == 1, "close send");
+
+        try
+        {
+            clock.AdvanceTo(SessionCloseCoordinator.DeadlineMilliseconds);
+            TranslationSessionException timeout =
+                await Assert.ThrowsExactlyAsync<TranslationSessionException>(
+                    () => close.WaitAsync(TimeSpan.FromSeconds(1)));
+
+            Assert.AreEqual(ErrorCategory.CloseTimeout, timeout.Error.Category);
+            Assert.AreEqual("translationSession.closeTimeout", session.LastError!.Code);
+            Assert.AreEqual(1, transport.DisposeCount);
+            Assert.AreEqual(1, transport.ActiveReceiveCount);
+            Assert.IsFalse(session.ShutdownTaskForTest!.IsCompleted);
+        }
+        finally
+        {
+            transport.ReleaseReceive();
+        }
+
+        await session.ShutdownTaskForTest!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(0, transport.ActiveReceiveCount);
         Assert.IsFalse(session.ShutdownTaskForTest.IsFaulted);
     }
 
@@ -785,10 +860,15 @@ public sealed class TranslationSessionTests
 
         public bool IgnoreAudioCancellation { get; init; }
 
+        public bool IgnoreReceiveCancellation { get; init; }
+
         private TaskCompletionSource SessionUpdateRelease { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         private TaskCompletionSource AudioSendRelease { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private TaskCompletionSource ReceiveRelease { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task<RuntimeError?> ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
@@ -844,6 +924,17 @@ public sealed class TranslationSessionTests
             Interlocked.Increment(ref _activeReceiveCount);
             try
             {
+                if (_receives.Reader.TryRead(out TranslationReceiveResult? received))
+                {
+                    return received;
+                }
+
+                if (IgnoreReceiveCancellation)
+                {
+                    await ReceiveRelease.Task;
+                    return TranslationReceiveResult.Closed();
+                }
+
                 return await _receives.Reader.ReadAsync(cancellationToken);
             }
             finally
@@ -867,6 +958,11 @@ public sealed class TranslationSessionTests
             AudioSendRelease.TrySetResult();
         }
 
+        public void ReleaseReceive()
+        {
+            ReceiveRelease.TrySetResult();
+        }
+
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 0)
@@ -880,13 +976,25 @@ public sealed class TranslationSessionTests
     private sealed class CancelAwareClientWebSocket : IClientWebSocket
     {
         private readonly Channel<byte[]> _receives = Channel.CreateUnbounded<byte[]>();
+        private readonly TaskCompletionSource _audioSendRelease =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _activeSendCount;
         private int _disposed;
+        private int _maxConcurrentSendCount;
 
         public int SessionUpdateCount { get; private set; }
 
         public int AudioSendCount { get; private set; }
 
         public int CloseCount { get; private set; }
+
+        public bool BlockAudioSends { get; set; } = true;
+
+        public bool IgnoreAudioCancellation { get; init; }
+
+        public int DisposeCount => Volatile.Read(ref _disposed);
+
+        public int MaxConcurrentSendCount => Volatile.Read(ref _maxConcurrentSendCount);
 
         public TaskCompletionSource AudioCancellationObserved { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -902,28 +1010,60 @@ public sealed class TranslationSessionTests
             bool endOfMessage,
             CancellationToken cancellationToken)
         {
-            string json = Encoding.UTF8.GetString(payload.Span);
-            if (json.Contains("\"type\":\"session.update\"", StringComparison.Ordinal))
+            int active = Interlocked.Increment(ref _activeSendCount);
+            int observed;
+            while (active > (observed = Volatile.Read(ref _maxConcurrentSendCount)))
             {
-                SessionUpdateCount++;
-                return;
+                if (Interlocked.CompareExchange(
+                        ref _maxConcurrentSendCount,
+                        active,
+                        observed) == observed)
+                {
+                    break;
+                }
             }
 
-            if (json.Contains("\"type\":\"session.close\"", StringComparison.Ordinal))
-            {
-                CloseCount++;
-                return;
-            }
-
-            AudioSendCount++;
             try
             {
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                string json = Encoding.UTF8.GetString(payload.Span);
+                if (json.Contains("\"type\":\"session.update\"", StringComparison.Ordinal))
+                {
+                    SessionUpdateCount++;
+                    return;
+                }
+
+                if (json.Contains("\"type\":\"session.close\"", StringComparison.Ordinal))
+                {
+                    CloseCount++;
+                    return;
+                }
+
+                AudioSendCount++;
+                if (!BlockAudioSends)
+                {
+                    return;
+                }
+
+                try
+                {
+                    if (IgnoreAudioCancellation)
+                    {
+                        await _audioSendRelease.Task;
+                    }
+                    else
+                    {
+                        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    AudioCancellationObserved.TrySetResult();
+                    throw;
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-                AudioCancellationObserved.TrySetResult();
-                throw;
+                Interlocked.Decrement(ref _activeSendCount);
             }
         }
 
@@ -942,6 +1082,11 @@ public sealed class TranslationSessionTests
         public void EnqueueText(string json)
         {
             Assert.IsTrue(_receives.Writer.TryWrite(Encoding.UTF8.GetBytes(json)));
+        }
+
+        public void ReleaseAudioSend()
+        {
+            _audioSendRelease.TrySetResult();
         }
 
         public void Dispose()

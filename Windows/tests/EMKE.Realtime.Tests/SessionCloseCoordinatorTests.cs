@@ -157,6 +157,34 @@ public sealed class SessionCloseCoordinatorTests
         await faultObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [TestMethod]
+    public async Task DetachedLateSendObserverConsumesUnexpectedFaultAndDisposesOnce()
+    {
+        FakeClock clock = new();
+        TaskCompletionSource releaseSend =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        SessionCloseCoordinator coordinator = new(clock);
+        coordinator.Activate(1);
+
+        Task<SessionCloseOutcome> close = coordinator.CloseAsync(
+            1,
+            async _ =>
+            {
+                await releaseSend.Task;
+                throw new NotSupportedException("late unexpected fault");
+            },
+            new TaskCompletionSource().Task);
+        clock.AdvanceTo(SessionCloseCoordinator.DeadlineMilliseconds);
+        SessionCloseOutcome outcome = await close;
+
+        Assert.AreEqual(SessionCloseCompletion.CloseTimeout, outcome.Completion);
+        releaseSend.SetResult();
+        await coordinator.DetachedSendObservationForTest!
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(coordinator.DetachedSendObservationForTest.IsFaulted);
+        Assert.AreEqual(1, coordinator.DetachedSendResourceDisposeCountForTest);
+    }
+
     private static async Task AssertSingleGenerationCaseAsync(
         JsonElement input,
         JsonElement expected,

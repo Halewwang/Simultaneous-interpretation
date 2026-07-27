@@ -235,6 +235,21 @@ public sealed class SharedFixtureTests
 
     [TestMethod]
     [TestCategory("FixtureAdapter")]
+    [TestCategory("Routing")]
+    public void RealtimeHandshakeChannelAndRouteExpectationsAwaitTask6Adapter()
+    {
+        using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
+        Assert.IsTrue(fixture.RootElement.GetProperty("cases")
+            .EnumerateArray()
+            .All(static fixtureCase =>
+                fixtureCase.GetProperty("expected")
+                    .TryGetProperty("inboundRoute", out _)));
+        Assert.Inconclusive(
+            "Realtime channel and route projection belongs to the EMKE.Routing adapter (Runtime Task 6).");
+    }
+
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
     [TestCategory("Realtime")]
     public async Task RealtimeCloseDeadlineFixtureUsesOwnedCoordinatorAdapter()
     {

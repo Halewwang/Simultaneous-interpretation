@@ -61,9 +61,18 @@ public sealed class PcmFrameBatcher
 
                 if (_offset == FrameBytes)
                 {
-                    await sink(_frame, cancellationToken).ConfigureAwait(false);
-                    CryptographicOperations.ZeroMemory(_frame);
-                    _offset = 0;
+                    try
+                    {
+                        await sink(_frame, cancellationToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Invoking the sink crosses the commit boundary: it may
+                        // have submitted the frame even if it reports cancellation
+                        // or failure. Never retain that frame for a duplicate send.
+                        CryptographicOperations.ZeroMemory(_frame);
+                        _offset = 0;
+                    }
                 }
             }
         }

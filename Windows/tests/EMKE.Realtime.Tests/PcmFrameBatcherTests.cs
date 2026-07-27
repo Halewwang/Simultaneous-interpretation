@@ -176,19 +176,23 @@ public sealed class PcmFrameBatcherTests
     }
 
     [TestMethod]
-    public async Task SinkFailureRetainsCompletedFrameUntilExplicitDiscardAndBatcherIsReusable()
+    public async Task SinkFailureDropsAndZerosAttemptedFrameWithoutRepeatingIt()
     {
         PcmFrameBatcher batcher = new();
+        ReadOnlyMemory<byte> attempted = default;
 
         await Assert.ThrowsExactlyAsync<IOException>(
             () => batcher.AppendAsync(
                 new byte[PcmFrameBatcher.FrameBytes],
-                static (_, _) => ValueTask.FromException(new IOException("safe failure")),
+                (frame, _) =>
+                {
+                    attempted = frame;
+                    return ValueTask.FromException(new IOException("safe failure"));
+                },
                 CancellationToken.None).AsTask());
 
-        Assert.AreEqual(PcmFrameBatcher.FrameBytes, batcher.RetainedByteCount);
-        Assert.AreEqual(PcmFrameBatcher.FrameBytes, batcher.Discard());
         Assert.AreEqual(0, batcher.RetainedByteCount);
+        Assert.IsTrue(attempted.Span.ToArray().All(static value => value == 0));
 
         int sends = 0;
         await batcher.AppendAsync(
@@ -200,15 +204,16 @@ public sealed class PcmFrameBatcherTests
             },
             CancellationToken.None);
         Assert.AreEqual(1, sends);
+        Assert.AreEqual(0, batcher.RetainedByteCount);
     }
 
     [TestMethod]
-    public async Task SinkCancellationRetainsCompletedFrameAndDoesNotTransferBufferOwnership()
+    public async Task SinkCancellationDropsAttemptedFrameAndNextAppendDoesNotRepeatIt()
     {
         PcmFrameBatcher batcher = new();
         using CancellationTokenSource cancellation = new();
 
-        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+        await Assert.ThrowsAsync<OperationCanceledException>(
             () => batcher.AppendAsync(
                 new byte[PcmFrameBatcher.FrameBytes],
                 async (frame, cancellationToken) =>
@@ -219,10 +224,37 @@ public sealed class PcmFrameBatcherTests
                 },
                 cancellation.Token).AsTask());
 
-        Assert.AreEqual(PcmFrameBatcher.FrameBytes, batcher.RetainedByteCount);
-        Assert.AreEqual(
-            PcmFrameBatcher.FrameBytes,
-            await batcher.DiscardAsync(CancellationToken.None));
+        Assert.AreEqual(0, batcher.RetainedByteCount);
+        int nextSends = 0;
+        await batcher.AppendAsync(
+            new byte[PcmFrameBatcher.FrameBytes],
+            (_, _) =>
+            {
+                nextSends++;
+                return ValueTask.CompletedTask;
+            },
+            CancellationToken.None);
+        Assert.AreEqual(1, nextSends);
+    }
+
+    [TestMethod]
+    public async Task PartialFrameBeforeSinkRemainsRetainedWhenNextAppendIsCanceled()
+    {
+        PcmFrameBatcher batcher = new();
+        await batcher.AppendAsync(
+            new byte[2400],
+            static (_, _) => throw new InvalidOperationException("sink must not run"),
+            CancellationToken.None);
+        using CancellationTokenSource cancellation = new();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => batcher.AppendAsync(
+                new byte[200],
+                static (_, _) => throw new InvalidOperationException("sink must not run"),
+                cancellation.Token).AsTask());
+
+        Assert.AreEqual(2400, batcher.RetainedByteCount);
     }
 
     private static async Task WaitUntilAsync(Func<bool> predicate)
