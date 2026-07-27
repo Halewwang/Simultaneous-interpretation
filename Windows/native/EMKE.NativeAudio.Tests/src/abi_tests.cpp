@@ -125,6 +125,20 @@ void test_public_abi_layout(TestContext& context) {
   EXPECT(context, EMKE_AUDIO_EVENT_DEVICE_CHANGED == 3, name);
   EXPECT(context, EMKE_AUDIO_EVENT_STREAM_ERROR == 4, name);
   EXPECT(context, EMKE_AUDIO_EVENT_BACKPRESSURE == 5, name);
+  EXPECT(context, emke_audio_get_abi_version() == EMKE_AUDIO_ABI_VERSION, name);
+  EXPECT(context, emke_audio_sizeof_config() == sizeof(emke_audio_config), name);
+  EXPECT(context, emke_audio_sizeof_event() == sizeof(emke_audio_event), name);
+  EXPECT(context,
+         emke_audio_sizeof_diagnostics() == sizeof(emke_audio_diagnostics),
+         name);
+  EXPECT(context,
+         emke_audio_sizeof_discovered_endpoint() ==
+             sizeof(emke_audio_discovered_endpoint),
+         name);
+  EXPECT(context,
+         emke_audio_sizeof_endpoint_snapshot() ==
+             sizeof(emke_audio_endpoint_snapshot),
+         name);
   EXPECT(context, sizeof(emke_audio_status) == sizeof(std::int32_t), name);
   EXPECT(context, sizeof(emke_audio_route) == sizeof(std::int32_t), name);
   EXPECT(context, sizeof(emke_audio_event_kind) == sizeof(std::int32_t), name);

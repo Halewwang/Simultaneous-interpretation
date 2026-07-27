@@ -33,6 +33,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
       - name: Validate shared contract and build native audio scaffold
         shell: pwsh
         run: |
@@ -101,6 +106,59 @@ jobs:
             Pop-Location
           }
 
+          $integrationProject = "Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj"
+          dotnet restore $integrationProject --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed native-audio integration restore failed."
+          }
+          dotnet build $integrationProject --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed native-audio integration build failed."
+          }
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "FullyQualifiedName~NativeAudio&TestCategory!=NativeAudioRealDll"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed fake native-audio integration tests failed."
+          }
+
+          $nativeDll = "Windows/artifacts/native/x64/Release/EMKE.NativeAudio.dll"
+          if (-not (Test-Path -LiteralPath $nativeDll -PathType Leaf)) {
+            throw "Production EMKE.NativeAudio.dll was not built at the expected x64 Release path."
+          }
+          $managedTestOutput = "Windows/tests/EMKE.Integration.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64"
+          if (-not (Test-Path -LiteralPath $managedTestOutput -PathType Container)) {
+            throw "Managed native-audio integration output directory is missing."
+          }
+          Copy-Item -LiteralPath $nativeDll -Destination $managedTestOutput -Force
+          $managedAbiResults = "Windows/out/test-results/native-audio-real-dll"
+          New-Item -ItemType Directory -Path $managedAbiResults -Force | Out-Null
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioRealDll" `
+            --logger "trx;LogFileName=native-audio-real-dll.trx" `
+            --results-directory $managedAbiResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed real-DLL ABI/load test failed."
+          }
+          $managedAbiTrx = Join-Path $managedAbiResults "native-audio-real-dll.trx"
+          if (-not (Test-Path -LiteralPath $managedAbiTrx -PathType Leaf)) {
+            throw "Managed real-DLL ABI/load test did not write TRX evidence."
+          }
+          [xml]$managedAbiEvidence = Get-Content -LiteralPath $managedAbiTrx -Raw
+          $managedAbiCounters = $managedAbiEvidence.TestRun.ResultSummary.Counters
+          if (
+            [int]$managedAbiCounters.total -ne 1 -or
+            [int]$managedAbiCounters.executed -ne 1 -or
+            [int]$managedAbiCounters.passed -ne 1 -or
+            [int]$managedAbiCounters.failed -ne 0 -or
+            [int]$managedAbiCounters.notExecuted -ne 0
+          ) {
+            throw "Managed real-DLL ABI/load test must execute and pass exactly once without skips."
+          }
+
           $windowsVersion = (Get-CimInstance -ClassName Win32_OperatingSystem).Version
           if ($windowsVersion -notmatch "^(?:[0-9]+\.){2}([0-9]+)(?:\.[0-9]+)?$") {
             throw "Windows build could not be parsed."
@@ -128,6 +186,7 @@ jobs:
           targetOsEligible = $targetOsEligibleValue
           installedWdkProof = pending
           nativeBuild = passed
+          managedNativeAbiLoad = passed
           driverBuild = pending
           driverInstall = pending
           liveEndpoints = pending

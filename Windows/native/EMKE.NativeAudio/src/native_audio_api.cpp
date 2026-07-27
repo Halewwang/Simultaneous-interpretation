@@ -75,6 +75,32 @@ class ScopedComApartment {
 
 extern "C" {
 
+EMKE_AUDIO_API std::uint32_t emke_audio_get_abi_version(void) {
+  return EMKE_AUDIO_ABI_VERSION;
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_config(void) {
+  return static_cast<std::uint32_t>(sizeof(emke_audio_config));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_event(void) {
+  return static_cast<std::uint32_t>(sizeof(emke_audio_event));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_diagnostics(void) {
+  return static_cast<std::uint32_t>(sizeof(emke_audio_diagnostics));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_discovered_endpoint(void) {
+  return static_cast<std::uint32_t>(
+      sizeof(emke_audio_discovered_endpoint));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_endpoint_snapshot(void) {
+  return static_cast<std::uint32_t>(
+      sizeof(emke_audio_endpoint_snapshot));
+}
+
 EMKE_AUDIO_API emke_audio_status emke_audio_create(
     const emke_audio_config* config,
     emke_audio_handle** out_handle) {

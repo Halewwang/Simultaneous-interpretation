@@ -177,7 +177,17 @@ typedef struct emke_audio_diagnostics {
  *
  * Enqueue functions synchronously copy PCM16 samples into native-owned queues.
  * destroy accepts NULL, so cleanup after a failed create is safe.
+ *
+ * ABI and size queries are read-only and never initialize COM, enumerate
+ * devices, or open audio streams. Managed callers use them before discovery or
+ * create to fail closed on incompatible binary layouts.
  */
+EMKE_AUDIO_API uint32_t emke_audio_get_abi_version(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_config(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_event(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_diagnostics(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_discovered_endpoint(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_endpoint_snapshot(void);
 EMKE_AUDIO_API emke_audio_status emke_audio_create(
     const emke_audio_config* config,
     emke_audio_handle** out_handle);
