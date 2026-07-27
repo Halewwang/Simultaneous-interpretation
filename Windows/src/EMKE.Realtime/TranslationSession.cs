@@ -408,7 +408,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
                 else if (!_lifetime.IsCancellationRequested)
                 {
                     Fail(Error(
-                        ErrorCategory.Protocol,
+                        ErrorCategory.Network,
                         "translationSession.unexpectedSocketClose"));
                 }
 
@@ -715,7 +715,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
         }
 
         _handshake.TrySetException(new TranslationSessionException(error));
-        _events.Writer.TryComplete();
+        _events.Writer.TryComplete(new TranslationSessionException(error));
         _remoteClosed.TrySetResult();
         _audioCancellation.Cancel();
         _lifetime.Cancel();

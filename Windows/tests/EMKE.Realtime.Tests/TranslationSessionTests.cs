@@ -344,6 +344,31 @@ public sealed class TranslationSessionTests
     }
 
     [TestMethod]
+    public async Task ConnectedTransportCloseBecomesRetryableNetworkFailure()
+    {
+        FakeTranslationTransport transport = new();
+        TranslationSession session = CreateSession(transport);
+        Task connect = session.ConnectAsync(CancellationToken.None);
+        transport.Enqueue(Event("session.created"));
+        transport.Enqueue(Event("session.updated"));
+        await connect;
+        await using IAsyncEnumerator<TranslationSessionEvent> events =
+            session.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
+
+        transport.Enqueue(TranslationReceiveResult.Closed());
+        TranslationSessionException failure =
+            await Assert.ThrowsExactlyAsync<TranslationSessionException>(
+                () => events.MoveNextAsync().AsTask());
+
+        Assert.AreEqual(TranslationSessionState.Failed, session.State);
+        Assert.AreEqual(ErrorCategory.Network, failure.Error.Category);
+        Assert.AreEqual(
+            "translationSession.unexpectedSocketClose",
+            failure.Error.Code);
+        Assert.AreEqual(RecoveryAction.Retry, failure.Error.RecoveryAction);
+    }
+
+    [TestMethod]
     public async Task EmptyAudioDeltaBecomesProtocolFailureWithoutRentingALease()
     {
         FakeTranslationTransport transport = new();
