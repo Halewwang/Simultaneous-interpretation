@@ -9,6 +9,7 @@ namespace EMKE.Integration.Tests;
 #pragma warning disable CA2007 // MSTest owns the test synchronization context.
 
 [TestClass]
+[TestCategory("NativeAudioManagedSeam")]
 public sealed class NativeAudioAbiTests
 {
     private static readonly AudioEngineConfiguration ValidConfiguration =
@@ -143,35 +144,6 @@ public sealed class NativeAudioAbiTests
 
         Assert.AreEqual(AudioEngineStatus.FormatUnsupported, exception.Status);
         Assert.AreEqual(0, native.CreateCount);
-    }
-
-    [TestMethod]
-    [TestCategory("NativeAudioRealDll")]
-    public void WindowsX64RealDllExportsMatchingAbiAndStructSizes()
-    {
-        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
-        {
-            Assert.Inconclusive("The real EMKE.NativeAudio DLL ABI check runs only on Windows x64.");
-        }
-
-        PInvokeNativeAudioApi native = PInvokeNativeAudioApi.Instance;
-
-        Assert.AreEqual(NativeAudioConstants.AbiVersion, native.GetAbiVersion());
-        Assert.AreEqual(
-            checked((uint)Marshal.SizeOf<NativeAudioConfiguration>()),
-            native.GetConfigurationSize());
-        Assert.AreEqual(
-            checked((uint)Marshal.SizeOf<NativeAudioEvent>()),
-            native.GetEventSize());
-        Assert.AreEqual(
-            checked((uint)Marshal.SizeOf<NativeAudioDiagnostics>()),
-            native.GetDiagnosticsSize());
-        Assert.AreEqual(
-            checked((uint)Marshal.SizeOf<NativeAudioDiscoveredEndpoint>()),
-            native.GetDiscoveredEndpointSize());
-        Assert.AreEqual(
-            checked((uint)Marshal.SizeOf<NativeAudioEndpointSnapshot>()),
-            native.GetEndpointSnapshotSize());
     }
 
     private static string ReadEndpointId(

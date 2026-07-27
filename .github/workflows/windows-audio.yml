@@ -44,6 +44,33 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
 
+          function Assert-ExactTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [int]$Expected,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -ne $Expected -or
+              [int]$counters.executed -ne $Expected -or
+              [int]$counters.passed -ne $Expected -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass exactly $Expected tests without failures or skips."
+            }
+          }
+
           node Scripts/validate-shared-contracts.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "Shared contract validator failed."
@@ -115,13 +142,46 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Managed native-audio integration build failed."
           }
+
+          Remove-Item Env:EMKE_NATIVE_AUDIO_TEST_MODE -ErrorAction SilentlyContinue
+          Remove-Item Env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY -ErrorAction SilentlyContinue
+          $managedSeamResults = "Windows/out/test-results/native-audio-managed-seam"
+          New-Item -ItemType Directory -Path $managedSeamResults -Force | Out-Null
           dotnet test $integrationProject `
             --configuration Release `
             --no-build `
-            --filter "FullyQualifiedName~NativeAudio&TestCategory!=NativeAudioRealDll"
+            --filter "TestCategory=NativeAudioManagedSeam" `
+            --logger "trx;LogFileName=native-audio-managed-seam.trx" `
+            --results-directory $managedSeamResults
           if ($LASTEXITCODE -ne 0) {
-            throw "Managed fake native-audio integration tests failed."
+            throw "Managed seam native-audio integration tests failed."
           }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $managedSeamResults "native-audio-managed-seam.trx") `
+            -Expected 16 `
+            -Label "Managed seam native-audio integration test"
+
+          $nativeFakeDll = "Windows/artifacts/native-test/x64/Release/EMKE.NativeAudio.ManagedFake.dll"
+          if (-not (Test-Path -LiteralPath $nativeFakeDll -PathType Leaf)) {
+            throw "Independent managed native-fake DLL was not built at the expected x64 Release path."
+          }
+          $env:EMKE_NATIVE_AUDIO_TEST_MODE = "native-fake"
+          $env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY = (Resolve-Path -LiteralPath $nativeFakeDll).Path
+          $nativeFakeResults = "Windows/out/test-results/native-audio-native-fake"
+          New-Item -ItemType Directory -Path $nativeFakeResults -Force | Out-Null
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioNativeFake" `
+            --logger "trx;LogFileName=native-audio-native-fake.trx" `
+            --results-directory $nativeFakeResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native-fake P/Invoke integration tests failed."
+          }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $nativeFakeResults "native-audio-native-fake.trx") `
+            -Expected 7 `
+            -Label "Native-fake P/Invoke integration test"
 
           $nativeDll = "Windows/artifacts/native/x64/Release/EMKE.NativeAudio.dll"
           if (-not (Test-Path -LiteralPath $nativeDll -PathType Leaf)) {
@@ -132,6 +192,8 @@ jobs:
             throw "Managed native-audio integration output directory is missing."
           }
           Copy-Item -LiteralPath $nativeDll -Destination $managedTestOutput -Force
+          $env:EMKE_NATIVE_AUDIO_TEST_MODE = "real-dll"
+          Remove-Item Env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY -ErrorAction SilentlyContinue
           $managedAbiResults = "Windows/out/test-results/native-audio-real-dll"
           New-Item -ItemType Directory -Path $managedAbiResults -Force | Out-Null
           dotnet test $integrationProject `
@@ -143,21 +205,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Managed real-DLL ABI/load test failed."
           }
-          $managedAbiTrx = Join-Path $managedAbiResults "native-audio-real-dll.trx"
-          if (-not (Test-Path -LiteralPath $managedAbiTrx -PathType Leaf)) {
-            throw "Managed real-DLL ABI/load test did not write TRX evidence."
-          }
-          [xml]$managedAbiEvidence = Get-Content -LiteralPath $managedAbiTrx -Raw
-          $managedAbiCounters = $managedAbiEvidence.TestRun.ResultSummary.Counters
-          if (
-            [int]$managedAbiCounters.total -ne 1 -or
-            [int]$managedAbiCounters.executed -ne 1 -or
-            [int]$managedAbiCounters.passed -ne 1 -or
-            [int]$managedAbiCounters.failed -ne 0 -or
-            [int]$managedAbiCounters.notExecuted -ne 0
-          ) {
-            throw "Managed real-DLL ABI/load test must execute and pass exactly once without skips."
-          }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $managedAbiResults "native-audio-real-dll.trx") `
+            -Expected 1 `
+            -Label "Managed real-DLL ABI/load test"
 
           $windowsVersion = (Get-CimInstance -ClassName Win32_OperatingSystem).Version
           if ($windowsVersion -notmatch "^(?:[0-9]+\.){2}([0-9]+)(?:\.[0-9]+)?$") {
@@ -186,6 +237,8 @@ jobs:
           targetOsEligible = $targetOsEligibleValue
           installedWdkProof = pending
           nativeBuild = passed
+          managedNativeSeamTests = passed
+          managedNativeFakePInvoke = passed
           managedNativeAbiLoad = passed
           driverBuild = pending
           driverInstall = pending

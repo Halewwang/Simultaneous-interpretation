@@ -12,6 +12,7 @@ namespace EMKE.Integration.Tests;
 #pragma warning disable CA2000 // Tests intentionally transfer fake handles into the engine.
 
 [TestClass]
+[TestCategory("NativeAudioManagedSeam")]
 public sealed class NativeAudioPollingTests
 {
     private static readonly AudioEngineConfiguration ValidConfiguration =

@@ -2,6 +2,41 @@ set(
   EMKE_NATIVE_AUDIO_TEST_RUNTIME_DIRECTORY
   "${CMAKE_CURRENT_BINARY_DIR}/integration/Release"
 )
+set(
+  EMKE_NATIVE_AUDIO_MANAGED_FAKE_RUNTIME_DIRECTORY
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../artifacts/native-test/x64/Release"
+)
+
+if("${EMKE_NATIVE_AUDIO_MANAGED_FAKE_RUNTIME_DIRECTORY}" STREQUAL
+   "${EMKE_NATIVE_ARTIFACT_DIRECTORY}")
+  message(FATAL_ERROR
+    "The managed native fake must not overwrite production native artifacts."
+  )
+endif()
+
+add_library(EMKE.NativeAudio.ManagedFake SHARED
+  src/managed_fake_native_audio.cpp
+)
+target_compile_definitions(EMKE.NativeAudio.ManagedFake PRIVATE
+  EMKE_NATIVE_AUDIO_MANAGED_FAKE_EXPORTS
+  EMKE_NATIVE_AUDIO_TEST_SEAM_EXPORTS
+)
+target_include_directories(EMKE.NativeAudio.ManagedFake PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../EMKE.NativeAudio/include"
+)
+target_compile_features(EMKE.NativeAudio.ManagedFake PUBLIC cxx_std_20)
+set_target_properties(EMKE.NativeAudio.ManagedFake PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  OUTPUT_NAME "EMKE.NativeAudio.ManagedFake"
+  VISIBILITY_INLINES_HIDDEN YES
+  ARCHIVE_OUTPUT_DIRECTORY_RELEASE
+    "${EMKE_NATIVE_AUDIO_MANAGED_FAKE_RUNTIME_DIRECTORY}"
+  LIBRARY_OUTPUT_DIRECTORY_RELEASE
+    "${EMKE_NATIVE_AUDIO_MANAGED_FAKE_RUNTIME_DIRECTORY}"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE
+    "${EMKE_NATIVE_AUDIO_MANAGED_FAKE_RUNTIME_DIRECTORY}"
+)
 
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp
