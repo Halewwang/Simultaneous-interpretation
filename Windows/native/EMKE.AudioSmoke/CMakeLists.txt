@@ -29,12 +29,18 @@ if(BUILD_TESTING)
       "-DEXPECTED_OUTPUT=usage: EMKE.AudioSmoke"
       -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
   )
-  get_test_property(
-    EMKE.AudioSmoke.InvalidScenario
-    COMMAND
-    EMKE_AUDIO_SMOKE_INVALID_PROCESS_COMMAND
+  get_property(
+    EMKE_AUDIO_SMOKE_REGISTERED_TESTS
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    PROPERTY TESTS
   )
-  if(NOT EMKE_AUDIO_SMOKE_INVALID_PROCESS_COMMAND)
+  list(
+    FIND
+    EMKE_AUDIO_SMOKE_REGISTERED_TESTS
+    "EMKE.AudioSmoke.InvalidScenario"
+    EMKE_AUDIO_SMOKE_INVALID_SCENARIO_INDEX
+  )
+  if(EMKE_AUDIO_SMOKE_INVALID_SCENARIO_INDEX EQUAL -1)
     message(FATAL_ERROR "EMKE.AudioSmoke.InvalidScenario must be registered.")
   endif()
   if(WIN32)
@@ -48,12 +54,18 @@ if(BUILD_TESTING)
         -DEXPECTED_OUTPUT=discovery=driverMissing
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_smoke_process.cmake
     )
-    get_test_property(
-      EMKE.AudioSmoke.NoCompatibleDriver
-      COMMAND
-      EMKE_AUDIO_SMOKE_NO_DRIVER_PROCESS_COMMAND
+    get_property(
+      EMKE_AUDIO_SMOKE_REGISTERED_TESTS
+      DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      PROPERTY TESTS
     )
-    if(NOT EMKE_AUDIO_SMOKE_NO_DRIVER_PROCESS_COMMAND)
+    list(
+      FIND
+      EMKE_AUDIO_SMOKE_REGISTERED_TESTS
+      "EMKE.AudioSmoke.NoCompatibleDriver"
+      EMKE_AUDIO_SMOKE_NO_COMPATIBLE_DRIVER_INDEX
+    )
+    if(EMKE_AUDIO_SMOKE_NO_COMPATIBLE_DRIVER_INDEX EQUAL -1)
       message(FATAL_ERROR
         "EMKE.AudioSmoke.NoCompatibleDriver must be registered on Windows."
       )
