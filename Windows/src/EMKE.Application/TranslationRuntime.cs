@@ -100,7 +100,9 @@ public sealed class TranslationRuntime :
     private readonly PcmLevelMeter _outboundLevel = new();
     private readonly PcmVoiceActivityDetector _voiceActivity = new();
     private readonly ConcurrentDictionary<Task, byte> _inFlightAudioWork = new();
+    private readonly ConcurrentDictionary<Task, byte> _startOutcomeCleanup = new();
     private readonly Task _actorStartBarrier;
+    private readonly Func<ValueTask> _startOutcomeBarrier;
     private readonly Task _actor;
     private AppSnapshot _currentSnapshot;
     private Task<RuntimeError?>? _activeStart;
@@ -149,11 +151,24 @@ public sealed class TranslationRuntime :
     internal TranslationRuntime(
         TranslationRuntimeDependencies dependencies,
         Task actorStartBarrier)
+        : this(
+            dependencies,
+            actorStartBarrier,
+            static () => ValueTask.CompletedTask)
+    {
+    }
+
+    internal TranslationRuntime(
+        TranslationRuntimeDependencies dependencies,
+        Task actorStartBarrier,
+        Func<ValueTask> startOutcomeBarrier)
     {
         _dependencies =
             dependencies ?? throw new ArgumentNullException(nameof(dependencies));
         _actorStartBarrier =
             actorStartBarrier ?? throw new ArgumentNullException(nameof(actorStartBarrier));
+        _startOutcomeBarrier =
+            startOutcomeBarrier ?? throw new ArgumentNullException(nameof(startOutcomeBarrier));
         _routingSnapshot = _routingPolicy.Snapshot;
         _currentSnapshot = _reducer.Current;
         _mailbox = new RuntimeCommandMailbox<RuntimeMessage>(
@@ -374,6 +389,8 @@ public sealed class TranslationRuntime :
         ];
         await ObserveCompletionAsync(Task.WhenAll(workers))
             .ConfigureAwait(false);
+        await DrainOwnedTasksAsync(_startOutcomeCleanup)
+            .ConfigureAwait(false);
         if (Interlocked.Exchange(ref _resourcesReleased, 1) != 0)
         {
             return;
@@ -406,6 +423,22 @@ public sealed class TranslationRuntime :
         catch (Exception)
 #pragma warning restore CA1031
         {
+        }
+    }
+
+    private static async Task DrainOwnedTasksAsync(
+        ConcurrentDictionary<Task, byte> ownedTasks)
+    {
+        while (true)
+        {
+            Task[] pending = ownedTasks.Keys.ToArray();
+            if (pending.Length == 0)
+            {
+                return;
+            }
+
+            await ObserveCompletionAsync(Task.WhenAll(pending))
+                .ConfigureAwait(false);
         }
     }
 
@@ -629,6 +662,7 @@ public sealed class TranslationRuntime :
             outcome = StartOutcome.Failed(error);
         }
 
+        await _startOutcomeBarrier().ConfigureAwait(false);
         await PostReliableAsync(
             new StartCompletedMessage(
                 generation,
@@ -2274,22 +2308,25 @@ public sealed class TranslationRuntime :
         DisposeSupervisor(outcome.Outbound);
         if (outcome.AudioStarted)
         {
-            ObserveDetached(StopAudioAfterDropAsync());
+            TrackStartOutcomeCleanup(StopAudioSafelyAsync());
         }
     }
 
-    private async Task StopAudioAfterDropAsync()
+    private void TrackStartOutcomeCleanup(Task cleanup)
     {
-        try
-        {
-            await _dependencies.AudioEngine.StopAsync(CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-#pragma warning disable CA1031 // Drop cleanup cannot report through a disposed actor.
-        catch (Exception)
-#pragma warning restore CA1031
-        {
-        }
+        _startOutcomeCleanup.TryAdd(cleanup, 0);
+        _ = cleanup.ContinueWith(
+            static (completed, state) =>
+            {
+                ConcurrentDictionary<Task, byte> tracked =
+                    (ConcurrentDictionary<Task, byte>)state!;
+                tracked.TryRemove(completed, out _);
+                _ = completed.Exception;
+            },
+            _startOutcomeCleanup,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private void SafeLogFailure(RuntimeError error)

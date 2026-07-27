@@ -1238,6 +1238,61 @@ public sealed class TranslationRuntimeTests
         Assert.AreEqual(1, harness.AudioStopCount);
     }
 
+    [TestMethod]
+    public async Task DisposeAsyncWaitsForUncommittedStartedAudioRollback()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        ControlledAsyncGate startOutcomeGate = new();
+        startOutcomeGate.Block();
+        harness.Audio.StopGate.Block();
+        TranslationRuntime runtime = harness.CreateRuntime(
+            startOutcomeBarrier: () =>
+                new ValueTask(startOutcomeGate.WaitAsync(CancellationToken.None)));
+        Task? disposal = null;
+        try
+        {
+            Task<RuntimeError?> start = runtime.StartAsync();
+            await startOutcomeGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
+            Assert.AreEqual(1, harness.AudioStartCount);
+
+#pragma warning disable CA1849 // This test verifies the synchronous IDisposable handoff.
+            runtime.Dispose();
+#pragma warning restore CA1849
+            disposal = runtime.DisposeAsync().AsTask();
+            Assert.AreEqual(
+                "translationRuntime.disposed",
+                (await start.WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false))?.Code);
+            startOutcomeGate.Release();
+            await harness.Audio.StopEntered.Task
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await Task.Delay(100).ConfigureAwait(false);
+
+            Assert.IsFalse(
+                disposal.IsCompleted,
+                "DisposeAsync returned before dropped StartOutcome native cleanup.");
+        }
+        finally
+        {
+            startOutcomeGate.Release();
+            harness.Audio.StopGate.Release();
+            if (disposal is not null)
+            {
+                await disposal.WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+#pragma warning disable CA1849 // Failure cleanup for the synchronous contract probe.
+                runtime.Dispose();
+#pragma warning restore CA1849
+            }
+        }
+
+        Assert.AreEqual(1, harness.AudioStopCount);
+    }
+
     private static async Task AssertStartFailureAsync(
         Action<RuntimeHarness> configure,
         ErrorCategory expectedCategory,
@@ -1441,7 +1496,9 @@ internal sealed class RuntimeHarness
         return new RuntimeHarness();
     }
 
-    public TranslationRuntime CreateRuntime(Task? actorStartBarrier = null)
+    public TranslationRuntime CreateRuntime(
+        Task? actorStartBarrier = null,
+        Func<ValueTask>? startOutcomeBarrier = null)
     {
         TranslationRuntimeDependencies dependencies = new(
             new FakeWindowsBuildGate(this),
@@ -1454,6 +1511,14 @@ internal sealed class RuntimeHarness
             new FakeLanguageClassifier(),
             Clock,
             RuntimeLog);
+        if (startOutcomeBarrier is not null)
+        {
+            return new TranslationRuntime(
+                dependencies,
+                actorStartBarrier ?? Task.CompletedTask,
+                startOutcomeBarrier);
+        }
+
         return actorStartBarrier is null
             ? new TranslationRuntime(dependencies)
             : new TranslationRuntime(dependencies, actorStartBarrier);
