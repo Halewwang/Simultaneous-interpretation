@@ -165,32 +165,25 @@ public sealed class InboundLanguageGate
     public InboundLanguageGateSnapshot EndVoice()
     {
         Snapshot = Snapshot with { TailState = InboundTailState.Waiting };
-        RestartTailWindow();
+        RestartTailWindow(_clock.MonotonicNow);
         return Snapshot;
     }
 
     public InboundLanguageGateSnapshot ObserveLateAudio()
     {
-        RestartTailWindowIfWaiting();
+        SettleAndRestartTailWindowIfWaiting();
         return Snapshot;
     }
 
     public InboundLanguageGateSnapshot ObserveLateTranscript()
     {
-        RestartTailWindowIfWaiting();
+        SettleAndRestartTailWindowIfWaiting();
         return Snapshot;
     }
 
     public InboundLanguageGateSnapshot TryCompleteTail()
     {
-        if (Snapshot.TailState == InboundTailState.Waiting
-            && _tailDeadline is TimeSpan deadline
-            && _clock.MonotonicNow >= deadline)
-        {
-            Snapshot = Snapshot with { TailState = InboundTailState.Draining };
-            _tailDeadline = null;
-        }
-
+        SettleTailDeadline(_clock.MonotonicNow);
         return Snapshot;
     }
 
@@ -215,17 +208,30 @@ public sealed class InboundLanguageGate
         };
     }
 
-    private void RestartTailWindowIfWaiting()
+    private void SettleAndRestartTailWindowIfWaiting()
     {
+        TimeSpan now = _clock.MonotonicNow;
+        SettleTailDeadline(now);
         if (Snapshot.TailState == InboundTailState.Waiting)
         {
-            RestartTailWindow();
+            RestartTailWindow(now);
         }
     }
 
-    private void RestartTailWindow()
+    private void SettleTailDeadline(TimeSpan now)
     {
-        _tailDeadline = _clock.MonotonicNow
+        if (Snapshot.TailState == InboundTailState.Waiting
+            && _tailDeadline is TimeSpan deadline
+            && now >= deadline)
+        {
+            Snapshot = Snapshot with { TailState = InboundTailState.Draining };
+            _tailDeadline = null;
+        }
+    }
+
+    private void RestartTailWindow(TimeSpan now)
+    {
+        _tailDeadline = now
             + TimeSpan.FromMilliseconds(LateInputWindowMilliseconds);
     }
 }

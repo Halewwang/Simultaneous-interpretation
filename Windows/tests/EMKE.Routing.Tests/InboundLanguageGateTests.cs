@@ -93,6 +93,54 @@ public sealed class InboundLanguageGateTests
     }
 
     [TestMethod]
+    [DataRow(499, InboundTailState.Waiting)]
+    [DataRow(500, InboundTailState.Draining)]
+    [DataRow(501, InboundTailState.Draining)]
+    public void LateAudioAtomicallySettlesTheExistingTailDeadlineBeforeRestart(
+        int arrivalMilliseconds,
+        InboundTailState expected)
+    {
+        FakeClock clock = new();
+        InboundLanguageGate gate = new(LanguageCode.Zh, clock);
+        _ = gate.EndVoice();
+
+        clock.AdvanceTo(arrivalMilliseconds);
+        InboundLanguageGateSnapshot arrival = gate.ObserveLateAudio();
+
+        Assert.AreEqual(expected, arrival.TailState);
+        if (expected == InboundTailState.Waiting)
+        {
+            clock.AdvanceTo(arrivalMilliseconds + 499);
+            Assert.AreEqual(
+                InboundTailState.Waiting,
+                gate.TryCompleteTail().TailState);
+            clock.AdvanceTo(arrivalMilliseconds + 500);
+            Assert.AreEqual(
+                InboundTailState.Draining,
+                gate.TryCompleteTail().TailState);
+        }
+    }
+
+    [TestMethod]
+    public void OutOfOrderLateTranscriptCannotRestartAnAlreadyDrainingTail()
+    {
+        FakeClock clock = new();
+        InboundLanguageGate gate = new(LanguageCode.En, clock);
+        _ = gate.EndVoice();
+        clock.AdvanceTo(500);
+        _ = gate.TryCompleteTail();
+
+        clock.AdvanceTo(501);
+        InboundLanguageGateSnapshot late = gate.ObserveLateTranscript();
+
+        Assert.AreEqual(InboundTailState.Draining, late.TailState);
+        clock.AdvanceTo(1_001);
+        Assert.AreEqual(
+            InboundTailState.Draining,
+            gate.TryCompleteTail().TailState);
+    }
+
+    [TestMethod]
     public void ResetStartsANewDecisionWindowAndClearsTailState()
     {
         FakeClock clock = new();
@@ -194,6 +242,80 @@ public sealed class InboundLanguageGateTests
         Assert.AreEqual(ChannelState.Inactive, result.OutboundChannelState);
         Assert.AreEqual(InboundRoute.Stopped, result.InboundRoute);
         Assert.AreEqual(OutboundRoute.Stopped, result.OutboundRoute);
+    }
+
+    [TestMethod]
+    public void RecoveryAndReconnectCannotResurrectInitialOrStoppedChannels()
+    {
+        RoutingPolicy policy = new();
+
+        Assert.AreEqual(ChannelState.Inactive, policy.RecoverInbound().InboundChannelState);
+        Assert.AreEqual(InboundRoute.Stopped, policy.Snapshot.InboundRoute);
+        Assert.AreEqual(ChannelState.Inactive, policy.ReconnectOutbound().OutboundChannelState);
+        Assert.AreEqual(OutboundRoute.Stopped, policy.Snapshot.OutboundRoute);
+
+        _ = policy.Start(outboundLocalBypass: false);
+        _ = policy.Stop();
+
+        Assert.AreEqual(ChannelState.Inactive, policy.RecoverInbound().InboundChannelState);
+        Assert.AreEqual(InboundRoute.Stopped, policy.Snapshot.InboundRoute);
+        Assert.AreEqual(ChannelState.Inactive, policy.ReconnectOutbound().OutboundChannelState);
+        Assert.AreEqual(OutboundRoute.Stopped, policy.Snapshot.OutboundRoute);
+    }
+
+    [TestMethod]
+    public void RecoveringOneChannelPreservesTheOtherActiveFailure()
+    {
+        RoutingPolicy policy = new();
+        _ = policy.Start(outboundLocalBypass: false);
+        _ = policy.FailInbound(ErrorCategory.Network);
+        _ = policy.FailOutbound(ErrorCategory.Protocol);
+
+        RoutingPolicySnapshot inboundRecovered = policy.RecoverInbound();
+
+        Assert.AreEqual(ChannelState.Connected, inboundRecovered.InboundChannelState);
+        Assert.AreEqual(ChannelState.Failed, inboundRecovered.OutboundChannelState);
+        Assert.AreEqual(ErrorCategory.Protocol, inboundRecovered.ErrorCategory);
+
+        RoutingPolicy outboundPolicy = new();
+        _ = outboundPolicy.Start(outboundLocalBypass: false);
+        _ = outboundPolicy.FailInbound(ErrorCategory.Network);
+        _ = outboundPolicy.DisconnectOutbound();
+        RoutingPolicySnapshot outboundRecovered =
+            outboundPolicy.ReconnectOutbound();
+
+        Assert.AreEqual(ChannelState.Failed, outboundRecovered.InboundChannelState);
+        Assert.AreEqual(ChannelState.Connected, outboundRecovered.OutboundChannelState);
+        Assert.AreEqual(ErrorCategory.Network, outboundRecovered.ErrorCategory);
+    }
+
+    [TestMethod]
+    public void StaleGenerationRecoveryCannotMutateANewerRun()
+    {
+        RoutingPolicy policy = new();
+        _ = policy.Start(outboundLocalBypass: false);
+        System.Reflection.PropertyInfo? generationProperty =
+            typeof(RoutingPolicySnapshot).GetProperty("Generation");
+        Assert.IsNotNull(generationProperty);
+        long staleGeneration =
+            (long)generationProperty.GetValue(policy.Snapshot)!;
+        _ = policy.FailInbound(ErrorCategory.Network);
+        _ = policy.Stop();
+        _ = policy.Start(outboundLocalBypass: false);
+        _ = policy.FailInbound(ErrorCategory.Protocol);
+
+        System.Reflection.MethodInfo? recover =
+            typeof(RoutingPolicy).GetMethod(
+                nameof(RoutingPolicy.RecoverInbound),
+                [typeof(long)]);
+        Assert.IsNotNull(recover);
+        RoutingPolicySnapshot result = (RoutingPolicySnapshot)recover.Invoke(
+            policy,
+            [staleGeneration])!;
+
+        Assert.AreEqual(ChannelState.Failed, result.InboundChannelState);
+        Assert.AreEqual(InboundRoute.OriginalFailOpen, result.InboundRoute);
+        Assert.AreEqual(ErrorCategory.Protocol, result.ErrorCategory);
     }
 
     private sealed class FakeClock : IClock

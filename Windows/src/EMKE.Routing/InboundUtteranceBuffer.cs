@@ -14,8 +14,8 @@ public sealed class InboundUtteranceBuffer
     private readonly List<byte[]> _translatedChunks = [];
     private readonly char[] _transcript;
     private int _transcriptLength;
-    private int _originalByteCount;
-    private int _translatedByteCount;
+    private long _originalByteCount;
+    private long _translatedByteCount;
     private bool _isActive;
 
     public InboundUtteranceBuffer(
@@ -39,8 +39,8 @@ public sealed class InboundUtteranceBuffer
 
     public InboundGateDecision Decision => _gate.Snapshot.Decision;
 
-    public int BufferedPcm16ByteCount =>
-        _originalByteCount + _translatedByteCount;
+    public long BufferedPcm16ByteCount =>
+        checked(_originalByteCount + _translatedByteCount);
 
     public string Transcript => new(_transcript, 0, _transcriptLength);
 
@@ -154,8 +154,13 @@ public sealed class InboundUtteranceBuffer
 
     private byte[][] BufferOriginal(ReadOnlySpan<byte> pcm16)
     {
-        _originalChunks.Add(pcm16.ToArray());
-        _originalByteCount += pcm16.Length;
+        int copyCount = BoundedCopyCount(_originalByteCount, pcm16.Length);
+        if (copyCount > 0)
+        {
+            _originalChunks.Add(pcm16[..copyCount].ToArray());
+            _originalByteCount = checked(_originalByteCount + copyCount);
+        }
+
         _gate.ObserveLateAudio();
         if (_originalByteCount < _maximumPcm16BytesPerCandidate)
         {
@@ -168,8 +173,13 @@ public sealed class InboundUtteranceBuffer
 
     private byte[][] BufferTranslation(ReadOnlySpan<byte> pcm16)
     {
-        _translatedChunks.Add(pcm16.ToArray());
-        _translatedByteCount += pcm16.Length;
+        int copyCount = BoundedCopyCount(_translatedByteCount, pcm16.Length);
+        if (copyCount > 0)
+        {
+            _translatedChunks.Add(pcm16[..copyCount].ToArray());
+            _translatedByteCount = checked(_translatedByteCount + copyCount);
+        }
+
         _gate.ObserveLateAudio();
         if (_translatedByteCount < _maximumPcm16BytesPerCandidate)
         {
@@ -178,6 +188,13 @@ public sealed class InboundUtteranceBuffer
 
         _gate.ForceDecision(voiced: true);
         return FlushSelectedCandidate();
+    }
+
+    private int BoundedCopyCount(long currentCount, int offeredCount)
+    {
+        long remaining = checked(
+            (long)_maximumPcm16BytesPerCandidate - currentCount);
+        return (int)Math.Min(remaining, offeredCount);
     }
 
     private byte[][] FlushSelectedCandidate()

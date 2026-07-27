@@ -1,4 +1,5 @@
 import EMKECore
+@testable import EMKELanguageBaseline
 import Foundation
 import Testing
 @testable import EMKERouting
@@ -134,25 +135,16 @@ func macOSBaselineToolRejectsWrongGoldenRouteWithoutRewritingFiles() throws {
     try wrongCorpusData.write(to: inputURL)
     try originalOutput.write(to: outputURL)
 
-    let executableURL = repositoryRoot
-        .appendingPathComponent(".build/debug/EMKELanguageBaselineTool")
-    #expect(FileManager.default.isExecutableFile(atPath: executableURL.path))
-
-    let process = Process()
-    let standardError = Pipe()
-    process.executableURL = executableURL
-    process.arguments = [inputURL.path, outputURL.path]
-    process.standardOutput = Pipe()
-    process.standardError = standardError
-    try process.run()
-    process.waitUntilExit()
-
-    let errorOutput = String(
-        decoding: standardError.fileHandleForReading.readDataToEndOfFile(),
-        as: UTF8.self
-    )
-    #expect(process.terminationStatus != 0)
-    #expect(errorOutput.contains("zh-001"))
+    do {
+        _ = try LanguageBaselineGenerator.generate(
+            inputURL: inputURL,
+            outputURL: outputURL,
+            environment: "hermetic-test"
+        )
+        Issue.record("Expected the wrong golden route to be rejected")
+    } catch let error as LanguageBaselineGenerationError {
+        #expect(error.description.contains("zh-001"))
+    }
     #expect(try Data(contentsOf: inputURL) == wrongCorpusData)
     #expect(try Data(contentsOf: outputURL) == originalOutput)
 }

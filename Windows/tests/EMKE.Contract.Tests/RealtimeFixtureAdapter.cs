@@ -72,6 +72,48 @@ internal static class RealtimeFixtureAdapter
         }
     }
 
+    internal static async Task<(
+        ErrorCategory? InboundError,
+        ErrorCategory? OutboundError)> ObserveRoutingOutcomeAsync(
+        JsonElement fixtureCase,
+        string name)
+    {
+        if (fixtureCase.TryGetProperty("sockets", out JsonElement sockets))
+        {
+            ErrorCategory? inbound = null;
+            ErrorCategory? outbound = null;
+            foreach (JsonElement socket in sockets.EnumerateArray())
+            {
+                HandshakeResult result = await DriveSessionAsync(
+                    socket.GetProperty("steps"),
+                    name);
+                switch (socket.GetProperty("socketId").GetString())
+                {
+                    case "inbound":
+                        inbound = result.ErrorCategory;
+                        break;
+                    case "outbound":
+                        outbound = result.ErrorCategory;
+                        break;
+                    default:
+                        throw new InvalidDataException(
+                            "Unknown handshake fixture socket id.");
+                }
+            }
+
+            return (inbound, outbound);
+        }
+
+        JsonElement steps = fixtureCase.GetProperty("steps");
+        if (steps[0].GetProperty("direction").GetString() == "local")
+        {
+            return (null, null);
+        }
+
+        HandshakeResult inboundResult = await DriveSessionAsync(steps, name);
+        return (inboundResult.ErrorCategory, null);
+    }
+
     public static async Task ValidateCloseDeadlineAsync(JsonElement fixture)
     {
         Assert.AreEqual("realtime.close-deadline.v1", fixture.GetProperty("fixtureId").GetString());

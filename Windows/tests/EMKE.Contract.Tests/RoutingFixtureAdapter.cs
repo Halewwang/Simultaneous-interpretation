@@ -90,7 +90,7 @@ internal static class RoutingFixtureAdapter
         }
     }
 
-    public static void ValidateRealtimeProjection(JsonElement fixture)
+    public static async Task ValidateRealtimeProjectionAsync(JsonElement fixture)
     {
         foreach (JsonElement fixtureCase in fixture.GetProperty("cases").EnumerateArray())
         {
@@ -103,10 +103,20 @@ internal static class RoutingFixtureAdapter
             RoutingPolicy policy = new();
             RoutingPolicySnapshot actual = policy.Start(sameLanguage);
             JsonElement expected = fixtureCase.GetProperty("expected");
-            if (expected.TryGetProperty("errorCategory", out JsonElement error)
-                && RequiredString(error) == "protocol")
+            (
+                ErrorCategory? inboundError,
+                ErrorCategory? outboundError
+            ) = await RealtimeFixtureAdapter.ObserveRoutingOutcomeAsync(
+                fixtureCase,
+                name).ConfigureAwait(false);
+            if (inboundError is ErrorCategory inbound)
             {
-                actual = policy.FailInbound(ErrorCategory.Protocol);
+                actual = policy.FailInbound(inbound);
+            }
+
+            if (outboundError is ErrorCategory outbound)
+            {
+                actual = policy.FailOutbound(outbound);
             }
 
             AssertExpectedProjection(expected, actual, name);

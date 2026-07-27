@@ -1,5 +1,7 @@
 using EMKE.Core;
+using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace EMKE.Routing.Tests;
 
@@ -65,13 +67,76 @@ public sealed class OfflineLanguageClassifierTests
                     "Das eingebettete Sprachprofil benötigt kein Arbeitsverzeichnis.",
                     CancellationToken.None);
 
-            Assert.IsGreaterThan(result.En, result.De);
+            Assert.IsTrue(double.IsFinite(result.Zh));
+            Assert.IsTrue(double.IsFinite(result.En));
+            Assert.IsTrue(double.IsFinite(result.De));
+            Assert.AreEqual(1, result.Zh + result.En + result.De, 0.000_000_001);
         }
         finally
         {
             Environment.CurrentDirectory = originalDirectory;
             Directory.Delete(temporaryDirectory);
         }
+    }
+
+    [TestMethod]
+    public void EmbeddedProfilePassesCanonicalIntegrityValidation()
+    {
+        JsonObject model = ReadEmbeddedProfile();
+
+        InvokeModelParser(model);
+    }
+
+    [TestMethod]
+    public void TamperedFeatureDataIsRejectedByTheCanonicalProfileHash()
+    {
+        JsonObject model = ReadEmbeddedProfile();
+        JsonObject english = Profile(model, "en");
+        string feature = english.First().Key;
+        english[feature] = 0.5;
+
+        AssertModelRejected(model, "integrity");
+    }
+
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(-0.1)]
+    [DataRow(1.1)]
+    public void InvalidFeatureProbabilitiesAreRejected(double probability)
+    {
+        JsonObject model = ReadEmbeddedProfile();
+        Profile(model, "de")["invalid"] = probability;
+
+        AssertModelRejected(model, "features");
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("four")]
+    public void EmptyOrWrongWidthFeaturesAreRejected(string feature)
+    {
+        JsonObject model = ReadEmbeddedProfile();
+        Profile(model, "zh")[feature] = 0.5;
+
+        AssertModelRejected(model, "features");
+    }
+
+    [TestMethod]
+    public void FeatureHashMustBeExactlyLowercaseHex()
+    {
+        JsonObject uppercase = ReadEmbeddedProfile();
+        uppercase["featureSha256"] =
+            uppercase["featureSha256"]!.GetValue<string>().ToUpperInvariant();
+        AssertModelRejected(uppercase, "featureSha256");
+
+        JsonObject nonHex = ReadEmbeddedProfile();
+        string current = nonHex["featureSha256"]!.GetValue<string>();
+        nonHex["featureSha256"] = $"g{current[1..]}";
+        AssertModelRejected(nonHex, "featureSha256");
+
+        JsonObject shortHash = ReadEmbeddedProfile();
+        shortHash["featureSha256"] = current[..63];
+        AssertModelRejected(shortHash, "featureSha256");
     }
 
     [TestMethod]
@@ -202,6 +267,54 @@ public sealed class OfflineLanguageClassifierTests
 
         throw new FileNotFoundException(
             "Unable to locate the shared routing language corpus.");
+    }
+
+    private static JsonObject ReadEmbeddedProfile()
+    {
+        const string resourceName =
+            "EMKE.Routing.Resources.language-profile-v1.json";
+        using Stream stream =
+            typeof(OfflineLanguageClassifier).Assembly
+                .GetManifestResourceStream(resourceName)
+            ?? throw new InvalidDataException(
+                "The embedded language profile is missing.");
+        return JsonNode.Parse(stream)?.AsObject()
+            ?? throw new InvalidDataException(
+                "The embedded language profile is empty.");
+    }
+
+    private static JsonObject Profile(JsonObject model, string language)
+    {
+        return model["profiles"]?[language]?.AsObject()
+            ?? throw new InvalidDataException(
+                $"The {language} language profile is missing.");
+    }
+
+    private static void AssertModelRejected(
+        JsonObject model,
+        string expectedMessageFragment)
+    {
+        TargetInvocationException failure =
+            Assert.ThrowsExactly<TargetInvocationException>(
+                () => InvokeModelParser(model));
+        InvalidDataException inner =
+            Assert.IsInstanceOfType<InvalidDataException>(
+                failure.InnerException);
+        StringAssert.Contains(
+            inner.Message,
+            expectedMessageFragment,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void InvokeModelParser(JsonObject model)
+    {
+        MethodInfo? parse = typeof(OfflineLanguageClassifier).GetMethod(
+            "ParseModel",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.IsNotNull(parse);
+        using MemoryStream stream = new(
+            JsonSerializer.SerializeToUtf8Bytes(model));
+        _ = parse.Invoke(null, [stream]);
     }
 
     private static LanguageCode ParseLanguage(string value)

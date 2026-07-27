@@ -7,29 +7,42 @@ public sealed record RoutingPolicySnapshot(
     ChannelState OutboundChannelState,
     InboundRoute InboundRoute,
     OutboundRoute OutboundRoute,
-    ErrorCategory? ErrorCategory,
+    ErrorCategory? InboundErrorCategory,
+    ErrorCategory? OutboundErrorCategory,
     bool OutputsZeros,
     bool PhysicalMicrophoneAllowed,
-    bool BypassPersisted);
+    bool BypassPersisted,
+    long Generation)
+{
+    public ErrorCategory? ErrorCategory =>
+        OutboundErrorCategory ?? InboundErrorCategory;
+}
 
 public sealed class RoutingPolicy
 {
     private bool _outboundBypassRequested;
+    private bool _outboundReconnectPending;
     private bool _inboundRecoveryPending;
+    private long _generation;
 
     public RoutingPolicySnapshot Snapshot { get; private set; } = new(
         ChannelState.Inactive,
         ChannelState.Inactive,
         InboundRoute.Stopped,
         OutboundRoute.Stopped,
-        ErrorCategory: null,
+        InboundErrorCategory: null,
+        OutboundErrorCategory: null,
         OutputsZeros: false,
         PhysicalMicrophoneAllowed: false,
-        BypassPersisted: false);
+        BypassPersisted: false,
+        Generation: 0);
 
     public RoutingPolicySnapshot Start(bool outboundLocalBypass)
     {
+        long nextGeneration = checked(_generation + 1);
+        _generation = nextGeneration;
         _outboundBypassRequested = outboundLocalBypass;
+        _outboundReconnectPending = false;
         _inboundRecoveryPending = false;
         Snapshot = new(
             ChannelState.Connected,
@@ -40,33 +53,52 @@ public sealed class RoutingPolicy
             outboundLocalBypass
                 ? OutboundRoute.OriginalBypass
                 : OutboundRoute.Translated,
-            ErrorCategory: null,
+            InboundErrorCategory: null,
+            OutboundErrorCategory: null,
             OutputsZeros: false,
             PhysicalMicrophoneAllowed: outboundLocalBypass,
-            BypassPersisted: false);
+            BypassPersisted: false,
+            Generation: nextGeneration);
         return Snapshot;
     }
 
     public RoutingPolicySnapshot FailInbound(ErrorCategory category)
     {
         ValidateCategory(category);
+        if (Snapshot.InboundChannelState == ChannelState.Inactive)
+        {
+            return Snapshot;
+        }
+
         _inboundRecoveryPending = false;
         Snapshot = Snapshot with
         {
             InboundChannelState = ChannelState.Failed,
             InboundRoute = InboundRoute.OriginalFailOpen,
-            ErrorCategory = category,
+            InboundErrorCategory = category,
         };
         return Snapshot;
     }
 
     public RoutingPolicySnapshot RecoverInbound()
     {
+        return RecoverInbound(_generation);
+    }
+
+    public RoutingPolicySnapshot RecoverInbound(long generation)
+    {
+        if (generation != _generation
+            || Snapshot.InboundChannelState != ChannelState.Failed
+            || Snapshot.InboundRoute != InboundRoute.OriginalFailOpen)
+        {
+            return Snapshot;
+        }
+
         _inboundRecoveryPending = true;
         Snapshot = Snapshot with
         {
             InboundChannelState = ChannelState.Connected,
-            ErrorCategory = null,
+            InboundErrorCategory = null,
         };
         return Snapshot;
     }
@@ -88,11 +120,17 @@ public sealed class RoutingPolicy
     public RoutingPolicySnapshot FailOutbound(ErrorCategory category)
     {
         ValidateCategory(category);
+        if (Snapshot.OutboundChannelState == ChannelState.Inactive)
+        {
+            return Snapshot;
+        }
+
+        _outboundReconnectPending = false;
         Snapshot = Snapshot with
         {
             OutboundChannelState = ChannelState.Failed,
             OutboundRoute = OutboundRoute.MutedFailClosed,
-            ErrorCategory = category,
+            OutboundErrorCategory = category,
             OutputsZeros = true,
             PhysicalMicrophoneAllowed = false,
         };
@@ -101,11 +139,18 @@ public sealed class RoutingPolicy
 
     public RoutingPolicySnapshot HandleOutboundUnderrun()
     {
+        if (Snapshot.OutboundChannelState is ChannelState.Inactive
+            or ChannelState.Bypassed)
+        {
+            return Snapshot;
+        }
+
+        _outboundReconnectPending = false;
         Snapshot = Snapshot with
         {
             OutboundChannelState = ChannelState.Degraded,
             OutboundRoute = OutboundRoute.MutedFailClosed,
-            ErrorCategory = ErrorCategory.Backpressure,
+            OutboundErrorCategory = ErrorCategory.Backpressure,
             OutputsZeros = true,
             PhysicalMicrophoneAllowed = false,
         };
@@ -114,12 +159,18 @@ public sealed class RoutingPolicy
 
     public RoutingPolicySnapshot EnableOutboundBypass()
     {
+        if (Snapshot.OutboundChannelState == ChannelState.Inactive)
+        {
+            return Snapshot;
+        }
+
         _outboundBypassRequested = true;
+        _outboundReconnectPending = false;
         Snapshot = Snapshot with
         {
             OutboundChannelState = ChannelState.Bypassed,
             OutboundRoute = OutboundRoute.OriginalBypass,
-            ErrorCategory = null,
+            OutboundErrorCategory = null,
             OutputsZeros = false,
             PhysicalMicrophoneAllowed = true,
         };
@@ -128,6 +179,13 @@ public sealed class RoutingPolicy
 
     public RoutingPolicySnapshot DisconnectOutbound()
     {
+        if (Snapshot.OutboundChannelState is not (
+            ChannelState.Connected or ChannelState.Bypassed))
+        {
+            return Snapshot;
+        }
+
+        _outboundReconnectPending = true;
         Snapshot = _outboundBypassRequested
             ? Snapshot with
             {
@@ -147,12 +205,23 @@ public sealed class RoutingPolicy
 
     public RoutingPolicySnapshot ReconnectOutbound()
     {
+        return ReconnectOutbound(_generation);
+    }
+
+    public RoutingPolicySnapshot ReconnectOutbound(long generation)
+    {
+        if (generation != _generation || !_outboundReconnectPending)
+        {
+            return Snapshot;
+        }
+
+        _outboundReconnectPending = false;
         Snapshot = _outboundBypassRequested
             ? Snapshot with
             {
                 OutboundChannelState = ChannelState.Bypassed,
                 OutboundRoute = OutboundRoute.OriginalBypass,
-                ErrorCategory = null,
+                OutboundErrorCategory = null,
                 OutputsZeros = false,
                 PhysicalMicrophoneAllowed = true,
                 BypassPersisted = true,
@@ -161,7 +230,7 @@ public sealed class RoutingPolicy
             {
                 OutboundChannelState = ChannelState.Connected,
                 OutboundRoute = OutboundRoute.Translated,
-                ErrorCategory = null,
+                OutboundErrorCategory = null,
                 OutputsZeros = false,
                 PhysicalMicrophoneAllowed = false,
             };
@@ -171,16 +240,19 @@ public sealed class RoutingPolicy
     public RoutingPolicySnapshot Stop()
     {
         _outboundBypassRequested = false;
+        _outboundReconnectPending = false;
         _inboundRecoveryPending = false;
         Snapshot = new(
             ChannelState.Inactive,
             ChannelState.Inactive,
             InboundRoute.Stopped,
             OutboundRoute.Stopped,
-            ErrorCategory: null,
+            InboundErrorCategory: null,
+            OutboundErrorCategory: null,
             OutputsZeros: false,
             PhysicalMicrophoneAllowed: false,
-            BypassPersisted: false);
+            BypassPersisted: false,
+            Generation: _generation);
         return Snapshot;
     }
 

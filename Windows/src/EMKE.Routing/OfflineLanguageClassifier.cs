@@ -1,7 +1,9 @@
 using System.Collections.Frozen;
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using EMKE.Core;
@@ -14,8 +16,11 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
     private const int MaximumNormalizedRunes = 4_096;
     private const double SoftmaxScale = 2;
     private const double UnknownFeatureProbability = 0.000_000_01;
+    private const string ExpectedFeatureSha256 =
+        "a64f8e589f873628197ebcb3efbc5c09b031d3190626697c49d12be86ca7a603";
     private const string ResourceName =
         "EMKE.Routing.Resources.language-profile-v1.json";
+    private static readonly string[] ProfileLanguages = ["zh", "en", "de"];
 
     private static readonly Lazy<LanguageModel> SharedModel =
         new(LoadModel, LazyThreadSafetyMode.ExecutionAndPublication);
@@ -196,8 +201,14 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
         using Stream stream = assembly.GetManifestResourceStream(ResourceName)
             ?? throw new InvalidDataException(
                 "The embedded language profile is missing.");
-        LanguageProfileDocument document = JsonSerializer.Deserialize(
-            stream,
+        return ParseModel(stream);
+    }
+
+    private static LanguageModel ParseModel(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        using JsonDocument raw = JsonDocument.Parse(stream);
+        LanguageProfileDocument document = raw.RootElement.Deserialize(
             LanguageProfileJsonContext.Default.LanguageProfileDocument)
             ?? throw new InvalidDataException(
                 "The embedded language profile is empty.");
@@ -208,7 +219,6 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
                 "normalized-character-1-to-3-grams",
                 StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(document.GeneratorVersion)
-            || document.FeatureSha256.Length != 64
             || document.Profiles.Count != 3
             || !document.Profiles.TryGetValue("zh", out Dictionary<string, double>? zh)
             || !document.Profiles.TryGetValue("en", out Dictionary<string, double>? en)
@@ -217,6 +227,11 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
             throw new InvalidDataException(
                 "The embedded language profile metadata is invalid.");
         }
+
+        ValidateFeatureHashFormat(document.FeatureSha256);
+        JsonElement rawProfiles = raw.RootElement.GetProperty("profiles");
+        ValidateRawProfiles(rawProfiles);
+        ValidateProfileIntegrity(rawProfiles, document.FeatureSha256);
 
         return new LanguageModel(
             document.Version,
@@ -227,20 +242,182 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
             Freeze(de));
     }
 
+    private static void ValidateFeatureHashFormat(string hash)
+    {
+        if (hash.Length != 64
+            || hash.Any(static character =>
+                character is not (>= '0' and <= '9')
+                    and not (>= 'a' and <= 'f')))
+        {
+            throw new InvalidDataException(
+                "The embedded featureSha256 must be 64 lowercase hexadecimal characters.");
+        }
+    }
+
+    private static void ValidateRawProfiles(JsonElement profiles)
+    {
+        if (profiles.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException(
+                "The embedded language profile contains invalid features.");
+        }
+
+        string[] languages = profiles.EnumerateObject()
+            .Select(static property => property.Name)
+            .ToArray();
+        if (languages.Length != ProfileLanguages.Length
+            || languages.Distinct(StringComparer.Ordinal).Count()
+                != ProfileLanguages.Length
+            || ProfileLanguages.Any(language =>
+                !languages.Contains(language, StringComparer.Ordinal)))
+        {
+            throw new InvalidDataException(
+                "The embedded language profile contains invalid features.");
+        }
+
+        foreach (string language in ProfileLanguages)
+        {
+            JsonElement profile = profiles.GetProperty(language);
+            if (profile.ValueKind != JsonValueKind.Object
+                || !profile.EnumerateObject().Any())
+            {
+                throw new InvalidDataException(
+                    "The embedded language profile contains invalid features.");
+            }
+
+            HashSet<string> unique = new(StringComparer.Ordinal);
+            foreach (JsonProperty feature in profile.EnumerateObject())
+            {
+                int width = feature.Name.EnumerateRunes().Count();
+                if (!unique.Add(feature.Name)
+                    || width is < 1 or > 3
+                    || feature.Value.ValueKind != JsonValueKind.Number
+                    || !feature.Value.TryGetDouble(out double probability)
+                    || !double.IsFinite(probability)
+                    || probability <= 0
+                    || probability > 1)
+                {
+                    throw new InvalidDataException(
+                        "The embedded language profile contains invalid features.");
+                }
+            }
+        }
+    }
+
+    private static void ValidateProfileIntegrity(
+        JsonElement profiles,
+        string declaredHash)
+    {
+        byte[] canonical = CanonicalizeProfiles(profiles);
+        byte[] computedHash = SHA256.HashData(canonical);
+        byte[] declaredHashBytes = Convert.FromHexString(declaredHash);
+        byte[] expectedHashBytes = Convert.FromHexString(
+            ExpectedFeatureSha256);
+        if (!CryptographicOperations.FixedTimeEquals(
+                computedHash,
+                declaredHashBytes)
+            || !CryptographicOperations.FixedTimeEquals(
+                computedHash,
+                expectedHashBytes))
+        {
+            throw new InvalidDataException(
+                "The embedded language profile failed canonical integrity validation.");
+        }
+    }
+
+    private static byte[] CanonicalizeProfiles(JsonElement profiles)
+    {
+        using MemoryStream output = new();
+        using (Utf8JsonWriter writer = new(
+            output,
+            new JsonWriterOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            }))
+        {
+            writer.WriteStartObject();
+            foreach (string language in ProfileLanguages)
+            {
+                writer.WritePropertyName(language);
+                writer.WriteStartObject();
+                foreach (JsonProperty feature in profiles.GetProperty(language)
+                             .EnumerateObject()
+                             .OrderBy(
+                                 static property => property.Name,
+                                 UnicodeCodePointComparer.Instance))
+                {
+                    writer.WritePropertyName(feature.Name);
+                    writer.WriteRawValue(
+                        feature.Value.GetRawText(),
+                        skipInputValidation: false);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return output.ToArray();
+    }
+
     private static FrozenDictionary<string, double> Freeze(
         Dictionary<string, double> values)
     {
         if (values.Count == 0
             || values.Any(static pair =>
-                string.IsNullOrEmpty(pair.Key)
+                pair.Key.EnumerateRunes().Count() is < 1 or > 3
                 || !double.IsFinite(pair.Value)
-                || pair.Value < 0))
+                || pair.Value <= 0
+                || pair.Value > 1))
         {
             throw new InvalidDataException(
                 "The embedded language profile contains invalid features.");
         }
 
         return values.ToFrozenDictionary(StringComparer.Ordinal);
+    }
+
+    private sealed class UnicodeCodePointComparer : IComparer<string>
+    {
+        public static UnicodeCodePointComparer Instance { get; } = new();
+
+        public int Compare(string? left, string? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left is null)
+            {
+                return -1;
+            }
+
+            if (right is null)
+            {
+                return 1;
+            }
+
+            var leftRunes = left.EnumerateRunes().GetEnumerator();
+            var rightRunes = right.EnumerateRunes().GetEnumerator();
+            while (true)
+            {
+                bool hasLeft = leftRunes.MoveNext();
+                bool hasRight = rightRunes.MoveNext();
+                if (!hasLeft || !hasRight)
+                {
+                    return hasLeft.CompareTo(hasRight);
+                }
+
+                int comparison =
+                    leftRunes.Current.Value.CompareTo(rightRunes.Current.Value);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+        }
     }
 
     private sealed record NormalizedText(

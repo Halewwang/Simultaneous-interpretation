@@ -26,6 +26,13 @@ let package = Package(
         .target(name: "EMKECore"),
         .target(name: "EMKERealtime", dependencies: ["EMKECore"]),
         .target(name: "EMKERouting", dependencies: ["EMKECore"]),
+        .target(
+            name: "EMKELanguageBaseline",
+            dependencies: [
+                "EMKECore",
+                "EMKERouting",
+            ]
+        ),
         .target(name: "EMKESecurity"),
         .target(
             name: "EMKEAudioBridge",
@@ -69,10 +76,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "EMKELanguageBaselineTool",
-            dependencies: [
-                "EMKECore",
-                "EMKERouting",
-            ],
+            dependencies: ["EMKELanguageBaseline"],
             path: "Tools/EMKELanguageBaselineTool"
         ),
         .testTarget(
@@ -94,6 +98,7 @@ let package = Package(
             name: "EMKERoutingTests",
             dependencies: [
                 "EMKECore",
+                "EMKELanguageBaseline",
                 "EMKERouting",
                 .product(name: "Testing", package: "swift-testing"),
             ]

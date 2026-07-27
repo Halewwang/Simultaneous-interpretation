@@ -261,10 +261,29 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Routing")]
-    public void RealtimeHandshakeChannelAndRouteExpectationsUseRoutingPolicy()
+    public async Task RealtimeHandshakeChannelAndRouteExpectationsUseRoutingPolicy()
     {
         using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
-        RoutingFixtureAdapter.ValidateRealtimeProjection(fixture.RootElement);
+        await RoutingFixtureAdapter.ValidateRealtimeProjectionAsync(
+            fixture.RootElement).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    [TestCategory("FixtureAdapter")]
+    [TestCategory("Routing")]
+    public async Task RealtimeRoutingActualDoesNotFollowMutatedExpectedErrorFields()
+    {
+        using JsonDocument fixture = LoadFixture("Realtime/text-frame-handshake.json");
+        JsonObject root = JsonNode.Parse(fixture.RootElement.GetRawText())!.AsObject();
+        JsonObject expected = root["cases"]![0]!["expected"]!.AsObject();
+        expected["inboundChannelState"] = "failed";
+        expected["inboundRoute"] = "originalFailOpen";
+        expected["errorCategory"] = "protocol";
+        using JsonDocument mutated = JsonDocument.Parse(root.ToJsonString());
+
+        _ = await Assert.ThrowsExactlyAsync<AssertFailedException>(
+            () => RoutingFixtureAdapter.ValidateRealtimeProjectionAsync(
+                mutated.RootElement)).ConfigureAwait(false);
     }
 
     [TestMethod]
