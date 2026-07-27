@@ -82,8 +82,7 @@ public sealed class InboundUtteranceBufferTests
 
         IReadOnlyList<byte[]> output = buffer.AppendOriginal(oversized);
 
-        Assert.HasCount(1, output);
-        CollectionAssert.AreEqual(new byte[] { 0, 1, 2, 3 }, output[0]);
+        CollectionAssert.AreEqual(oversized, output.SelectMany(static chunk => chunk).ToArray());
         Assert.AreEqual(0, buffer.BufferedPcm16ByteCount);
         Assert.AreEqual(InboundGateDecision.Original, buffer.Decision);
     }
@@ -102,11 +101,43 @@ public sealed class InboundUtteranceBufferTests
         IReadOnlyList<byte[]> output =
             buffer.AppendTranslation(new byte[] { 5, 6, 7, 8 });
 
-        Assert.HasCount(2, output);
-        CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, output[0]);
-        CollectionAssert.AreEqual(new byte[] { 5, 6 }, output[1]);
+        CollectionAssert.AreEqual(
+            new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 },
+            output.SelectMany(static chunk => chunk).ToArray());
         Assert.AreEqual(0, buffer.BufferedPcm16ByteCount);
         Assert.AreEqual(InboundGateDecision.Translated, buffer.Decision);
+    }
+
+    [TestMethod]
+    public void CapacityDecisionOutputsOnlySelectedCandidateAndCurrentRemainder()
+    {
+        InboundUtteranceBuffer buffer = new(
+            LanguageCode.En,
+            new FixedClock(),
+            maximumPcm16BytesPerCandidate: 4,
+            maximumTranscriptCharacters: 8);
+        buffer.Begin();
+        _ = buffer.AppendTranslation(new byte[] { 91, 92 });
+
+        IReadOnlyList<byte[]> output =
+            buffer.AppendOriginal(new byte[] { 1, 2, 3, 4, 5, 6 });
+
+        CollectionAssert.AreEqual(
+            new byte[] { 1, 2, 3, 4, 5, 6 },
+            output.SelectMany(static chunk => chunk).ToArray());
+        Assert.IsFalse(output.SelectMany(static chunk => chunk).Contains((byte)91));
+        Assert.AreEqual(0, buffer.BufferedPcm16ByteCount);
+    }
+
+    [TestMethod]
+    public void OddPcm16CandidateCapacityIsRejected()
+    {
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => new InboundUtteranceBuffer(
+                LanguageCode.En,
+                new FixedClock(),
+                maximumPcm16BytesPerCandidate: 3,
+                maximumTranscriptCharacters: 8));
     }
 
     [TestMethod]

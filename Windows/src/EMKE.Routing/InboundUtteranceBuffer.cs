@@ -28,6 +28,13 @@ public sealed class InboundUtteranceBuffer
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
             maximumPcm16BytesPerCandidate);
+        if ((maximumPcm16BytesPerCandidate & 1) != 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumPcm16BytesPerCandidate),
+                "PCM16 candidate capacity must contain an even number of bytes.");
+        }
+
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
             maximumTranscriptCharacters);
 
@@ -168,7 +175,9 @@ public sealed class InboundUtteranceBuffer
         }
 
         _gate.ForceDecision(voiced: false);
-        return FlushSelectedCandidate();
+        return FlushSelectedCandidateWithRemainder(
+            pcm16[copyCount..],
+            InboundGateDecision.Original);
     }
 
     private byte[][] BufferTranslation(ReadOnlySpan<byte> pcm16)
@@ -187,7 +196,9 @@ public sealed class InboundUtteranceBuffer
         }
 
         _gate.ForceDecision(voiced: true);
-        return FlushSelectedCandidate();
+        return FlushSelectedCandidateWithRemainder(
+            pcm16[copyCount..],
+            InboundGateDecision.Translated);
     }
 
     private int BoundedCopyCount(long currentCount, int offeredCount)
@@ -210,6 +221,23 @@ public sealed class InboundUtteranceBuffer
             .Select(static chunk => chunk.ToArray())
             .ToArray();
         ClearPcm();
+        return output;
+    }
+
+    private byte[][] FlushSelectedCandidateWithRemainder(
+        ReadOnlySpan<byte> remainder,
+        InboundGateDecision currentCandidate)
+    {
+        bool outputRemainder =
+            remainder.Length > 0 && Decision == currentCandidate;
+        byte[][] output = FlushSelectedCandidate();
+        if (!outputRemainder)
+        {
+            return output;
+        }
+
+        Array.Resize(ref output, checked(output.Length + 1));
+        output[^1] = remainder.ToArray();
         return output;
     }
 
