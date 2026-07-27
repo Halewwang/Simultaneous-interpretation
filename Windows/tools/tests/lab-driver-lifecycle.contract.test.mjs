@@ -28,9 +28,10 @@ const validationTestPath = path.join(
   "lab-driver-lifecycle.validation.test.ps1",
 );
 
-async function readRequired(filePath) {
+async function readRequired(filePath, readText = readFile) {
   try {
-    return await readFile(filePath, "utf8");
+    const source = await readText(filePath, "utf8");
+    return source.replace(/\r\n?/g, "\n");
   } catch (error) {
     assert.fail(`required lifecycle file is missing: ${filePath}\n${error.message}`);
   }
@@ -87,7 +88,16 @@ function assertCommonSafetyContract(source, operation) {
   }
 }
 
-test("install lifecycle is fail-closed before the one exact pnputil install", async () => {
+test("install lifecycle input is line-ending stable and fail-closed", async () => {
+  assert.equal(
+    await readRequired(
+      "mixed-endings.ps1",
+      async () => "alpha\r\nbeta\rgamma\n",
+    ),
+    "alpha\nbeta\ngamma\n",
+    "required lifecycle sources must normalize CRLF and CR to LF",
+  );
+
   const source = await readRequired(installPath);
   assertCommonSafetyContract(source, "install");
 
