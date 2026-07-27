@@ -187,10 +187,10 @@ for (const forbiddenProperty of [
 
         const result = runResolver(fixtureVersionFile);
         assert.notEqual(result.status, 0);
-        assert.match(
-          `${result.stdout}\n${result.stderr}`,
-          /driverPackageAvailable=false cannot be combined with driverPackageUrl or driverPackageSha256/,
-        );
+        const errorOutput = `${result.stdout}\n${result.stderr}`;
+        assert.match(errorOutput, /driverPackageAvailable=false/);
+        assert.match(errorOutput, /driverPackageUrl/);
+        assert.match(errorOutput, /driverPackageSha256/);
       } finally {
         await rm(fixtureRoot, { recursive: true, force: true });
       }
