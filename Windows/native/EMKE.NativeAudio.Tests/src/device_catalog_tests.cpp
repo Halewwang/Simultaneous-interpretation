@@ -40,6 +40,7 @@ class TestContext {
 using emke::audio::DeviceDataFlow;
 using emke::audio::DeviceEndpoint;
 using emke::audio::EndpointRole;
+using emke::audio::EndpointDiscoveryStatus;
 
 DeviceEndpoint endpoint(
     std::u16string id,
@@ -454,6 +455,88 @@ void test_follow_default_permits_migration_but_rejects_virtual(
       context,
       resolution.status ==
           emke::audio::PhysicalResolutionStatus::virtualEndpoint);
+}
+
+void test_discovery_reports_four_ready_roles_and_default_physical_ids(
+    TestContext& context) {
+  FakeDeviceSource source;
+  source.next_endpoints = complete_virtual_endpoints();
+  source.next_endpoints.push_back(
+      endpoint(u"{physical-output}", DeviceDataFlow::render));
+  source.next_endpoints.push_back(
+      endpoint(u"{physical-input}", DeviceDataFlow::capture));
+  source.default_render = u"{physical-output}";
+  source.default_capture = u"{physical-input}";
+  emke::audio::DeviceCatalog catalog(source);
+
+  const auto result = emke::audio::discover_endpoints(catalog);
+  EXPECT(context, result.status == EndpointDiscoveryStatus::ready);
+  EXPECT(
+      context,
+      result.virtual_endpoints[0].id == u"{opaque}.meeting.render");
+  EXPECT(context, result.virtual_endpoints[1].id == u"{opaque}.app.capture");
+  EXPECT(context, result.virtual_endpoints[2].id == u"{opaque}.app.render");
+  EXPECT(
+      context,
+      result.virtual_endpoints[3].id == u"{opaque}.meeting.capture");
+  EXPECT(context, result.default_physical_output_id == u"{physical-output}");
+  EXPECT(context, result.default_physical_input_id == u"{physical-input}");
+}
+
+void test_discovery_distinguishes_missing_driver_from_partial_roles(
+    TestContext& context) {
+  FakeDeviceSource source;
+  source.next_endpoints = {
+      endpoint(u"{physical-output}", DeviceDataFlow::render),
+      endpoint(u"{physical-input}", DeviceDataFlow::capture),
+  };
+  source.default_render = u"{physical-output}";
+  source.default_capture = u"{physical-input}";
+  emke::audio::DeviceCatalog catalog(source);
+
+  auto result = emke::audio::discover_endpoints(catalog);
+  EXPECT(context, result.status == EndpointDiscoveryStatus::driverMissing);
+
+  source.next_endpoints.push_back(endpoint(
+      u"{opaque}.meeting.render",
+      DeviceDataFlow::render,
+      EndpointRole::meetingSpeakerRender));
+  result = emke::audio::discover_endpoints(catalog);
+  EXPECT(
+      context,
+      result.status == EndpointDiscoveryStatus::virtualEndpointsPartial);
+}
+
+void test_discovery_rejects_missing_default_physical_endpoint(
+    TestContext& context) {
+  FakeDeviceSource source;
+  source.next_endpoints = complete_virtual_endpoints();
+  source.next_endpoints.push_back(
+      endpoint(u"{physical-output}", DeviceDataFlow::render));
+  source.default_render = u"{physical-output}";
+  source.default_capture = u"{not-active}";
+  emke::audio::DeviceCatalog catalog(source);
+
+  const auto result = emke::audio::discover_endpoints(catalog);
+  EXPECT(
+      context,
+      result.status == EndpointDiscoveryStatus::physicalInputMissing);
+}
+
+void test_discovery_preserves_source_error_without_partial_classification(
+    TestContext& context) {
+  FakeDeviceSource source;
+  source.fail_enumeration = true;
+  emke::audio::DeviceCatalog catalog(source);
+
+  const auto result = emke::audio::discover_endpoints(catalog);
+  EXPECT(context, result.status == EndpointDiscoveryStatus::sourceError);
+  EXPECT(context, result.error.has_value());
+  EXPECT(
+      context,
+      result.error.has_value() &&
+          result.error->operation ==
+              emke::audio::DeviceCatalogOperation::enumerateEndpoints);
 }
 
 void test_catalog_snapshots_and_resolutions_survive_refresh(
@@ -921,6 +1004,10 @@ int run_device_catalog_tests() {
   test_missing_saved_physical_endpoint_does_not_fallback(context);
   test_inactive_physical_endpoint_is_unavailable_without_fallback(context);
   test_follow_default_permits_migration_but_rejects_virtual(context);
+  test_discovery_reports_four_ready_roles_and_default_physical_ids(context);
+  test_discovery_distinguishes_missing_driver_from_partial_roles(context);
+  test_discovery_rejects_missing_default_physical_endpoint(context);
+  test_discovery_preserves_source_error_without_partial_classification(context);
   test_catalog_snapshots_and_resolutions_survive_refresh(context);
   test_catalog_snapshot_publish_supports_concurrent_readers(context);
   test_notification_callback_copies_without_enumeration(context);

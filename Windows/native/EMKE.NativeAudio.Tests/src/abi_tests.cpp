@@ -253,6 +253,36 @@ void test_public_abi_layout(TestContext& context) {
          (std::is_same_v<decltype(&emke_audio_get_diagnostics),
                          DiagnosticsFunction>),
          name);
+
+  using DiscoverFunction =
+      emke_audio_status (*)(emke_audio_endpoint_snapshot*);
+  EXPECT(context,
+         EMKE_AUDIO_DISCOVERED_ENDPOINT_COUNT == 4u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, size) == 0u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_snapshot, abi_version) ==
+             sizeof(std::uint32_t),
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, size) == 0u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_discovered_endpoint, abi_version) ==
+             sizeof(std::uint32_t),
+         name);
+  EXPECT(context,
+         std::is_standard_layout_v<emke_audio_endpoint_snapshot>,
+         name);
+  EXPECT(context,
+         std::is_standard_layout_v<emke_audio_discovered_endpoint>,
+         name);
+  EXPECT(context,
+         (std::is_same_v<decltype(&emke_audio_discover_endpoints),
+                         DiscoverFunction>),
+         name);
 }
 
 void test_struct_validation(TestContext& context) {

@@ -52,6 +52,13 @@ emke_audio_diagnostics valid_diagnostics() {
   return diagnostics;
 }
 
+emke_audio_endpoint_snapshot valid_endpoint_snapshot() {
+  emke_audio_endpoint_snapshot snapshot{};
+  snapshot.size = sizeof(snapshot);
+  snapshot.abi_version = EMKE_AUDIO_ABI_VERSION;
+  return snapshot;
+}
+
 std::vector<float> stereo_block(float sample) {
   return std::vector<float>(
       EMKE_AUDIO_LOCAL_CYCLE_FRAMES * 2u, sample);
@@ -308,6 +315,34 @@ void test_public_same_route_reassertion_preserves_audio(
   emke_audio_destroy(handle);
 }
 
+void test_discovery_validates_snapshot_and_reports_platform_source_error(
+    TestContext& context) {
+  auto snapshot = valid_endpoint_snapshot();
+  snapshot.size = sizeof(snapshot) - 1u;
+  EXPECT(
+      context,
+      emke_audio_discover_endpoints(&snapshot) == EMKE_AUDIO_INVALID_ARGUMENT);
+
+  snapshot = valid_endpoint_snapshot();
+  snapshot.abi_version = EMKE_AUDIO_ABI_VERSION + 1u;
+  EXPECT(
+      context,
+      emke_audio_discover_endpoints(&snapshot) == EMKE_AUDIO_ABI_MISMATCH);
+
+  snapshot = valid_endpoint_snapshot();
+  EXPECT(context, emke_audio_discover_endpoints(&snapshot) == EMKE_AUDIO_OK);
+#if defined(_WIN32)
+  // Physical-lab status is intentionally exercised only by the Windows lab.
+  EXPECT(
+      context,
+      snapshot.discovery_status <= EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR);
+#else
+  EXPECT(
+      context,
+      snapshot.discovery_status == EMKE_AUDIO_ENDPOINT_DISCOVERY_SOURCE_ERROR);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -317,5 +352,6 @@ int main() {
   test_public_inbound_fail_open_persists(context);
   test_running_device_failure_is_observable(context);
   test_public_same_route_reassertion_preserves_audio(context);
+  test_discovery_validates_snapshot_and_reports_platform_source_error(context);
   return std::min(context.failures(), 255);
 }

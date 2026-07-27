@@ -175,6 +175,23 @@ enum class PhysicalResolutionStatus : std::uint8_t {
   sourceError,
 };
 
+enum class EndpointDiscoveryStatus : std::uint8_t {
+  ready,
+  driverMissing,
+  virtualEndpointsPartial,
+  physicalInputMissing,
+  physicalOutputMissing,
+  sourceError,
+};
+
+struct EndpointDiscoveryResult {
+  EndpointDiscoveryStatus status = EndpointDiscoveryStatus::sourceError;
+  std::array<DeviceEndpoint, 4u> virtual_endpoints{};
+  std::u16string default_physical_input_id;
+  std::u16string default_physical_output_id;
+  std::optional<DeviceCatalogError> error;
+};
+
 class DeviceCatalogSnapshot {
  public:
   explicit DeviceCatalogSnapshot(std::vector<DeviceEndpoint> endpoints);
@@ -220,6 +237,14 @@ class DeviceCatalog {
   std::mutex source_mutex_;
   std::shared_ptr<const DeviceCatalogSnapshot> snapshot_;
 };
+
+/*
+ * Refreshes the catalog and returns one self-contained discovery result. A
+ * default changing after the refresh is treated as missing rather than silently
+ * migrating to another endpoint.
+ */
+[[nodiscard]] EndpointDiscoveryResult discover_endpoints(
+    DeviceCatalog& catalog) noexcept;
 
 /*
  * Creates the real MMDevice source. The caller owns COM apartment

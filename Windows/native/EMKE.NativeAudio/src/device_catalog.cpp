@@ -570,6 +570,92 @@ PhysicalEndpointResolution DeviceCatalog::resolve_physical(
   };
 }
 
+EndpointDiscoveryResult discover_endpoints(DeviceCatalog& catalog) noexcept {
+  try {
+    const CatalogRefreshResult refresh = catalog.refresh();
+    if (!refresh.ok) {
+      return {
+          .status = EndpointDiscoveryStatus::sourceError,
+          .error = refresh.error,
+      };
+    }
+
+    const auto current = catalog.snapshot();
+    bool has_emke_role_property = false;
+    for (std::size_t index = 0u; index < current->size(); ++index) {
+      has_emke_role_property =
+          has_emke_role_property || current->endpoint_at(index).has_emke_role_property;
+    }
+
+    const VirtualEndpointAssessment assessment =
+        catalog.virtual_endpoint_assessment();
+    if (!assessment.ready) {
+      return {
+          .status = has_emke_role_property
+                        ? EndpointDiscoveryStatus::virtualEndpointsPartial
+                        : EndpointDiscoveryStatus::driverMissing,
+      };
+    }
+
+    EndpointDiscoveryResult result;
+    for (std::size_t index = 0u; index < current->size(); ++index) {
+      const DeviceEndpoint endpoint = current->endpoint_at(index);
+      if (endpoint.role.has_value()) {
+        result.virtual_endpoints[static_cast<std::size_t>(*endpoint.role)] =
+            endpoint;
+      }
+    }
+
+    const PhysicalEndpointSelection output_selection{
+        .mode = PhysicalEndpointMode::followDefault,
+        .data_flow = DeviceDataFlow::render,
+    };
+    const PhysicalEndpointResolution output =
+        catalog.resolve_physical(output_selection);
+    if (output.status == PhysicalResolutionStatus::sourceError) {
+      result.status = EndpointDiscoveryStatus::sourceError;
+      result.error = output.error;
+      return result;
+    }
+    if (output.status != PhysicalResolutionStatus::resolved ||
+        output.endpoint == nullptr) {
+      result.status = EndpointDiscoveryStatus::physicalOutputMissing;
+      return result;
+    }
+    result.default_physical_output_id = output.endpoint->id;
+
+    const PhysicalEndpointSelection input_selection{
+        .mode = PhysicalEndpointMode::followDefault,
+        .data_flow = DeviceDataFlow::capture,
+    };
+    const PhysicalEndpointResolution input =
+        catalog.resolve_physical(input_selection);
+    if (input.status == PhysicalResolutionStatus::sourceError) {
+      result.status = EndpointDiscoveryStatus::sourceError;
+      result.error = input.error;
+      return result;
+    }
+    if (input.status != PhysicalResolutionStatus::resolved ||
+        input.endpoint == nullptr) {
+      result.status = EndpointDiscoveryStatus::physicalInputMissing;
+      return result;
+    }
+    result.default_physical_input_id = input.endpoint->id;
+    result.status = EndpointDiscoveryStatus::ready;
+    return result;
+  } catch (const std::bad_alloc&) {
+    return {
+        .status = EndpointDiscoveryStatus::sourceError,
+        .error = allocation_error(),
+    };
+  } catch (...) {
+    return {
+        .status = EndpointDiscoveryStatus::sourceError,
+        .error = unexpected_error(),
+    };
+  }
+}
+
 std::unique_ptr<DeviceSource> create_mm_device_source(
     DeviceCatalogError& error) noexcept {
 #if defined(_WIN32)

@@ -5,6 +5,7 @@ set(
 
 add_library(EMKE.NativeAudio.IntegrationHost SHARED
   ../EMKE.NativeAudio/src/audio_runtime.cpp
+  ../EMKE.NativeAudio/src/device_catalog.cpp
   ../EMKE.NativeAudio/src/fake_audio_backend.cpp
   ../EMKE.NativeAudio/src/native_audio_api.cpp
 )
