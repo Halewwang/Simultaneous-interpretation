@@ -6,4 +6,8 @@
     <ProjectReference Include="../EMKE.Routing/EMKE.Routing.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="EMKE.Application.Tests" />
+  </ItemGroup>
+
 </Project>
