@@ -23,6 +23,7 @@ public struct InboundAuditionController: Sendable {
     private var bufferedTranslation: [Data] = []
     private var bufferedTranslationByteCount = 0
     private var crossfadeStarted = false
+    private var rendererResetPending = false
 
     public init(
         motherLanguage: SupportedLanguage,
@@ -35,11 +36,13 @@ public struct InboundAuditionController: Sendable {
     }
 
     public mutating func beginUtterance() -> UInt64 {
+        let replacesActiveUtterance = utteranceID != nil
         nextUtteranceID += 1
         clearUtterance()
         gate.reset()
         route = .undecided
         utteranceID = nextUtteranceID
+        rendererResetPending = replacesActiveUtterance
         return nextUtteranceID
     }
 
@@ -48,7 +51,7 @@ public struct InboundAuditionController: Sendable {
         utteranceID: UInt64
     ) -> [InboundAuditionCommand] {
         guard self.utteranceID == utteranceID else { return [] }
-        return [.original(pcm16)]
+        return commandsWithPendingRendererReset([.original(pcm16)])
     }
 
     public mutating func appendTranslation(
@@ -58,30 +61,34 @@ public struct InboundAuditionController: Sendable {
         guard self.utteranceID == utteranceID else { return [] }
         guard !pcm16.isEmpty else { return [] }
 
+        let commands: [InboundAuditionCommand]
         switch route {
         case .original:
-            return []
+            commands = []
         case .translated:
             if crossfadeStarted {
-                return [.translation(pcm16)]
+                commands = [.translation(pcm16)]
+            } else {
+                crossfadeStarted = true
+                commands = [.beginCrossfade(
+                    [pcm16],
+                    rampSamples: Self.rampSampleCount
+                )]
             }
-            crossfadeStarted = true
-            return [.beginCrossfade(
-                [pcm16],
-                rampSamples: Self.rampSampleCount
-            )]
         case .undecided:
             bufferedTranslation.append(pcm16)
             bufferedTranslationByteCount += pcm16.count
-            guard bufferedTranslationByteCount
-                    >= maximumBufferedTranslationBytes
-            else {
-                return []
+            if bufferedTranslationByteCount
+                >= maximumBufferedTranslationBytes
+            {
+                _ = gate.resolveDeadline(isSpeech: true)
+                route = .translated
+                commands = beginCrossfadeWithBufferedTranslation()
+            } else {
+                commands = []
             }
-            _ = gate.resolveDeadline(isSpeech: true)
-            route = .translated
-            return beginCrossfadeWithBufferedTranslation()
         }
+        return commandsWithPendingRendererReset(commands)
     }
 
     public mutating func observe(
@@ -92,7 +99,9 @@ public struct InboundAuditionController: Sendable {
             return []
         }
         route = gate.observe(hypotheses)
-        return commandsForLockedRoute()
+        return commandsWithPendingRendererReset(
+            commandsForLockedRoute()
+        )
     }
 
     public mutating func resolveDeadline(
@@ -105,7 +114,9 @@ public struct InboundAuditionController: Sendable {
         let translationIsAvailable =
             isSpeech && !bufferedTranslation.isEmpty
         route = gate.resolveDeadline(isSpeech: translationIsAvailable)
-        return commandsForLockedRoute()
+        return commandsWithPendingRendererReset(
+            commandsForLockedRoute()
+        )
     }
 
     public mutating func failOpen() -> [InboundAuditionCommand] {
@@ -114,7 +125,9 @@ public struct InboundAuditionController: Sendable {
         route = gate.resolveDeadline(isSpeech: false)
         discardBufferedTranslation()
         crossfadeStarted = false
-        return [.failOpen(rampSamples: Self.rampSampleCount)]
+        return commandsWithPendingRendererReset([
+            .failOpen(rampSamples: Self.rampSampleCount),
+        ])
     }
 
     public mutating func finish(
@@ -125,6 +138,7 @@ public struct InboundAuditionController: Sendable {
         gate.reset()
         route = .undecided
         self.utteranceID = nil
+        rendererResetPending = false
         return [.reset]
     }
 
@@ -133,6 +147,7 @@ public struct InboundAuditionController: Sendable {
         gate.reset()
         route = .undecided
         utteranceID = nil
+        rendererResetPending = false
         return [.reset]
     }
 
@@ -174,5 +189,16 @@ public struct InboundAuditionController: Sendable {
     private mutating func clearUtterance() {
         discardBufferedTranslation()
         crossfadeStarted = false
+    }
+
+    private mutating func commandsWithPendingRendererReset(
+        _ commands: [InboundAuditionCommand]
+    ) -> [InboundAuditionCommand] {
+        guard rendererResetPending else { return commands }
+        rendererResetPending = false
+        if commands.first == .reset {
+            return commands
+        }
+        return [.reset] + commands
     }
 }

@@ -20,6 +20,16 @@ private func decodePCM16(_ data: Data) -> [Int16] {
     }
 }
 
+private func pcm16Samples(_ samples: [Int16]) -> Data {
+    var data = Data(capacity: samples.count * 2)
+    for sample in samples {
+        let bits = UInt16(bitPattern: sample)
+        data.append(UInt8(truncatingIfNeeded: bits))
+        data.append(UInt8(truncatingIfNeeded: bits >> 8))
+    }
+    return data
+}
+
 @Test
 func rendererPreviewsOriginalAtTwelvePercent() throws {
     var renderer = InboundAuditionRenderer()
@@ -31,6 +41,43 @@ func rendererPreviewsOriginalAtTwelvePercent() throws {
     #expect(output.count == 1)
     #expect(output[0].source == .original)
     #expect(decodePCM16(output[0].pcm16).allSatisfy { $0 == 1_200 })
+}
+
+@Test
+func rendererAcceptsOriginalDataWithNonzeroStartIndex() throws {
+    var renderer = InboundAuditionRenderer()
+    var storage = Data([0xAA, 0xBB])
+    storage.append(constantPCM16(10_000, samples: 2))
+    let slice = storage.dropFirst(2)
+
+    #expect(slice.startIndex != 0)
+    let output = try renderer.consume(.original(slice))
+
+    #expect(output.count == 1)
+    #expect(output[0].source == .original)
+    #expect(decodePCM16(output[0].pcm16) == [1_200, 1_200])
+}
+
+@Test
+func rendererAcceptsTranslationDataWithNonzeroStartIndex() throws {
+    var renderer = InboundAuditionRenderer()
+    _ = try renderer.consume(.beginCrossfade(
+        [constantPCM16(2_000, samples: 1)],
+        rampSamples: 1
+    ))
+    _ = try renderer.consume(.original(
+        constantPCM16(10_000, samples: 1)
+    ))
+    var storage = Data([0xAA, 0xBB])
+    storage.append(constantPCM16(2_345, samples: 2))
+    let slice = storage.dropFirst(2)
+
+    #expect(slice.startIndex != 0)
+    let output = try renderer.consume(.translation(slice))
+
+    #expect(output.count == 1)
+    #expect(output[0].source == .translation)
+    #expect(decodePCM16(output[0].pcm16) == [2_345, 2_345])
 }
 
 @Test
@@ -93,6 +140,40 @@ func crossfadeRampsContinueAcrossOriginalChunks() throws {
     #expect(second[0].source == .crossfade)
     #expect(decodePCM16(first[0].pcm16).first == 1_200)
     #expect(abs(Int(decodePCM16(second[0].pcm16).last ?? 0) - 2_000) <= 1)
+}
+
+@Test
+func longerOriginalPreservesSampleOrderAsTranslationArrivesInChunks()
+    throws
+{
+    var renderer = InboundAuditionRenderer()
+    _ = try renderer.consume(.beginCrossfade(
+        [pcm16Samples([100, 200])],
+        rampSamples: 4
+    ))
+
+    let first = try renderer.consume(.original(
+        pcm16Samples([1_000, 2_000, 3_000, 4_000])
+    ))
+    let second = try renderer.consume(.translation(
+        pcm16Samples([300])
+    ))
+    let third = try renderer.consume(.translation(
+        pcm16Samples([400])
+    ))
+    let output = first + second + third
+
+    #expect(output.map(\.source) == [
+        .crossfade,
+        .crossfade,
+        .crossfade,
+    ])
+    #expect(output.flatMap { decodePCM16($0.pcm16) } == [
+        120,
+        225,
+        319,
+        400,
+    ])
 }
 
 @Test
@@ -200,6 +281,42 @@ func originalQueueRejectsBytesBeyondConfiguredLimit() throws {
     #expect(throws: InboundAuditionRendererError.bufferLimitExceeded) {
         try renderer.consume(.original(
             constantPCM16(10_000, samples: 3)
+        ))
+    }
+}
+
+@Test
+func originalQueueRejectsOversizedChunkBeforeImmediateDrain() throws {
+    var renderer = InboundAuditionRenderer(
+        maximumQueuedBytesPerSource: 4
+    )
+    _ = try renderer.consume(.beginCrossfade(
+        [constantPCM16(2_000, samples: 2)],
+        rampSamples: 1_920
+    ))
+
+    #expect(throws: InboundAuditionRendererError.bufferLimitExceeded) {
+        try renderer.consume(.original(
+            constantPCM16(10_000, samples: 3)
+        ))
+    }
+}
+
+@Test
+func translationQueueRejectsOversizedChunkBeforeImmediateDrain() throws {
+    var renderer = InboundAuditionRenderer(
+        maximumQueuedBytesPerSource: 4
+    )
+    _ = try renderer.consume(
+        .beginCrossfade([], rampSamples: 1_920)
+    )
+    _ = try renderer.consume(.original(
+        constantPCM16(10_000, samples: 2)
+    ))
+
+    #expect(throws: InboundAuditionRendererError.bufferLimitExceeded) {
+        try renderer.consume(.translation(
+            constantPCM16(2_000, samples: 3)
         ))
     }
 }

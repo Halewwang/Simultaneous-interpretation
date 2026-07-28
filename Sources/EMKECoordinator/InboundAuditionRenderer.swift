@@ -122,13 +122,15 @@ public struct InboundAuditionRenderer: Sendable {
         case .original:
             guard !pcm16.isEmpty else { return [] }
             return [InboundRenderedChunk(
-                pcm16: try originalRamp.process(pcm16),
+                pcm16: try originalRamp.process(
+                    zeroBasedData(pcm16)
+                ),
                 source: .original
             )]
         case .translation:
             return []
         case .crossfade:
-            try ensureQueueLimitAfterAddingOriginal(pcm16.count)
+            try ensureQueueLimitBeforeAddingOriginal(pcm16.count)
             originalQueue.append(pcm16)
             return try drainCrossfade()
         }
@@ -143,11 +145,13 @@ public struct InboundAuditionRenderer: Sendable {
         case .translation:
             guard !pcm16.isEmpty else { return [] }
             return [InboundRenderedChunk(
-                pcm16: try translationRamp.process(pcm16),
+                pcm16: try translationRamp.process(
+                    zeroBasedData(pcm16)
+                ),
                 source: .translation
             )]
         case .crossfade:
-            try ensureQueueLimitAfterAddingTranslation(pcm16.count)
+            try ensureQueueLimitBeforeAddingTranslation(pcm16.count)
             translationQueue.append(pcm16)
             return try drainCrossfade()
         }
@@ -207,40 +211,22 @@ public struct InboundAuditionRenderer: Sendable {
         )]
     }
 
-    private func ensureQueueLimitAfterAddingOriginal(
+    private func ensureQueueLimitBeforeAddingOriginal(
         _ byteCount: Int
     ) throws {
-        let originalTotal = originalQueue.count + byteCount
-        let pairableBytes = min(
-            originalTotal,
-            translationQueue.count,
-            remainingCrossfadeSamples * 2
-        )
-        let willCompleteCrossfade =
-            pairableBytes == remainingCrossfadeSamples * 2
-        let queuedBytes = willCompleteCrossfade
-            ? 0
-            : originalTotal - pairableBytes
-        guard queuedBytes <= maximumQueuedBytesPerSource else {
+        guard byteCount
+                <= maximumQueuedBytesPerSource - originalQueue.count
+        else {
             throw InboundAuditionRendererError.bufferLimitExceeded
         }
     }
 
-    private func ensureQueueLimitAfterAddingTranslation(
+    private func ensureQueueLimitBeforeAddingTranslation(
         _ byteCount: Int
     ) throws {
-        let translationTotal = translationQueue.count + byteCount
-        let pairableBytes = min(
-            originalQueue.count,
-            translationTotal,
-            remainingCrossfadeSamples * 2
-        )
-        let willCompleteCrossfade =
-            pairableBytes == remainingCrossfadeSamples * 2
-        let queuedBytes = willCompleteCrossfade
-            ? 0
-            : translationTotal - pairableBytes
-        guard queuedBytes <= maximumQueuedBytesPerSource else {
+        guard byteCount
+                <= maximumQueuedBytesPerSource - translationQueue.count
+        else {
             throw InboundAuditionRendererError.bufferLimitExceeded
         }
     }
@@ -260,6 +246,10 @@ public struct InboundAuditionRenderer: Sendable {
         guard sampleCount >= 0, sampleCount <= Int.max / 2 else {
             throw PCM16ProcessingError.invalidRampSampleCount
         }
+    }
+
+    private func zeroBasedData(_ data: Data) -> Data {
+        data.startIndex == 0 ? data : Data(data)
     }
 
     private func removePrefix(
