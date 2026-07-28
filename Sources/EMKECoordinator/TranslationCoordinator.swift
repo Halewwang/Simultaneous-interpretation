@@ -105,6 +105,8 @@ public actor TranslationCoordinator {
     private var inboundFinishTask: Task<Void, Never>?
     private var inboundReconnectTask: Task<Void, Never>?
     private var outboundReconnectTask: Task<Void, Never>?
+    private var inboundEpoch: UInt64 = 0
+    private var outboundEpoch: UInt64 = 0
     private var inboundBatcher = PCMFrameBatcher()
     private var outboundBatcher = PCMFrameBatcher()
     private var inboundVAD = PCMVoiceActivityDetector()
@@ -178,6 +180,8 @@ public actor TranslationCoordinator {
         routing.handle(.translationStarted)
         startAudioLoop()
 
+        let startInboundEpoch = advanceEpoch(for: .inbound)
+        let startOutboundEpoch = advanceEpoch(for: .outbound)
         let inbound = await sessionBuilder.makeSession(
             configuration: configuration.apiConfiguration,
             sessionConfiguration: TranslationSessionConfiguration(
@@ -188,6 +192,11 @@ public actor TranslationCoordinator {
             ),
             apiKey: configuration.apiKey
         )
+        guard isCurrent(startInboundEpoch, for: .inbound),
+              !isStopping else {
+            try? await inbound.close()
+            return
+        }
         inboundSession = inbound
 
         let usesOutboundBypass = configuration.preferences.motherLanguage
@@ -205,6 +214,11 @@ public actor TranslationCoordinator {
                 ),
                 apiKey: configuration.apiKey
             )
+            guard isCurrent(startOutboundEpoch, for: .outbound),
+                  !isStopping else {
+                try? await newOutbound.close()
+                return
+            }
             outbound = newOutbound
             outboundSession = newOutbound
         }
@@ -212,18 +226,31 @@ public actor TranslationCoordinator {
         if let outbound {
             async let inboundConnection: Void = connectInitialSession(
                 inbound,
-                channel: .inbound
+                channel: .inbound,
+                epoch: startInboundEpoch
             )
             async let outboundConnection: Void = connectInitialSession(
                 outbound,
-                channel: .outbound
+                channel: .outbound,
+                epoch: startOutboundEpoch
             )
             _ = await (inboundConnection, outboundConnection)
         } else {
-            await connectInitialSession(inbound, channel: .inbound)
+            await connectInitialSession(
+                inbound,
+                channel: .inbound,
+                epoch: startInboundEpoch
+            )
         }
 
+        guard !isStopping,
+              self.configuration != nil else { return }
+        let completionInboundEpoch = inboundEpoch
+        let completionOutboundEpoch = outboundEpoch
         await applyRouting()
+        guard isCurrent(completionInboundEpoch, for: .inbound),
+              isCurrent(completionOutboundEpoch, for: .outbound),
+              !isStopping else { return }
         state.isRunning = true
         publishState()
     }
@@ -231,6 +258,8 @@ public actor TranslationCoordinator {
     public func stop() async {
         guard state.isRunning || state.inbound == .connecting else { return }
         isStopping = true
+        advanceEpoch(for: .inbound)
+        advanceEpoch(for: .outbound)
         cancelTimingAndReconnectTasks()
 
         let inbound = inboundSession
@@ -329,6 +358,27 @@ public actor TranslationCoordinator {
         case outbound
     }
 
+    @discardableResult
+    private func advanceEpoch(for channel: Channel) -> UInt64 {
+        switch channel {
+        case .inbound:
+            inboundEpoch &+= 1
+            return inboundEpoch
+        case .outbound:
+            outboundEpoch &+= 1
+            return outboundEpoch
+        }
+    }
+
+    private func isCurrent(_ epoch: UInt64, for channel: Channel) -> Bool {
+        switch channel {
+        case .inbound:
+            epoch == inboundEpoch
+        case .outbound:
+            epoch == outboundEpoch
+        }
+    }
+
     private static func connectError(
         for session: any TranslationSessionControlling
     ) async -> (any Error)? {
@@ -342,9 +392,14 @@ public actor TranslationCoordinator {
 
     private func connectInitialSession(
         _ session: any TranslationSessionControlling,
-        channel: Channel
+        channel: Channel,
+        epoch: UInt64
     ) async {
+        let resultingEpoch: UInt64
         if let error = await Self.connectError(for: session) {
+            guard isCurrent(epoch, for: channel), !isStopping else { return }
+            let retryEpoch = advanceEpoch(for: channel)
+            resultingEpoch = retryEpoch
             switch channel {
             case .inbound:
                 inboundSession = nil
@@ -355,18 +410,26 @@ public actor TranslationCoordinator {
                 state.outbound = .failed(message: String(describing: error))
                 routing.handle(.outboundConnectionFailed)
             }
-            scheduleReconnect(channel: channel, attempt: 0)
+            scheduleReconnect(
+                channel: channel,
+                attempt: 0,
+                expectedEpoch: retryEpoch
+            )
         } else {
+            guard isCurrent(epoch, for: channel), !isStopping else { return }
+            resultingEpoch = epoch
             switch channel {
             case .inbound:
                 state.inbound = .active
-                startInboundReceiveLoop(session: session)
+                startInboundReceiveLoop(session: session, epoch: epoch)
             case .outbound:
                 state.outbound = .active
-                startOutboundReceiveLoop(session: session)
+                startOutboundReceiveLoop(session: session, epoch: epoch)
             }
         }
         await applyRouting()
+        guard isCurrent(resultingEpoch, for: channel),
+              !isStopping else { return }
         publishState()
     }
 
@@ -383,21 +446,31 @@ public actor TranslationCoordinator {
     }
 
     private func startInboundReceiveLoop(
-        session: any TranslationSessionControlling
+        session: any TranslationSessionControlling,
+        epoch: UInt64
     ) {
+        guard isCurrent(epoch, for: .inbound) else { return }
         inboundReceiveTask?.cancel()
         inboundReceiveTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
                     let event = try await session.nextEvent()
                     guard let self else { return }
-                    let shouldContinue = await self.handleInboundEvent(event)
+                    guard await self.isCurrent(
+                        epoch,
+                        for: .inbound
+                    ) else { return }
+                    let shouldContinue = await self.handleInboundEvent(
+                        event,
+                        epoch: epoch
+                    )
                     if !shouldContinue { return }
                 } catch {
                     guard let self else { return }
                     await self.handleChannelFailure(
                         .inbound,
-                        error: error
+                        error: error,
+                        epoch: epoch
                     )
                     return
                 }
@@ -406,21 +479,31 @@ public actor TranslationCoordinator {
     }
 
     private func startOutboundReceiveLoop(
-        session: any TranslationSessionControlling
+        session: any TranslationSessionControlling,
+        epoch: UInt64
     ) {
+        guard isCurrent(epoch, for: .outbound) else { return }
         outboundReceiveTask?.cancel()
         outboundReceiveTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
                     let event = try await session.nextEvent()
                     guard let self else { return }
-                    let shouldContinue = await self.handleOutboundEvent(event)
+                    guard await self.isCurrent(
+                        epoch,
+                        for: .outbound
+                    ) else { return }
+                    let shouldContinue = await self.handleOutboundEvent(
+                        event,
+                        epoch: epoch
+                    )
                     if !shouldContinue { return }
                 } catch {
                     guard let self else { return }
                     await self.handleChannelFailure(
                         .outbound,
-                        error: error
+                        error: error,
+                        epoch: epoch
                     )
                     return
                 }
@@ -470,6 +553,7 @@ public actor TranslationCoordinator {
     }
 
     private func handleInboundAudio(_ pcm16: Data) async {
+        let epoch = inboundEpoch
         do {
             let vadEvent = try inboundVAD.observe(pcm16)
             if vadEvent == .speechStarted {
@@ -483,13 +567,21 @@ public actor TranslationCoordinator {
                 await playInbound(inboundBuffer.appendOriginal(pcm16))
             }
 
-            if state.inbound == .active, let inboundSession {
+            if state.inbound == .active,
+               isCurrent(epoch, for: .inbound),
+               let inboundSession {
                 let frames = try inboundBatcher.append(pcm16)
                 for frame in frames {
+                    guard isCurrent(epoch, for: .inbound) else { break }
                     do {
                         try await inboundSession.appendAudio(frame)
+                        guard isCurrent(epoch, for: .inbound) else { break }
                     } catch {
-                        await handleChannelFailure(.inbound, error: error)
+                        await handleChannelFailure(
+                            .inbound,
+                            error: error,
+                            epoch: epoch
+                        )
                         break
                     }
                 }
@@ -498,22 +590,35 @@ public actor TranslationCoordinator {
             }
 
             if vadEvent == .speechEnded {
-                scheduleInboundFinish()
+                scheduleInboundFinish(epoch: epoch)
             }
         } catch {
-            await handleChannelFailure(.inbound, error: error)
+            await handleChannelFailure(
+                .inbound,
+                error: error,
+                epoch: epoch
+            )
         }
     }
 
     private func handleOutboundAudio(_ pcm16: Data) async {
+        let epoch = outboundEpoch
         do {
-            if state.outbound == .active, let outboundSession {
+            if state.outbound == .active,
+               isCurrent(epoch, for: .outbound),
+               let outboundSession {
                 let frames = try outboundBatcher.append(pcm16)
                 for frame in frames {
+                    guard isCurrent(epoch, for: .outbound) else { break }
                     do {
                         try await outboundSession.appendAudio(frame)
+                        guard isCurrent(epoch, for: .outbound) else { break }
                     } catch {
-                        await handleChannelFailure(.outbound, error: error)
+                        await handleChannelFailure(
+                            .outbound,
+                            error: error,
+                            epoch: epoch
+                        )
                         break
                     }
                 }
@@ -521,23 +626,35 @@ public actor TranslationCoordinator {
                 outboundBatcher.reset()
             }
         } catch {
-            await handleChannelFailure(.outbound, error: error)
+            await handleChannelFailure(
+                .outbound,
+                error: error,
+                epoch: epoch
+            )
         }
     }
 
     private func handleInboundEvent(
-        _ event: TranslationServerEvent
+        _ event: TranslationServerEvent,
+        epoch: UInt64
     ) async -> Bool {
+        guard isCurrent(epoch, for: .inbound), !isStopping else {
+            return false
+        }
         switch event {
         case .outputAudio(let delta):
             guard inboundUtteranceActive else { return true }
             await playInbound(
-                inboundBuffer.appendTranslation(delta.data)
+                inboundBuffer.appendTranslation(delta.data),
+                epoch: epoch
             )
-            if inboundBuffer.currentRoute == .undecided {
-                scheduleInboundDeadline()
+            guard isCurrent(epoch, for: .inbound), !isStopping else {
+                return false
             }
-            extendInboundFinishWindowIfDraining()
+            if inboundBuffer.currentRoute == .undecided {
+                scheduleInboundDeadline(epoch: epoch)
+            }
+            extendInboundFinishWindowIfDraining(epoch: epoch)
         case .inputTranscript(let delta):
             appendText(
                 delta.text,
@@ -549,10 +666,14 @@ public actor TranslationCoordinator {
                         languageClassifier(
                             state.subtitles.inboundSource
                         )
-                    )
+                    ),
+                    epoch: epoch
                 )
+                guard isCurrent(epoch, for: .inbound), !isStopping else {
+                    return false
+                }
                 cancelDeadlineIfResolved()
-                extendInboundFinishWindowIfDraining()
+                extendInboundFinishWindowIfDraining(epoch: epoch)
             }
             publishState()
         case .outputTranscript(let delta):
@@ -560,13 +681,14 @@ public actor TranslationCoordinator {
                 delta.text,
                 to: &state.subtitles.inboundTranslation
             )
-            extendInboundFinishWindowIfDraining()
+            extendInboundFinishWindowIfDraining(epoch: epoch)
             publishState()
         case .closed:
             if !isStopping {
                 await handleChannelFailure(
                     .inbound,
-                    error: TranslationSocketError.disconnected
+                    error: TranslationSocketError.disconnected,
+                    epoch: epoch
                 )
             }
             return false
@@ -576,7 +698,8 @@ public actor TranslationCoordinator {
                 error: TranslationSessionError.server(
                     code: code,
                     message: message
-                )
+                ),
+                epoch: epoch
             )
             return false
         case .sessionCreated, .sessionUpdated, .ignored:
@@ -586,11 +709,18 @@ public actor TranslationCoordinator {
     }
 
     private func handleOutboundEvent(
-        _ event: TranslationServerEvent
+        _ event: TranslationServerEvent,
+        epoch: UInt64
     ) async -> Bool {
+        guard isCurrent(epoch, for: .outbound), !isStopping else {
+            return false
+        }
         switch event {
         case .outputAudio(let delta):
             try? await audioEngine.enqueueOutboundTranslation(delta.data)
+            guard isCurrent(epoch, for: .outbound), !isStopping else {
+                return false
+            }
         case .inputTranscript(let delta):
             appendText(
                 delta.text,
@@ -607,7 +737,8 @@ public actor TranslationCoordinator {
             if !isStopping {
                 await handleChannelFailure(
                     .outbound,
-                    error: TranslationSocketError.disconnected
+                    error: TranslationSocketError.disconnected,
+                    epoch: epoch
                 )
             }
             return false
@@ -617,7 +748,8 @@ public actor TranslationCoordinator {
                 error: TranslationSessionError.server(
                     code: code,
                     message: message
-                )
+                ),
+                epoch: epoch
             )
             return false
         case .sessionCreated, .sessionUpdated, .ignored:
@@ -632,21 +764,31 @@ public actor TranslationCoordinator {
         }
     }
 
-    private func scheduleInboundDeadline() {
-        guard inboundDeadlineTask == nil else { return }
-        inboundDeadlineTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled, let self else { return }
-            await self.resolveInboundDeadline()
+    private func playInbound(_ chunks: [Data], epoch: UInt64) async {
+        for chunk in chunks {
+            guard isCurrent(epoch, for: .inbound), !isStopping else { return }
+            try? await audioEngine.enqueueInboundOutput(chunk)
         }
     }
 
-    private func resolveInboundDeadline() async {
+    private func scheduleInboundDeadline(epoch: UInt64) {
+        guard isCurrent(epoch, for: .inbound),
+              inboundDeadlineTask == nil else { return }
+        inboundDeadlineTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            await self.resolveInboundDeadline(epoch: epoch)
+        }
+    }
+
+    private func resolveInboundDeadline(epoch: UInt64) async {
+        guard isCurrent(epoch, for: .inbound), !isStopping else { return }
         inboundDeadlineTask = nil
         guard inboundUtteranceActive,
               inboundBuffer.currentRoute == .undecided else { return }
         await playInbound(
-            inboundBuffer.resolveDeadline(isSpeech: inboundVAD.isSpeaking)
+            inboundBuffer.resolveDeadline(isSpeech: inboundVAD.isSpeaking),
+            epoch: epoch
         )
     }
 
@@ -656,24 +798,32 @@ public actor TranslationCoordinator {
         inboundDeadlineTask = nil
     }
 
-    private func scheduleInboundFinish() {
+    private func scheduleInboundFinish(epoch: UInt64) {
+        guard isCurrent(epoch, for: .inbound) else { return }
         inboundFinishTask?.cancel()
         inboundFinishTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self else { return }
-            await self.finishInboundUtterance()
+            await self.finishInboundUtterance(epoch: epoch)
         }
     }
 
-    private func extendInboundFinishWindowIfDraining() {
-        guard inboundUtteranceActive, !inboundVAD.isSpeaking else { return }
-        scheduleInboundFinish()
+    private func extendInboundFinishWindowIfDraining(epoch: UInt64) {
+        guard isCurrent(epoch, for: .inbound),
+              inboundUtteranceActive,
+              !inboundVAD.isSpeaking else { return }
+        scheduleInboundFinish(epoch: epoch)
     }
 
-    private func finishInboundUtterance() async {
+    private func finishInboundUtterance(epoch: UInt64) async {
+        guard isCurrent(epoch, for: .inbound), !isStopping else { return }
         inboundFinishTask = nil
         guard inboundUtteranceActive else { return }
-        await playInbound(inboundBuffer.finish(isSpeech: true))
+        await playInbound(
+            inboundBuffer.finish(isSpeech: true),
+            epoch: epoch
+        )
+        guard isCurrent(epoch, for: .inbound), !isStopping else { return }
         inboundUtteranceActive = false
         inboundDeadlineTask?.cancel()
         inboundDeadlineTask = nil
@@ -683,42 +833,71 @@ public actor TranslationCoordinator {
 
     private func handleChannelFailure(
         _ channel: Channel,
-        error: any Error
+        error: any Error,
+        epoch: UInt64
     ) async {
-        guard !isStopping else { return }
+        guard isCurrent(epoch, for: channel), !isStopping else { return }
+        let retryEpoch: UInt64
         switch channel {
         case .inbound:
             guard inboundSession != nil || state.inbound == .active else {
                 return
             }
+            retryEpoch = advanceEpoch(for: .inbound)
+            inboundReceiveTask?.cancel()
+            inboundDeadlineTask?.cancel()
+            inboundFinishTask?.cancel()
+            inboundDeadlineTask = nil
+            inboundFinishTask = nil
             inboundBatcher.reset()
             inboundSession = nil
             state.inbound = .failed(message: String(describing: error))
             routing.handle(.inboundConnectionFailed)
-            scheduleReconnect(channel: .inbound, attempt: 0)
+            scheduleReconnect(
+                channel: .inbound,
+                attempt: 0,
+                expectedEpoch: retryEpoch
+            )
         case .outbound:
             guard outboundSession != nil || state.outbound == .active else {
                 return
             }
+            retryEpoch = advanceEpoch(for: .outbound)
+            outboundReceiveTask?.cancel()
             outboundBatcher.reset()
             outboundSession = nil
             state.outbound = .failed(message: String(describing: error))
             routing.handle(.outboundConnectionFailed)
-            scheduleReconnect(channel: .outbound, attempt: 0)
+            scheduleReconnect(
+                channel: .outbound,
+                attempt: 0,
+                expectedEpoch: retryEpoch
+            )
         }
         await applyRouting()
+        guard isCurrent(retryEpoch, for: channel),
+              !isStopping else { return }
         publishState()
     }
 
-    private func scheduleReconnect(channel: Channel, attempt: Int) {
+    private func scheduleReconnect(
+        channel: Channel,
+        attempt: Int,
+        expectedEpoch: UInt64
+    ) {
         guard reconnectDelays.indices.contains(attempt),
               configuration != nil,
-              !isStopping else { return }
+              !isStopping,
+              isCurrent(expectedEpoch, for: channel) else { return }
         let delay = reconnectDelays[attempt]
         let task = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
-            await self.reconnect(channel: channel, attempt: attempt)
+            await self.reconnect(
+                channel: channel,
+                attempt: attempt,
+                expectedEpoch: expectedEpoch
+            )
         }
         switch channel {
         case .inbound:
@@ -730,8 +909,15 @@ public actor TranslationCoordinator {
         }
     }
 
-    private func reconnect(channel: Channel, attempt: Int) async {
-        guard !isStopping, let configuration else { return }
+    private func reconnect(
+        channel: Channel,
+        attempt: Int,
+        expectedEpoch: UInt64
+    ) async {
+        guard isCurrent(expectedEpoch, for: channel),
+              !isStopping,
+              let configuration else { return }
+        let sessionEpoch = advanceEpoch(for: channel)
         switch channel {
         case .inbound:
             state.inbound = .reconnecting(attempt: attempt + 1)
@@ -761,7 +947,14 @@ public actor TranslationCoordinator {
             sessionConfiguration: sessionConfiguration,
             apiKey: configuration.apiKey
         )
+        guard isCurrent(sessionEpoch, for: channel), !isStopping else {
+            try? await session.close()
+            return
+        }
         if let error = await Self.connectError(for: session) {
+            guard isCurrent(sessionEpoch, for: channel),
+                  !isStopping else { return }
+            let retryEpoch = advanceEpoch(for: channel)
             switch channel {
             case .inbound:
                 state.inbound = .failed(message: String(describing: error))
@@ -769,10 +962,18 @@ public actor TranslationCoordinator {
                 state.outbound = .failed(message: String(describing: error))
             }
             publishState()
-            scheduleReconnect(channel: channel, attempt: attempt + 1)
+            scheduleReconnect(
+                channel: channel,
+                attempt: attempt + 1,
+                expectedEpoch: retryEpoch
+            )
             return
         }
 
+        guard isCurrent(sessionEpoch, for: channel), !isStopping else {
+            try? await session.close()
+            return
+        }
         switch channel {
         case .inbound:
             inboundSession = session
@@ -781,14 +982,16 @@ public actor TranslationCoordinator {
             if !inboundUtteranceActive {
                 routing.handle(.utteranceEnded)
             }
-            startInboundReceiveLoop(session: session)
+            startInboundReceiveLoop(session: session, epoch: sessionEpoch)
         case .outbound:
             outboundSession = session
             state.outbound = .active
             routing.handle(.outboundConnectionRecovered)
-            startOutboundReceiveLoop(session: session)
+            startOutboundReceiveLoop(session: session, epoch: sessionEpoch)
         }
         await applyRouting()
+        guard isCurrent(sessionEpoch, for: channel),
+              !isStopping else { return }
         publishState()
     }
 
