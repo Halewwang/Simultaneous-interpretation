@@ -66,13 +66,10 @@ test('installer exposes the exact public and constrained child parameter sets', 
       'CertificatePath',
       'ChecksumsPath',
       'ConfirmTrust',
-      'ExpectedCertificateSha256',
       'ExpectedCertificateThumbprint',
-      'ImportCertificateChild',
       'PackagePath',
-      'VerifiedCertificatePath',
     ],
-    Sets: ['ImportCertificateChild', 'Install'],
+    Sets: ['Install'],
   });
 });
 
@@ -99,13 +96,10 @@ test('uninstaller exposes exact package removal and separately confirmed certifi
       'CertificatePath',
       'ChecksumsPath',
       'ConfirmRemoveCertificate',
-      'ExpectedCertificateSha256',
       'ExpectedCertificateThumbprint',
       'RemoveCertificate',
-      'RemoveCertificateChild',
-      'VerifiedCertificatePath',
     ],
-    Sets: ['RemoveCertificateChild', 'Uninstall'],
+    Sets: ['Uninstall'],
   });
 });
 
@@ -115,7 +109,7 @@ for (const [operation, scriptPath] of [
 ]) {
   test(`${operation} helper rejects dot-source before leaking functions`, () => {
     const dotSourceArguments = operation === 'install'
-      ? '-PackagePath /tmp/a.msix -CertificatePath /tmp/a.cer -ChecksumsPath /tmp/SHA256SUMS.txt'
+      ? '-PackagePath /tmp/a.msix -CertificatePath /tmp/a.cer -ChecksumsPath /tmp/SHA256SUMS.txt -ExpectedCertificateThumbprint AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
       : '';
     const command = [
       '$ErrorActionPreference = "Continue"',
@@ -145,11 +139,29 @@ test('installer contains only the approved package and certificate mutation boun
   assert.match(source, /EMKE\.Translation\.Internal/);
   assert.match(source, /CN=EMKE Internal Test/);
   assert.match(source, /0\.1\.0\.0/);
+  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.msix/);
+  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.cer/);
+  assert.match(source, /Install-EMKE-Translation-Internal\.ps1/);
+  assert.match(source, /Uninstall-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /LocalMachine/);
   assert.match(source, /TrustedPeople/);
   assert.match(source, /Start-Process[^]*?-Verb\s+RunAs[^]*?-Wait[^]*?-PassThru/);
+  assert.match(source, /-EncodedCommand/);
+  assert.match(source, /function\s+New-ProtectedElevatedRequest/);
+  assert.match(source, /function\s+Assert-ElevatedRequestUnchanged/);
+  assert.match(source, /SetAccessRuleProtection/);
+  assert.match(source, /FileAttributes\]::ReadOnly/);
+  assert.match(source, /FileShare\]::Read/);
+  assert.match(source, /\$postMatches/);
+  assert.match(source, /EMKE_ELEVATED_REQUEST_PATH/);
+  assert.match(source, /EMKE_ELEVATED_REQUEST_SHA256/);
+  assert.match(source, /function\s+Invoke-InstallRollback/);
   assert.match(source, /Add-AppxPackage/);
   assert.doesNotMatch(source, /-AllUsers\b/i);
+  assert.doesNotMatch(
+    source,
+    /-File["']?\s*,?\s*\$PSCommandPath|ImportCertificateChild/i,
+  );
   assert.doesNotMatch(source, /StoreName\]::Root|Cert:\\LocalMachine\\Root/i);
   assert.doesNotMatch(
     source,
@@ -162,10 +174,27 @@ test('uninstaller contains only exact current-user AppX and certificate mutation
 
   assert.match(source, /DefaultParameterSetName\s*=\s*["']Uninstall["']/);
   assert.match(source, /EMKE\.Translation\.Internal/);
+  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.msix/);
+  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.cer/);
+  assert.match(source, /Install-EMKE-Translation-Internal\.ps1/);
+  assert.match(source, /Uninstall-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /LocalMachine/);
   assert.match(source, /TrustedPeople/);
   assert.match(source, /Remove-AppxPackage/);
   assert.match(source, /Start-Process[^]*?-Verb\s+RunAs[^]*?-Wait[^]*?-PassThru/);
+  assert.match(source, /-EncodedCommand/);
+  assert.match(source, /function\s+New-ProtectedElevatedRequest/);
+  assert.match(source, /function\s+Assert-ElevatedRequestUnchanged/);
+  assert.match(source, /SetAccessRuleProtection/);
+  assert.match(source, /FileAttributes\]::ReadOnly/);
+  assert.match(source, /FileShare\]::Read/);
+  assert.match(source, /\$postMatches/);
+  assert.match(source, /EMKE_ELEVATED_REQUEST_PATH/);
+  assert.match(source, /EMKE_ELEVATED_REQUEST_SHA256/);
+  assert.doesNotMatch(
+    source,
+    /-File["']?\s*,?\s*\$PSCommandPath|RemoveCertificateChild/i,
+  );
   assert.doesNotMatch(source, /-AllUsers\b/i);
   assert.doesNotMatch(source, /StoreName\]::Root|Cert:\\LocalMachine\\Root/i);
   assert.doesNotMatch(

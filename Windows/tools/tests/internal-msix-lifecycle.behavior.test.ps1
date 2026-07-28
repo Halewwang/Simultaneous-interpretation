@@ -205,6 +205,28 @@ function Write-TestChecksums {
     )
 }
 
+function Write-ExactInventoryChecksums {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string[]]$Files
+    )
+
+    $lines = foreach ($file in $Files) {
+        $hash = (Get-FileHash `
+            -LiteralPath $file `
+            -Algorithm SHA256).Hash.ToUpperInvariant()
+        "$hash  $([IO.Path]::GetFileName($file))"
+    }
+    [IO.File]::WriteAllText(
+        $Path,
+        (($lines -join "`n") + "`n"),
+        [Text.UTF8Encoding]::new($false)
+    )
+}
+
 function Reset-InstallFunctions {
     Import-LifecycleFunctions -Path $installScript
     $script:PackageName = "EMKE.Translation.Internal"
@@ -212,6 +234,14 @@ function Reset-InstallFunctions {
     $script:ExpectedVersion = "0.1.0.0"
     $script:ExpectedArchitecture = "x64"
     $script:ExpectedCertificateSubject = "CN=EMKE Internal Test"
+    $script:PackageFileName =
+        "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+    $script:CertificateFileName =
+        "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+    $script:InstallScriptFileName =
+        "Install-EMKE-Translation-Internal.ps1"
+    $script:UninstallScriptFileName =
+        "Uninstall-EMKE-Translation-Internal.ps1"
 }
 
 function Reset-UninstallFunctions {
@@ -221,6 +251,14 @@ function Reset-UninstallFunctions {
     $script:ExpectedVersion = "0.1.0.0"
     $script:ExpectedArchitecture = "x64"
     $script:ExpectedCertificateSubject = "CN=EMKE Internal Test"
+    $script:PackageFileName =
+        "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+    $script:CertificateFileName =
+        "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+    $script:InstallScriptFileName =
+        "Install-EMKE-Translation-Internal.ps1"
+    $script:UninstallScriptFileName =
+        "Uninstall-EMKE-Translation-Internal.ps1"
 }
 
 function Set-SafeInstallOrchestratorDefaults {
@@ -232,6 +270,39 @@ function Set-SafeInstallOrchestratorDefaults {
         param($Path, $ExpectedExtension)
         $script:installEvents.Add("resolve:$ExpectedExtension")
         [IO.Path]::GetFullPath($Path)
+    }
+    Set-TestFunction -Name Get-CurrentLifecycleScriptPath -Body {
+        "/tmp/Install-EMKE-Translation-Internal.ps1"
+    }
+    Set-TestFunction -Name Resolve-ExactBundleInventory -Body {
+        param(
+            $PackagePath,
+            $CertificatePath,
+            $ChecksumsPath,
+            $CurrentScriptPath
+        )
+        $script:installEvents.Add("inventory")
+        [pscustomobject]@{
+            PackagePath = [IO.Path]::GetFullPath($PackagePath)
+            CertificatePath = [IO.Path]::GetFullPath($CertificatePath)
+            ChecksumsPath = [IO.Path]::GetFullPath($ChecksumsPath)
+            InstallScriptPath =
+                "/tmp/Install-EMKE-Translation-Internal.ps1"
+            UninstallScriptPath =
+                "/tmp/Uninstall-EMKE-Translation-Internal.ps1"
+            Hashes = [ordered]@{
+                Package = "A" * 64
+                Certificate = "A" * 64
+                InstallScript = "A" * 64
+                UninstallScript = "A" * 64
+            }
+            PackageSha256 = "A" * 64
+            CertificateSha256 = "A" * 64
+        }
+    }
+    Set-TestFunction -Name Assert-BundleInventoryUnchanged -Body {
+        param($Inventory)
+        $script:installEvents.Add("inventory-unchanged")
     }
     Set-TestFunction -Name Read-ExpectedSha256 -Body {
         param($ChecksumsPath, $FilePath)
@@ -267,6 +338,9 @@ function Set-SafeInstallOrchestratorDefaults {
         param($PackagePath)
         $script:installEvents.Add("add-appx")
     }
+    Set-TestFunction -Name Assert-InternalPackageAbsent -Body {
+        $script:installEvents.Add("verify-pre-absent")
+    }
     Set-TestFunction -Name Assert-InstalledInternalPackage -Body {
         $script:installEvents.Add("verify-identity")
         [pscustomobject]@{
@@ -281,6 +355,21 @@ function Set-SafeInstallOrchestratorDefaults {
         param($CertificateEvidence)
         $script:installEvents.Add("record")
     }
+    Set-TestFunction -Name Invoke-InstallRollback -Body {
+        param(
+            $CertificateTrustCompleted,
+            $CertificatePath,
+            $ExpectedCertificateSha256,
+            $ExpectedCertificateThumbprint
+        )
+        $script:installEvents.Add(
+            "rollback:cert=$([bool]$CertificateTrustCompleted)"
+        )
+        [pscustomobject]@{
+            Complete = $true
+            RecoveryRequired = $false
+        }
+    }
 }
 
 function Set-SafeUninstallOrchestratorDefaults {
@@ -292,6 +381,39 @@ function Set-SafeUninstallOrchestratorDefaults {
         param($Path, $ExpectedExtension)
         $script:uninstallEvents.Add("resolve:$ExpectedExtension")
         [IO.Path]::GetFullPath($Path)
+    }
+    Set-TestFunction -Name Get-CurrentLifecycleScriptPath -Body {
+        "/tmp/Uninstall-EMKE-Translation-Internal.ps1"
+    }
+    Set-TestFunction -Name Resolve-ExactBundleInventory -Body {
+        param(
+            $PackagePath,
+            $CertificatePath,
+            $ChecksumsPath,
+            $CurrentScriptPath
+        )
+        $script:uninstallEvents.Add("inventory")
+        [pscustomobject]@{
+            PackagePath = "/tmp/product.msix"
+            CertificatePath = [IO.Path]::GetFullPath($CertificatePath)
+            ChecksumsPath = [IO.Path]::GetFullPath($ChecksumsPath)
+            InstallScriptPath =
+                "/tmp/Install-EMKE-Translation-Internal.ps1"
+            UninstallScriptPath =
+                "/tmp/Uninstall-EMKE-Translation-Internal.ps1"
+            Hashes = [ordered]@{
+                Package = "A" * 64
+                Certificate = "A" * 64
+                InstallScript = "A" * 64
+                UninstallScript = "A" * 64
+            }
+            PackageSha256 = "A" * 64
+            CertificateSha256 = "A" * 64
+        }
+    }
+    Set-TestFunction -Name Assert-BundleInventoryUnchanged -Body {
+        param($Inventory)
+        $script:uninstallEvents.Add("inventory-unchanged")
     }
     Set-TestFunction -Name Read-ExpectedSha256 -Body {
         param($ChecksumsPath, $FilePath)
@@ -316,6 +438,7 @@ function Set-SafeUninstallOrchestratorDefaults {
         }
     }
     Set-TestFunction -Name Read-CertificateInstallRecord -Body {
+        param([switch]$AllowMissing)
         $script:uninstallEvents.Add("read-record")
         [pscustomobject]@{
             PackageName = "EMKE.Translation.Internal"
@@ -325,6 +448,16 @@ function Set-SafeUninstallOrchestratorDefaults {
         }
     }
     Set-TestFunction -Name Get-ExactInstalledInternalPackage -Body {
+        $script:uninstallEvents.Add("query-package")
+        [pscustomobject]@{
+            Name = "EMKE.Translation.Internal"
+            Publisher = "CN=EMKE Internal Test"
+            Version = "0.1.0.0"
+            Architecture = "x64"
+            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+        }
+    }
+    Set-TestFunction -Name Get-OptionalInstalledInternalPackage -Body {
         $script:uninstallEvents.Add("query-package")
         [pscustomobject]@{
             Name = "EMKE.Translation.Internal"
@@ -513,6 +646,267 @@ try {
             }
     }
 
+    Invoke-Case "exact bundle inventory rejects extra missing and duplicate entries" {
+        Reset-InstallFunctions
+        $bundle = Join-Path $testRoot "exact-inventory"
+        [IO.Directory]::CreateDirectory($bundle) | Out-Null
+        $package = Join-Path `
+            $bundle `
+            "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+        $certificate = Join-Path `
+            $bundle `
+            "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+        $install = Join-Path `
+            $bundle `
+            "Install-EMKE-Translation-Internal.ps1"
+        $uninstall = Join-Path `
+            $bundle `
+            "Uninstall-EMKE-Translation-Internal.ps1"
+        $checksums = Join-Path $bundle "SHA256SUMS.txt"
+        [IO.File]::WriteAllBytes($package, [byte[]](1, 4, 9))
+        New-TestCertificate -Path $certificate
+        [IO.File]::Copy($installScript, $install, $true)
+        [IO.File]::Copy($uninstallScript, $uninstall, $true)
+        $files = @($package, $certificate, $install, $uninstall)
+        Write-ExactInventoryChecksums -Path $checksums -Files $files
+
+        $inventory = Resolve-ExactBundleInventory `
+            -PackagePath $package `
+            -CertificatePath $certificate `
+            -ChecksumsPath $checksums `
+            -CurrentScriptPath $install
+        Assert-Equal `
+            $inventory.Hashes.Count `
+            4 `
+            "Exact bundle inventory hash count differs."
+
+        [IO.File]::AppendAllText(
+            $checksums,
+            ("A" * 64) + "  unexpected.txt`n"
+        )
+        Assert-Throws `
+            -Pattern "exactly four|unexpected" `
+            -Action {
+                Resolve-ExactBundleInventory `
+                    -PackagePath $package `
+                    -CertificatePath $certificate `
+                    -ChecksumsPath $checksums `
+                    -CurrentScriptPath $install
+            }
+
+        Write-ExactInventoryChecksums -Path $checksums -Files $files
+        [IO.File]::AppendAllText(
+            $checksums,
+            [IO.File]::ReadAllLines($checksums)[0] + "`n"
+        )
+        Assert-Throws `
+            -Pattern "exactly four|duplicate" `
+            -Action {
+                Resolve-ExactBundleInventory `
+                    -PackagePath $package `
+                    -CertificatePath $certificate `
+                    -ChecksumsPath $checksums `
+                    -CurrentScriptPath $install
+            }
+    }
+
+    Invoke-Case "same-subject replacement with updated sums fails fixed thumbprint" {
+        Reset-InstallFunctions
+        $bundle = Join-Path $testRoot "replacement-certificate"
+        [IO.Directory]::CreateDirectory($bundle) | Out-Null
+        $package = Join-Path `
+            $bundle `
+            "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+        $certificate = Join-Path `
+            $bundle `
+            "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+        $install = Join-Path `
+            $bundle `
+            "Install-EMKE-Translation-Internal.ps1"
+        $uninstall = Join-Path `
+            $bundle `
+            "Uninstall-EMKE-Translation-Internal.ps1"
+        $checksums = Join-Path $bundle "SHA256SUMS.txt"
+        [IO.File]::WriteAllBytes($package, [byte[]](2, 3, 5))
+        New-TestCertificate -Path $certificate
+        $trustedThumbprint =
+            (Get-InternalCertificateEvidence -Path $certificate).Thumbprint
+        New-TestCertificate -Path $certificate
+        $replacementThumbprint =
+            (Get-InternalCertificateEvidence -Path $certificate).Thumbprint
+        Assert-True `
+            ($replacementThumbprint -cne $trustedThumbprint) `
+            "Replacement fixture reused the trusted thumbprint."
+        [IO.File]::Copy($installScript, $install, $true)
+        [IO.File]::Copy($uninstallScript, $uninstall, $true)
+        Write-ExactInventoryChecksums `
+            -Path $checksums `
+            -Files @($package, $certificate, $install, $uninstall)
+
+        Set-TestFunction -Name Assert-SupportedInstallParent -Body {}
+        $script:replacementInstallPath = $install
+        Set-TestFunction -Name Get-CurrentLifecycleScriptPath -Body {
+            $script:replacementInstallPath
+        }
+        $script:replacementElevated = $false
+        Set-TestFunction -Name Invoke-ElevatedCertificateImport -Body {
+            $script:replacementElevated = $true
+        }
+        Set-TestFunction -Name Assert-InternalPackageAbsent -Body {}
+
+        Assert-Throws `
+            -Pattern "trusted expected thumbprint|thumbprint" `
+            -Action {
+                Invoke-InstallInternalMsix `
+                    -PackagePath $package `
+                    -CertificatePath $certificate `
+                    -ChecksumsPath $checksums `
+                    -ExpectedCertificateThumbprint $trustedThumbprint `
+                    -ConfirmTrust
+            }
+        Assert-True `
+            (-not $script:replacementElevated) `
+            "Same-subject replacement reached elevation."
+    }
+
+    Invoke-Case "protected request preserves spaced quote path and detects tamper" {
+        Reset-InstallFunctions
+        $quotedDirectory = Join-Path $testRoot "space ' quote"
+        [IO.Directory]::CreateDirectory($quotedDirectory) | Out-Null
+        $certificate = Join-Path $quotedDirectory "internal cert.cer"
+        New-TestCertificate -Path $certificate
+        $evidence = Get-InternalCertificateEvidence -Path $certificate
+        $request = New-ProtectedElevatedRequest `
+            -Operation "Import" `
+            -CertificatePath $certificate `
+            -ExpectedCertificateSha256 $evidence.Sha256 `
+            -ExpectedCertificateThumbprint $evidence.Thumbprint
+        try {
+            $payload = ConvertFrom-Json `
+                -InputObject ([IO.File]::ReadAllText($request.RequestPath))
+            Assert-Equal `
+                $payload.certificatePath `
+                $certificate `
+                "Protected request changed the spaced quote path."
+            Assert-ElevatedRequestUnchanged -Request $request
+            [IO.File]::SetAttributes(
+                $request.RequestPath,
+                [IO.FileAttributes]::Normal
+            )
+            [IO.File]::AppendAllText($request.RequestPath, " ")
+            Assert-Throws `
+                -Pattern "request.*changed|digest" `
+                -Action {
+                    Assert-ElevatedRequestUnchanged -Request $request
+                }
+        } finally {
+            Remove-ProtectedElevatedRequest -Request $request
+        }
+    }
+
+    Invoke-Case "encoded elevation keeps path data out of argv and detects launch tamper" {
+        Reset-InstallFunctions
+        $quotedDirectory = Join-Path $testRoot "encoded space ' quote"
+        [IO.Directory]::CreateDirectory($quotedDirectory) | Out-Null
+        $certificate = Join-Path $quotedDirectory "internal cert.cer"
+        New-TestCertificate -Path $certificate
+        $evidence = Get-InternalCertificateEvidence -Path $certificate
+        Set-TestFunction -Name Resolve-TrustedPowerShell -Body {
+            "/trusted/pwsh.exe"
+        }
+        $script:capturedArgumentList = $null
+        $script:capturedRequestPath = $null
+        Set-TestFunction -Name Start-Process -Body {
+            param(
+                $FilePath,
+                $ArgumentList,
+                $Verb,
+                [switch]$Wait,
+                [switch]$PassThru
+            )
+            $script:capturedArgumentList = $ArgumentList
+            $script:capturedRequestPath = [Environment]::GetEnvironmentVariable(
+                "EMKE_ELEVATED_REQUEST_PATH",
+                [EnvironmentVariableTarget]::Process
+            )
+            [pscustomobject]@{ ExitCode = 0 }
+        }
+
+        Invoke-ElevatedCertificateOperation `
+            -Operation "Import" `
+            -CertificatePath $certificate `
+            -ExpectedCertificateSha256 $evidence.Sha256 `
+            -ExpectedCertificateThumbprint $evidence.Thumbprint
+        Assert-True `
+            ($script:capturedArgumentList -match "-EncodedCommand") `
+            "Elevation did not use EncodedCommand."
+        Assert-True `
+            (-not $script:capturedArgumentList.Contains(
+                $certificate,
+                [StringComparison]::Ordinal
+            )) `
+            "Certificate path leaked into the elevated argv."
+        Assert-True `
+            (-not [string]::IsNullOrWhiteSpace(
+                $script:capturedRequestPath
+            )) `
+            "Elevation did not pass the protected request path."
+        Assert-True `
+            (-not (Test-Path -LiteralPath $script:capturedRequestPath)) `
+            "Protected request was not cleaned after elevation."
+
+        Set-TestFunction -Name Start-Process -Body {
+            param(
+                $FilePath,
+                $ArgumentList,
+                $Verb,
+                [switch]$Wait,
+                [switch]$PassThru
+            )
+            $requestPath = [Environment]::GetEnvironmentVariable(
+                "EMKE_ELEVATED_REQUEST_PATH",
+                [EnvironmentVariableTarget]::Process
+            )
+            [IO.File]::SetAttributes(
+                $requestPath,
+                [IO.FileAttributes]::Normal
+            )
+            [IO.File]::AppendAllText($requestPath, " ")
+            [pscustomobject]@{ ExitCode = 0 }
+        }
+        Assert-Throws `
+            -Pattern "request.*changed|digest mismatch" `
+            -Action {
+                Invoke-ElevatedCertificateOperation `
+                    -Operation "Import" `
+                    -CertificatePath $certificate `
+                    -ExpectedCertificateSha256 $evidence.Sha256 `
+                    -ExpectedCertificateThumbprint $evidence.Thumbprint
+            }
+    }
+
+    Invoke-Case "fixed encoded child source parses independently" {
+        Reset-InstallFunctions
+        $source = Get-ElevatedCertificateChildSource
+        $tokens = $null
+        $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseInput(
+            $source,
+            [ref]$tokens,
+            [ref]$errors
+        )
+        Assert-Equal `
+            $errors.Count `
+            0 `
+            "Encoded child source contains parser errors."
+        Assert-True `
+            (-not $source.Contains(
+                '$PSCommandPath',
+                [StringComparison]::Ordinal
+            )) `
+            "Encoded child source depends on a mutable script path."
+    }
+
     Invoke-Case "installer requires trust confirmation before any mutation" {
         Reset-InstallFunctions
         Set-SafeInstallOrchestratorDefaults
@@ -524,6 +918,7 @@ try {
                     -PackagePath "/tmp/product.msix" `
                     -CertificatePath "/tmp/product.cer" `
                     -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40) `
                     -ConfirmTrust:$false
             }
         Assert-Equal `
@@ -540,15 +935,14 @@ try {
             -PackagePath "/tmp/product.msix" `
             -CertificatePath "/tmp/product.cer" `
             -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+            -ExpectedCertificateThumbprint ("B" * 40) `
             -ConfirmTrust
         Assert-Equal `
             ($script:installEvents -join "|") `
             (
-                "parent|resolve:.msix|resolve:.cer|resolve:.txt|" +
-                "read-hash:.msix|read-hash:.cer|" +
-                "hash:.msix|hash:.cer|certificate|" +
-                "elevate-import|hash:.msix|hash:.cer|certificate|" +
-                "record|add-appx|verify-identity"
+                "parent|inventory|certificate|verify-pre-absent|" +
+                "elevate-import|inventory-unchanged|certificate|" +
+                "add-appx|verify-identity|record"
             ) `
             "Installer mutation sequence differs."
     }
@@ -556,11 +950,7 @@ try {
     Invoke-Case "digest failure prevents elevation and AppX mutation" {
         Reset-InstallFunctions
         Set-SafeInstallOrchestratorDefaults
-        Set-TestFunction -Name Assert-FileSha256 -Body {
-            param($Path, $ExpectedSha256)
-            $script:installEvents.Add(
-                "hash:$([IO.Path]::GetExtension($Path))"
-            )
+        Set-TestFunction -Name Resolve-ExactBundleInventory -Body {
             throw "File digest mismatch."
         }
 
@@ -571,6 +961,7 @@ try {
                     -PackagePath "/tmp/product.msix" `
                     -CertificatePath "/tmp/product.cer" `
                     -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40) `
                     -ConfirmTrust
             }
         Assert-True `
@@ -581,67 +972,60 @@ try {
             "Digest failure reached Add-AppxPackage."
     }
 
-    Invoke-Case "elevated import child revalidates certificate bytes and identity" {
+    Invoke-Case "UAC cancellation enters exact recoverable rollback path" {
         Reset-InstallFunctions
-        $script:childEvents = [Collections.Generic.List[string]]::new()
-        Set-TestFunction -Name Assert-SupportedCertificateChild -Body {
-            $script:childEvents.Add("admin")
-        }
-        Set-TestFunction -Name Resolve-ExactBundleInput -Body {
-            param($Path, $ExpectedExtension)
-            $script:childEvents.Add("resolve")
-            $Path
-        }
-        Set-TestFunction -Name Assert-FileSha256 -Body {
-            param($Path, $ExpectedSha256)
-            $script:childEvents.Add("hash")
-        }
-        Set-TestFunction -Name Get-InternalCertificateEvidence -Body {
-            param($Path)
-            $script:childEvents.Add("certificate")
-            [pscustomobject]@{
-                Subject = "CN=EMKE Internal Test"
-                Thumbprint = "B" * 40
-                Sha256 = "A" * 64
-            }
-        }
-        Set-TestFunction -Name Add-ExactTrustedPeopleCertificate -Body {
-            param($CertificatePath, $ExpectedThumbprint)
-            $script:childEvents.Add("trusted-people-add:$ExpectedThumbprint")
-        }
-        Set-TestFunction -Name Assert-TrustedPeopleCertificate -Body {
-            param($ExpectedThumbprint, $ExpectedRawSha256)
-            $script:childEvents.Add("trusted-people-verify")
+        Set-SafeInstallOrchestratorDefaults
+        Set-TestFunction -Name Invoke-ElevatedCertificateImport -Body {
+            $script:installEvents.Add("elevate-import")
+            throw "UAC was cancelled."
         }
 
-        Invoke-ImportCertificateChild `
-            -CertificatePath "/tmp/product.cer" `
-            -ExpectedSha256 ("A" * 64) `
-            -ExpectedThumbprint ("B" * 40)
-        Assert-Equal `
-            ($script:childEvents -join "|") `
-            (
-                "admin|resolve|hash|certificate|" +
-                "trusted-people-add:$("B" * 40)|trusted-people-verify"
-            ) `
-            "Elevated child validation order differs."
-
-        Set-TestFunction -Name Get-InternalCertificateEvidence -Body {
-            param($Path)
-            [pscustomobject]@{
-                Subject = "CN=EMKE Internal Test"
-                Thumbprint = "C" * 40
-                Sha256 = "A" * 64
-            }
-        }
         Assert-Throws `
-            -Pattern "thumbprint" `
+            -Pattern "rollback|retry|Recovery required" `
             -Action {
-                Invoke-ImportCertificateChild `
+                Invoke-InstallInternalMsix `
+                    -PackagePath "/tmp/product.msix" `
                     -CertificatePath "/tmp/product.cer" `
-                    -ExpectedSha256 ("A" * 64) `
-                    -ExpectedThumbprint ("B" * 40)
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40) `
+                    -ConfirmTrust
             }
+        Assert-True `
+            ($script:installEvents.Contains("rollback:cert=True")) `
+            "UAC cancellation did not enter exact certificate recovery."
+        Assert-True `
+            (-not $script:installEvents.Contains("add-appx")) `
+            "UAC cancellation reached Add-AppxPackage."
+        Assert-True `
+            (-not $script:installEvents.Contains("record")) `
+            "UAC cancellation wrote an install record."
+    }
+
+    Invoke-Case "Add-Appx failure rolls back certificate without writing record" {
+        Reset-InstallFunctions
+        Set-SafeInstallOrchestratorDefaults
+        Set-TestFunction -Name Invoke-AddExactAppxPackage -Body {
+            param($PackagePath)
+            $script:installEvents.Add("add-appx")
+            throw "Synthetic Add-AppxPackage failure."
+        }
+
+        Assert-Throws `
+            -Pattern "rollback|retry|Recovery required" `
+            -Action {
+                Invoke-InstallInternalMsix `
+                    -PackagePath "/tmp/product.msix" `
+                    -CertificatePath "/tmp/product.cer" `
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40) `
+                    -ConfirmTrust
+            }
+        Assert-True `
+            ($script:installEvents.Contains("rollback:cert=True")) `
+            "Add-AppxPackage failure did not roll back exact certificate."
+        Assert-True `
+            (-not $script:installEvents.Contains("record")) `
+            "Add-AppxPackage failure wrote an install record."
     }
 
     Invoke-Case "AppX install and identity verification target exact current user package" {
@@ -718,7 +1102,8 @@ try {
                     -RemoveCertificate `
                     -ConfirmRemoveCertificate:$false `
                     -CertificatePath "/tmp/product.cer" `
-                    -ChecksumsPath "/tmp/SHA256SUMS.txt"
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40)
             }
         Assert-Equal `
             $script:uninstallEvents.Count `
@@ -734,20 +1119,22 @@ try {
             -RemoveCertificate `
             -ConfirmRemoveCertificate `
             -CertificatePath "/tmp/product.cer" `
-            -ChecksumsPath "/tmp/SHA256SUMS.txt"
+            -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+            -ExpectedCertificateThumbprint ("B" * 40)
         Assert-Equal `
             ($script:uninstallEvents -join "|") `
             (
-                "parent|resolve:.cer|resolve:.txt|read-hash:.cer|" +
-                "hash:.cer|certificate|read-record|query-package|" +
+                "parent|inventory|certificate|read-record|query-package|" +
                 "remove-appx:EMKE.Translation.Internal_0.1.0.0_x64__test|" +
-                "verify-absent|elevate-remove|remove-record"
+                "verify-absent|inventory-unchanged|" +
+                "elevate-remove|remove-record"
             ) `
             "Certificate-removal sequence differs."
 
         Reset-UninstallFunctions
         Set-SafeUninstallOrchestratorDefaults
         Set-TestFunction -Name Read-CertificateInstallRecord -Body {
+            param([switch]$AllowMissing)
             [pscustomobject]@{
                 PackageName = "EMKE.Translation.Internal"
                 CertificateSubject = "CN=EMKE Internal Test"
@@ -762,7 +1149,8 @@ try {
                     -RemoveCertificate `
                     -ConfirmRemoveCertificate `
                     -CertificatePath "/tmp/product.cer" `
-                    -ChecksumsPath "/tmp/SHA256SUMS.txt"
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40)
             }
         Assert-True `
             (-not ($script:uninstallEvents -join "|").Contains("remove-appx")) `
@@ -774,6 +1162,7 @@ try {
         Reset-UninstallFunctions
         Set-SafeUninstallOrchestratorDefaults
         Set-TestFunction -Name Read-CertificateInstallRecord -Body {
+            param([switch]$AllowMissing)
             [pscustomobject]@{
                 PackageName = "EMKE.Translation.Internal"
                 CertificateSubject = "CN=EMKE Internal Test"
@@ -788,11 +1177,42 @@ try {
                     -RemoveCertificate `
                     -ConfirmRemoveCertificate `
                     -CertificatePath "/tmp/product.cer" `
-                    -ChecksumsPath "/tmp/SHA256SUMS.txt"
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40)
             }
         Assert-True `
             (-not ($script:uninstallEvents -join "|").Contains("remove-appx")) `
             "Recorded-byte mismatch removed the package."
+    }
+
+    Invoke-Case "absent package can still clean exact certificate after failed install" {
+        Reset-UninstallFunctions
+        Set-SafeUninstallOrchestratorDefaults
+        Set-TestFunction -Name Get-OptionalInstalledInternalPackage -Body {
+            $script:uninstallEvents.Add("query-package")
+            $null
+        }
+        Set-TestFunction -Name Read-CertificateInstallRecord -Body {
+            param([switch]$AllowMissing)
+            $script:uninstallEvents.Add("read-record")
+            $null
+        }
+
+        Invoke-UninstallInternalMsix `
+            -RemoveCertificate `
+            -ConfirmRemoveCertificate `
+            -CertificatePath "/tmp/product.cer" `
+            -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+            -ExpectedCertificateThumbprint ("B" * 40)
+        Assert-True `
+            (-not ($script:uninstallEvents -join "|").Contains("remove-appx")) `
+            "Absent package path invoked Remove-AppxPackage."
+        Assert-True `
+            ($script:uninstallEvents.Contains("elevate-remove")) `
+            "Absent package blocked exact certificate recovery."
+        Assert-True `
+            ($script:uninstallEvents.Contains("remove-record")) `
+            "Exact certificate recovery did not clean stale record."
     }
 
     Invoke-Case "AppX uninstall targets one exact full name and verifies absence" {
@@ -828,49 +1248,6 @@ try {
         Assert-InternalPackageAbsent
     }
 
-    Invoke-Case "elevated removal child revalidates exact certificate before store mutation" {
-        Reset-UninstallFunctions
-        $script:removeChildEvents = [Collections.Generic.List[string]]::new()
-        Set-TestFunction -Name Assert-SupportedCertificateChild -Body {
-            $script:removeChildEvents.Add("admin")
-        }
-        Set-TestFunction -Name Resolve-ExactBundleInput -Body {
-            param($Path, $ExpectedExtension)
-            $script:removeChildEvents.Add("resolve")
-            $Path
-        }
-        Set-TestFunction -Name Assert-FileSha256 -Body {
-            param($Path, $ExpectedSha256)
-            $script:removeChildEvents.Add("hash")
-        }
-        Set-TestFunction -Name Get-InternalCertificateEvidence -Body {
-            param($Path)
-            $script:removeChildEvents.Add("certificate")
-            [pscustomobject]@{
-                Subject = "CN=EMKE Internal Test"
-                Thumbprint = "B" * 40
-                Sha256 = "A" * 64
-            }
-        }
-        Set-TestFunction -Name Remove-ExactTrustedPeopleCertificate -Body {
-            param($ExpectedThumbprint, $ExpectedRawSha256)
-            $script:removeChildEvents.Add(
-                "trusted-people-remove:$ExpectedThumbprint"
-            )
-        }
-
-        Invoke-RemoveCertificateChild `
-            -CertificatePath "/tmp/product.cer" `
-            -ExpectedSha256 ("A" * 64) `
-            -ExpectedThumbprint ("B" * 40)
-        Assert-Equal `
-            ($script:removeChildEvents -join "|") `
-            (
-                "admin|resolve|hash|certificate|" +
-                "trusted-people-remove:$("B" * 40)"
-            ) `
-            "Elevated certificate removal sequence differs."
-    }
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force

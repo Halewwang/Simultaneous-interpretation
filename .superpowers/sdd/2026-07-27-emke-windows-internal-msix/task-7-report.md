@@ -39,32 +39,50 @@ tests 6; pass 6; fail 0; exit 0
 
 pwsh -NoLogo -NoProfile -File \
   Windows/tools/tests/internal-msix-lifecycle.behavior.test.ps1
-cases 13; pass 13; fail 0; exit 0
+cases 19; pass 19; fail 0; exit 0
 ```
 
-## Implemented safety boundary
+Round-one security review added a second RED/GREEN cycle. RED proved that the
+original helper trusted a thumbprint derived from the same replaceable CER and
+that UAC cancellation did not yet enter certificate recovery. GREEN proves an
+externally pinned thumbprint, an exact four-file checksum inventory, a fixed
+encoded elevation child, protected request tamper detection, and exact rollback
+after UAC or Add-Appx failure.
+
+## Hardened safety boundary
 
 The installer:
 
 - rejects dot-source invocation;
-- requires explicit `-ConfirmTrust`;
+- requires explicit `-ConfirmTrust` and a mandatory externally supplied
+  `-ExpectedCertificateThumbprint`;
 - rejects non-absolute, remote/mapped, missing, wrong-extension, or reparse
   inputs and requires all inputs to share one exact bundle directory;
-- parses exact leaf entries from `SHA256SUMS.txt`, rejects malformed,
-  traversing, or duplicate requested entries, and verifies the MSIX and CER
-  before elevation;
+- accepts exactly four nonblank checksum entries: the fixed MSIX, CER, install
+  helper, and uninstall helper names; it rejects every missing, extra,
+  duplicate, malformed, or traversing entry and verifies all four files;
 - validates the public CER subject `CN=EMKE Internal Test`, fixed SHA-256, and
-  fixed thumbprint;
+  the independently supplied fixed thumbprint, so a same-subject replacement
+  CER remains rejected even if an attacker updates `SHA256SUMS.txt`;
 - rejects an already elevated parent;
-- uses `Start-Process ... -Verb RunAs -Wait -PassThru` only for the constrained
-  certificate-import child;
-- re-resolves and re-verifies the CER bytes, subject, and thumbprint in that
-  child, importing only into `LocalMachine\TrustedPeople`;
+- never re-executes `$PSCommandPath`; it launches only a fixed encoded child
+  source with `-Verb RunAs -Wait -PassThru`;
+- sends no caller-controlled path in the elevated argv. A random per-operation
+  JSON request carries exact operation/path/hash/thumbprint/subject data; its
+  directory ACL is restricted, the file is read-only, its digest is bound
+  through inherited process environment, and parent file handles prevent
+  replacement while the elevated child reads it and the CER;
+- independently parses and validates the request schema, request digest, local
+  non-reparse CER path, CER bytes, subject, fixed thumbprint, and exact
+  `LocalMachine\TrustedPeople` postcondition inside the encoded child;
 - returns to the original non-elevated process, re-verifies both inputs, then
   calls `Add-AppxPackage` for that user;
 - verifies exact Name, Publisher, Version, and Architecture;
-- records only the exact certificate subject, thumbprint, and hash under the
-  invoking user's Internal installation registry key.
+- writes the invoking-user install record only after Add-Appx succeeds and the
+  exact package identity is observed;
+- on UAC cancellation, child failure, Add-Appx failure, identity mismatch, or
+  record failure, attempts exact package/certificate/record rollback and emits
+  explicit complete-versus-recovery-required guidance.
 
 The uninstaller:
 
@@ -72,10 +90,14 @@ The uninstaller:
   `EMKE.Translation.Internal` package full name;
 - retains certificate trust by default;
 - requires both `-RemoveCertificate` and
-  `-ConfirmRemoveCertificate`, the original CER, and `SHA256SUMS.txt`;
-- validates the CER against the exact invoking-user install record before
-  removing the package;
-- elevates only the constrained certificate-removal child;
+  `-ConfirmRemoveCertificate`, the original CER, `SHA256SUMS.txt`, and the
+  externally supplied fixed thumbprint;
+- applies the same exact four-file inventory and fixed encoded-child boundary;
+- validates the CER against the exact invoking-user install record when one
+  exists, while allowing explicit exact-certificate cleanup after a failed
+  install left no package or record;
+- removes the package first when present, verifies it absent, and elevates only
+  the constrained exact-certificate-removal child;
 - re-verifies the CER bytes, subject, thumbprint, and exact
   `LocalMachine\TrustedPeople` certificate before removal;
 - never matches or removes a certificate by subject alone.
@@ -90,6 +112,19 @@ PowerShell AST parse: PASS for both helpers and the behavior suite
 forbidden capability scan: PASS
 git diff --check: PASS
 ```
+
+The behavior suite specifically covers same-subject CER replacement with
+updated checksums, extra/duplicate inventory entries, paths containing spaces
+and single quotes, caller-controlled data exclusion from elevated argv,
+protected-request tampering, UAC cancellation recovery, Add-Appx failure
+rollback, no-record cleanup, and install-record ordering.
+
+## Task 8 handoff
+
+Workflow or release automation must pass
+`-ExpectedCertificateThumbprint` from the trusted certificate/provenance input;
+the lifecycle helper will not infer trust from the bundled CER or
+`SHA256SUMS.txt`. The package builder and CI workflow remain outside this task.
 
 Windows UAC, real Local Machine certificate-store mutation, and real AppX
 installation remain hosted/physical Windows evidence gates; this portable
