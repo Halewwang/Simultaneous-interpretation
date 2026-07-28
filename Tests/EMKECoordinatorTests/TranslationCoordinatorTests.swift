@@ -458,10 +458,12 @@ private struct CoordinatorHarness {
     }
 
     func drainStartupEvents() async {
-        _ = await coordinator.nextEvent()
-        _ = await coordinator.nextEvent()
-        _ = await coordinator.nextEvent()
-        _ = await coordinator.nextEvent()
+        while true {
+            if case .stateChanged(let state) = await coordinator.nextEvent(),
+               state.isRunning {
+                return
+            }
+        }
     }
 
     func nextAudioLevelEvent() async -> AudioLevelSnapshot {

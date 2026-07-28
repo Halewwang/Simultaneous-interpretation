@@ -147,12 +147,17 @@ struct TranslationDashboardPresentation: Equatable {
     ) -> TranslationDashboardPresentation {
         let running = coordinatorState.isRunning
         let effectiveInboundState: TranslationChannelState =
-            isStarting && !running ? .connecting : coordinatorState.inbound
+            isStopping ? .stopped : isStarting && !running
+                ? .connecting
+                : coordinatorState.inbound
         let effectiveOutboundState: TranslationChannelState =
-            isStarting && !running ? .connecting : coordinatorState.outbound
+            isStopping ? .stopped : isStarting && !running
+                ? .connecting
+                : coordinatorState.outbound
         let inbound = TranslationChannelPresentation.make(
             channel: .inbound,
             state: effectiveInboundState,
+            capabilityAvailable: coordinatorState.canListen,
             bypassEnabled: inboundBypassEnabled,
             copy: copy
         )
@@ -162,6 +167,7 @@ struct TranslationDashboardPresentation: Equatable {
         let outbound = TranslationChannelPresentation.make(
             channel: .outbound,
             state: effectiveOutboundState,
+            capabilityAvailable: coordinatorState.canSpeak,
             bypassEnabled: outboundBypassEnabled,
             automaticBypass: usesAutomaticOutboundBypass,
             copy: copy
@@ -198,6 +204,7 @@ struct TranslationDashboardPresentation: Equatable {
                 isStarting: isStarting,
                 isStopping: isStopping,
                 isRunning: running,
+                audioEngineStarted: coordinatorState.audioEngineStarted,
                 inboundState: effectiveInboundState,
                 outboundState: effectiveOutboundState,
                 translationStartedAt: translationStartedAt,
@@ -235,6 +242,7 @@ struct TranslationDashboardPresentation: Equatable {
         isStarting: Bool,
         isStopping: Bool,
         isRunning: Bool,
+        audioEngineStarted: Bool,
         inboundState: TranslationChannelState,
         outboundState: TranslationChannelState,
         translationStartedAt: Date?,
@@ -242,6 +250,9 @@ struct TranslationDashboardPresentation: Equatable {
         copy: AppCopy
     ) -> String {
         if isStopping { return copy.text(.stopping) }
+        if isStarting && audioEngineStarted {
+            return copy.text(.audioEngineStarted)
+        }
         if isStarting { return copy.text(.connecting) }
         if isRunning {
             if case .failed = outboundState {

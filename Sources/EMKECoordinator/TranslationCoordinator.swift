@@ -244,6 +244,9 @@ public actor TranslationCoordinator {
               isCurrent(startOutboundEpoch, for: .outbound),
               !isStopping else { return }
 
+        state.audioEngineStarted = true
+        publishState()
+
         resetRuntimeBuffers(configuration: configuration)
         routing = RoutingStateMachine()
         routing.handle(.translationStarted)

@@ -3,16 +3,90 @@ import Testing
 @testable import EMKEMenuBarApp
 
 @Test
-func inboundActiveUsesOriginalAudioAction() {
+func runningCapabilitiesSeparateEngineListenAndSpeakReadiness() {
+    let connecting = TranslationCoordinatorState(
+        audioEngineStarted: true,
+        inbound: .connecting,
+        outbound: .connecting
+    )
+    #expect(connecting.audioEngineStarted)
+    #expect(!connecting.canListen)
+    #expect(!connecting.canSpeak)
+
+    let active = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .active,
+        outbound: .active
+    )
+    #expect(active.canListen)
+    #expect(active.canSpeak)
+
+    let inboundFailed = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .failed(message: "offline"),
+        outbound: .active
+    )
+    #expect(inboundFailed.canListen)
+    #expect(inboundFailed.canSpeak)
+
+    let outboundFailed = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .active,
+        outbound: .failed(message: "offline")
+    )
+    #expect(outboundFailed.canListen)
+    #expect(!outboundFailed.canSpeak)
+
+    let outboundReconnecting = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .reconnecting(attempt: 1),
+        outbound: .reconnecting(attempt: 1)
+    )
+    #expect(outboundReconnecting.canListen)
+    #expect(!outboundReconnecting.canSpeak)
+
+    let bypassed = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .bypassed,
+        outbound: .bypassed
+    )
+    #expect(bypassed.canListen)
+    #expect(bypassed.canSpeak)
+
+    #expect(!TranslationCoordinatorState().canListen)
+    #expect(!TranslationCoordinatorState().canSpeak)
+}
+
+@Test
+func inboundActiveShowsListenReadinessAndOriginalAudioAction() {
     let value = TranslationChannelPresentation.make(
         channel: .inbound,
         state: .active,
+        capabilityAvailable: true,
         bypassEnabled: false,
         copy: AppCopy(language: .zhHans)
     )
-    #expect(value.status == "稳定")
+    #expect(value.status == "可以收听")
     #expect(value.actionTitle == "播放原音")
     #expect(value.actionAccessibilityLabel == "播放入站原音")
+}
+
+@Test
+func outboundActiveShowsSpeakReadinessInEnglish() {
+    let value = TranslationChannelPresentation.make(
+        channel: .outbound,
+        state: .active,
+        capabilityAvailable: true,
+        bypassEnabled: false,
+        copy: AppCopy(language: .english)
+    )
+
+    #expect(value.status == "Can speak")
 }
 
 @Test

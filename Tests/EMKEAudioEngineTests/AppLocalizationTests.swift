@@ -57,6 +57,19 @@ func manualUpdateCheckCopyIsLocalizedInBothLanguages() {
 }
 
 @Test
+func runtimeCapabilityCopyIsExactInBothLanguages() {
+    let chinese = AppCopy(language: .zhHans)
+    let english = AppCopy(language: .english)
+
+    #expect(chinese.text(.audioEngineStarted) == "音频引擎已启动")
+    #expect(english.text(.audioEngineStarted) == "Audio engine ready")
+    #expect(chinese.text(.canListen) == "可以收听")
+    #expect(english.text(.canListen) == "Can listen")
+    #expect(chinese.text(.canSpeak) == "可以发言")
+    #expect(english.text(.canSpeak) == "Can speak")
+}
+
+@Test
 func onboardingCopyIsCompleteInBothLanguages() {
     let keys: [AppCopyKey] = [
         .gettingStarted,

@@ -15,6 +15,7 @@ struct TranslationChannelPresentation: Equatable {
     static func make(
         channel: MenuBarChannel,
         state: TranslationChannelState,
+        capabilityAvailable: Bool = false,
         bypassEnabled: Bool,
         automaticBypass: Bool = false,
         copy: AppCopy
@@ -71,7 +72,9 @@ struct TranslationChannelPresentation: Equatable {
                 )
             }
             return makeValue(
-                status: copy.text(.stable),
+                status: capabilityAvailable
+                    ? copy.text(channel == .inbound ? .canListen : .canSpeak)
+                    : copy.text(.stable),
                 statusSymbol: "checkmark.circle",
                 statusColor: EMKEVisualStyle.secondaryText,
                 symbol: channelSymbol,

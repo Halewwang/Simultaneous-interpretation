@@ -28,10 +28,20 @@ struct DashboardFixture: Sendable {
         ),
         isStarting: true
     )
+    static let engineReady = DashboardFixture(
+        readiness: .active,
+        coordinatorState: TranslationCoordinatorState(
+            audioEngineStarted: true,
+            inbound: .connecting,
+            outbound: .connecting
+        ),
+        isStarting: true
+    )
     static let running = DashboardFixture(
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .active,
             outbound: .active
         ),
@@ -41,6 +51,7 @@ struct DashboardFixture: Sendable {
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .failed(message: "offline"),
             outbound: .active
         ),
@@ -51,6 +62,7 @@ struct DashboardFixture: Sendable {
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .active,
             outbound: .failed(message: "offline")
         ),
@@ -61,6 +73,7 @@ struct DashboardFixture: Sendable {
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .bypassed,
             outbound: .active
         ),
@@ -71,6 +84,7 @@ struct DashboardFixture: Sendable {
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .active,
             outbound: .bypassed
         ),
@@ -81,6 +95,7 @@ struct DashboardFixture: Sendable {
         readiness: .active,
         coordinatorState: TranslationCoordinatorState(
             isRunning: true,
+            audioEngineStarted: true,
             inbound: .active,
             outbound: .active
         ),
@@ -172,6 +187,39 @@ func dashboardPrimaryStatusUsesSemanticSymbolForEveryGlobalState() {
         let value = item.fixture.makePresentation()
         #expect(value.primaryStatusSymbol == item.symbol)
     }
+}
+
+@Test
+func startupShowsAudioEngineReadinessOnlyAfterTheEngineStarts() {
+    let beforeEngineStarts = DashboardFixture.connecting.makePresentation(
+        copy: AppCopy(language: .english)
+    )
+    let afterEngineStarts = DashboardFixture.engineReady.makePresentation(
+        copy: AppCopy(language: .english)
+    )
+
+    #expect(beforeEngineStarts.primaryStatus == "Connecting")
+    #expect(afterEngineStarts.primaryStatus == "Audio engine ready")
+    #expect(afterEngineStarts.inbound.status == "Connecting")
+    #expect(afterEngineStarts.outbound.status == "Connecting")
+}
+
+@Test
+func stoppingDashboardDoesNotContinueToPresentListenOrSpeakReadiness() {
+    let value = DashboardFixture(
+        readiness: .active,
+        coordinatorState: TranslationCoordinatorState(
+            isRunning: true,
+            audioEngineStarted: true,
+            inbound: .active,
+            outbound: .active
+        ),
+        isStopping: true,
+        startedAt: DashboardFixture.now
+    ).makePresentation()
+
+    #expect(value.inbound.status == "已停止")
+    #expect(value.outbound.status == "已停止")
 }
 
 @Test
