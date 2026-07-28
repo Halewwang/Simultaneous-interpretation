@@ -990,6 +990,26 @@ public actor TranslationCoordinator {
         }
     }
 
+    private func playInboundFinish(
+        _ chunks: [Data],
+        epoch: UInt64,
+        token: UInt64
+    ) async {
+        for chunk in chunks {
+            guard isCurrentInboundFinish(
+                epoch: epoch,
+                token: token,
+                phase: .draining
+            ) else { return }
+            try? await audioEngine.enqueueInboundOutput(chunk)
+            guard isCurrentInboundFinish(
+                epoch: epoch,
+                token: token,
+                phase: .draining
+            ) else { return }
+        }
+    }
+
     private func scheduleInboundDeadline(epoch: UInt64) {
         guard isCurrent(epoch, for: .inbound),
               inboundDeadlineTask == nil else { return }
@@ -1054,22 +1074,23 @@ public actor TranslationCoordinator {
         epoch: UInt64,
         token: UInt64
     ) async {
-        guard isCurrent(epoch, for: .inbound),
-              !isStopping,
-              inboundUtteranceActive,
-              inboundFinishState?.epoch == epoch,
-              inboundFinishState?.token == token,
-              inboundFinishState?.phase == .scheduled else { return }
+        guard isCurrentInboundFinish(
+            epoch: epoch,
+            token: token,
+            phase: .scheduled
+        ),
+              inboundUtteranceActive else { return }
         inboundFinishState?.phase = .draining
-        await playInbound(
+        await playInboundFinish(
             inboundBuffer.finish(isSpeech: true),
-            epoch: epoch
+            epoch: epoch,
+            token: token
         )
-        guard isCurrent(epoch, for: .inbound),
-              !isStopping,
-              inboundFinishState?.epoch == epoch,
-              inboundFinishState?.token == token,
-              inboundFinishState?.phase == .draining else { return }
+        guard isCurrentInboundFinish(
+            epoch: epoch,
+            token: token,
+            phase: .draining
+        ) else { return }
         inboundFinishTask = nil
         inboundFinishState = nil
         inboundUtteranceActive = false
@@ -1077,6 +1098,19 @@ public actor TranslationCoordinator {
         inboundDeadlineTask = nil
         routing.handle(.utteranceEnded)
         await applyRouting()
+    }
+
+    private func isCurrentInboundFinish(
+        epoch: UInt64,
+        token: UInt64,
+        phase: InboundFinishPhase
+    ) -> Bool {
+        isCurrent(epoch, for: .inbound)
+            && !isStopping
+            && !Task.isCancelled
+            && inboundFinishState?.epoch == epoch
+            && inboundFinishState?.token == token
+            && inboundFinishState?.phase == phase
     }
 
     private func handleChannelFailure(
