@@ -35,6 +35,43 @@ if (-not $IsWindows) {
     throw 'Hosted MSIX installation validation requires Windows.'
 }
 
+function Assert-NoReparsePathChain {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $currentPath = $fullPath
+    while ($true) {
+        if (-not (Test-Path -LiteralPath $currentPath)) {
+            throw 'Hosted MSIX input path chain validation failed.'
+        }
+        $currentItem = Get-Item -LiteralPath $currentPath -Force
+        $linkProperty = $currentItem.PSObject.Properties['LinkType']
+        $linkType = if ($null -eq $linkProperty) {
+            $null
+        } else {
+            $linkProperty.Value
+        }
+        if (
+            $null -ne $linkType -or
+            ($currentItem.Attributes -band
+                [IO.FileAttributes]::ReparsePoint) -ne 0
+        ) {
+            throw 'Hosted MSIX input paths must not contain reparse points.'
+        }
+
+        $parent = [IO.Directory]::GetParent($currentPath)
+        if ($null -eq $parent) {
+            break
+        }
+        $currentPath = $parent.FullName
+    }
+
+    return $fullPath
+}
+
 function Resolve-ExactLeafFile {
     param(
         [Parameter(Mandatory)]
@@ -49,7 +86,8 @@ function Resolve-ExactLeafFile {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw 'Hosted MSIX input file is unavailable.'
     }
-    $item = Get-Item -LiteralPath $Path -Force
+    $resolvedPath = Assert-NoReparsePathChain -Path $Path
+    $item = Get-Item -LiteralPath $resolvedPath -Force
     if (
         $item.Extension -cne $ExpectedExtension -or
         $null -ne $item.LinkType -or
@@ -74,6 +112,49 @@ function Get-ExactInstalledPackage {
         )
     }
     return $packages[0]
+}
+
+function Assert-DriverMissingSmokeRecord {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Json
+    )
+
+    try {
+        $smoke = ConvertFrom-Json -InputObject $Json -NoEnumerate
+    } catch {
+        throw 'Driver-missing smoke output is not valid JSON.'
+    }
+
+    if ($smoke -isnot [pscustomobject]) {
+        throw 'Driver-missing smoke output must be one JSON object.'
+    }
+    $requiredProperties = @(
+        'status',
+        'translationStartAllowed',
+        'networkOpenCount',
+        'audioStartCount'
+    )
+    foreach ($propertyName in $requiredProperties) {
+        if ($null -eq $smoke.PSObject.Properties[$propertyName]) {
+            throw "Driver-missing smoke is missing '$propertyName'."
+        }
+    }
+    if (
+        $smoke.status -isnot [string] -or
+        $smoke.status -cne 'driverMissing' -or
+        $smoke.translationStartAllowed -isnot [bool] -or
+        $smoke.translationStartAllowed -ne $false -or
+        $smoke.networkOpenCount -isnot [long] -or
+        $smoke.networkOpenCount -ne 0 -or
+        $smoke.audioStartCount -isnot [long] -or
+        $smoke.audioStartCount -ne 0
+    ) {
+        throw (
+            'Driver-missing smoke must block translation with zero ' +
+            'network opens and zero audio starts.'
+        )
+    }
 }
 
 function Invoke-DriverMissingSmoke {
@@ -120,22 +201,7 @@ function Invoke-DriverMissingSmoke {
         if ($lines.Count -ne 1) {
             throw 'Driver-missing smoke must emit exactly one JSON record.'
         }
-        try {
-            $smoke = ConvertFrom-Json -InputObject $lines[0] -NoEnumerate
-        } catch {
-            throw 'Driver-missing smoke output is not valid JSON.'
-        }
-        if (
-            $smoke.status -cne 'driverMissing' -or
-            $smoke.translationStartAllowed -ne $false -or
-            [int]$smoke.networkOpenCount -ne 0 -or
-            [int]$smoke.audioStartCount -ne 0
-        ) {
-            throw (
-                'Driver-missing smoke must block translation with zero ' +
-                'network opens and zero audio starts.'
-            )
-        }
+        Assert-DriverMissingSmokeRecord -Json $lines[0]
     } finally {
         $process.Dispose()
     }

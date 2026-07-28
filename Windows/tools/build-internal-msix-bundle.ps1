@@ -18,6 +18,10 @@ param(
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
+    [string]$AllowedOutputRoot,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
 
     [Parameter(Mandatory)]
@@ -48,6 +52,46 @@ $expectedInputs = [ordered]@{
     'Uninstall-EMKE-Translation-Internal.ps1' = $UninstallScriptPath
 }
 
+function Assert-NoReparsePathChain {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [switch]$AllowMissingLeaf
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $currentPath = $fullPath
+    while ($true) {
+        if (Test-Path -LiteralPath $currentPath) {
+            $currentItem = Get-Item -LiteralPath $currentPath -Force
+            $linkProperty = $currentItem.PSObject.Properties['LinkType']
+            $linkType = if ($null -eq $linkProperty) {
+                $null
+            } else {
+                $linkProperty.Value
+            }
+            if (
+                $null -ne $linkType -or
+                ($currentItem.Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0
+            ) {
+                throw 'Bundle paths must not contain reparse points.'
+            }
+        } elseif (-not $AllowMissingLeaf) {
+            throw 'Bundle path chain validation failed.'
+        }
+
+        $parent = [IO.Directory]::GetParent($currentPath)
+        if ($null -eq $parent) {
+            break
+        }
+        $currentPath = $parent.FullName
+    }
+
+    return $fullPath
+}
+
 function Resolve-ExactInputFile {
     param(
         [Parameter(Mandatory)]
@@ -63,7 +107,8 @@ function Resolve-ExactInputFile {
         throw "Bundle input file is unavailable: $ExpectedName"
     }
 
-    $item = Get-Item -LiteralPath $Path -Force
+    $resolvedPath = Assert-NoReparsePathChain -Path $Path
+    $item = Get-Item -LiteralPath $resolvedPath -Force
     if (
         $item.Name -cne $ExpectedName -or
         $null -ne $item.LinkType -or
@@ -97,7 +142,40 @@ foreach ($entry in $expectedInputs.GetEnumerator()) {
         -ExpectedName $entry.Key
 }
 
-$resolvedOutput = [IO.Path]::GetFullPath($OutputDirectory)
+if (-not [IO.Path]::IsPathFullyQualified($AllowedOutputRoot)) {
+    throw 'Bundle allowed output root validation failed.'
+}
+$resolvedAllowedOutputRoot = [IO.Path]::GetFullPath($AllowedOutputRoot)
+if (
+    -not (
+        Test-Path `
+            -LiteralPath $resolvedAllowedOutputRoot `
+            -PathType Container
+    )
+) {
+    throw 'Bundle allowed output root validation failed.'
+}
+$resolvedAllowedOutputRoot =
+    Assert-NoReparsePathChain -Path $AllowedOutputRoot
+if (-not [IO.Path]::IsPathFullyQualified($OutputDirectory)) {
+    throw 'Bundle output directory must be inside the allowed output root.'
+}
+$resolvedOutput = Assert-NoReparsePathChain `
+    -Path $OutputDirectory `
+    -AllowMissingLeaf
+$pathComparison = if ($IsWindows) {
+    [StringComparison]::OrdinalIgnoreCase
+} else {
+    [StringComparison]::Ordinal
+}
+$allowedPrefix =
+    $resolvedAllowedOutputRoot.TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    ) + [IO.Path]::DirectorySeparatorChar
+if (-not $resolvedOutput.StartsWith($allowedPrefix, $pathComparison)) {
+    throw 'Bundle output directory must be inside the allowed output root.'
+}
 if (Test-Path -LiteralPath $resolvedOutput) {
     $outputItem = Get-Item -LiteralPath $resolvedOutput -Force
     if (
@@ -113,6 +191,7 @@ if (Test-Path -LiteralPath $resolvedOutput) {
 } else {
     [IO.Directory]::CreateDirectory($resolvedOutput) | Out-Null
 }
+$resolvedOutput = Assert-NoReparsePathChain -Path $resolvedOutput
 
 foreach ($entry in $resolvedInputs.GetEnumerator()) {
     [IO.File]::Copy(

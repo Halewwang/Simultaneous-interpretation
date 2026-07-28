@@ -42,35 +42,77 @@ fields, file sizes, and hashes.
 
 ## Implemented behavior
 
-- Hosted workflow uses `windows-2025-vs2026`, Node 24, and .NET 10.
+- The secret-free `build-test` job uses `windows-2025-vs2026`, Node 24, and
+  .NET 10 for pull requests, selected pushes, and manual runs.
 - It validates shared/portable contracts, performs locked restore, runs native
   Release build plus CTest, and runs managed Release build/tests.
+- The `sign-package-bundle` job is limited to manual dispatch or `main`, runs
+  only after `build-test`, and is bound to the protected
+  `windows-internal-signing` environment.
 - The PFX bytes and password are step-scoped encrypted secrets. Reconstruction,
   validation, signing input, byte clearing, and exact PFX cleanup are bounded
   to the signing step.
-- The package is verified before installation.
-- Hosted validation imports only the exact public certificate into Local
-  Machine Trusted People, installs and queries only
-  `EMKE.Translation.Internal`, validates version/publisher/architecture, and
-  runs `--hosted-driver-missing-smoke`.
+- The build-26100 hosted job only builds, signs, verifies, bundles, and uploads;
+  it never imports a certificate or invokes `Add-AppxPackage`.
+- The default-off `install-25h2` job requires
+  `[self-hosted, Windows, X64, emke-win11-25h2]`, rejects builds below `26200`,
+  downloads the exact signed artifact, and performs install/query/smoke/remove
+  separately.
 - The smoke requires one JSON record with `status=driverMissing`,
   `translationStartAllowed=false`, `networkOpenCount=0`, and
-  `audioStartCount=0`.
+  `audioStartCount=0`; all four properties and their JSON-derived types are
+  checked explicitly.
 - Package and certificate cleanup are nested so certificate cleanup still runs
-  if package removal fails. The workflow adds an `always()` exact-thumbprint
-  cleanup.
-- Artifact upload is after every normal success gate and is not marked
-  `always()`.
+  if package removal fails. The optional install job adds an `always()` cleanup
+  guarded by a run-unique exact-thumbprint marker.
+- Artifact upload follows every hosted build/sign/verify gate and precedes the
+  optional install job, so installation is not silently claimed as hosted
+  evidence.
 - No driver build/install/uninstall command is present.
+- Bundle and hosted-install inputs reject reparse points across the complete
+  existing parent chain. Bundle output must be under an explicit allowed root
+  and is revalidated after creation.
 - The handoff ZIP contains exactly MSIX, CER, install helper, uninstall helper,
   and `SHA256SUMS.txt`; the Actions artifact also contains the ZIP and
   provenance JSON.
+
+## Review fix TDD evidence
+
+Observed RED failures before production changes:
+
+```text
+workflow split:
+  tests 3; pass 2; fail 1
+  missing run_25h2_install_validation and split jobs
+
+strict smoke:
+  tests 1; pass 0; fail 1
+  missing networkOpenCount was accepted
+
+controlled output root:
+  tests 1; pass 0; fail 1
+  AllowedOutputRoot parameter unavailable
+  then outside-root bundle write was accepted
+
+reparse parent chains:
+  tests 1; pass 0; fail 1
+  linked input ancestor was accepted
+```
+
+Focused GREEN after the fixes:
+
+```text
+tests 7; pass 7; fail 0
+```
 
 ## Verification
 
 Passed:
 
 ```text
+Node Task 8 contract/behavior:
+  tests 7; pass 7; fail 0
+
 PowerShell parser:
   build-internal-msix-bundle.ps1 = passed
   test-hosted-msix-install.ps1 = passed
@@ -80,12 +122,6 @@ YAML parser:
 
 git diff --check = passed
 ```
-
-The broader portable Node invocation currently reaches this Task 8 contract
-successfully, but the combined command is not green yet because the concurrently
-created Task 7 lifecycle contract tests have six expected failures while their
-install/uninstall helpers are not present. Those files are outside this task
-and were not changed.
 
 ## Integration dependency and proof boundary
 
@@ -99,9 +135,11 @@ package-msix.ps1
 ```
 
 Task 6 must retain or reconcile that interface before hosted execution.
-Task 7 must provide the two named handoff helpers. The packaged app must provide
-the non-interactive `--hosted-driver-missing-smoke` contract.
+Task 7 now provides the two named handoff helpers. The packaged app must provide
+the non-interactive `--hosted-driver-missing-smoke` contract; this Task 8 fix
+does not claim that production WPF entry point exists or has run.
 
-No Windows MSIX was installed in this macOS implementation session. A hosted
-run is still required for MakeAppx, SignTool, certificate-store, AppX,
-packaged-process smoke, cleanup, and downloadable artifact evidence.
+No Windows MSIX was installed in this macOS implementation session. A protected
+hosted run is still required for MakeAppx, SignTool, and downloadable artifact
+evidence. A separate disposable Windows 11 25H2 runner run is required for
+certificate-store, AppX, packaged-process smoke, and cleanup evidence.

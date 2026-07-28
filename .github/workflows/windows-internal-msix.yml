@@ -2,6 +2,12 @@ name: Windows Internal MSIX
 
 on:
   workflow_dispatch:
+    inputs:
+      run_25h2_install_validation:
+        description: Run install and driver-missing smoke on the ephemeral 25H2 runner
+        required: false
+        type: boolean
+        default: false
   pull_request:
     paths:
       - "Windows/**"
@@ -26,9 +32,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-install-check:
+  build-test:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -106,6 +112,54 @@ jobs:
             --logger "trx;LogFileName=windows-internal-msix.trx"
           if ($LASTEXITCODE -ne 0) {
             throw "Windows managed test gate failed."
+          }
+
+  sign-package-bundle:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    needs: build-test
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 30
+    environment: windows-internal-signing
+    outputs:
+      certificate_thumbprint: ${{ steps.package.outputs.certificate_thumbprint }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore locked managed packaging inputs
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows locked packaging restore failed."
+          }
+
+      - name: Build native Release package input
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Push-Location Windows/native
+          try {
+            cmake --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native packaging configuration failed."
+            }
+            cmake --build --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native packaging input build failed."
+            }
+          } finally {
+            Pop-Location
           }
 
       - name: Reconstruct, sign, and verify Internal MSIX
@@ -208,69 +262,14 @@ jobs:
             }
           }
 
-      - name: Install, query, smoke, and remove exact Internal MSIX
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
-          pwsh -NoProfile -File Windows/tools/test-hosted-msix-install.ps1 `
-            -PackagePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-            ) `
-            -CertificatePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
-            ) `
-            -ExpectedCertificateThumbprint `
-              "${{ steps.package.outputs.certificate_thumbprint }}"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Hosted Internal MSIX install validation failed."
-          }
-
-      - name: Ensure exact certificate cleanup
-        if: always()
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $thumbprint =
-            "${{ steps.package.outputs.certificate_thumbprint }}".ToUpperInvariant()
-          if ($thumbprint -match "^[0-9A-F]{40}$") {
-            $store =
-              [Security.Cryptography.X509Certificates.X509Store]::new(
-                [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
-                [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
-              )
-            try {
-              $store.Open(
-                [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
-              )
-              $matches = @(
-                $store.Certificates |
-                  Where-Object {
-                    $_.Thumbprint.ToUpperInvariant() -ceq $thumbprint
-                  }
-              )
-              foreach ($match in $matches) {
-                $store.Remove($match)
-              }
-            } finally {
-              $store.Close()
-              $store.Dispose()
-            }
-          }
-
       - name: Build exact handoff bundle
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
-          $bundleRoot = Join-Path $PWD "Windows/artifacts/internal-bundle"
+          $allowedOutputRoot = Join-Path $PWD "Windows/artifacts"
+          $artifactRoot = Join-Path $allowedOutputRoot "msix"
+          $bundleRoot = Join-Path $allowedOutputRoot "internal-bundle"
           pwsh -NoProfile -File `
             Windows/tools/build-internal-msix-bundle.ps1 `
             -PackagePath (
@@ -293,6 +292,7 @@ jobs:
                 $PWD `
                 "Windows/packaging/App/Uninstall-EMKE-Translation-Internal.ps1"
             ) `
+            -AllowedOutputRoot $allowedOutputRoot `
             -OutputDirectory $bundleRoot `
             -SourceCommit "${{ github.sha }}" `
             -WorkflowRunId "${{ github.run_id }}" `
@@ -311,3 +311,119 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  install-25h2:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_25h2_install_validation }}
+    needs: sign-package-bundle
+    runs-on: [self-hosted, Windows, X64, emke-win11-25h2]
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download exact signed Internal bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          path: Windows/artifacts/internal-bundle
+
+      - name: Verify Windows 11 25H2 runner
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
+            throw "The 25H2 install runner must be x64."
+          }
+          $windowsBuild = [Environment]::OSVersion.Version.Build
+          if ($windowsBuild -lt 26200) {
+            throw "The install runner must be Windows build 26200 or newer."
+          }
+
+      - name: Install, query, smoke, and remove exact Internal MSIX
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $artifactRoot = Join-Path $PWD "Windows/artifacts/internal-bundle"
+          $thumbprint =
+            "${{ needs.sign-package-bundle.outputs.certificate_thumbprint }}".
+              ToUpperInvariant()
+          if ($thumbprint -notmatch "^[0-9A-F]{40}$") {
+            throw "The signing job did not emit an exact certificate thumbprint."
+          }
+          $existingCertificate = Test-Path -LiteralPath (
+            "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+          )
+          if ($existingCertificate) {
+            throw "The ephemeral 25H2 runner already trusts the Internal certificate."
+          }
+          $cleanupMarker = Join-Path `
+            $env:RUNNER_TEMP `
+            "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
+          [IO.File]::WriteAllText(
+            $cleanupMarker,
+            $thumbprint,
+            [Text.UTF8Encoding]::new($false)
+          )
+          pwsh -NoProfile -File Windows/tools/test-hosted-msix-install.ps1 `
+            -PackagePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            ) `
+            -CertificatePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            ) `
+            -ExpectedCertificateThumbprint $thumbprint
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows 11 25H2 Internal MSIX install validation failed."
+          }
+
+      - name: Ensure exact certificate cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $cleanupMarker = Join-Path `
+            $env:RUNNER_TEMP `
+            "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
+          if (Test-Path -LiteralPath $cleanupMarker -PathType Leaf) {
+            $thumbprint = (
+              [IO.File]::ReadAllText($cleanupMarker)
+            ).Trim().ToUpperInvariant()
+            try {
+              if ($thumbprint -notmatch "^[0-9A-F]{40}$") {
+                throw "The cleanup marker has an invalid thumbprint."
+              }
+              $store =
+                [Security.Cryptography.X509Certificates.X509Store]::new(
+                  [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+                  [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+                )
+              try {
+                $store.Open(
+                  [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+                )
+                $matches = @(
+                  $store.Certificates |
+                    Where-Object {
+                      $_.Thumbprint.ToUpperInvariant() -ceq $thumbprint
+                    }
+                )
+                foreach ($match in $matches) {
+                  $store.Remove($match)
+                }
+              } finally {
+                $store.Close()
+                $store.Dispose()
+              }
+            } finally {
+              Remove-Item -LiteralPath $cleanupMarker -Force
+            }
+          }
