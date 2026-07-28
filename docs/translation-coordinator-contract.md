@@ -61,6 +61,8 @@
 
 每个失败会话按 `250 ms → 500 ms → 1 s → 2 s → 5 s` 重连，共五次有界尝试。入站话语结束使用独立的 finish token、入站 epoch 和 `scheduled/draining` 阶段三重校验；新语音、晚到尾部、重连和停止会取消或替换旧 token，过期 finish 不能结束新话语或播放旧译音。应用停止时取消定时器与重连，关闭每条现存及握手中的会话，停止音频引擎并清空内存状态。
 
+入站渲染还维护独立于通道 epoch 和 finish token 的 renderer generation。每批渲染命令捕获 generation 与 `utteranceID`，并在消费命令前、每次音频 enqueue 前后重新校验：入站 epoch 仍有效、generation 未变、当前话语 ID 相同、未进入 direct fail-open、且手动原声旁路未启用。新话语、audition reset、手动入站旁路、direct fallback 和运行时重置都会推进 generation；因此旧命令在任意 `await` 返回后都不能继续写真实耳机。三类所有权的分工是：epoch 隔离连接代际，renderer generation/话语 ID 隔离播放代际，finish token/phase 只决定当前话语哪一次尾部结束仍有效。
+
 ## 配置与隐私
 
 | 数据 | 存储位置 |
@@ -92,7 +94,7 @@ API Key 输入框是临时草稿。开始翻译或测试连接时，非空草稿
 
 未提供真实语音样本时，前四项和关闭可以通过协议握手验证；源字幕和输出音频标记为 `requiresInteractiveAudio`。此状态显示为“协议连接通过，需要音频测试”，不等同于完全兼容。鉴权、模型、目标语言、端点、源字幕、音频输出和关闭失败保持为不同错误类别，不能统一误报为 API Key 无效。
 
-仓库中的 live Provider probe 只有在 `EMKE_RUN_LIVE_TRANSLATION_TESTS=1` 时启用，并在启用后才读取明确提供的 API、模型和本地有声 PCM 样本路径。默认测试运行跳过该用例，不读取 Provider 输入、不尝试网络。live probe 要求样本长度是 1,920 bytes 的整数倍，并通过 `speechChunkByteCount: 1_920` 真正连续 append 40 ms 有声块；配置的 chunk 大小必须是正偶数。探测只断言握手后的有声源字幕、译音输出和错误分类，不打印或持久化样本、字幕、凭据或身份信息。
+仓库中的 live Provider probe 只有在 `EMKE_RUN_LIVE_TRANSLATION_TESTS=1` 时启用；默认测试运行在进入测试体前跳过该用例，不读取 Key 或样本，也不尝试网络。启用后先读取本地有声 PCM 样本，并用终止式校验拒绝空样本以及任何不是 1,920 bytes 整数倍的长度（包括奇数字节和短尾）；只有样本通过后才读取 Key、Base URL 和模型并构造网络 probe。live test 使用覆盖整个测试体的 1 分钟上限，因此 connect、握手、append、响应收集和 drain 都在同一边界内。它通过 `speechChunkByteCount: 1_920` 真正连续 append 40 ms 有声块，只断言 live 握手、有声源字幕和译音输出。鉴权、模型、目标语言、端点、缺失字幕、缺失音频和关闭错误的分类由无网络的 deterministic probe tests 证明。两类测试都不打印或持久化样本、字幕、凭据或身份信息。
 
 40 ms 的本地分帧与 fake-session 测试通过，只证明 chunk 循环及本地 PCM 边界。只有对目标 Provider/Base URL 执行真实有声 probe 并通过后，未来发布才可评估把 `.production` 从 200 ms 切为 40 ms；当前生产默认仍为 200 ms。
 
