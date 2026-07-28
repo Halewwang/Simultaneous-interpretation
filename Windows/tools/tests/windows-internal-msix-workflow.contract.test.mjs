@@ -256,6 +256,20 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   assert.match(signingStep[0], /::FromBase64String/);
   assert.match(signingStep[0], /finally\s*\{/);
   assert.match(signingStep[0], /Remove-Item[^]*\$pfxPath/);
+  assert.doesNotMatch(
+    signingStep[0],
+    /GetCertHashString|Thumbprint\.ToUpperInvariant|certificate_thumbprint\s*=/,
+    'workflow must consume package-msix verified-PFX output without CER-derived overwrite',
+  );
+
+  const bundleStep = signingJob.match(
+    /- name:\s*Build exact handoff bundle[^]*?(?=\n\s{6}- name:)/,
+  );
+  assert.ok(bundleStep, 'workflow must have one exact bundle step');
+  assert.match(
+    bundleStep[0],
+    /-CertificateThumbprint\s+`\s*\n\s*"\$\{\{\s*steps\.package\.outputs\.certificate_thumbprint\s*\}\}"/,
+  );
 
   const installJob = workflowJob(workflow, 'install-25h2');
   assert.match(
@@ -268,6 +282,10 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   );
   assert.match(installJob, /actions\/download-artifact@v4/);
   assert.match(installJob, /test-hosted-msix-install\.ps1/);
+  assert.match(
+    installJob,
+    /needs\.sign-package-bundle\.outputs\.certificate_thumbprint/,
+  );
   assert.match(installJob, /if:\s*always\(\)/);
 
   const bundleStepIndex = signingJob.indexOf('- name: Build exact handoff bundle');

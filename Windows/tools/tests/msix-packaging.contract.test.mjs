@@ -24,6 +24,13 @@ const manifestPath = path.join(
 );
 const packageScriptPath = path.join(windowsRoot, 'tools', 'package-msix.ps1');
 const verifyScriptPath = path.join(windowsRoot, 'tools', 'verify-msix.ps1');
+const nativeCmakePath = path.join(windowsRoot, 'native', 'CMakeLists.txt');
+const nativeWorkflowPath = path.join(
+  repositoryRoot,
+  '.github',
+  'workflows',
+  'windows-audio.yml',
+);
 const approvedIconPath = path.join(
   repositoryRoot,
   'Packaging',
@@ -369,6 +376,100 @@ ConvertTo-Json -InputObject $selected -Compress
   );
 }
 
+function runCleanupFailureProbe(scriptPath, markerPath) {
+  const command = `
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile(
+  $env:EMKE_CLEANUP_SCRIPT,
+  [ref]$tokens,
+  [ref]$errors
+)
+if ($errors.Count -ne 0) {
+  throw 'Cleanup script did not parse.'
+}
+$function = $ast.Find(
+  {
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -ceq 'Invoke-CompleteCleanup'
+  },
+  $true
+)
+if ($null -eq $function) {
+  throw 'Complete cleanup function is unavailable.'
+}
+Invoke-Expression $function.Extent.Text
+Invoke-CompleteCleanup -Actions @(
+  [pscustomobject]@{
+    Name = 'first'
+    Action = {
+      Add-Content -LiteralPath $env:EMKE_CLEANUP_MARKER -Value 'first'
+      throw 'injected first cleanup failure'
+    }
+  },
+  [pscustomobject]@{
+    Name = 'second'
+    Action = {
+      Add-Content -LiteralPath $env:EMKE_CLEANUP_MARKER -Value 'second'
+    }
+  }
+)
+`;
+  return spawnSync(
+    'pwsh',
+    ['-NoLogo', '-NoProfile', '-Command', command],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        EMKE_CLEANUP_SCRIPT: scriptPath,
+        EMKE_CLEANUP_MARKER: markerPath,
+      },
+    },
+  );
+}
+
+function runEmptyCleanupProbe(scriptPath) {
+  const command = `
+$ErrorActionPreference = 'Stop'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile(
+  $env:EMKE_CLEANUP_SCRIPT,
+  [ref]$tokens,
+  [ref]$errors
+)
+if ($errors.Count -ne 0) {
+  throw 'Cleanup script did not parse.'
+}
+$function = $ast.Find(
+  {
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -ceq 'Invoke-CompleteCleanup'
+  },
+  $true
+)
+if ($null -eq $function) {
+  throw 'Complete cleanup function is unavailable.'
+}
+Invoke-Expression $function.Extent.Text
+Invoke-CompleteCleanup -Actions @()
+`;
+  return spawnSync(
+    'pwsh',
+    ['-NoLogo', '-NoProfile', '-Command', command],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        EMKE_CLEANUP_SCRIPT: scriptPath,
+      },
+    },
+  );
+}
+
 test('Internal manifest resolves to the exact classic x64 package contract', async () => {
   const command = `
 [xml]$manifest = Get-Content -LiteralPath $env:EMKE_MANIFEST -Raw
@@ -495,6 +596,27 @@ test('production package mode requires external PFX and password-environment inp
   const output = `${result.stdout}\n${result.stderr}`;
   assert.match(output, /PfxPath/);
   assert.match(output, /PasswordEnvironmentVariable/);
+});
+
+test('packaging consumes the exact CMake and native CI x64 Release artifact', async () => {
+  const [cmake, nativeWorkflow, packageScript] = await Promise.all([
+    readFile(nativeCmakePath, 'utf8'),
+    readFile(nativeWorkflowPath, 'utf8'),
+    readFile(packageScriptPath, 'utf8'),
+  ]);
+  const exactRelativePath =
+    'Windows/artifacts/native/x64/Release/EMKE.NativeAudio.dll';
+
+  assert.match(
+    cmake,
+    /EMKE_NATIVE_ARTIFACT_DIRECTORY[^]*artifacts\/native\/x64\/Release/,
+  );
+  assert.ok(nativeWorkflow.includes(exactRelativePath));
+  assert.ok(packageScript.includes(exactRelativePath));
+  assert.doesNotMatch(
+    packageScript,
+    /out\/native\/x64-release\/EMKE\.NativeAudio\/Release/,
+  );
 });
 
 test('verified signer output writes package-bound provenance and the pinned CI thumbprint', async () => {
@@ -666,6 +788,50 @@ test('certificate cleanup selects only unique certificates added by this packagi
     JSON.parse(result.stdout.trim()),
     ['BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'],
   );
+});
+
+test('package and verification cleanup continue after an earlier removal fails', async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), 'emke-msix-cleanup-failure-'),
+  );
+  try {
+    for (const scriptPath of [packageScriptPath, verifyScriptPath]) {
+      const markerPath = path.join(
+        fixtureRoot,
+        `${path.basename(scriptPath)}.marker`,
+      );
+      await writeFile(markerPath, '');
+      const result = runCleanupFailureProbe(scriptPath, markerPath);
+      assert.notEqual(
+        result.status,
+        0,
+        `${path.basename(scriptPath)} must report aggregate cleanup failure`,
+      );
+      assert.deepEqual(
+        (await readFile(markerPath, 'utf8')).trim().split(/\r?\n/),
+        ['first', 'second'],
+        `${path.basename(scriptPath)} stopped before later cleanup`,
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /first/,
+        `${path.basename(scriptPath)} lost cleanup failure identity`,
+      );
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('package and verification cleanup accept an empty early-failure action set', async () => {
+  for (const scriptPath of [packageScriptPath, verifyScriptPath]) {
+    const result = runEmptyCleanupProbe(scriptPath);
+    assert.equal(
+      result.status,
+      0,
+      `${path.basename(scriptPath)} rejected empty cleanup:\n${result.stderr}`,
+    );
+  }
 });
 
 test('staging validation accepts only the application runtime and package resources', async () => {

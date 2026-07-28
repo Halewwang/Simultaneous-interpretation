@@ -230,22 +230,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Internal MSIX verification failed."
             }
-
-            $publicCertificate =
-              [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-                [IO.File]::ReadAllBytes($certificatePath)
-              )
-            try {
-              $thumbprint =
-                $publicCertificate.Thumbprint.ToUpperInvariant()
-              "certificate_thumbprint=$thumbprint" |
-                Out-File `
-                  -FilePath $env:GITHUB_OUTPUT `
-                  -Encoding utf8 `
-                  -Append
-            } finally {
-              $publicCertificate.Dispose()
-            }
           } finally {
             $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
             $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null

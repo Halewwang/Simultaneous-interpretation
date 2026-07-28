@@ -171,6 +171,43 @@ function Select-NewCertificateThumbprints {
     return @($selected | Sort-Object)
 }
 
+function Invoke-CompleteCleanup {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Actions
+    )
+
+    $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+    foreach ($entry in $Actions) {
+        $name = [string]$entry.Name
+        $action = $entry.Action
+        try {
+            if (
+                [string]::IsNullOrWhiteSpace($name) -or
+                $action -isnot [scriptblock]
+            ) {
+                throw "Cleanup action definition is invalid."
+            }
+            & $action
+        } catch {
+            $cleanupErrors.Add(
+                [InvalidOperationException]::new(
+                    "Cleanup action '$name' failed.",
+                    $_.Exception
+                )
+            )
+        }
+    }
+
+    if ($cleanupErrors.Count -ne 0) {
+        throw [AggregateException]::new(
+            "One or more MSIX cleanup actions failed.",
+            $cleanupErrors
+        )
+    }
+}
+
 function Assert-StagingTree {
     param(
         [Parameter(Mandatory)]
@@ -594,8 +631,8 @@ try {
     Copy-VerifiedTree -Source $publishPath -Destination $stagingPath
 
     $nativePath = Join-Path (
-        $windowsRoot
-    ) "out/native/x64-release/EMKE.NativeAudio/Release/EMKE.NativeAudio.dll"
+        $repositoryRoot
+    ) "Windows/artifacts/native/x64/Release/EMKE.NativeAudio.dll"
     if (-not (Test-Path -LiteralPath $nativePath -PathType Leaf)) {
         throw "Release EMKE.NativeAudio.dll is unavailable."
     }
@@ -727,25 +764,62 @@ try {
 } finally {
     $password = $null
     $securePassword = $null
+    $cleanupActions = [Collections.Generic.List[object]]::new()
     foreach ($temporaryThumbprint in $temporaryStoreThumbprints) {
         $certificateStorePath =
             "Cert:\CurrentUser\My\$temporaryThumbprint"
-        if (Test-Path -LiteralPath $certificateStorePath) {
-            Remove-Item -LiteralPath $certificateStorePath -Force
-        }
+        $cleanupCertificatePath = $certificateStorePath
+        $cleanupActions.Add(
+            [pscustomobject]@{
+                Name = "CurrentUserMy:$temporaryThumbprint"
+                Action = {
+                    if (Test-Path -LiteralPath $cleanupCertificatePath) {
+                        Remove-Item `
+                            -LiteralPath $cleanupCertificatePath `
+                            -Force
+                    }
+                }.GetNewClosure()
+            }
+        )
     }
-    if (
-        $null -ne $stagingPath -and
-        (Test-Path -LiteralPath $stagingPath -PathType Container)
-    ) {
-        Remove-Item -LiteralPath $stagingPath -Recurse -Force
+    if ($null -ne $stagingPath) {
+        $cleanupStagingPath = $stagingPath
+        $cleanupActions.Add(
+            [pscustomobject]@{
+                Name = "staging-directory"
+                Action = {
+                    if (
+                        Test-Path `
+                            -LiteralPath $cleanupStagingPath `
+                            -PathType Container
+                    ) {
+                        Remove-Item `
+                            -LiteralPath $cleanupStagingPath `
+                            -Recurse `
+                            -Force
+                    }
+                }.GetNewClosure()
+            }
+        )
     }
-    if (
-        $deletePfxOnExit -and
-        $null -ne $resolvedPfxPath -and
-        (Test-Path -LiteralPath $resolvedPfxPath -PathType Leaf)
-    ) {
-        Remove-Item -LiteralPath $resolvedPfxPath -Force
+    if ($deletePfxOnExit -and $null -ne $resolvedPfxPath) {
+        $cleanupPfxPath = $resolvedPfxPath
+        $cleanupActions.Add(
+            [pscustomobject]@{
+                Name = "ephemeral-pfx"
+                Action = {
+                    if (
+                        Test-Path `
+                            -LiteralPath $cleanupPfxPath `
+                            -PathType Leaf
+                    ) {
+                        Remove-Item `
+                            -LiteralPath $cleanupPfxPath `
+                            -Force
+                    }
+                }.GetNewClosure()
+            }
+        )
     }
     if (-not $packageSucceeded) {
         foreach ($partialArtifact in @(
@@ -753,9 +827,26 @@ try {
             $certificatePath,
             $provenancePath
         )) {
-            if (Test-Path -LiteralPath $partialArtifact -PathType Leaf) {
-                Remove-Item -LiteralPath $partialArtifact -Force
-            }
+            $cleanupPartialArtifact = $partialArtifact
+            $cleanupActions.Add(
+                [pscustomobject]@{
+                    Name = "partial-artifact:$(
+                        [IO.Path]::GetFileName($partialArtifact)
+                    )"
+                    Action = {
+                        if (
+                            Test-Path `
+                                -LiteralPath $cleanupPartialArtifact `
+                                -PathType Leaf
+                        ) {
+                            Remove-Item `
+                                -LiteralPath $cleanupPartialArtifact `
+                                -Force
+                        }
+                    }.GetNewClosure()
+                }
+            )
         }
     }
+    Invoke-CompleteCleanup -Actions @($cleanupActions)
 }

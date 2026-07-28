@@ -28,6 +28,43 @@ $script:ForbiddenNamePattern =
     "(?i)(?:tests?|password|credentials?|settings?|recordings?|transcripts?|" +
     "raw[-_. ]?endpoints?|endpoint[-_. ]?fixtures?)"
 
+function Invoke-CompleteCleanup {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Actions
+    )
+
+    $cleanupErrors = [Collections.Generic.List[Exception]]::new()
+    foreach ($entry in $Actions) {
+        $name = [string]$entry.Name
+        $action = $entry.Action
+        try {
+            if (
+                [string]::IsNullOrWhiteSpace($name) -or
+                $action -isnot [scriptblock]
+            ) {
+                throw "Cleanup action definition is invalid."
+            }
+            & $action
+        } catch {
+            $cleanupErrors.Add(
+                [InvalidOperationException]::new(
+                    "Cleanup action '$name' failed.",
+                    $_.Exception
+                )
+            )
+        }
+    }
+
+    if ($cleanupErrors.Count -ne 0) {
+        throw [AggregateException]::new(
+            "One or more MSIX cleanup actions failed.",
+            $cleanupErrors
+        )
+    }
+}
+
 function Assert-NoReparsePathChain {
     param(
         [Parameter(Mandatory)]
@@ -657,22 +694,54 @@ try {
             ConvertTo-Json -Depth 5
     )
 } finally {
-    if (
-        Test-Path -LiteralPath $extractRoot -PathType Container
-    ) {
-        Remove-Item -LiteralPath $extractRoot -Recurse -Force
-    }
+    $cleanupActions = [Collections.Generic.List[object]]::new()
+    $cleanupExtractRoot = $extractRoot
+    $cleanupActions.Add(
+        [pscustomobject]@{
+            Name = "unpack-directory"
+            Action = {
+                if (
+                    Test-Path `
+                        -LiteralPath $cleanupExtractRoot `
+                        -PathType Container
+                ) {
+                    Remove-Item `
+                        -LiteralPath $cleanupExtractRoot `
+                        -Recurse `
+                        -Force
+                }
+            }.GetNewClosure()
+        }
+    )
     if (
         $addedTrust -and
         -not [string]::IsNullOrEmpty($trustedThumbprint)
     ) {
-        $trustedPath =
+        $cleanupTrustedPath =
             "Cert:\CurrentUser\TrustedPeople\$trustedThumbprint"
-        if (Test-Path -LiteralPath $trustedPath) {
-            Remove-Item -LiteralPath $trustedPath -Force
-        }
+        $cleanupActions.Add(
+            [pscustomobject]@{
+                Name = "CurrentUserTrustedPeople:$trustedThumbprint"
+                Action = {
+                    if (Test-Path -LiteralPath $cleanupTrustedPath) {
+                        Remove-Item `
+                            -LiteralPath $cleanupTrustedPath `
+                            -Force
+                    }
+                }.GetNewClosure()
+            }
+        )
     }
     if ($null -ne $publicCertificate) {
-        $publicCertificate.Dispose()
+        $cleanupPublicCertificate = $publicCertificate
+        $cleanupActions.Add(
+            [pscustomobject]@{
+                Name = "public-certificate"
+                Action = {
+                    $cleanupPublicCertificate.Dispose()
+                }.GetNewClosure()
+            }
+        )
     }
+    Invoke-CompleteCleanup -Actions @($cleanupActions)
 }

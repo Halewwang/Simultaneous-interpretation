@@ -105,6 +105,13 @@ Focused GREEN after the fixes:
 tests 7; pass 7; fail 0
 ```
 
+The Task 6 integration review also first observed RED because the signing step
+re-read the exported CER and overwrote `certificate_thumbprint`. The workflow
+now treats `steps.package.outputs.certificate_thumbprint` as the sole source
+for both bundle construction and the hosted-install job. The contract forbids
+the removed CER thumbprint recomputation and verifies both downstream
+consumers.
+
 ## Verification
 
 Passed:
