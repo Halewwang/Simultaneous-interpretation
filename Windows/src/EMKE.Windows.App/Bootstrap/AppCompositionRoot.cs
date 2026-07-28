@@ -1,5 +1,8 @@
 using EMKE.Application;
 using EMKE.Core;
+using EMKE.Windows.App.Commands;
+using EMKE.Windows.App.Localization;
+using EMKE.Windows.App.Presentation;
 using EMKE.Windows.App.State;
 
 namespace EMKE.Windows.App.Bootstrap;
@@ -62,27 +65,27 @@ internal interface IApplicationShutdown
 
 internal interface IAppAdapterFactory
 {
-    ValueTask<AppAdapterBundle> CreateAsync(
+    ValueTask<AppCoreAdapterBundle> CreateCoreAsync(
+        CancellationToken cancellationToken);
+
+    ValueTask<AppUiAdapterBundle> CreateUiAsync(
+        AppUiCompositionContext context,
         CancellationToken cancellationToken);
 }
 
-internal sealed class AppAdapterBundle : IAsyncDisposable
+internal sealed class AppCoreAdapterBundle : IAsyncDisposable
 {
     private readonly IAsyncDisposable _ownedAdapters;
 
-    public AppAdapterBundle(
+    public AppCoreAdapterBundle(
         TranslationRuntimeDependencies runtimeDependencies,
         IAppDiagnosticsLifetime diagnostics,
-        IAppTrayLifetime tray,
-        IAppViewLifetime views,
         IAsyncDisposable ownedAdapters)
     {
         RuntimeDependencies = runtimeDependencies
             ?? throw new ArgumentNullException(nameof(runtimeDependencies));
         Diagnostics =
             diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
-        Tray = tray ?? throw new ArgumentNullException(nameof(tray));
-        Views = views ?? throw new ArgumentNullException(nameof(views));
         _ownedAdapters = ownedAdapters
             ?? throw new ArgumentNullException(nameof(ownedAdapters));
     }
@@ -90,6 +93,27 @@ internal sealed class AppAdapterBundle : IAsyncDisposable
     public TranslationRuntimeDependencies RuntimeDependencies { get; }
 
     public IAppDiagnosticsLifetime Diagnostics { get; }
+
+    public ValueTask DisposeAsync()
+    {
+        return _ownedAdapters.DisposeAsync();
+    }
+}
+
+internal sealed class AppUiAdapterBundle : IAsyncDisposable
+{
+    private readonly IAsyncDisposable _ownedAdapters;
+
+    public AppUiAdapterBundle(
+        IAppTrayLifetime tray,
+        IAppViewLifetime views,
+        IAsyncDisposable ownedAdapters)
+    {
+        Tray = tray ?? throw new ArgumentNullException(nameof(tray));
+        Views = views ?? throw new ArgumentNullException(nameof(views));
+        _ownedAdapters = ownedAdapters
+            ?? throw new ArgumentNullException(nameof(ownedAdapters));
+    }
 
     public IAppTrayLifetime Tray { get; }
 
@@ -99,6 +123,33 @@ internal sealed class AppAdapterBundle : IAsyncDisposable
     {
         return _ownedAdapters.DisposeAsync();
     }
+}
+
+internal sealed record AppUiCompositionContext
+{
+    public AppUiCompositionContext(
+        IRuntimeCommandSink runtimeCommands,
+        AppSnapshotStore snapshots,
+        PresentationCoordinator presentation,
+        LocalizationService localization)
+    {
+        RuntimeCommands = runtimeCommands
+            ?? throw new ArgumentNullException(nameof(runtimeCommands));
+        Snapshots =
+            snapshots ?? throw new ArgumentNullException(nameof(snapshots));
+        Presentation = presentation
+            ?? throw new ArgumentNullException(nameof(presentation));
+        Localization = localization
+            ?? throw new ArgumentNullException(nameof(localization));
+    }
+
+    public IRuntimeCommandSink RuntimeCommands { get; }
+
+    public AppSnapshotStore Snapshots { get; }
+
+    public PresentationCoordinator Presentation { get; }
+
+    public LocalizationService Localization { get; }
 }
 
 internal sealed class UiCommandGate
@@ -163,6 +214,7 @@ internal sealed class AppCompositionRoot
     private readonly IApplicationShutdown _application;
     private readonly IAppViewLifetime? _views;
     private readonly TimeSpan _runtimeStopDeadline;
+    private readonly bool _ownsProcessRuntimeClaim;
     private Task<AppExitReport>? _exitTask;
 
     internal AppCompositionRoot(
@@ -175,7 +227,8 @@ internal sealed class AppCompositionRoot
         IAsyncDisposable coordinator,
         IApplicationShutdown application,
         TimeSpan runtimeStopDeadline,
-        IAppViewLifetime? views = null)
+        IAppViewLifetime? views = null,
+        bool ownsProcessRuntimeClaim = false)
     {
         _commandGate =
             commandGate ?? throw new ArgumentNullException(nameof(commandGate));
@@ -192,6 +245,7 @@ internal sealed class AppCompositionRoot
         _application =
             application ?? throw new ArgumentNullException(nameof(application));
         _views = views;
+        _ownsProcessRuntimeClaim = ownsProcessRuntimeClaim;
         if (runtimeStopDeadline <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
@@ -224,41 +278,84 @@ internal sealed class AppCompositionRoot
                 "This process already owns an application runtime.");
         }
 
-        AppAdapterBundle? adapters = null;
+        AppCoreAdapterBundle? coreAdapters = null;
+        AppUiAdapterBundle? uiAdapters = null;
         TranslationRuntimeLifetime? runtime = null;
         SnapshotLifetime? snapshots = null;
+        AppSnapshotStore? snapshotStore = null;
+        IDisposable? runtimeSubscription = null;
+        PresentationCoordinator? presentation = null;
         try
         {
-            adapters = await adapterFactory.CreateAsync(cancellationToken)
+            coreAdapters = await adapterFactory
+                .CreateCoreAsync(cancellationToken)
                 .ConfigureAwait(false);
             runtime = new TranslationRuntimeLifetime(
-                new TranslationRuntime(adapters.RuntimeDependencies));
-            AppSnapshotStore snapshotStore = new(
+                new TranslationRuntime(coreAdapters.RuntimeDependencies));
+            snapshotStore = new AppSnapshotStore(
                 new CallbackAppDispatcher(postToUi));
+            runtimeSubscription = runtime.Snapshots.Subscribe(snapshotStore);
+            LocalizationService localization = new();
+            presentation = new PresentationCoordinator(
+                snapshotStore,
+                localization,
+                new AppPresentationMapper(localization));
             snapshots = new SnapshotLifetime(
-                runtime.Snapshots.Subscribe(snapshotStore),
-                snapshotStore);
-            await adapters.Tray.StartAsync(cancellationToken)
+                runtimeSubscription,
+                snapshotStore,
+                presentation);
+            AppUiCompositionContext uiContext = new(
+                runtime,
+                snapshots.Store,
+                snapshots.Presentation,
+                localization);
+            uiAdapters = await adapterFactory
+                .CreateUiAsync(uiContext, cancellationToken)
+                .ConfigureAwait(false);
+            await uiAdapters.Tray.StartAsync(cancellationToken)
                 .ConfigureAwait(false);
             return new AppCompositionRoot(
                 new UiCommandGate(),
-                adapters.Diagnostics,
+                coreAdapters.Diagnostics,
                 runtime,
                 snapshots,
-                adapters,
-                adapters.Tray,
+                new AdapterLifetime(uiAdapters, coreAdapters),
+                uiAdapters.Tray,
                 coordinator,
                 new CallbackApplicationShutdown(shutdownApplication),
                 runtimeStopDeadline,
-                adapters.Views);
+                uiAdapters.Views,
+                ownsProcessRuntimeClaim: true);
         }
         catch
         {
-            snapshots?.Dispose();
-            runtime?.Dispose();
-            if (adapters is not null)
+            if (uiAdapters is not null)
             {
-                await adapters.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await uiAdapters.Tray.RemoveAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+
+                await uiAdapters.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (snapshots is not null)
+            {
+                snapshots.Dispose();
+            }
+            else
+            {
+                presentation?.Dispose();
+                runtimeSubscription?.Dispose();
+                snapshotStore?.Dispose();
+            }
+            runtime?.Dispose();
+            if (coreAdapters is not null)
+            {
+                await coreAdapters.DisposeAsync().ConfigureAwait(false);
             }
 
             Interlocked.Exchange(ref s_processRuntimeClaimed, 0);
@@ -371,6 +468,10 @@ internal sealed class AppCompositionRoot
         Run(
             AppExitErrorKind.ApplicationShutdown,
             _application.Shutdown);
+        if (_ownsProcessRuntimeClaim)
+        {
+            Interlocked.Exchange(ref s_processRuntimeClaimed, 0);
+        }
 
         return new AppExitReport(errors.AsReadOnly());
 
@@ -402,7 +503,9 @@ internal sealed class AppCompositionRoot
         }
     }
 
-    private sealed class TranslationRuntimeLifetime : IAppRuntimeLifetime
+    private sealed class TranslationRuntimeLifetime :
+        IAppRuntimeLifetime,
+        IRuntimeCommandSink
     {
         private readonly TranslationRuntime _runtime;
 
@@ -413,6 +516,13 @@ internal sealed class AppCompositionRoot
         }
 
         public IObservable<AppSnapshot> Snapshots => _runtime.Snapshots;
+
+        public Task<RuntimeError?> SubmitAsync(
+            RuntimeCommand command,
+            CancellationToken cancellationToken)
+        {
+            return _runtime.SubmitAsync(command, cancellationToken);
+        }
 
         public async Task<RuntimeStopResult> StopAsync(
             CancellationToken cancellationToken)
@@ -434,20 +544,63 @@ internal sealed class AppCompositionRoot
     {
         private IDisposable? _subscription;
         private AppSnapshotStore? _store;
+        private PresentationCoordinator? _presentation;
 
         public SnapshotLifetime(
             IDisposable subscription,
-            AppSnapshotStore store)
+            AppSnapshotStore store,
+            PresentationCoordinator presentation)
         {
             _subscription = subscription
                 ?? throw new ArgumentNullException(nameof(subscription));
             _store = store ?? throw new ArgumentNullException(nameof(store));
+            _presentation = presentation
+                ?? throw new ArgumentNullException(nameof(presentation));
         }
+
+        public AppSnapshotStore Store =>
+            _store
+            ?? throw new ObjectDisposedException(nameof(SnapshotLifetime));
+
+        public PresentationCoordinator Presentation =>
+            _presentation
+            ?? throw new ObjectDisposedException(nameof(SnapshotLifetime));
 
         public void Dispose()
         {
+            Interlocked.Exchange(ref _presentation, null)?.Dispose();
             Interlocked.Exchange(ref _subscription, null)?.Dispose();
             Interlocked.Exchange(ref _store, null)?.Dispose();
+        }
+    }
+
+    private sealed class AdapterLifetime : IAsyncDisposable
+    {
+        private AppUiAdapterBundle? _ui;
+        private AppCoreAdapterBundle? _core;
+
+        public AdapterLifetime(
+            AppUiAdapterBundle ui,
+            AppCoreAdapterBundle core)
+        {
+            _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+            _core = core ?? throw new ArgumentNullException(nameof(core));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            AppUiAdapterBundle? ui = Interlocked.Exchange(ref _ui, null);
+            AppCoreAdapterBundle? core =
+                Interlocked.Exchange(ref _core, null);
+            if (ui is not null)
+            {
+                await ui.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (core is not null)
+            {
+                await core.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 

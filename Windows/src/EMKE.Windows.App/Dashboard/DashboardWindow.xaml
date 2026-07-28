@@ -96,6 +96,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <DockPanel>
                         <TextBlock
@@ -116,12 +117,20 @@
                         Maximum="1"
                         Value="{Binding InboundLevel}" />
                     <CheckBox
-                        Grid.Row="3"
+                        Grid.Row="4"
                         Margin="0,6,0,0"
                         Command="{Binding InboundBypassCommand}"
                         Content="{Binding InboundBypassLabel}"
                         IsChecked="{Binding IsInboundBypassActive, Mode=OneWay}"
                         IsHitTestVisible="True" />
+                    <TextBlock
+                        Grid.Row="3"
+                        MaxHeight="34"
+                        Margin="0,4,0,0"
+                        Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                        Text="{Binding InboundSafetyMessage}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap" />
                 </Grid>
             </Border>
 
@@ -133,6 +142,7 @@
                 CornerRadius="6">
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -157,12 +167,20 @@
                         Maximum="1"
                         Value="{Binding OutboundLevel}" />
                     <CheckBox
-                        Grid.Row="3"
+                        Grid.Row="4"
                         Margin="0,6,0,0"
                         Command="{Binding OutboundBypassCommand}"
                         Content="{Binding OutboundBypassLabel}"
                         IsChecked="{Binding IsOutboundBypassActive, Mode=OneWay}"
                         IsHitTestVisible="True" />
+                    <TextBlock
+                        Grid.Row="3"
+                        MaxHeight="34"
+                        Margin="0,4,0,0"
+                        Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                        Text="{Binding OutboundSafetyMessage}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap" />
                 </Grid>
             </Border>
         </Grid>

@@ -5,7 +5,100 @@ using System.Runtime.InteropServices;
 
 namespace EMKE.Windows.App.Tray;
 
+internal interface IUiDispatcher
+{
+    ValueTask InvokeAsync(
+        Action action,
+        CancellationToken cancellationToken = default);
+}
+
+internal interface IShellNotifyIconNativeSession
+{
+    void Create(Func<TrayInteraction, ValueTask> interaction);
+
+    void Add(TrayMenuLabels labels);
+
+    void Update(TrayMenuLabels labels);
+
+    void Delete();
+
+    void Destroy();
+}
+
 internal sealed class ShellNotifyIconInterop : ITrayIconTransport
+{
+    private readonly IUiDispatcher _dispatcher;
+    private readonly IShellNotifyIconNativeSession _native;
+    private int _disposed;
+
+    public ShellNotifyIconInterop(IUiDispatcher dispatcher)
+        : this(dispatcher, new Win32ShellNotifyIconNativeSession())
+    {
+    }
+
+    internal ShellNotifyIconInterop(
+        IUiDispatcher dispatcher,
+        IShellNotifyIconNativeSession native)
+    {
+        _dispatcher =
+            dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _native = native ?? throw new ArgumentNullException(nameof(native));
+    }
+
+    public ValueTask StartAsync(
+        Func<TrayInteraction, ValueTask> interaction,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(interaction);
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
+        return _dispatcher.InvokeAsync(
+            () => _native.Create(interaction),
+            cancellationToken);
+    }
+
+    public ValueTask AddIconAsync(TrayMenuLabels labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
+        return _dispatcher.InvokeAsync(() => _native.Add(labels));
+    }
+
+    public ValueTask UpdateIconAsync(TrayMenuLabels labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        ObjectDisposedException.ThrowIf(
+            Volatile.Read(ref _disposed) != 0,
+            this);
+        return _dispatcher.InvokeAsync(() => _native.Update(labels));
+    }
+
+    public ValueTask DeleteIconAsync()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return _dispatcher.InvokeAsync(_native.Delete);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return _dispatcher.InvokeAsync(_native.Destroy);
+    }
+}
+
+internal sealed class Win32ShellNotifyIconNativeSession :
+    IShellNotifyIconNativeSession
 {
     private const uint NotifyIconAdd = 0x00000000;
     private const uint NotifyIconModify = 0x00000001;
@@ -44,17 +137,14 @@ internal sealed class ShellNotifyIconInterop : ITrayIconTransport
     private bool _iconAdded;
     private int _disposed;
 
-    public ShellNotifyIconInterop()
+    public Win32ShellNotifyIconNativeSession()
     {
         _windowProcedure = WindowProc;
     }
 
-    public ValueTask StartAsync(
-        Func<TrayInteraction, ValueTask> interaction,
-        CancellationToken cancellationToken)
+    public void Create(Func<TrayInteraction, ValueTask> interaction)
     {
         ArgumentNullException.ThrowIfNull(interaction);
-        cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(
             Volatile.Read(ref _disposed) != 0,
             this);
@@ -120,10 +210,9 @@ internal sealed class ShellNotifyIconInterop : ITrayIconTransport
             }
         }
 
-        return ValueTask.CompletedTask;
     }
 
-    public void AddIcon(TrayMenuLabels labels)
+    public void Add(TrayMenuLabels labels)
     {
         ArgumentNullException.ThrowIfNull(labels);
         lock (_sync)
@@ -147,7 +236,7 @@ internal sealed class ShellNotifyIconInterop : ITrayIconTransport
         }
     }
 
-    public void UpdateIcon(TrayMenuLabels labels)
+    public void Update(TrayMenuLabels labels)
     {
         ArgumentNullException.ThrowIfNull(labels);
         lock (_sync)
@@ -167,7 +256,7 @@ internal sealed class ShellNotifyIconInterop : ITrayIconTransport
         }
     }
 
-    public void DeleteIcon()
+    public void Delete()
     {
         lock (_sync)
         {
@@ -183,22 +272,20 @@ internal sealed class ShellNotifyIconInterop : ITrayIconTransport
         }
     }
 
-    public ValueTask DisposeAsync()
+    public void Destroy()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         lock (_sync)
         {
-            DeleteIcon();
+            Delete();
             DestroyWindowAndClass();
             _interaction = null;
             _labels = null;
         }
-
-        return ValueTask.CompletedTask;
     }
 
     private nint WindowProc(

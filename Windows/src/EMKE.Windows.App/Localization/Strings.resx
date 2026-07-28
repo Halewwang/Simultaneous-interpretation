@@ -37,6 +37,15 @@
   <data name="DashboardTitle" xml:space="preserve"><value>Translation Dashboard</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>Simplified Chinese</value></data>
+  <data name="PlaceholderClose" xml:space="preserve"><value>Close</value></data>
+  <data name="PlaceholderDiagnosticsBody" xml:space="preserve"><value>Audio diagnostics are not yet available in this Internal build.</value></data>
+  <data name="PlaceholderDiagnosticsTitle" xml:space="preserve"><value>Diagnostics unavailable</value></data>
+  <data name="PlaceholderOnboardingBody" xml:space="preserve"><value>The guided setup flow is not yet available in this Internal build.</value></data>
+  <data name="PlaceholderOnboardingTitle" xml:space="preserve"><value>Setup unavailable</value></data>
+  <data name="PlaceholderSettingsBody" xml:space="preserve"><value>Settings editing is not yet available in this Internal build. Translation will remain stopped.</value></data>
+  <data name="PlaceholderSettingsTitle" xml:space="preserve"><value>Settings unavailable</value></data>
+  <data name="PlaceholderUpdateBody" xml:space="preserve"><value>Update checking is not yet available in this Internal build.</value></data>
+  <data name="PlaceholderUpdateTitle" xml:space="preserve"><value>Updates unavailable</value></data>
   <data name="BypassBadge" xml:space="preserve"><value>Bypass on</value></data>
   <data name="ChannelBypassed" xml:space="preserve"><value>Bypassed</value></data>
   <data name="ChannelConnected" xml:space="preserve"><value>Connected</value></data>

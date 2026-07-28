@@ -28,11 +28,11 @@ internal interface ITrayIconTransport : IAsyncDisposable
         Func<TrayInteraction, ValueTask> interaction,
         CancellationToken cancellationToken);
 
-    void AddIcon(TrayMenuLabels labels);
+    ValueTask AddIconAsync(TrayMenuLabels labels);
 
-    void UpdateIcon(TrayMenuLabels labels);
+    ValueTask UpdateIconAsync(TrayMenuLabels labels);
 
-    void DeleteIcon();
+    ValueTask DeleteIconAsync();
 }
 
 internal interface ITrayActions
@@ -86,7 +86,7 @@ internal sealed class TrayHost : IAppTrayLifetime
         }
 
         _localization.LanguageChanged -= OnLanguageChanged;
-        _transport.DeleteIcon();
+        await _transport.DeleteIconAsync().ConfigureAwait(false);
         await _transport.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -100,7 +100,7 @@ internal sealed class TrayHost : IAppTrayLifetime
                 cancellationToken)
             .ConfigureAwait(false);
         _localization.LanguageChanged += OnLanguageChanged;
-        _transport.AddIcon(CurrentLabels());
+        await _transport.AddIconAsync(CurrentLabels()).ConfigureAwait(false);
     }
 
     private ValueTask HandleInteractionAsync(TrayInteraction interaction)
@@ -134,8 +134,7 @@ internal sealed class TrayHost : IAppTrayLifetime
 
     private ValueTask RecreateIconAsync()
     {
-        _transport.AddIcon(CurrentLabels());
-        return ValueTask.CompletedTask;
+        return _transport.AddIconAsync(CurrentLabels());
     }
 
     private void OnLanguageChanged(
@@ -144,9 +143,23 @@ internal sealed class TrayHost : IAppTrayLifetime
     {
         if (Volatile.Read(ref _removed) == 0)
         {
-            _transport.UpdateIcon(CurrentLabels());
+            _ = ObserveAsync(
+                _transport.UpdateIconAsync(CurrentLabels()));
         }
     }
+
+#pragma warning disable CA1031 // Resource language events cannot return a Task.
+    private static async Task ObserveAsync(ValueTask action)
+    {
+        try
+        {
+            await action.ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+        }
+    }
+#pragma warning restore CA1031
 
     private TrayMenuLabels CurrentLabels()
     {

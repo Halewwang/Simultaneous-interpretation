@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Xml.Linq;
 using EMKE.Core;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
@@ -173,6 +175,74 @@ public sealed class DashboardViewModelTests
             fixture.ViewModel.OutboundSafetyMessage);
     }
 
+    [TestMethod]
+    public void DashboardXamlBindsBothDirectionalSafetyMessages()
+    {
+        XDocument dashboard = XDocument.Load(DashboardXamlPath());
+        string[] bindings = dashboard
+            .Descendants()
+            .Attributes()
+            .Select(static attribute => attribute.Value)
+            .Where(static value =>
+                value.Contains(
+                    "SafetyMessage",
+                    StringComparison.Ordinal))
+            .ToArray();
+
+        CollectionAssert.Contains(
+            bindings,
+            "{Binding InboundSafetyMessage}");
+        CollectionAssert.Contains(
+            bindings,
+            "{Binding OutboundSafetyMessage}");
+    }
+
+    [TestMethod]
+    public void DirectionalSafetyMessagesRemapInEnglishAndSimplifiedChinese()
+    {
+        using DashboardFixture fixture = new();
+        fixture.Publish(
+            Snapshot(
+                RuntimeState.Degraded,
+                inboundState: ChannelState.Degraded,
+                outboundState: ChannelState.Degraded,
+                inboundRoute: InboundRoute.OriginalFailOpen,
+                outboundRoute: OutboundRoute.MutedFailClosed));
+
+        Assert.AreEqual(
+            "Original audio remains audible while inbound translation recovers.",
+            fixture.ViewModel.InboundSafetyMessage);
+        Assert.AreEqual(
+            "Your meeting microphone is muted while outbound translation recovers.",
+            fixture.ViewModel.OutboundSafetyMessage);
+
+        fixture.Localization.ChangeLanguage(AppInterfaceLanguage.ZhHans);
+
+        Assert.AreEqual(
+            "入站翻译恢复期间，仍会播放会议原声。",
+            fixture.ViewModel.InboundSafetyMessage);
+        Assert.AreEqual(
+            "出站翻译恢复期间，发送到会议的麦克风将保持静音。",
+            fixture.ViewModel.OutboundSafetyMessage);
+    }
+
+    private static string DashboardXamlPath(
+        [CallerFilePath] string sourceFile = "")
+    {
+        string testDirectory = Path.GetDirectoryName(sourceFile)
+            ?? throw new InvalidOperationException(
+                "The test source path is unavailable.");
+        return Path.GetFullPath(
+            Path.Combine(
+                testDirectory,
+                "..",
+                "..",
+                "src",
+                "EMKE.Windows.App",
+                "Dashboard",
+                "DashboardWindow.xaml"));
+    }
+
     private static AppSnapshot Snapshot(
         RuntimeState state,
         ChannelState inboundState = ChannelState.Inactive,
@@ -222,21 +292,23 @@ public sealed class DashboardViewModelTests
         public DashboardFixture(
             Func<RuntimeCommand, CancellationToken, Task>? onSubmit = null)
         {
-            LocalizationService localization = new(
+            Localization = new LocalizationService(
                 () => CultureInfo.GetCultureInfo("en-US"));
-            localization.ChangeLanguage(AppInterfaceLanguage.English);
+            Localization.ChangeLanguage(AppInterfaceLanguage.English);
             _store = new AppSnapshotStore(new ImmediateDispatcher());
             _coordinator = new PresentationCoordinator(
                 _store,
-                localization,
-                new AppPresentationMapper(localization));
+                Localization,
+                new AppPresentationMapper(Localization));
             Sink = new RecordingRuntimeCommandSink(onSubmit);
             ViewModel = new DashboardViewModel(
                 _coordinator,
-                localization,
+                Localization,
                 Sink,
                 new NoOpSurfaceActions());
         }
+
+        public LocalizationService Localization { get; }
 
         public RecordingRuntimeCommandSink Sink { get; }
 

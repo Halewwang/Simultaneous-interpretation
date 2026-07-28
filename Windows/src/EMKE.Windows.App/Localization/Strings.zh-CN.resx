@@ -37,6 +37,15 @@
   <data name="DashboardTitle" xml:space="preserve"><value>同传控制台</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>英语</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>简体中文</value></data>
+  <data name="PlaceholderClose" xml:space="preserve"><value>关闭</value></data>
+  <data name="PlaceholderDiagnosticsBody" xml:space="preserve"><value>当前内部版本暂未开放音频诊断。</value></data>
+  <data name="PlaceholderDiagnosticsTitle" xml:space="preserve"><value>诊断暂不可用</value></data>
+  <data name="PlaceholderOnboardingBody" xml:space="preserve"><value>当前内部版本暂未开放引导设置流程。</value></data>
+  <data name="PlaceholderOnboardingTitle" xml:space="preserve"><value>设置向导暂不可用</value></data>
+  <data name="PlaceholderSettingsBody" xml:space="preserve"><value>当前内部版本暂未开放设置编辑，翻译将保持停止。</value></data>
+  <data name="PlaceholderSettingsTitle" xml:space="preserve"><value>设置暂不可用</value></data>
+  <data name="PlaceholderUpdateBody" xml:space="preserve"><value>当前内部版本暂未开放更新检查。</value></data>
+  <data name="PlaceholderUpdateTitle" xml:space="preserve"><value>更新暂不可用</value></data>
   <data name="BypassBadge" xml:space="preserve"><value>旁路已开启</value></data>
   <data name="ChannelBypassed" xml:space="preserve"><value>已旁路</value></data>
   <data name="ChannelConnected" xml:space="preserve"><value>已连接</value></data>

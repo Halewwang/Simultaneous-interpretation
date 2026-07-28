@@ -13,11 +13,15 @@ public partial class App : System.Windows.Application
     private static readonly TimeSpan RuntimeStopDeadline =
         TimeSpan.FromSeconds(3);
 
-    private readonly IAppAdapterFactory? _adapterFactory;
+    private readonly IAppAdapterFactory _adapterFactory;
     private AppCompositionRoot? _compositionRoot;
+    private int _exitRequestedBeforeComposition;
 
     public App()
     {
+        _adapterFactory = AppStartupFactory.CreateProduction(
+            new WpfUiDispatcher(Dispatcher),
+            RequestExitAsync);
     }
 
     internal App(IAppAdapterFactory adapterFactory)
@@ -29,11 +33,6 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (_adapterFactory is null)
-        {
-            Shutdown(exitCode: 2);
-            return;
-        }
 
         SingleInstanceCoordinator coordinator = new(
             WindowsPackageChannel.Internal);
@@ -58,6 +57,14 @@ public partial class App : System.Windows.Application
                     callback => _ = Dispatcher.BeginInvoke(callback),
                     Shutdown,
                     CancellationToken.None).ConfigureAwait(true);
+            if (Interlocked.Exchange(
+                    ref _exitRequestedBeforeComposition,
+                    0) != 0)
+            {
+                await _compositionRoot.ExitAsync().ConfigureAwait(true);
+                return;
+            }
+
             await _compositionRoot.ShowInitialSurfaceAsync()
                 .ConfigureAwait(true);
             if (Interlocked.Exchange(
@@ -104,5 +111,19 @@ public partial class App : System.Windows.Application
             ?? throw new InvalidOperationException(
                 "The application composition root has not started.");
         return root.ExitAsync();
+    }
+
+    private async Task RequestExitAsync()
+    {
+        AppCompositionRoot? root = Volatile.Read(ref _compositionRoot);
+        if (root is null)
+        {
+            Interlocked.Exchange(
+                ref _exitRequestedBeforeComposition,
+                1);
+            return;
+        }
+
+        _ = await root.ExitAsync().ConfigureAwait(true);
     }
 }

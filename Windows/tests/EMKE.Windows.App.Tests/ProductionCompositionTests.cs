@@ -1,0 +1,404 @@
+using EMKE.Application;
+using EMKE.Core;
+using EMKE.Windows.App.Bootstrap;
+using EMKE.Windows.App.Commands;
+using EMKE.Windows.App.Presentation;
+using EMKE.Windows.App.State;
+using EMKE.Windows.App.Tray;
+
+namespace EMKE.Windows.App.Tests;
+
+#pragma warning disable CA1515 // MSTest requires discoverable public test classes.
+#pragma warning disable CA2007 // MSTest provides no UI synchronization context.
+#pragma warning disable CA2000 // Composition-root creation takes ownership of coordinator inputs.
+
+[TestClass]
+[DoNotParallelize]
+public sealed class ProductionCompositionTests
+{
+    [TestMethod]
+    public async Task StartupFactoryComposesOneRuntimeAndSharesItsUiContext()
+    {
+        int coreCreations = 0;
+        int uiCreations = 0;
+        AppUiCompositionContext? capturedContext = null;
+        CapturingTray? tray = null;
+        CapturingViews? views = null;
+        IAppAdapterFactory factory = AppStartupFactory.Create(
+            _ =>
+            {
+                coreCreations++;
+                return ValueTask.FromResult(
+                    new AppCoreAdapterBundle(
+                        Dependencies(),
+                        new NoOpDiagnostics(),
+                        new NoOpAsyncDisposable()));
+            },
+            (context, _) =>
+            {
+                uiCreations++;
+                capturedContext = context;
+                tray = new CapturingTray(context);
+                views = new CapturingViews(context);
+                return ValueTask.FromResult(
+                    new AppUiAdapterBundle(
+                        tray,
+                        views,
+                        new NoOpAsyncDisposable()));
+            });
+
+        AppCompositionRoot root =
+            await AppCompositionRoot.CreateForProcessAsync(
+                factory,
+                new NoOpAsyncDisposable(),
+                TimeSpan.FromSeconds(1),
+                static callback => callback(),
+                static () => { },
+                CancellationToken.None);
+
+        Assert.AreEqual(1, coreCreations);
+        Assert.AreEqual(1, uiCreations);
+        Assert.IsNotNull(capturedContext);
+        Assert.IsNotNull(tray);
+        Assert.IsNotNull(views);
+        Assert.IsTrue(tray.Started);
+        Assert.AreSame(
+            capturedContext.RuntimeCommands,
+            tray.RuntimeCommands);
+        Assert.AreSame(
+            capturedContext.RuntimeCommands,
+            views.RuntimeCommands);
+        Assert.AreSame(capturedContext.Snapshots, views.Snapshots);
+        Assert.AreSame(capturedContext.Presentation, tray.Presentation);
+        Assert.AreSame(capturedContext.Presentation, views.Presentation);
+
+        capturedContext.Snapshots.Publish(Snapshot(version: 900));
+        Assert.AreEqual(
+            900UL,
+            capturedContext.Presentation.Current?.SnapshotVersion);
+        await root.ShowInitialSurfaceAsync();
+        await root.ShowDashboardAsync();
+        Assert.AreEqual(1, views.InitialSurfaceCount);
+        Assert.AreEqual(1, views.DashboardCount);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () =>
+                await AppCompositionRoot.CreateForProcessAsync(
+                    factory,
+                    new NoOpAsyncDisposable(),
+                    TimeSpan.FromSeconds(1),
+                    static callback => callback(),
+                    static () => { },
+                    CancellationToken.None));
+        Assert.AreEqual(1, coreCreations);
+
+        AppExitReport exit = await root.ExitAsync();
+        Assert.IsEmpty(exit.Errors);
+    }
+
+    [TestMethod]
+    public void ProductionStartupFactoryIsAlwaysAvailable()
+    {
+        IAppAdapterFactory factory = AppStartupFactory.CreateProduction(
+            new InlineUiDispatcher(),
+            static () => Task.CompletedTask);
+
+        Assert.IsInstanceOfType<ProductionAppAdapterFactory>(factory);
+    }
+
+    private static TranslationRuntimeDependencies Dependencies()
+    {
+        return new TranslationRuntimeDependencies(
+            new PassingBuildGate(),
+            new MissingSettingsStore(),
+            new MissingSecretStore(),
+            new CompatibleDriverManager(),
+            new EmptyDeviceCatalog(),
+            new NoOpAudioEngine(),
+            new UnreachableSessionFactory(),
+            new UniformLanguageClassifier(),
+            new ImmediateClock(),
+            new NoOpRuntimeLog());
+    }
+
+    private static AppSnapshot Snapshot(ulong version)
+    {
+        return new AppSnapshot(
+            contractVersion: 1,
+            version,
+            RuntimeState.Stopped,
+            ChannelState.Inactive,
+            ChannelState.Inactive,
+            InboundRoute.Stopped,
+            OutboundRoute.Stopped,
+            inboundLevel: 0,
+            outboundLevel: 0,
+            sourceCaption: string.Empty,
+            translatedCaption: string.Empty,
+            new AudioSelection("input", "output"),
+            new DriverCompatibility(true, "compatible"),
+            connectionReport: null,
+            new AudioDiagnostics(true, 0),
+            new UpdateAvailability(false, string.Empty),
+            error: null);
+    }
+
+    private sealed class CapturingTray : IAppTrayLifetime
+    {
+        public CapturingTray(AppUiCompositionContext context)
+        {
+            RuntimeCommands = context.RuntimeCommands;
+            Presentation = context.Presentation;
+        }
+
+        public IRuntimeCommandSink RuntimeCommands { get; }
+
+        public PresentationCoordinator Presentation { get; }
+
+        public bool Started { get; private set; }
+
+        public ValueTask StartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Started = true;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask RemoveAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingViews : IAppViewLifetime
+    {
+        public CapturingViews(AppUiCompositionContext context)
+        {
+            RuntimeCommands = context.RuntimeCommands;
+            Snapshots = context.Snapshots;
+            Presentation = context.Presentation;
+        }
+
+        public IRuntimeCommandSink RuntimeCommands { get; }
+
+        public AppSnapshotStore Snapshots { get; }
+
+        public PresentationCoordinator Presentation { get; }
+
+        public int InitialSurfaceCount { get; private set; }
+
+        public int DashboardCount { get; private set; }
+
+        public ValueTask ShowInitialSurfaceAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InitialSurfaceCount++;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask ShowDashboardAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DashboardCount++;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class InlineUiDispatcher : IUiDispatcher
+    {
+        public ValueTask InvokeAsync(
+            Action action,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            action();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpDiagnostics : IAppDiagnosticsLifetime
+    {
+        public ValueTask StopAsync(CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpAsyncDisposable : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class PassingBuildGate : IWindowsBuildGate
+    {
+        public ValueTask<RuntimeError?> CheckAsync(
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<RuntimeError?>(null);
+        }
+    }
+
+    private sealed class MissingSettingsStore : ISettingsStore
+    {
+        public ValueTask<RuntimeSettings?> LoadAsync(
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<RuntimeSettings?>(null);
+        }
+
+        public ValueTask SaveAsync(
+            RuntimeSettings settings,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class MissingSecretStore : ISecretStore
+    {
+        public ValueTask<ISecretBuffer?> LoadAsync(
+            string name,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ISecretBuffer?>(null);
+        }
+
+        public ValueTask SaveAsync(
+            string name,
+            ReadOnlyMemory<char> secret,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteAsync(
+            string name,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CompatibleDriverManager : IDriverManager
+    {
+        public Task<DriverCompatibility> CheckCompatibilityAsync(
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(
+                new DriverCompatibility(true, "compatible"));
+        }
+    }
+
+    private sealed class EmptyDeviceCatalog : IAudioDeviceCatalog
+    {
+        public Task<AudioDeviceSnapshot> GetSnapshotAsync(
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(
+                new AudioDeviceSnapshot([]));
+        }
+    }
+
+    private sealed class NoOpAudioEngine : ITranslationAudioEngine
+    {
+        public Task StartAsync(
+            AudioEngineConfiguration configuration,
+            CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public ValueTask<AudioEngineEvent?> PollEventAsync(
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<AudioEngineEvent?>(null);
+        }
+
+        public ValueTask EnqueueInboundTranslationAsync(
+            ReadOnlyMemory<byte> pcm16,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask EnqueueOutboundTranslationAsync(
+            ReadOnlyMemory<byte> pcm16,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask SetInboundRouteAsync(
+            InboundRoute route,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask SetOutboundRouteAsync(
+            OutboundRoute route,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class UnreachableSessionFactory :
+        ITranslationSessionFactory
+    {
+        public ValueTask<ITranslationSession> CreateAsync(
+            TranslationSessionConfiguration configuration,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromException<ITranslationSession>(
+                new InvalidOperationException(
+                    "The test runtime must not create a session."));
+        }
+    }
+
+    private sealed class UniformLanguageClassifier : ILanguageClassifier
+    {
+        public ValueTask<LanguageProbabilities> ClassifyAsync(
+            string text,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(
+                new LanguageProbabilities(
+                    1d / 3,
+                    1d / 3,
+                    1d / 3));
+        }
+    }
+
+    private sealed class ImmediateClock : IClock
+    {
+        public TimeSpan MonotonicNow => TimeSpan.Zero;
+
+        public ValueTask DelayAsync(
+            TimeSpan delay,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpRuntimeLog : IRuntimeLog
+    {
+        public void Write(
+            RuntimeLogLevel level,
+            string eventName,
+            IReadOnlyDictionary<string, string> safeFields)
+        {
+        }
+    }
+}
