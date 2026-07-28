@@ -19,6 +19,9 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     private var events: [AudioEngineEvent] = []
     private var waiters: [CheckedContinuation<AudioEngineEvent, Never>] = []
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var blocksNextInboundOutput = false
+    private(set) var blockedInboundOutputCount = 0
+    private var inboundOutputWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(blocksStart: Bool = false) {
         self.blocksStart = blocksStart
@@ -58,6 +61,13 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     }
 
     func enqueueInboundOutput(_ pcm16: Data) async throws {
+        if blocksNextInboundOutput {
+            blocksNextInboundOutput = false
+            blockedInboundOutputCount += 1
+            await withCheckedContinuation { continuation in
+                inboundOutputWaiters.append(continuation)
+            }
+        }
         inboundPlayback.append(pcm16)
     }
 
@@ -76,6 +86,18 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     func releaseStarts() {
         let waiters = startWaiters
         startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func blockNextInboundOutput() {
+        blocksNextInboundOutput = true
+    }
+
+    func releaseInboundOutputs() {
+        let waiters = inboundOutputWaiters
+        inboundOutputWaiters.removeAll()
         for waiter in waiters {
             waiter.resume()
         }
@@ -320,8 +342,45 @@ private actor AudioLevelEventRecorder {
     }
 }
 
+private actor CoordinatorReaderDispositionProbe {
+    struct Record: Equatable, Sendable {
+        let channel: TranslationReaderChannel
+        let epoch: UInt64
+        let disposition: TranslationReaderEventDisposition
+    }
+
+    private var records: [Record] = []
+    private var waiters: [CheckedContinuation<Record, Never>] = []
+
+    func record(
+        channel: TranslationReaderChannel,
+        epoch: UInt64,
+        disposition: TranslationReaderEventDisposition
+    ) {
+        let record = Record(
+            channel: channel,
+            epoch: epoch,
+            disposition: disposition
+        )
+        if waiters.isEmpty {
+            records.append(record)
+        } else {
+            waiters.removeFirst().resume(returning: record)
+        }
+    }
+
+    func nextRecord() async -> Record {
+        if !records.isEmpty {
+            return records.removeFirst()
+        }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
+
 private struct CoordinatorHarness {
-    let audio = CoordinatorAudioEngineFake()
+    let audio: CoordinatorAudioEngineFake
     let levelClock: CoordinatorLevelClock
     let inbound: CoordinatorSessionFake
     let outbound: CoordinatorSessionFake
@@ -334,6 +393,7 @@ private struct CoordinatorHarness {
             motherLanguage: .chinese,
             meetingOutputLanguage: .german
         ),
+        audio: CoordinatorAudioEngineFake? = nil,
         inbound: CoordinatorSessionFake? = nil,
         outbound: CoordinatorSessionFake? = nil,
         inboundError: CoordinatorTestError? = nil,
@@ -344,6 +404,7 @@ private struct CoordinatorHarness {
             _ in LanguageHypotheses(["de": 0.9])
         }
     ) {
+        self.audio = audio ?? CoordinatorAudioEngineFake()
         levelClock = CoordinatorLevelClock()
         self.inbound = inbound ?? CoordinatorSessionFake(
             connectError: inboundError
@@ -355,7 +416,7 @@ private struct CoordinatorHarness {
             sessions: [self.inbound, self.outbound] + additionalSessions
         )
         coordinator = TranslationCoordinator(
-            audioEngine: audio,
+            audioEngine: self.audio,
             sessionBuilder: builder,
             languageClassifier: classifier,
             reconnectDelays: reconnectDelays,
@@ -1231,6 +1292,54 @@ func inboundFailureAfterSpeechEndedStillCompletesRecovery() async throws {
 }
 
 @Test
+func inboundFailureWhileFinishPlaybackIsInFlightStillCompletesRecovery()
+    async throws
+{
+    let audio = CoordinatorAudioEngineFake()
+    let recovered = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        audio: audio,
+        additionalSessions: [recovered],
+        reconnectDelays: [.zero]
+    )
+    try await harness.start()
+
+    await harness.audio.emit(
+        .inboundNetworkAudio(voicedPCM16(byteCount: 7_500))
+    )
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 7_500))
+        )
+    }
+    #expect(await eventually {
+        await harness.inbound.appended.count == 24
+    })
+    await audio.blockNextInboundOutput()
+    #expect(await eventually {
+        await audio.blockedInboundOutputCount == 1
+    })
+    let playbackCountBeforeRelease = await audio.inboundPlayback.count
+
+    await harness.inbound.emit(.failure(.disconnected))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+    #expect(await harness.audio.lastRouting?.0 == .originalFailOpen)
+
+    await audio.releaseInboundOutputs()
+    #expect(await eventually {
+        await harness.audio.lastRouting?.0 == .translated
+    })
+    #expect(
+        await audio.inboundPlayback.count <= playbackCountBeforeRelease + 1
+    )
+    await harness.coordinator.stop()
+}
+
+@Test
 func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
     let stale = CoordinatorSessionFake(emitsClosedOnClose: false)
     let recovered = CoordinatorSessionFake()
@@ -1258,9 +1367,21 @@ func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
         }
     )
 
+    let probe = CoordinatorReaderDispositionProbe()
+    await harness.coordinator.setReaderDispositionObserver {
+        channel,
+        epoch,
+        disposition in
+        await probe.record(
+            channel: channel,
+            epoch: epoch,
+            disposition: disposition
+        )
+    }
     await stale.emit(.success(.outputAudio(audioDelta(Data([9, 9])))))
-    await stale.waitUntilDeliveredEventCount(2)
-    _ = await harness.coordinator.currentState()
+    let record = await probe.nextRecord()
+    #expect(record.channel == .inbound)
+    #expect(record.disposition == .stale)
     #expect(!(await harness.audio.inboundPlayback).contains(Data([9, 9])))
     await harness.coordinator.stop()
 }
@@ -1290,9 +1411,21 @@ func staleOutboundAudioFromPreviousEpochCannotReachPlayback() async throws {
         }
     )
 
+    let probe = CoordinatorReaderDispositionProbe()
+    await harness.coordinator.setReaderDispositionObserver {
+        channel,
+        epoch,
+        disposition in
+        await probe.record(
+            channel: channel,
+            epoch: epoch,
+            disposition: disposition
+        )
+    }
     await stale.emit(.success(.outputAudio(audioDelta(Data([8, 8])))))
-    await stale.waitUntilDeliveredEventCount(1)
-    _ = await harness.coordinator.currentState()
+    let record = await probe.nextRecord()
+    #expect(record.channel == .outbound)
+    #expect(record.disposition == .stale)
     #expect(!(await harness.audio.outboundPlayback).contains(Data([8, 8])))
     await harness.coordinator.stop()
 }

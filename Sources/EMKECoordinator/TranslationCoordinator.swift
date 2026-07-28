@@ -27,6 +27,22 @@ public protocol TranslationSessionControlling: Sendable {
 
 extension TranslationSession: TranslationSessionControlling {}
 
+enum TranslationReaderChannel: Equatable, Sendable {
+    case inbound
+    case outbound
+}
+
+enum TranslationReaderEventDisposition: Equatable, Sendable {
+    case accepted
+    case stale
+}
+
+typealias TranslationReaderDispositionObserver = @Sendable (
+    TranslationReaderChannel,
+    UInt64,
+    TranslationReaderEventDisposition
+) async -> Void
+
 public protocol TranslationSessionBuilding: Sendable {
     func makeSession(
         configuration: APIConfiguration,
@@ -101,6 +117,17 @@ public actor TranslationCoordinator {
         let session: any TranslationSessionControlling
     }
 
+    private enum InboundFinishPhase: Equatable, Sendable {
+        case scheduled
+        case draining
+    }
+
+    private struct InboundFinishState: Sendable {
+        let token: UInt64
+        let epoch: UInt64
+        var phase: InboundFinishPhase
+    }
+
     private var configuration: TranslationCoordinatorConfiguration?
     private var inboundSession: (any TranslationSessionControlling)?
     private var outboundSession: (any TranslationSessionControlling)?
@@ -113,9 +140,13 @@ public actor TranslationCoordinator {
     private var inboundFinishTask: Task<Void, Never>?
     private var inboundReconnectTask: Task<Void, Never>?
     private var outboundReconnectTask: Task<Void, Never>?
+    private var inboundFinishState: InboundFinishState?
+    private var inboundFinishGeneration: UInt64 = 0
     private var inboundEpoch: UInt64 = 0
     private var outboundEpoch: UInt64 = 0
     private var lifecycleGeneration: UInt64 = 0
+    private var readerDispositionObserver:
+        TranslationReaderDispositionObserver?
     private var inboundBatcher = PCMFrameBatcher()
     private var outboundBatcher = PCMFrameBatcher()
     private var inboundVAD = PCMVoiceActivityDetector()
@@ -364,6 +395,12 @@ public actor TranslationCoordinator {
         state
     }
 
+    func setReaderDispositionObserver(
+        _ observer: TranslationReaderDispositionObserver?
+    ) {
+        readerDispositionObserver = observer
+    }
+
     public func setAudioLevelUpdatesEnabled(_ enabled: Bool) {
         audioLevelUpdatesEnabled = enabled
         inboundLevelMeter.reset()
@@ -443,11 +480,10 @@ public actor TranslationCoordinator {
         switch channel {
         case .inbound:
             let rebindsFinish = !isStopping
-                && inboundFinishTask != nil
+                && inboundFinishState != nil
                 && inboundUtteranceActive
                 && !inboundVAD.isSpeaking
-            inboundFinishTask?.cancel()
-            inboundFinishTask = nil
+            cancelInboundFinish()
             inboundEpoch = Self.nextGeneration(
                 after: inboundEpoch,
                 name: "inbound"
@@ -618,7 +654,7 @@ public actor TranslationCoordinator {
                 do {
                     let event = try await session.nextEvent()
                     guard let self else { return }
-                    guard await self.isCurrent(
+                    guard await self.observeReaderEvent(
                         epoch,
                         for: .inbound
                     ) else { return }
@@ -651,7 +687,7 @@ public actor TranslationCoordinator {
                 do {
                     let event = try await session.nextEvent()
                     guard let self else { return }
-                    guard await self.isCurrent(
+                    guard await self.observeReaderEvent(
                         epoch,
                         for: .outbound
                     ) else { return }
@@ -671,6 +707,27 @@ public actor TranslationCoordinator {
                 }
             }
         }
+    }
+
+    private func observeReaderEvent(
+        _ epoch: UInt64,
+        for channel: Channel
+    ) async -> Bool {
+        let isAccepted = isCurrent(epoch, for: channel)
+        if let readerDispositionObserver {
+            let observedChannel: TranslationReaderChannel = switch channel {
+            case .inbound:
+                .inbound
+            case .outbound:
+                .outbound
+            }
+            await readerDispositionObserver(
+                observedChannel,
+                epoch,
+                isAccepted ? .accepted : .stale
+            )
+        }
+        return isAccepted
     }
 
     private func handleAudioEvent(_ event: AudioEngineEvent) async -> Bool {
@@ -719,7 +776,7 @@ public actor TranslationCoordinator {
         do {
             let vadEvent = try inboundVAD.observe(pcm16)
             if vadEvent == .speechStarted {
-                inboundFinishTask?.cancel()
+                cancelInboundFinish()
                 inboundBuffer.begin()
                 inboundUtteranceActive = true
                 clearInboundSubtitles()
@@ -962,12 +1019,28 @@ public actor TranslationCoordinator {
 
     private func scheduleInboundFinish(epoch: UInt64) {
         guard isCurrent(epoch, for: .inbound) else { return }
-        inboundFinishTask?.cancel()
+        cancelInboundFinish()
+        inboundFinishGeneration = Self.nextGeneration(
+            after: inboundFinishGeneration,
+            name: "inbound finish"
+        )
+        let token = inboundFinishGeneration
+        inboundFinishState = InboundFinishState(
+            token: token,
+            epoch: epoch,
+            phase: .scheduled
+        )
         inboundFinishTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self else { return }
-            await self.finishInboundUtterance(epoch: epoch)
+            await self.finishInboundUtterance(epoch: epoch, token: token)
         }
+    }
+
+    private func cancelInboundFinish() {
+        inboundFinishTask?.cancel()
+        inboundFinishTask = nil
+        inboundFinishState = nil
     }
 
     private func extendInboundFinishWindowIfDraining(epoch: UInt64) {
@@ -977,15 +1050,28 @@ public actor TranslationCoordinator {
         scheduleInboundFinish(epoch: epoch)
     }
 
-    private func finishInboundUtterance(epoch: UInt64) async {
-        guard isCurrent(epoch, for: .inbound), !isStopping else { return }
-        inboundFinishTask = nil
-        guard inboundUtteranceActive else { return }
+    private func finishInboundUtterance(
+        epoch: UInt64,
+        token: UInt64
+    ) async {
+        guard isCurrent(epoch, for: .inbound),
+              !isStopping,
+              inboundUtteranceActive,
+              inboundFinishState?.epoch == epoch,
+              inboundFinishState?.token == token,
+              inboundFinishState?.phase == .scheduled else { return }
+        inboundFinishState?.phase = .draining
         await playInbound(
             inboundBuffer.finish(isSpeech: true),
             epoch: epoch
         )
-        guard isCurrent(epoch, for: .inbound), !isStopping else { return }
+        guard isCurrent(epoch, for: .inbound),
+              !isStopping,
+              inboundFinishState?.epoch == epoch,
+              inboundFinishState?.token == token,
+              inboundFinishState?.phase == .draining else { return }
+        inboundFinishTask = nil
+        inboundFinishState = nil
         inboundUtteranceActive = false
         inboundDeadlineTask?.cancel()
         inboundDeadlineTask = nil
@@ -1208,6 +1294,7 @@ public actor TranslationCoordinator {
     }
 
     private func resetRuntimeBuffers(motherLanguage: SupportedLanguage) {
+        cancelInboundFinish()
         inboundBatcher.reset()
         outboundBatcher.reset()
         inboundVAD.reset()
@@ -1239,11 +1326,10 @@ public actor TranslationCoordinator {
 
     private func cancelTimingAndReconnectTasks() {
         inboundDeadlineTask?.cancel()
-        inboundFinishTask?.cancel()
+        cancelInboundFinish()
         inboundReconnectTask?.cancel()
         outboundReconnectTask?.cancel()
         inboundDeadlineTask = nil
-        inboundFinishTask = nil
         inboundReconnectTask = nil
         outboundReconnectTask = nil
     }
