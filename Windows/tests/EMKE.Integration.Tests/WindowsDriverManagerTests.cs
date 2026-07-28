@@ -8,6 +8,12 @@ namespace EMKE.Integration.Tests;
 [TestClass]
 public sealed class WindowsDriverManagerTests
 {
+    private const string CatalogPath =
+        @"C:\Windows\System32\DriverStore\FileRepository\emke\EMKE.VirtualAudio.cat";
+    private const string InfPath =
+        @"C:\Windows\INF\oem42.inf";
+    private const string DriverBinaryPath =
+        @"C:\Windows\System32\DriverStore\FileRepository\emke\EMKE.VirtualAudio.sys";
     private static readonly string[] CompleteEvidenceCalls =
         ["root", "catalog", "endpoints"];
     private static readonly string[] RootEvidenceCalls = ["root"];
@@ -119,7 +125,9 @@ public sealed class WindowsDriverManagerTests
                 HardwareId: @"ROOT\EMKEVIRTUALAUDIO",
                 DriverFileVersion: new Version(1, 0, 0, 1),
                 DriverAbi: 1,
-                CatalogPath: @"C:\Windows\System32\DriverStore\emke.cat"),
+                CatalogPath,
+                InfPath,
+                DriverBinaryPath),
             Catalog = new WindowsCatalogEvidence(
                 "CN=EMKE Internal Test",
                 ChainValid: true),
@@ -148,6 +156,9 @@ public sealed class WindowsDriverManagerTests
         CollectionAssert.AreEqual(
             CompleteEvidenceCalls,
             api.Calls);
+        Assert.AreEqual(CatalogPath, api.ReadCatalogPath);
+        Assert.AreEqual(InfPath, api.ReadInfPath);
+        Assert.AreEqual(DriverBinaryPath, api.ReadDriverBinaryPath);
     }
 
     [TestMethod]
@@ -197,6 +208,93 @@ public sealed class WindowsDriverManagerTests
 
         Assert.ThrowsExactly<PlatformNotSupportedException>(
             WindowsDriverEvidenceApi.Instance.ReadRootDriver);
+    }
+
+    [TestMethod]
+    public void CatalogTrustRequiresExactSignerLocalChainIntegrityAndBothMembers()
+    {
+        RecordingCatalogTrustNativeApi native = new();
+        WindowsCatalogTrustVerifier verifier = new(native);
+
+        WindowsCatalogEvidence evidence = verifier.Verify(
+            CatalogPath,
+            InfPath,
+            DriverBinaryPath);
+
+        Assert.AreEqual("CN=EMKE Internal Test", evidence.Signer);
+        Assert.IsTrue(evidence.ChainValid);
+        Assert.AreEqual(CatalogPath, native.SignerCatalogPath);
+        Assert.AreEqual(CatalogPath, native.SignatureCatalogPath);
+        CollectionAssert.AreEqual(
+            new[] { InfPath, DriverBinaryPath },
+            native.MemberPaths);
+    }
+
+    [TestMethod]
+    [DataRow("missingSigner")]
+    [DataRow("wrongSigner")]
+    [DataRow("localChainInvalid")]
+    [DataRow("tamperedCatalog")]
+    [DataRow("unrelatedCatalog")]
+    [DataRow("missingInfMember")]
+    [DataRow("missingDriverMember")]
+    [DataRow("winVerifyTrustError")]
+    public void CatalogTrustFailsClosedWhenAnyProofIsMissing(
+        string failure)
+    {
+        RecordingCatalogTrustNativeApi native =
+            RecordingCatalogTrustNativeApi.ForFailure(failure);
+        WindowsCatalogTrustVerifier verifier = new(native);
+
+        WindowsCatalogEvidence evidence = verifier.Verify(
+            CatalogPath,
+            InfPath,
+            DriverBinaryPath);
+
+        Assert.IsFalse(evidence.ChainValid);
+    }
+
+    [TestMethod]
+    [TestCategory("WindowsCatalogTrust")]
+    public void ProductionCatalogTrustRejectsTamperedCatalogOnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive(
+                "Production WinTrust catalog verification runs in Windows CI.");
+        }
+
+        string temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"emke-catalog-trust-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            string catalogPath = Path.Combine(
+                temporaryDirectory,
+                "EMKE.VirtualAudio.cat");
+            string infPath = Path.Combine(
+                temporaryDirectory,
+                "EMKE.VirtualAudio.inf");
+            string driverPath = Path.Combine(
+                temporaryDirectory,
+                "EMKE.VirtualAudio.sys");
+            File.WriteAllBytes(catalogPath, [0x43, 0x41, 0x54]);
+            File.WriteAllBytes(infPath, [0x49, 0x4E, 0x46]);
+            File.WriteAllBytes(driverPath, [0x53, 0x59, 0x53]);
+
+            WindowsCatalogEvidence evidence =
+                WindowsCatalogTrustVerifier.Instance.Verify(
+                    catalogPath,
+                    infPath,
+                    driverPath);
+
+            Assert.IsFalse(evidence.ChainValid);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
     }
 
     private static CompatibilityManifest CreateManifest()
@@ -262,6 +360,12 @@ public sealed class WindowsDriverManagerTests
 
         public Exception? RootFailure { get; init; }
 
+        public string? ReadCatalogPath { get; private set; }
+
+        public string? ReadInfPath { get; private set; }
+
+        public string? ReadDriverBinaryPath { get; private set; }
+
         public WindowsRootDriverEvidence ReadRootDriver()
         {
             Calls.Add("root");
@@ -273,9 +377,15 @@ public sealed class WindowsDriverManagerTests
             return Root;
         }
 
-        public WindowsCatalogEvidence ReadCatalog(string catalogPath)
+        public WindowsCatalogEvidence ReadCatalog(
+            string catalogPath,
+            string infPath,
+            string driverBinaryPath)
         {
             Calls.Add("catalog");
+            ReadCatalogPath = catalogPath;
+            ReadInfPath = infPath;
+            ReadDriverBinaryPath = driverBinaryPath;
             return Catalog;
         }
 
@@ -284,6 +394,105 @@ public sealed class WindowsDriverManagerTests
         {
             Calls.Add("endpoints");
             return Endpoints;
+        }
+    }
+
+    private sealed class RecordingCatalogTrustNativeApi
+        : IWindowsCatalogTrustNativeApi
+    {
+        private const int TrustSuccess = 0;
+        private const int TrustFailure = unchecked((int)0x800B0100);
+        private const int WinTrustError = unchecked((int)0x80092003);
+
+        public WindowsCatalogSignerEvidence Signer { get; init; } =
+            new("CN=EMKE Internal Test", LocalChainValid: true);
+
+        public int SignatureStatus { get; init; } = TrustSuccess;
+
+        public int InfMemberStatus { get; init; } = TrustSuccess;
+
+        public int DriverMemberStatus { get; init; } = TrustSuccess;
+
+        public string? SignerCatalogPath { get; private set; }
+
+        public string? SignatureCatalogPath { get; private set; }
+
+        public List<string> MemberPaths { get; } = [];
+
+        public static RecordingCatalogTrustNativeApi ForFailure(
+            string failure)
+        {
+            return failure switch
+            {
+                "missingSigner" => new()
+                {
+                    Signer = new(null, LocalChainValid: true),
+                },
+                "wrongSigner" => new()
+                {
+                    Signer = new(
+                        "CN=Other Publisher",
+                        LocalChainValid: true),
+                },
+                "localChainInvalid" => new()
+                {
+                    Signer = new(
+                        "CN=EMKE Internal Test",
+                        LocalChainValid: false),
+                },
+                "tamperedCatalog" => new()
+                {
+                    SignatureStatus = TrustFailure,
+                },
+                "unrelatedCatalog" => new()
+                {
+                    InfMemberStatus = TrustFailure,
+                    DriverMemberStatus = TrustFailure,
+                },
+                "missingInfMember" => new()
+                {
+                    InfMemberStatus = TrustFailure,
+                },
+                "missingDriverMember" => new()
+                {
+                    DriverMemberStatus = TrustFailure,
+                },
+                "winVerifyTrustError" => new()
+                {
+                    SignatureStatus = WinTrustError,
+                },
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(failure),
+                    failure,
+                    "Undefined catalog trust failure."),
+            };
+        }
+
+        public WindowsCatalogSignerEvidence ReadCatalogSigner(
+            string catalogPath)
+        {
+            SignerCatalogPath = catalogPath;
+            return Signer;
+        }
+
+        public int VerifyCatalogSignature(string catalogPath)
+        {
+            SignatureCatalogPath = catalogPath;
+            return SignatureStatus;
+        }
+
+        public int VerifyCatalogMember(
+            string catalogPath,
+            string memberPath)
+        {
+            Assert.AreEqual(CatalogPath, catalogPath);
+            MemberPaths.Add(memberPath);
+            return string.Equals(
+                    memberPath,
+                    InfPath,
+                    StringComparison.Ordinal)
+                ? InfMemberStatus
+                : DriverMemberStatus;
         }
     }
 }

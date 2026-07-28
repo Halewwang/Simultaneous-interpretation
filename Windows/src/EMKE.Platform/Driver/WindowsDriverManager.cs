@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -87,14 +88,18 @@ internal sealed record WindowsRootDriverEvidence(
     string? HardwareId,
     Version DriverFileVersion,
     int DriverAbi,
-    string? CatalogPath)
+    string? CatalogPath,
+    string? InfPath,
+    string? DriverBinaryPath)
 {
     public static WindowsRootDriverEvidence Missing { get; } = new(
         Present: false,
         HardwareId: null,
         new Version(0, 0, 0),
         DriverAbi: 0,
-        CatalogPath: null);
+        CatalogPath: null,
+        InfPath: null,
+        DriverBinaryPath: null);
 }
 
 internal sealed record WindowsCatalogEvidence(
@@ -105,7 +110,10 @@ internal interface IWindowsDriverEvidenceApi
 {
     WindowsRootDriverEvidence ReadRootDriver();
 
-    WindowsCatalogEvidence ReadCatalog(string catalogPath);
+    WindowsCatalogEvidence ReadCatalog(
+        string catalogPath,
+        string infPath,
+        string driverBinaryPath);
 
     IReadOnlyList<WindowsInstalledDriverEndpointState> ReadEndpointStates();
 }
@@ -135,13 +143,18 @@ public sealed class WindowsDriverSnapshotSource
             WindowsRootDriverEvidence root = _api.ReadRootDriver();
             if (!root.Present
                 || string.IsNullOrWhiteSpace(root.HardwareId)
-                || string.IsNullOrWhiteSpace(root.CatalogPath))
+                || string.IsNullOrWhiteSpace(root.CatalogPath)
+                || string.IsNullOrWhiteSpace(root.InfPath)
+                || string.IsNullOrWhiteSpace(root.DriverBinaryPath))
             {
                 return ValueTask.FromResult(MissingSnapshot());
             }
 
             WindowsCatalogEvidence catalog =
-                _api.ReadCatalog(root.CatalogPath);
+                _api.ReadCatalog(
+                    root.CatalogPath,
+                    root.InfPath,
+                    root.DriverBinaryPath);
             IReadOnlyList<WindowsInstalledDriverEndpointState> endpoints =
                 _api.ReadEndpointStates();
             return ValueTask.FromResult(
@@ -179,11 +192,98 @@ public sealed class WindowsDriverSnapshotSource
     }
 }
 
+internal sealed record WindowsCatalogSignerEvidence(
+    string? Subject,
+    bool LocalChainValid);
+
+internal interface IWindowsCatalogTrustNativeApi
+{
+    WindowsCatalogSignerEvidence ReadCatalogSigner(string catalogPath);
+
+    int VerifyCatalogSignature(string catalogPath);
+
+    int VerifyCatalogMember(
+        string catalogPath,
+        string memberPath);
+}
+
+internal sealed class WindowsCatalogTrustVerifier
+{
+    private const string ExpectedSigner = "CN=EMKE Internal Test";
+    private const int TrustSuccess = 0;
+    private readonly IWindowsCatalogTrustNativeApi _native;
+
+    public static WindowsCatalogTrustVerifier Instance { get; } = new(
+        WindowsCatalogTrustNativeApi.Instance);
+
+    internal WindowsCatalogTrustVerifier(
+        IWindowsCatalogTrustNativeApi native)
+    {
+        _native = native ?? throw new ArgumentNullException(nameof(native));
+    }
+
+#pragma warning disable CA1031 // Incomplete trust evidence must fail closed.
+    public WindowsCatalogEvidence Verify(
+        string catalogPath,
+        string infPath,
+        string driverBinaryPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(infPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(driverBinaryPath);
+        try
+        {
+            if (_native.VerifyCatalogSignature(catalogPath)
+                != TrustSuccess)
+            {
+                return Untrusted();
+            }
+
+            WindowsCatalogSignerEvidence signer =
+                _native.ReadCatalogSigner(catalogPath);
+            if (!string.Equals(
+                    signer.Subject,
+                    ExpectedSigner,
+                    StringComparison.Ordinal)
+                || !signer.LocalChainValid)
+            {
+                return Untrusted();
+            }
+
+            if (_native.VerifyCatalogMember(catalogPath, infPath)
+                    != TrustSuccess
+                || _native.VerifyCatalogMember(
+                    catalogPath,
+                    driverBinaryPath) != TrustSuccess)
+            {
+                return Untrusted();
+            }
+
+            return new WindowsCatalogEvidence(
+                signer.Subject,
+                ChainValid: true);
+        }
+        catch (Exception)
+        {
+            return Untrusted();
+        }
+    }
+#pragma warning restore CA1031
+
+    private static WindowsCatalogEvidence Untrusted()
+    {
+        return new WindowsCatalogEvidence(
+            Signer: null,
+            ChainValid: false);
+    }
+}
+
 internal sealed class WindowsDriverEvidenceApi
     : IWindowsDriverEvidenceApi
 {
     private const string RootHardwareId = @"ROOT\EMKEVIRTUALAUDIO";
     private const string DriverAbiValueName = "DriverAbi";
+    private const string DriverBinaryValueName = "Driver";
     private const string DriverVersionValueName = "DriverVersion";
     private const string InfPathValueName = "InfPath";
     private const uint DigcfAllClasses = 0x00000004;
@@ -203,11 +303,17 @@ internal sealed class WindowsDriverEvidenceApi
     private const uint DeviceStateNotPresent = 0x00000004;
     private const uint DeviceStateUnplugged = 0x00000008;
     private static readonly nint InvalidHandleValue = new(-1);
+    private readonly WindowsCatalogTrustVerifier _catalogTrustVerifier;
 
-    public static WindowsDriverEvidenceApi Instance { get; } = new();
+    public static WindowsDriverEvidenceApi Instance { get; } = new(
+        WindowsCatalogTrustVerifier.Instance);
 
-    private WindowsDriverEvidenceApi()
+    private WindowsDriverEvidenceApi(
+        WindowsCatalogTrustVerifier catalogTrustVerifier)
     {
+        _catalogTrustVerifier = catalogTrustVerifier
+            ?? throw new ArgumentNullException(
+                nameof(catalogTrustVerifier));
     }
 
     public WindowsRootDriverEvidence ReadRootDriver()
@@ -274,34 +380,15 @@ internal sealed class WindowsDriverEvidenceApi
         }
     }
 
-    public WindowsCatalogEvidence ReadCatalog(string catalogPath)
+    public WindowsCatalogEvidence ReadCatalog(
+        string catalogPath,
+        string infPath,
+        string driverBinaryPath)
     {
-        EnsureWindows();
-        ArgumentException.ThrowIfNullOrWhiteSpace(catalogPath);
-        string fullPath = Path.GetFullPath(catalogPath);
-        if (!File.Exists(fullPath))
-        {
-            throw new FileNotFoundException(
-                "The installed driver catalog was not found.");
-        }
-
-#pragma warning disable SYSLIB0057 // Signed-file extraction has no loader replacement.
-        using X509Certificate signer =
-            X509Certificate.CreateFromSignedFile(fullPath);
-#pragma warning restore SYSLIB0057
-        using X509Certificate2 signerCertificate =
-            X509CertificateLoader.LoadCertificate(signer.GetRawCertData());
-        using X509Chain chain = new();
-        // Startup preflight is local-only; never fetch revocation or
-        // intermediate-certificate data.
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-        chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
-        chain.ChainPolicy.VerificationTime = DateTime.Now;
-        chain.ChainPolicy.DisableCertificateDownloads = true;
-        bool valid = chain.Build(signerCertificate);
-        return new WindowsCatalogEvidence(
-            signerCertificate.Subject,
-            valid);
+        return _catalogTrustVerifier.Verify(
+            catalogPath,
+            infPath,
+            driverBinaryPath);
     }
 
     public IReadOnlyList<WindowsInstalledDriverEndpointState>
@@ -367,13 +454,22 @@ internal sealed class WindowsDriverEvidenceApi
                 ReadRegistryString(
                     driverKey,
                     InfPathValueName));
-            string catalogPath = ResolveCatalogPath(infName);
+            string driverBinaryName = Path.GetFileName(
+                ReadRegistryString(
+                    driverKey,
+                    DriverBinaryValueName));
+            WindowsDriverPackagePaths package =
+                ResolveDriverPackagePaths(
+                    infName,
+                    driverBinaryName);
             return new WindowsRootDriverEvidence(
                 Present: true,
                 hardwareId,
                 version,
                 driverAbi,
-                catalogPath);
+                package.CatalogPath,
+                package.InfPath,
+                package.DriverBinaryPath);
         }
         finally
         {
@@ -489,7 +585,9 @@ internal sealed class WindowsDriverEvidenceApi
         return bytes;
     }
 
-    private static string ResolveCatalogPath(string infName)
+    private static WindowsDriverPackagePaths ResolveDriverPackagePaths(
+        string infName,
+        string driverBinaryName)
     {
         if (string.IsNullOrWhiteSpace(infName)
             || !string.Equals(
@@ -499,6 +597,16 @@ internal sealed class WindowsDriverEvidenceApi
         {
             throw new InvalidDataException(
                 "The installed driver INF name is invalid.");
+        }
+
+        if (string.IsNullOrWhiteSpace(driverBinaryName)
+            || !string.Equals(
+                Path.GetFileName(driverBinaryName),
+                driverBinaryName,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "The installed driver binary name is invalid.");
         }
 
         string windowsDirectory =
@@ -545,10 +653,20 @@ internal sealed class WindowsDriverEvidenceApi
                 SearchOption.AllDirectories)
             .Take(2)
             .ToArray();
-        return matches.Length == 1
-            ? matches[0]
-            : throw new InvalidDataException(
+        if (matches.Length != 1)
+        {
+            throw new InvalidDataException(
                 "The installed driver catalog could not be resolved uniquely.");
+        }
+
+        string catalogPath = matches[0];
+        string packageDirectory = Path.GetDirectoryName(catalogPath)
+            ?? throw new InvalidDataException(
+                "The installed driver catalog directory is invalid.");
+        return new WindowsDriverPackagePaths(
+            installedInfPath,
+            catalogPath,
+            Path.Combine(packageDirectory, driverBinaryName));
     }
 
     private static WindowsInstalledDriverEndpointState MapEndpoint(
@@ -596,6 +714,11 @@ internal sealed class WindowsDriverEvidenceApi
         };
     }
 
+    private sealed record WindowsDriverPackagePaths(
+        string InfPath,
+        string CatalogPath,
+        string DriverBinaryPath);
+
     private static void EnsureWindows()
     {
         if (!OperatingSystem.IsWindows())
@@ -604,6 +727,322 @@ internal sealed class WindowsDriverEvidenceApi
                 "Windows driver evidence is available only on Windows.");
         }
     }
+}
+
+internal sealed class WindowsCatalogTrustNativeApi
+    : IWindowsCatalogTrustNativeApi
+{
+    private const uint WtdUiNone = 2;
+    private const uint WtdRevokeNone = 0;
+    private const uint WtdChoiceFile = 1;
+    private const uint WtdChoiceCatalog = 2;
+    private const uint WtdStateActionIgnore = 0;
+    private const uint WtdRevocationCheckNone = 0x00000010;
+    private const uint WtdCacheOnlyUrlRetrieval = 0x00001000;
+    private static readonly nint InvalidHandleValue = new(-1);
+    private static readonly Guid GenericVerifyV2 = new(
+        "00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
+    private static readonly Guid DriverActionVerify = new(
+        "F750E6C3-38EE-11D1-85E5-00C04FC295EE");
+
+    public static WindowsCatalogTrustNativeApi Instance { get; } = new();
+
+    private WindowsCatalogTrustNativeApi()
+    {
+    }
+
+    public WindowsCatalogSignerEvidence ReadCatalogSigner(
+        string catalogPath)
+    {
+        string fullCatalogPath = RequireWindowsFile(
+            catalogPath,
+            "catalog");
+
+#pragma warning disable SYSLIB0057 // Signed-file extraction has no loader replacement.
+        using X509Certificate signer =
+            X509Certificate.CreateFromSignedFile(fullCatalogPath);
+#pragma warning restore SYSLIB0057
+        using X509Certificate2 signerCertificate =
+            X509CertificateLoader.LoadCertificate(signer.GetRawCertData());
+        using X509Chain chain = new();
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
+        chain.ChainPolicy.VerificationTime = DateTime.Now;
+        chain.ChainPolicy.DisableCertificateDownloads = true;
+        return new WindowsCatalogSignerEvidence(
+            signerCertificate.Subject,
+            chain.Build(signerCertificate));
+    }
+
+    public unsafe int VerifyCatalogSignature(string catalogPath)
+    {
+        string fullCatalogPath = RequireWindowsFile(
+            catalogPath,
+            "catalog");
+        fixed (char* path = fullCatalogPath)
+        {
+            WindowsCatalogNativeMethods.WinTrustFileInfo fileInfo = new()
+            {
+                Size = checked(
+                    (uint)Marshal.SizeOf<
+                        WindowsCatalogNativeMethods.WinTrustFileInfo>()),
+                FilePath = (nint)path,
+            };
+            WindowsCatalogNativeMethods.WinTrustData trustData =
+                CreateTrustData(
+                    WtdChoiceFile,
+                    (nint)(&fileInfo));
+            Guid action = GenericVerifyV2;
+            return WindowsCatalogNativeMethods.WinVerifyTrust(
+                InvalidHandleValue,
+                ref action,
+                ref trustData);
+        }
+    }
+
+    public int VerifyCatalogMember(
+        string catalogPath,
+        string memberPath)
+    {
+        string fullCatalogPath = RequireWindowsFile(
+            catalogPath,
+            "catalog");
+        string fullMemberPath = RequireWindowsFile(
+            memberPath,
+            "catalog member");
+        Guid subsystem = DriverActionVerify;
+        if (!WindowsCatalogNativeMethods.CryptCATAdminAcquireContext2(
+                out nint catalogAdmin,
+                ref subsystem,
+                hashAlgorithm: null,
+                strongHashPolicy: nint.Zero,
+                flags: 0))
+        {
+            return LastNativeError();
+        }
+
+        try
+        {
+            using SafeFileHandle memberFile = File.OpenHandle(
+                fullMemberPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read | FileShare.Delete);
+            uint hashSize = 0;
+            if (!WindowsCatalogNativeMethods
+                    .CryptCATAdminCalcHashFromFileHandle2(
+                        catalogAdmin,
+                        memberFile,
+                        ref hashSize,
+                        hash: null,
+                        flags: 0)
+                || hashSize == 0)
+            {
+                return LastNativeError();
+            }
+
+            byte[] hash = new byte[hashSize];
+            if (!WindowsCatalogNativeMethods
+                    .CryptCATAdminCalcHashFromFileHandle2(
+                        catalogAdmin,
+                        memberFile,
+                        ref hashSize,
+                        hash,
+                        flags: 0))
+            {
+                return LastNativeError();
+            }
+
+            return VerifyCatalogMemberTrust(
+                fullCatalogPath,
+                fullMemberPath,
+                memberFile,
+                catalogAdmin,
+                hash);
+        }
+        finally
+        {
+            _ = WindowsCatalogNativeMethods.CryptCATAdminReleaseContext(
+                catalogAdmin,
+                flags: 0);
+        }
+    }
+
+    private static unsafe int VerifyCatalogMemberTrust(
+        string catalogPath,
+        string memberPath,
+        SafeFileHandle memberFile,
+        nint catalogAdmin,
+        byte[] hash)
+    {
+        string memberTag = Convert.ToHexString(hash);
+        fixed (char* catalogPathPointer = catalogPath)
+        fixed (char* memberPathPointer = memberPath)
+        fixed (char* memberTagPointer = memberTag)
+        fixed (byte* hashPointer = hash)
+        {
+            WindowsCatalogNativeMethods.WinTrustCatalogInfo catalogInfo =
+                new()
+                {
+                    Size = checked(
+                        (uint)Marshal.SizeOf<
+                            WindowsCatalogNativeMethods
+                                .WinTrustCatalogInfo>()),
+                    CatalogFilePath = (nint)catalogPathPointer,
+                    MemberTag = (nint)memberTagPointer,
+                    MemberFilePath = (nint)memberPathPointer,
+                    MemberFile = memberFile.DangerousGetHandle(),
+                    CalculatedFileHash = (nint)hashPointer,
+                    CalculatedFileHashSize =
+                        checked((uint)hash.Length),
+                    CatalogAdmin = catalogAdmin,
+                };
+            WindowsCatalogNativeMethods.WinTrustData trustData =
+                CreateTrustData(
+                    WtdChoiceCatalog,
+                    (nint)(&catalogInfo));
+            Guid action = GenericVerifyV2;
+            return WindowsCatalogNativeMethods.WinVerifyTrust(
+                InvalidHandleValue,
+                ref action,
+                ref trustData);
+        }
+    }
+
+    private static WindowsCatalogNativeMethods.WinTrustData CreateTrustData(
+        uint unionChoice,
+        nint unionInfo)
+    {
+        return new WindowsCatalogNativeMethods.WinTrustData
+        {
+            Size = checked(
+                (uint)Marshal.SizeOf<
+                    WindowsCatalogNativeMethods.WinTrustData>()),
+            UiChoice = WtdUiNone,
+            RevocationChecks = WtdRevokeNone,
+            UnionChoice = unionChoice,
+            UnionInfo = unionInfo,
+            StateAction = WtdStateActionIgnore,
+            ProviderFlags =
+                WtdRevocationCheckNone | WtdCacheOnlyUrlRetrieval,
+        };
+    }
+
+    private static string RequireWindowsFile(
+        string path,
+        string description)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "Windows catalog trust is available only on Windows.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        string fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException(
+                $"The driver {description} was not found.");
+        }
+
+        return fullPath;
+    }
+
+    private static int LastNativeError()
+    {
+        int error = Marshal.GetLastPInvokeError();
+        return error == 0 ? -1 : error;
+    }
+}
+
+internal static partial class WindowsCatalogNativeMethods
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WinTrustFileInfo
+    {
+        public uint Size;
+        public nint FilePath;
+        public nint File;
+        public nint KnownSubject;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WinTrustCatalogInfo
+    {
+        public uint Size;
+        public uint CatalogVersion;
+        public nint CatalogFilePath;
+        public nint MemberTag;
+        public nint MemberFilePath;
+        public nint MemberFile;
+        public nint CalculatedFileHash;
+        public uint CalculatedFileHashSize;
+        public nint CatalogContext;
+        public nint CatalogAdmin;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WinTrustData
+    {
+        public uint Size;
+        public nint PolicyCallbackData;
+        public nint SipClientData;
+        public uint UiChoice;
+        public uint RevocationChecks;
+        public uint UnionChoice;
+        public nint UnionInfo;
+        public uint StateAction;
+        public nint StateData;
+        public nint UrlReference;
+        public uint ProviderFlags;
+        public uint UiContext;
+        public nint SignatureSettings;
+    }
+
+    [LibraryImport("wintrust.dll", EntryPoint = "WinVerifyTrust")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    internal static partial int WinVerifyTrust(
+        nint window,
+        ref Guid actionId,
+        ref WinTrustData trustData);
+
+    [LibraryImport(
+        "wintrust.dll",
+        EntryPoint = "CryptCATAdminAcquireContext2",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CryptCATAdminAcquireContext2(
+        out nint catalogAdmin,
+        ref Guid subsystem,
+        string? hashAlgorithm,
+        nint strongHashPolicy,
+        uint flags);
+
+    [LibraryImport(
+        "wintrust.dll",
+        EntryPoint = "CryptCATAdminCalcHashFromFileHandle2",
+        SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CryptCATAdminCalcHashFromFileHandle2(
+        nint catalogAdmin,
+        SafeFileHandle file,
+        ref uint hashSize,
+        [Out] byte[]? hash,
+        uint flags);
+
+    [LibraryImport(
+        "wintrust.dll",
+        EntryPoint = "CryptCATAdminReleaseContext",
+        SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CryptCATAdminReleaseContext(
+        nint catalogAdmin,
+        uint flags);
 }
 
 internal static partial class WindowsDriverNativeMethods
