@@ -13,6 +13,145 @@ namespace EMKE.Integration.Tests;
 public sealed class TranslationRuntimeIntegrationTests
 {
     [TestMethod]
+    public async Task ExplicitOutboundBypassRendersNonZeroAdapterProbe()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        RuntimeSettings bypassSettings = new(
+            LanguageCode.Zh,
+            LanguageCode.En,
+            "gpt-realtime-translate",
+            inboundBypass: false,
+            outboundBypass: true);
+        await using TranslationRuntime runtime =
+            CreateRuntime(server, audio, bypassSettings);
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        byte[] probe = [7, 6, 5, 4, 3, 2, 1, 9];
+
+        audio.RenderVirtualMicrophone(probe);
+
+        Assert.AreEqual(
+            OutboundRoute.OriginalBypass,
+            runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreEqual(
+            OutboundRoute.OriginalBypass,
+            audio.CurrentOutboundRoute);
+        Assert.HasCount(probe.Length, audio.VirtualMicrophoneOutput);
+        CollectionAssert.AreEqual(probe, audio.VirtualMicrophoneOutput);
+        Assert.IsTrue(
+            audio.VirtualMicrophoneOutput.Any(static sample => sample != 0));
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+    }
+
+    [TestMethod]
+    public async Task TestAudioEngineOutboundQueueReportsActualFullCondition()
+    {
+        TestAudioEngine audio = new();
+        await audio.EnqueueOutboundTranslationAsync(
+            new byte[] { 1, 0 },
+            CancellationToken.None).ConfigureAwait(false);
+
+        RuntimeOperationException failure =
+            await Assert.ThrowsExactlyAsync<RuntimeOperationException>(
+                () => audio.EnqueueOutboundTranslationAsync(
+                    new byte[] { 2, 0 },
+                    CancellationToken.None).AsTask());
+
+        Assert.AreEqual(ErrorCategory.Backpressure, failure.Error.Category);
+        Assert.AreEqual("testAudioEngine.outboundQueueFull", failure.Error.Code);
+    }
+
+    [TestMethod]
+    public void TestAudioEngineEventQueueRejectsWritePastCapacity()
+    {
+        TestAudioEngine audio = new();
+        for (ulong sequence = 1; sequence <= 8; sequence++)
+        {
+#pragma warning disable CA2000 // Ownership transfers to the bounded test event queue.
+            audio.EmitControl(AudioEngineEvent.CreateControl(
+                AudioEngineEventKind.Backpressure,
+                AudioEngineStatus.QueueFull,
+                AudioEngineRoute.Translated,
+                sequence));
+#pragma warning restore CA2000
+        }
+
+#pragma warning disable CA2000 // EmitControl consumes the rejected event.
+        AudioEngineEvent overflow = AudioEngineEvent.CreateControl(
+            AudioEngineEventKind.Backpressure,
+            AudioEngineStatus.QueueFull,
+            AudioEngineRoute.Translated,
+            sequence: 9);
+#pragma warning restore CA2000
+        InvalidOperationException failure =
+            Assert.ThrowsExactly<InvalidOperationException>(
+                () => audio.EmitControl(overflow));
+
+        Assert.AreEqual(
+            "The test audio event queue is full.",
+            failure.Message);
+    }
+
+    [TestMethod]
+    public async Task MockCaptureQueueAppliesBoundedBackpressure()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        byte[] first = Enumerable.Repeat((byte)1, 9_600).ToArray();
+        byte[] second = Enumerable.Repeat((byte)2, 9_600).ToArray();
+
+        audio.EmitCaptured(AudioDirection.Outbound, first);
+        audio.EmitCaptured(AudioDirection.Outbound, second);
+        await WaitUntilAsync(
+            () => server.ClientAudioBackpressureCount >= 1)
+            .ConfigureAwait(false);
+
+        Assert.IsGreaterThanOrEqualTo(
+            1,
+            server.ClientAudioBackpressureCount);
+        MockClientAudioMessage firstObserved =
+            await server.WaitForClientAudioAsync(LanguageCode.En)
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        MockClientAudioMessage secondObserved =
+            await server.WaitForClientAudioAsync(LanguageCode.En)
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        CollectionAssert.AreEqual(first, firstObserved.Pcm16);
+        CollectionAssert.AreEqual(second, secondObserved.Pcm16);
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+    }
+
+    [TestMethod]
+    public async Task ReconnectWindowWaiterReturnsReplacementConnection()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        await using TranslationRuntime runtime = CreateRuntime(
+            server,
+            new TestAudioEngine());
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        await server.DisconnectAsync(LanguageCode.En).ConfigureAwait(false);
+        Task sendDuringReconnect = server.SendTranscriptAsync(
+            LanguageCode.En,
+            "replacement-connection-caption");
+        await sendDuringReconnect.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.TranslatedCaption
+                == "replacement-connection-caption").ConfigureAwait(false);
+
+        Assert.IsGreaterThanOrEqualTo(3, server.TotalConnectionCount);
+        Assert.AreEqual(
+            "replacement-connection-caption",
+            runtime.CurrentSnapshot.TranslatedCaption);
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+    }
+
+    [TestMethod]
     public async Task TwoLanguageStartUsesTwoSessionsAndReachesRunning()
     {
         await using MockTranslationServer server =
@@ -55,7 +194,7 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
-    public async Task InputPcmUsesOne9600ByteTextFrameJsonEvent()
+    public async Task InputPcmUsesOne9600ByteTextJsonMessage()
     {
         await using MockTranslationServer server =
             await MockTranslationServer.StartAsync().ConfigureAwait(false);
@@ -67,7 +206,7 @@ public sealed class TranslationRuntimeIntegrationTests
             .ToArray();
 
         audio.EmitCaptured(AudioDirection.Outbound, pcm16);
-        MockClientAudioFrame observed =
+        MockClientAudioMessage observed =
             await server.WaitForClientAudioAsync(LanguageCode.En)
                 .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
 
@@ -344,7 +483,8 @@ public sealed class TranslationRuntimeIntegrationTests
         MockTranslationServer server,
         TestAudioEngine audio,
         RuntimeSettings? settings = null,
-        ITranslationSessionFactory? sessionFactory = null)
+        ITranslationSessionFactory? sessionFactory = null,
+        IClock? clock = null)
     {
         TranslationRuntimeDependencies dependencies = new(
             new PassingWindowsBuildGate(),
@@ -355,7 +495,7 @@ public sealed class TranslationRuntimeIntegrationTests
             audio,
             sessionFactory ?? new LoopbackSessionFactory(server),
             new FixedLanguageClassifier(),
-            new SystemClock(),
+            clock ?? new SystemClock(),
             new NullRuntimeLog());
         return new TranslationRuntime(dependencies);
     }

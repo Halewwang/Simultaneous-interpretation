@@ -1,13 +1,32 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using EMKE.Application;
 using EMKE.Core;
 
 namespace EMKE.Integration.Tests;
 
 internal sealed class TestAudioEngine : ITranslationAudioEngine
 {
+    private const int EventCapacity = 8;
+    private const int OutboundTranslationCapacity = 1;
     private readonly Channel<AudioEngineEvent> _events =
-        Channel.CreateUnbounded<AudioEngineEvent>();
+        Channel.CreateBounded<AudioEngineEvent>(
+            new BoundedChannelOptions(EventCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false,
+            });
+    private readonly Channel<byte[]> _outboundTranslationQueue =
+        Channel.CreateBounded<byte[]>(
+            new BoundedChannelOptions(OutboundTranslationCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false,
+            });
     private readonly ConcurrentQueue<byte[]> _inboundTranslations = new();
     private readonly ConcurrentQueue<byte[]> _outboundTranslations = new();
     private readonly ConcurrentQueue<byte[]> _virtualMicrophone = new();
@@ -24,8 +43,6 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
 
     public OutboundRoute CurrentOutboundRoute =>
         (OutboundRoute)Volatile.Read(ref _outboundRoute);
-
-    public Exception? OutboundEnqueueException { get; set; }
 
     public byte[] VirtualMicrophoneOutput =>
         _virtualMicrophone.SelectMany(static chunk => chunk).ToArray();
@@ -50,7 +67,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         {
             audio.Dispose();
             throw new InvalidOperationException(
-                "The test audio event queue is closed.");
+                "The test audio event queue is full.");
         }
     }
 
@@ -61,7 +78,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         {
             audio.Dispose();
             throw new InvalidOperationException(
-                "The test audio event queue is closed.");
+                "The test audio event queue is full.");
         }
     }
 
@@ -111,15 +128,20 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         ReadOnlyMemory<byte> pcm16,
         CancellationToken cancellationToken)
     {
-        if (OutboundEnqueueException is not null)
+        byte[] copy = pcm16.ToArray();
+        if (!_outboundTranslationQueue.Writer.TryWrite(copy))
         {
-            throw OutboundEnqueueException;
+            throw new RuntimeOperationException(new RuntimeError(
+                ErrorCategory.Backpressure,
+                "testAudioEngine.outboundQueueFull",
+                new Dictionary<string, string>(),
+                RecoveryAction.Retry));
         }
 
-        _outboundTranslations.Enqueue(pcm16.ToArray());
+        _outboundTranslations.Enqueue(copy);
         if (CurrentOutboundRoute == OutboundRoute.Translated)
         {
-            _virtualMicrophone.Enqueue(pcm16.ToArray());
+            _virtualMicrophone.Enqueue(copy);
         }
 
         return ValueTask.CompletedTask;

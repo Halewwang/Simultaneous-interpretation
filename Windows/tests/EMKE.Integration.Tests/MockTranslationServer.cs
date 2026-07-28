@@ -31,7 +31,7 @@ public enum MockTranslationScenario
     LateDeltas,
 }
 
-internal sealed record MockClientAudioFrame(
+internal sealed record MockClientAudioMessage(
     LanguageCode TargetLanguage,
     WebSocketMessageType MessageType,
     byte[] Pcm16);
@@ -42,7 +42,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     private readonly ConcurrentDictionary<LanguageCode, Connection> _connections = new();
     private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource<Connection>>
         _connectionWaiters = new();
-    private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioFrame>>
+    private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioMessage>>
         _clientAudio = new();
     private readonly TaskCompletionSource _closeRequestReceived =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -51,6 +51,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     private Uri? _baseAddress;
     private int _fragmentedTextFrameCount;
     private int _totalConnectionCount;
+    private int _clientAudioBackpressureCount;
 
     private MockTranslationServer(
         WebApplication application,
@@ -70,17 +71,20 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     public int TotalConnectionCount =>
         Volatile.Read(ref _totalConnectionCount);
 
+    public int ClientAudioBackpressureCount =>
+        Volatile.Read(ref _clientAudioBackpressureCount);
+
     public void ReleaseDelayedClose()
     {
         _delayedCloseRelease.TrySetResult();
     }
 
-    public async Task<MockClientAudioFrame> WaitForClientAudioAsync(
+    public async Task<MockClientAudioMessage> WaitForClientAudioAsync(
         LanguageCode targetLanguage)
     {
-        Channel<MockClientAudioFrame> channel = _clientAudio.GetOrAdd(
+        Channel<MockClientAudioMessage> channel = _clientAudio.GetOrAdd(
             targetLanguage,
-            static _ => Channel.CreateUnbounded<MockClientAudioFrame>());
+            static _ => CreateClientAudioChannel());
         return await channel.Reader.ReadAsync().ConfigureAwait(false);
     }
 
@@ -236,6 +240,44 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         return waiter.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    private static Channel<MockClientAudioMessage> CreateClientAudioChannel()
+    {
+        return Channel.CreateBounded<MockClientAudioMessage>(
+            new BoundedChannelOptions(1)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false,
+            });
+    }
+
+    private void ResetConnectionWaiter(
+        LanguageCode targetLanguage,
+        Connection connection)
+    {
+        while (_connectionWaiters.TryGetValue(
+            targetLanguage,
+            out TaskCompletionSource<Connection>? waiter))
+        {
+            if (!waiter.Task.IsCompletedSuccessfully
+                || !ReferenceEquals(waiter.Task.Result, connection))
+            {
+                return;
+            }
+
+            TaskCompletionSource<Connection> replacement = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_connectionWaiters.TryUpdate(
+                targetLanguage,
+                replacement,
+                waiter))
+            {
+                return;
+            }
+        }
+    }
+
     private async Task HandleAsync(HttpContext context)
     {
         if (Scenario == MockTranslationScenario.Unauthorized)
@@ -330,17 +372,23 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                         document.RootElement
                             .GetProperty("audio")
                             .GetString()!);
-                    Channel<MockClientAudioFrame> audio =
+                    Channel<MockClientAudioMessage> audio =
                         _clientAudio.GetOrAdd(
                             targetLanguage,
-                            static _ =>
-                                Channel.CreateUnbounded<MockClientAudioFrame>());
-                    await audio.Writer.WriteAsync(
-                        new MockClientAudioFrame(
-                            targetLanguage,
-                            WebSocketMessageType.Text,
-                            pcm16),
-                        context.RequestAborted).ConfigureAwait(false);
+                            static _ => CreateClientAudioChannel());
+                    MockClientAudioMessage clientMessage = new(
+                        targetLanguage,
+                        WebSocketMessageType.Text,
+                        pcm16);
+                    if (!audio.Writer.TryWrite(clientMessage))
+                    {
+                        Interlocked.Increment(
+                            ref _clientAudioBackpressureCount);
+                        await audio.Writer.WriteAsync(
+                            clientMessage,
+                            context.RequestAborted).ConfigureAwait(false);
+                    }
+
                     continue;
                 }
 
@@ -390,6 +438,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         }
         finally
         {
+            ResetConnectionWaiter(targetLanguage, connection);
             _connections.TryRemove(
                 new KeyValuePair<LanguageCode, Connection>(
                     targetLanguage,
