@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon />
+    <StartupObject />
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../EMKE.Application/EMKE.Application.csproj" />
+    <ProjectReference Include="../EMKE.Core/EMKE.Core.csproj" />
+    <ProjectReference Include="../EMKE.Platform/EMKE.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EMKE.Windows.App.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference
+      Update="Microsoft.WindowsDesktop.App.WPF"
+      PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
