@@ -17,14 +17,14 @@ public sealed class NativeAudioRealDllTests
             "real-dll",
             StringComparison.Ordinal))
         {
-            Assert.Inconclusive(
+            Assert.Fail(
                 "The real-DLL test requires an isolated real-dll test process.");
         }
 
         if (!OperatingSystem.IsWindows()
             || RuntimeInformation.ProcessArchitecture != Architecture.X64)
         {
-            Assert.Inconclusive("The real EMKE.NativeAudio DLL ABI check runs only on Windows x64.");
+            Assert.Fail("The real EMKE.NativeAudio DLL ABI check runs only on Windows x64.");
         }
 
         PInvokeNativeAudioApi native = PInvokeNativeAudioApi.Instance;

@@ -3,6 +3,8 @@
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <VSTestTestCaseFilter
+      Condition="'$(VSTestTestCaseFilter)' == ''">TestCategory!=NativeAudioNativeFake&amp;TestCategory!=NativeAudioRealDll</VSTestTestCaseFilter>
   </PropertyGroup>
 
   <ItemGroup>

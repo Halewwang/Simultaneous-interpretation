@@ -323,22 +323,26 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Audio")]
-    public void AudioPcmConversionFixtureAwaitsOwnedNativeAdapter()
+    [TestCategory("NativeAudioOwnedAdapter")]
+    public async Task AudioPcmConversionFixtureUsesOwnedNativeAdapter()
     {
         using JsonDocument fixture = LoadFixture("Audio/pcm-conversion.json");
-        Assert.AreEqual("audio.pcm-conversion.v1", fixture.RootElement.GetProperty("fixtureId").GetString());
-        Assert.Inconclusive(
-            "Awaiting native-audio PCM conversion fixture adapter validation (Runtime Task 7).");
+        await NativePcmFixtureAdapter.ValidateAsync(fixture.RootElement)
+            .ConfigureAwait(false);
     }
 
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Settings")]
-    public void SettingsFixturesAwaitOwnedCompatibilityAdapter()
+    public void SettingsFixturesUseOwnedCompatibilityAdapter()
     {
-        AssertFixtureCategoryIsReadable("settings");
-        Assert.Inconclusive(
-            "Awaiting Application/Platform settings migration and compatibility adapter validation.");
+        using JsonDocument compatibility =
+            LoadFixture("Settings/compatibility-gate.json");
+        using JsonDocument migration =
+            LoadFixture("Settings/v1-migration.json");
+
+        SettingsFixtureAdapter.ValidateCompatibility(compatibility.RootElement);
+        SettingsFixtureAdapter.ValidateMigration(migration.RootElement);
     }
 
     internal static FixtureInventory LoadFixtureInventory()

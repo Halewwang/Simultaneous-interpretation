@@ -30,14 +30,14 @@ public sealed class NativeAudioNativeFakeTests
             "native-fake",
             StringComparison.Ordinal))
         {
-            Assert.Inconclusive(
+            Assert.Fail(
                 "The native-fake tests require an isolated native-fake test process.");
         }
 
         if (RuntimeInformation.ProcessArchitecture != Architecture.X64
             || (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS()))
         {
-            Assert.Inconclusive(
+            Assert.Fail(
                 "The native-fake P/Invoke tests require a Windows or macOS x64 process.");
         }
 

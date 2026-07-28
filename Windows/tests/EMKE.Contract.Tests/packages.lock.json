@@ -113,8 +113,23 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
+      "emke.application": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Core": "[1.0.0, )",
+          "EMKE.Realtime": "[1.0.0, )",
+          "EMKE.Routing": "[1.0.0, )"
+        }
+      },
       "emke.core": {
         "type": "Project"
+      },
+      "emke.platform": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Application": "[1.0.0, )",
+          "EMKE.Core": "[1.0.0, )"
+        }
       },
       "emke.realtime": {
         "type": "Project",

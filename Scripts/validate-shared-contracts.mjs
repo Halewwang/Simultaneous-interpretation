@@ -115,6 +115,9 @@ const expectedFixtureCases = new Map([
 ]);
 
 const expectedFixturePaths = [...expectedFixtureCases.keys()];
+const expectedAuxiliaryFixturePaths = [
+  "Routing/LanguageCorpus/language-corpus-v1.json",
+];
 
 const expectedFixtureCaseJson = new Map([
   ["Realtime/text-frame-handshake.json", String.raw`[{"name":"normal handshake sends session update as text and connects","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"connected","inboundRoute":"translated"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]},{"name":"client JSON session update sent as binary is protocol failure","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"failed","inboundRoute":"originalFailOpen","errorCategory":"protocol"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"binary","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"protocolFailure"}]},{"name":"session updated before session created is protocol failure","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"failed","inboundRoute":"originalFailOpen","errorCategory":"protocol"},"steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"protocolFailure"}]},{"name":"same language uses local bypass with no outbound socket","configuration":{"nativeLanguage":"zh","meetingLanguage":"zh"},"expected":{"inboundSocketCount":1,"outboundSocketCount":0,"inboundChannelState":"connected","inboundRoute":"translated","outboundChannelState":"bypassed","outboundRoute":"originalBypass"},"steps":[{"direction":"local","eventType":"language.match","localInput":{"nativeLanguage":"zh","meetingLanguage":"zh"},"expectedState":"localBypass"}]},{"name":"two language setup creates two independent sockets","configuration":{"nativeLanguage":"zh","meetingLanguage":"en"},"expected":{"inboundSocketCount":1,"outboundSocketCount":1,"inboundChannelState":"connected","outboundChannelState":"connected","inboundRoute":"translated","outboundRoute":"translated"},"sockets":[{"socketId":"inbound","steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"zh"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]},{"socketId":"outbound","steps":[{"direction":"serverToClient","frameType":"text","eventType":"session.created","payloadEncoding":"json","payload":{"type":"session.created"},"expectedState":"created"},{"direction":"clientToServer","frameType":"text","eventType":"session.update","payloadEncoding":"json","payload":{"type":"session.update","target_language":"en"},"expectedState":"updating"},{"direction":"serverToClient","frameType":"text","eventType":"session.updated","payloadEncoding":"json","payload":{"type":"session.updated"},"expectedState":"connected"}]}]}]`],
@@ -170,12 +173,12 @@ function isSafeRelativePath(relativePath) {
   return relativePath.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 
-function collectJsonPaths(directory, excludedFile, label) {
+function collectJsonPaths(directory, excludedFiles, label) {
   try {
     return fs.readdirSync(directory, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.name.endsWith(".json"))
       .map((entry) => path.relative(directory, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"))
-      .filter((relativePath) => relativePath !== excludedFile)
+      .filter((relativePath) => !excludedFiles.includes(relativePath))
       .sort();
   } catch {
     fail(`${label}: inventory unreadable`);
@@ -183,7 +186,7 @@ function collectJsonPaths(directory, excludedFile, label) {
   }
 }
 
-function validateInventory(name, listedPaths, directory, excludedFile, relativeDirectory) {
+function validateInventory(name, listedPaths, directory, excludedFiles, relativeDirectory) {
   if (!Array.isArray(listedPaths)) {
     fail(`${name} manifest: inventory must be an array`);
     return [];
@@ -200,7 +203,7 @@ function validateInventory(name, listedPaths, directory, excludedFile, relativeD
   }
 
   const sortedListed = [...listed].sort();
-  const actual = collectJsonPaths(directory, excludedFile, `${relativeDirectory}`);
+  const actual = collectJsonPaths(directory, excludedFiles, `${relativeDirectory}`);
   const actualSet = new Set(actual);
   for (const relativePath of sortedListed) {
     const contractPath = `${relativeDirectory}/${relativePath}`;
@@ -898,8 +901,24 @@ if (fixtureManifest !== undefined && manifest !== undefined && fixtureManifest.c
   fail("Shared/TestVectors/fixture-manifest.json: contract version differs from contract manifest");
 }
 
-const schemaPaths = validateInventory("schema", manifest?.schemas, contractsDirectory, "contract-manifest.json", "Shared/Contracts");
-const fixturePaths = validateInventory("fixture", fixtureManifest?.fixtures, fixturesDirectory, "fixture-manifest.json", "Shared/TestVectors");
+const schemaPaths = validateInventory("schema", manifest?.schemas, contractsDirectory, ["contract-manifest.json"], "Shared/Contracts");
+const fixturePaths = validateInventory(
+  "fixture",
+  fixtureManifest?.fixtures,
+  fixturesDirectory,
+  ["fixture-manifest.json", ...expectedAuxiliaryFixturePaths],
+  "Shared/TestVectors",
+);
+
+for (const auxiliaryPath of expectedAuxiliaryFixturePaths) {
+  const relativePath = `Shared/TestVectors/${auxiliaryPath}`;
+  const auxiliary = readObjectJson(relativePath);
+  if (auxiliary?.contractVersion !== 1) fail(`${relativePath}: contractVersion must be 1`);
+  if (auxiliary?.corpusId !== "routing.language-corpus.v1") fail(`${relativePath}: corpusId drifted`);
+  if (!Array.isArray(auxiliary?.cases) || auxiliary.cases.length === 0) {
+    fail(`${relativePath}: cases must be a non-empty array`);
+  }
+}
 
 const schemaDocuments = new Map();
 for (const relativePath of schemaPaths) {
