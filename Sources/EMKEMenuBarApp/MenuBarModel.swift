@@ -370,6 +370,8 @@ final class MenuBarModel: ObservableObject {
     private var driverAvailable = false
     private var hasStoredAPIKey = false
     private var coordinatorLifecycleRevision: UInt = 0
+    private var coordinatorObservationGeneration: UInt = 0
+    private var startOperationGeneration: UInt = 0
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
     private var audioInputDiagnosticGeneration: UInt = 0
@@ -825,9 +827,16 @@ final class MenuBarModel: ObservableObject {
         guard canStart,
               let selectedInputUID,
               let selectedOutputUID else { return }
+        startOperationGeneration &+= 1
+        let startGeneration = startOperationGeneration
         isStarting = true
-        defer { isStarting = false }
+        defer {
+            if startGeneration == startOperationGeneration {
+                isStarting = false
+            }
+        }
         configurationErrorValue = nil
+        var observationGeneration: UInt?
         do {
             try await requireMicrophonePermission()
             try await persistDraftKeyIfNeeded()
@@ -840,6 +849,7 @@ final class MenuBarModel: ObservableObject {
                 physicalInputUID: selectedInputUID,
                 physicalOutputUID: selectedOutputUID
             )
+            observationGeneration = startObservingCoordinator()
             try await coordinator.start(
                 configuration: TranslationCoordinatorConfiguration(
                     apiConfiguration: apiConfiguration,
@@ -850,14 +860,20 @@ final class MenuBarModel: ObservableObject {
                     apiKey: apiKey
                 )
             )
+            guard startGeneration == startOperationGeneration,
+                  observationGeneration == coordinatorObservationGeneration
+            else { return }
             coordinatorState = await coordinator.currentState()
             if coordinatorState.isRunning {
                 translationStartedAt = Date()
             } else {
                 resetRuntimePresentation()
             }
-            startObservingCoordinator()
         } catch {
+            guard startGeneration == startOperationGeneration else { return }
+            if observationGeneration == coordinatorObservationGeneration {
+                stopObservingCoordinator()
+            }
             configurationErrorValue = Self.configurationMessage(for: error)
             coordinatorState = TranslationCoordinatorState()
             resetRuntimePresentation()
@@ -865,6 +881,8 @@ final class MenuBarModel: ObservableObject {
     }
 
     func stop() async {
+        startOperationGeneration &+= 1
+        isStarting = false
         isStopping = true
         defer { isStopping = false }
         await coordinator.stop()
@@ -1208,19 +1226,25 @@ final class MenuBarModel: ObservableObject {
         interfaceLanguage = settings.interfaceLanguage
     }
 
-    private func startObservingCoordinator() {
-        eventTask?.cancel()
+    @discardableResult
+    private func startObservingCoordinator() -> UInt {
+        stopObservingCoordinator()
+        coordinatorObservationGeneration &+= 1
+        let observationGeneration = coordinatorObservationGeneration
         eventTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 let event = await coordinator.nextEvent()
-                if Task.isCancelled { return }
+                guard !Task.isCancelled,
+                      observationGeneration
+                        == coordinatorObservationGeneration
+                else { return }
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
                     if !state.hasActivePresentation(
                         translationStartedAt: translationStartedAt
-                    ) {
+                    ), !isStarting, !state.audioEngineStarted {
                         finishCoordinatorSession()
                         return
                     }
@@ -1237,12 +1261,18 @@ final class MenuBarModel: ObservableObject {
                 }
             }
         }
+        return observationGeneration
     }
 
-    private func finishCoordinatorSession() {
+    private func stopObservingCoordinator() {
+        coordinatorObservationGeneration &+= 1
         let task = eventTask
         eventTask = nil
         task?.cancel()
+    }
+
+    private func finishCoordinatorSession() {
+        stopObservingCoordinator()
         coordinatorState = TranslationCoordinatorState()
         resetRuntimePresentation()
     }

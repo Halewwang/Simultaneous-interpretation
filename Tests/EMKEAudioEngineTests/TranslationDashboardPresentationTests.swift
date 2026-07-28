@@ -223,6 +223,39 @@ func stoppingDashboardDoesNotContinueToPresentListenOrSpeakReadiness() {
 }
 
 @Test
+func runningChannelAccessibilityUsesTheRenderedCapabilityCopy() {
+    let chineseCopy = AppCopy(language: .zhHans)
+    let englishCopy = AppCopy(language: .english)
+    let chinese = DashboardFixture.running.makePresentation(copy: chineseCopy)
+    let english = DashboardFixture.running.makePresentation(copy: englishCopy)
+
+    #expect(
+        chineseCopy.channelStatus(
+            title: chineseCopy.text(.heardByMe),
+            status: chinese.inbound.status
+        ) == "我听到状态：可以收听"
+    )
+    #expect(
+        chineseCopy.channelStatus(
+            title: chineseCopy.text(.heardByOther),
+            status: chinese.outbound.status
+        ) == "对方听到状态：可以发言"
+    )
+    #expect(
+        englishCopy.channelStatus(
+            title: englishCopy.text(.heardByMe),
+            status: english.inbound.status
+        ) == "I hear status: Can listen"
+    )
+    #expect(
+        englishCopy.channelStatus(
+            title: englishCopy.text(.heardByOther),
+            status: english.outbound.status
+        ) == "They hear status: Can speak"
+    )
+}
+
+@Test
 func runningDashboardUsesCombinedAudioLevel() {
     let value = DashboardFixture.running.makePresentation(
         inboundLevel: 0.35,

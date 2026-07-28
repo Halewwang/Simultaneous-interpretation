@@ -60,6 +60,22 @@ func runningCapabilitiesSeparateEngineListenAndSpeakReadiness() {
 
     #expect(!TranslationCoordinatorState().canListen)
     #expect(!TranslationCoordinatorState().canSpeak)
+
+    let engineUnavailable = TranslationCoordinatorState(
+        isRunning: true,
+        inbound: .active,
+        outbound: .active
+    )
+    #expect(!engineUnavailable.canListen)
+    #expect(!engineUnavailable.canSpeak)
+
+    let stoppedChannels = TranslationCoordinatorState(
+        audioEngineStarted: true,
+        inbound: .stopped,
+        outbound: .stopped
+    )
+    #expect(!stoppedChannels.canListen)
+    #expect(!stoppedChannels.canSpeak)
 }
 
 @Test
