@@ -2,8 +2,12 @@
 
 ## Evidence identity
 
+- Tested Task 10 runtime CI implementation source commit:
+  `775b84ff1349a217208183e32b94a12b3e13ab58`
 - Tested Task 9 implementation source commit:
   `a478c5985bc0c3b269b11f6e6d7bf65b606e5232`
+- Task 9 evidence commit and Task 10 implementation baseline:
+  `63eda23f8be04722c53c94d33d9d72d71ab04901`
 - Review baseline source commit: `90dac629eefc6b27b0346bf0561cb6ce7b2718a6`
 - Required transport-close fix: `78713339c36767016aacaa0f0d367386450420ef`
 - Target: Windows 11 25H2+ x64, managed TFM `net10.0-windows10.0.26100.0`
@@ -29,16 +33,49 @@ Fresh Release solution results on 2026-07-28:
 | Core unit | 50 | 0 | 0 |
 | Realtime unit | 96 | 0 | 0 |
 | Routing unit | 50 | 0 | 0 |
-| Contract | 17 | 2 | 0 |
-| Integration | 44 | 8 | 0 |
-| Managed solution total | 313 | 10 | 0 |
+| Contract | 18 | 0 | 0 |
+| Integration | 44 | 0 | 0 |
+| Managed solution total | 314 | 0 | 0 |
 
-The 10 skips are the two pre-existing owned-adapter contract gaps and eight
-Windows native-DLL/production-P/Invoke checks that cannot execute on this
-macOS host. Release solution build completed with 0 warnings and 0 errors.
+Release solution build completed with 0 warnings and 0 errors. The contract
+suite now executes the production settings migration and driver-compatibility
+policies against both canonical settings fixtures. The default solution gate
+does not discover the nine Windows-isolated tests: one owned native PCM
+contract adapter, seven native-fake P/Invoke tests, and one real-DLL ABI test.
+The Windows workflow runs those categories explicitly after building native
+artifacts.
+
+The shared contract validator passed with 3 schemas and 8 canonical fixtures.
+The routing language corpus is separately parsed and validated as a named
+auxiliary vector rather than being misclassified as a ninth canonical fixture.
+The incomplete-source scan over `Windows/src` and `Windows/tests` produced no
+matches.
 
 All server-to-client JSON events are WebSocket Text messages. Binary is
 emitted only by the explicit protocol negative case.
+
+## Task 10 CI gate
+
+`.github/workflows/windows-runtime.yml` is independent of macOS release and
+Windows packaging workflows. It targets the Windows x64 hosted runner with
+.NET 10 and Node 24, validates the shared contract, performs locked restore,
+builds and runs native CTest, builds and tests the Release solution, runs the
+owned native PCM adapter, then runs native-fake and real-DLL managed tests in
+separate processes. Every managed test command writes TRX, and the workflow
+uploads the complete TRX set even when a preceding gate fails.
+
+The isolated launcher requires Windows x64 before resolving artifacts. Its
+behavior test observed that a non-Windows environment fails and that the
+Windows x64 path launches exactly two filtered processes with exact 7-test and
+1-test TRX requirements. On this macOS host, explicitly selecting the native
+PCM contract category failed with the required Windows x64 diagnostic; it did
+not report a pass or skip.
+
+The workflow YAML and its PowerShell run block passed local static parsing.
+The hosted Windows workflow itself, native CTest, owned native PCM adapter,
+native-fake DLL, and real production DLL were not executed locally and remain
+pending remote CI observation for source commit
+`775b84ff1349a217208183e32b94a12b3e13ab58`.
 
 ## Scenario coverage
 
