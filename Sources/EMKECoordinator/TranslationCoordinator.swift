@@ -472,7 +472,7 @@ public actor TranslationCoordinator {
             }
 
             let frames = try inboundBatcher.append(pcm16)
-            if let inboundSession {
+            if state.inbound == .active, let inboundSession {
                 for frame in frames {
                     do {
                         try await inboundSession.appendAudio(frame)
@@ -494,7 +494,7 @@ public actor TranslationCoordinator {
     private func handleOutboundAudio(_ pcm16: Data) async {
         do {
             let frames = try outboundBatcher.append(pcm16)
-            if let outboundSession {
+            if state.outbound == .active, let outboundSession {
                 for frame in frames {
                     do {
                         try await outboundSession.appendAudio(frame)
@@ -521,6 +521,7 @@ public actor TranslationCoordinator {
             if inboundBuffer.currentRoute == .undecided {
                 scheduleInboundDeadline()
             }
+            extendInboundFinishWindowIfDraining()
         case .inputTranscript(let delta):
             appendText(
                 delta.text,
@@ -535,6 +536,7 @@ public actor TranslationCoordinator {
                     )
                 )
                 cancelDeadlineIfResolved()
+                extendInboundFinishWindowIfDraining()
             }
             publishState()
         case .outputTranscript(let delta):
@@ -542,6 +544,7 @@ public actor TranslationCoordinator {
                 delta.text,
                 to: &state.subtitles.inboundTranslation
             )
+            extendInboundFinishWindowIfDraining()
             publishState()
         case .closed:
             if !isStopping {
@@ -644,6 +647,11 @@ public actor TranslationCoordinator {
             guard !Task.isCancelled, let self else { return }
             await self.finishInboundUtterance()
         }
+    }
+
+    private func extendInboundFinishWindowIfDraining() {
+        guard inboundUtteranceActive, !inboundVAD.isSpeaking else { return }
+        scheduleInboundFinish()
     }
 
     private func finishInboundUtterance() async {

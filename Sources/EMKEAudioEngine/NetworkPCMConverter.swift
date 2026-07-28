@@ -86,6 +86,69 @@ struct StreamingStereoResampler: Sendable {
     }
 }
 
+struct StreamingMonoInterpolator2x: Sendable {
+    private static let phases: (even: [Float], odd: [Float]) = {
+        let tapCount = 127
+        let midpoint = Double(tapCount - 1) * 0.5
+        let cutoff = 0.25
+        var taps = (0..<tapCount).map { index -> Double in
+            let distance = Double(index) - midpoint
+            let sinc = distance == 0
+                ? 2 * cutoff
+                : sin(2 * Double.pi * cutoff * distance)
+                    / (Double.pi * distance)
+            let window = 0.42
+                - 0.5 * cos(
+                    2 * Double.pi * Double(index) / Double(tapCount - 1)
+                )
+                + 0.08 * cos(
+                    4 * Double.pi * Double(index) / Double(tapCount - 1)
+                )
+            return sinc * window
+        }
+        let gain = 2 / taps.reduce(0, +)
+        taps = taps.map { $0 * gain }
+        return (
+            stride(from: 0, to: tapCount, by: 2).map {
+                Float(taps[$0])
+            },
+            stride(from: 1, to: tapCount, by: 2).map {
+                Float(taps[$0])
+            }
+        )
+    }()
+
+    private var history = Array(
+        repeating: Float.zero,
+        count: phases.even.count
+    )
+    private var newestIndex = phases.even.count - 1
+
+    mutating func append(_ samples: [Float]) -> [Float] {
+        guard !samples.isEmpty else { return [] }
+        var output: [Float] = []
+        output.reserveCapacity(samples.count * 2)
+
+        for sample in samples {
+            newestIndex = (newestIndex + 1) % history.count
+            history[newestIndex] = sample
+            output.append(filtered(with: Self.phases.even))
+            output.append(filtered(with: Self.phases.odd))
+        }
+        return output
+    }
+
+    private func filtered(with coefficients: [Float]) -> Float {
+        var result: Float = 0
+        for (delay, coefficient) in coefficients.enumerated() {
+            let index = (newestIndex - delay + history.count)
+                % history.count
+            result += coefficient * history[index]
+        }
+        return result
+    }
+}
+
 public struct NetworkPCMEncoder: Sendable {
     private var pendingMonoFrame: Float?
 
@@ -142,6 +205,8 @@ public struct NetworkPCMEncoder: Sendable {
 }
 
 public struct NetworkPCMDecoder: Sendable {
+    private var interpolator = StreamingMonoInterpolator2x()
+
     public init() {}
 
     public mutating func append24kMonoPCM16(
@@ -151,8 +216,8 @@ public struct NetworkPCMDecoder: Sendable {
             throw NetworkPCMError.misalignedPCM16
         }
 
-        var result: [Float] = []
-        result.reserveCapacity(pcm16.count * 2)
+        var sourceSamples: [Float] = []
+        sourceSamples.reserveCapacity(pcm16.count / 2)
         var index = pcm16.startIndex
         while index < pcm16.endIndex {
             let nextIndex = pcm16.index(after: index)
@@ -163,11 +228,16 @@ public struct NetworkPCMDecoder: Sendable {
                 ? -1
                 : Float(signed) / Float(Int16.max)
 
-            result.append(sample)
-            result.append(sample)
-            result.append(sample)
-            result.append(sample)
+            sourceSamples.append(sample)
             index = pcm16.index(after: nextIndex)
+        }
+        let interpolated = interpolator.append(sourceSamples)
+        var result: [Float] = []
+        result.reserveCapacity(interpolated.count * 2)
+        for sample in interpolated {
+            let clamped = max(-1, min(1, sample))
+            result.append(clamped)
+            result.append(clamped)
         }
         return result
     }

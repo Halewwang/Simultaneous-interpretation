@@ -143,19 +143,69 @@ import Testing
     #expect(decoded == Array(repeating: 0, count: 8))
 }
 
-@Test func decoderConvertsSignedPCM16AndDuplicatesBothChannels() throws {
+@Test func decoderProducesTwoStereoFramesPer24kSample() throws {
     var decoder = NetworkPCMDecoder()
 
     let decoded = try decoder.append24kMonoPCM16(
-        Data([0xff, 0x7f, 0x00, 0x80])
+        Data([0x00, 0x00, 0xff, 0x7f])
     )
 
-    #expect(decoded == [
-        1, 1,
-        1, 1,
-        -1, -1,
-        -1, -1,
-    ])
+    #expect(decoded.count == 8)
+    #expect(stride(from: 0, to: decoded.count, by: 2).allSatisfy {
+        decoded[$0] == decoded[$0 + 1]
+    })
+}
+
+@Test func decoderSuppressesThe24kUpsamplingImageBand() throws {
+    let sourceFrequency = 10_560.0
+    let imageFrequency = 24_000.0 - sourceFrequency
+    var pcm16 = Data()
+    for frame in 0..<12_000 {
+        let phase = 2 * Double.pi * sourceFrequency
+            * Double(frame) / 24_000
+        var sample = Int16(
+            (sin(phase) * 0.5 * Double(Int16.max)).rounded()
+        ).littleEndian
+        withUnsafeBytes(of: &sample) { pcm16.append(contentsOf: $0) }
+    }
+    var decoder = NetworkPCMDecoder()
+
+    let decoded = try decoder.append24kMonoPCM16(pcm16)
+    let desiredMagnitude = toneMagnitude(
+        decoded,
+        frequency: sourceFrequency,
+        sampleRate: 48_000
+    )
+    let imageMagnitude = toneMagnitude(
+        decoded,
+        frequency: imageFrequency,
+        sampleRate: 48_000
+    )
+
+    #expect(desiredMagnitude > 0)
+    #expect(imageMagnitude < desiredMagnitude * 0.01)
+}
+
+@Test func decoderConvertsSignedPCM16AndDuplicatesBothChannels() throws {
+    var positiveDecoder = NetworkPCMDecoder()
+    var negativeDecoder = NetworkPCMDecoder()
+    let positivePCM = Data(
+        (0..<160).flatMap { _ in [UInt8(0xff), UInt8(0x7f)] }
+    )
+    let negativePCM = Data(
+        (0..<160).flatMap { _ in [UInt8(0x00), UInt8(0x80)] }
+    )
+
+    let positive = try positiveDecoder.append24kMonoPCM16(positivePCM)
+    let negative = try negativeDecoder.append24kMonoPCM16(negativePCM)
+
+    #expect(positive.count == 640)
+    #expect(negative.count == 640)
+    #expect(positive.suffix(16).allSatisfy { abs($0 - 1) < 0.0001 })
+    #expect(negative.suffix(16).allSatisfy { abs($0 + 1) < 0.0001 })
+    #expect(stride(from: 0, to: positive.count, by: 2).allSatisfy {
+        positive[$0] == positive[$0 + 1]
+    })
 }
 
 @Test func decoderPreservesResultsAcrossChunkBoundaries() throws {
@@ -178,4 +228,29 @@ import Testing
     #expect(throws: NetworkPCMError.misalignedPCM16) {
         try decoder.append24kMonoPCM16(Data([0]))
     }
+}
+
+private func toneMagnitude(
+    _ interleavedStereo: [Float],
+    frequency: Double,
+    sampleRate: Double
+) -> Double {
+    let mono = stride(from: 0, to: interleavedStereo.count, by: 2)
+        .map { Double(interleavedStereo[$0]) }
+    let start = min(512, mono.count / 4)
+    let count = mono.count - start
+    guard count > 1 else { return 0 }
+
+    var real = 0.0
+    var imaginary = 0.0
+    for offset in 0..<count {
+        let window = 0.5 - 0.5 * cos(
+            2 * Double.pi * Double(offset) / Double(count - 1)
+        )
+        let phase = 2 * Double.pi * frequency
+            * Double(start + offset) / sampleRate
+        real += mono[start + offset] * window * cos(phase)
+        imaginary -= mono[start + offset] * window * sin(phase)
+    }
+    return hypot(real, imaginary)
 }
