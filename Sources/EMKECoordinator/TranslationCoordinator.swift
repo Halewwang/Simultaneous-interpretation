@@ -22,6 +22,10 @@ private final class EventWaiterCancellation: @unchecked Sendable {
             return waiterID
         }
     }
+
+    var cancelled: Bool {
+        lock.withLock { isCancelled }
+    }
 }
 
 public protocol TranslationAudioEngine: Sendable {
@@ -123,7 +127,13 @@ public struct TranslationCoordinatorConfiguration: Sendable {
 public actor TranslationCoordinator {
     private struct EventWaiter {
         let id: UInt
+        let cancellation: EventWaiterCancellation
         let continuation: CheckedContinuation<TranslationCoordinatorEvent, Never>
+    }
+
+    private struct QueuedEvent: Sendable {
+        let lifecycle: UInt64
+        let payload: TranslationCoordinatorEvent
     }
 
     private static let maximumQueuedEvents = 128
@@ -197,10 +207,11 @@ public actor TranslationCoordinator {
     private var inboundLegacyTranslationAvailable = false
     private var inboundRendererFailedOpen = false
     private var inboundUtteranceActive = false
+    private var inboundUtteranceWasSpeech = false
     private var routing = RoutingStateMachine()
     private var isStarting = false
     private var isStopping = false
-    private var events: [TranslationCoordinatorEvent] = []
+    private var events: [QueuedEvent] = []
     private var eventWaiters: [EventWaiter] = []
     private var nextEventWaiterID: UInt = 0
     private var nextEventReadBarrierForTesting: (@Sendable () async -> Void)?
@@ -239,6 +250,7 @@ public actor TranslationCoordinator {
         guard !state.isRunning, !isStarting, !isStopping else { return }
 
         let lifecycle = advanceLifecycleGeneration()
+        events.removeAll { $0.lifecycle != lifecycle }
         let startInboundEpoch = advanceEpoch(for: .inbound)
         let startOutboundEpoch = advanceEpoch(for: .outbound)
         isStarting = true
@@ -247,10 +259,7 @@ public actor TranslationCoordinator {
         state = TranslationCoordinatorState(
             isRunning: false,
             inbound: .connecting,
-            outbound: configuration.preferences.motherLanguage
-                == configuration.preferences.meetingOutputLanguage
-                ? .bypassed
-                : .connecting
+            outbound: .connecting
         )
         publishState()
 
@@ -427,7 +436,7 @@ public actor TranslationCoordinator {
         await nextEventReadBarrierForTesting?()
         guard !Task.isCancelled else { return .stopped }
         if !events.isEmpty {
-            return events.removeFirst()
+            return events.removeFirst().payload
         }
         let cancellation = EventWaiterCancellation()
         return await withTaskCancellationHandler(operation: {
@@ -443,7 +452,11 @@ public actor TranslationCoordinator {
                     return
                 }
                 eventWaiters.append(
-                    EventWaiter(id: waiterID, continuation: continuation)
+                    EventWaiter(
+                        id: waiterID,
+                        cancellation: cancellation,
+                        continuation: continuation
+                    )
                 )
             }
         }, onCancel: {
@@ -489,7 +502,7 @@ public actor TranslationCoordinator {
         audioLevels = AudioLevelSnapshot()
         lastLevelPublishTime = nil
         events.removeAll { event in
-            if case .audioLevels = event { return true }
+            if case .audioLevels = event.payload { return true }
             return false
         }
     }
@@ -1211,6 +1224,7 @@ public actor TranslationCoordinator {
         }
         activeInboundUtteranceID = utteranceID
         inboundUtteranceActive = true
+        inboundUtteranceWasSpeech = true
         clearInboundSubtitles()
         markLatency(.speechStarted, utteranceID: utteranceID)
 
@@ -1468,6 +1482,7 @@ public actor TranslationCoordinator {
         inboundBuffer.reset()
         inboundLegacyTranslationAvailable = false
         inboundUtteranceActive = false
+        inboundUtteranceWasSpeech = false
         activeInboundUtteranceID = nil
         inboundRendererFailedOpen = true
         state.inbound = .failed(
@@ -1499,6 +1514,7 @@ public actor TranslationCoordinator {
         inboundBuffer.reset()
         inboundLegacyTranslationAvailable = false
         inboundUtteranceActive = false
+        inboundUtteranceWasSpeech = false
         activeInboundUtteranceID = nil
     }
 
@@ -1520,10 +1536,14 @@ public actor TranslationCoordinator {
               currentInboundRoute == .undecided else { return }
         let routeBefore = currentInboundRoute
         if inboundAuditionEnabled {
-            let commands = inboundAudition.resolveDeadline(
-                isSpeech: inboundVAD.isSpeaking,
+            var commands = inboundAudition.resolveDeadline(
+                isSpeech: inboundUtteranceWasSpeech,
                 utteranceID: utteranceID
             )
+            if currentInboundRoute == .translated,
+               !inboundVAD.isSpeaking {
+                commands.append(.completeCrossfadeWithSilence)
+            }
             markRouteDecisionIfNeeded(
                 from: routeBefore,
                 utteranceID: utteranceID
@@ -1535,7 +1555,8 @@ public actor TranslationCoordinator {
             )
         } else {
             let chunks = inboundBuffer.resolveDeadline(
-                isSpeech: inboundVAD.isSpeaking
+                isSpeech: inboundUtteranceWasSpeech
+                    && inboundLegacyTranslationAvailable
             )
             markRouteDecisionIfNeeded(
                 from: routeBefore,
@@ -1606,10 +1627,14 @@ public actor TranslationCoordinator {
         if inboundAuditionEnabled {
             if currentInboundRoute == .undecided {
                 let routeBefore = currentInboundRoute
-                let decisionCommands = inboundAudition.resolveDeadline(
-                    isSpeech: true,
+                var decisionCommands = inboundAudition.resolveDeadline(
+                    isSpeech: inboundUtteranceWasSpeech,
                     utteranceID: utteranceID
                 )
+                if currentInboundRoute == .translated,
+                   !inboundVAD.isSpeaking {
+                    decisionCommands.append(.completeCrossfadeWithSilence)
+                }
                 markRouteDecisionIfNeeded(
                     from: routeBefore,
                     utteranceID: utteranceID
@@ -1635,7 +1660,8 @@ public actor TranslationCoordinator {
                 let routeBefore = currentInboundRoute
                 chunks.append(contentsOf:
                     inboundBuffer.resolveDeadline(
-                        isSpeech: inboundLegacyTranslationAvailable
+                        isSpeech: inboundUtteranceWasSpeech
+                            && inboundLegacyTranslationAvailable
                     )
                 )
                 markRouteDecisionIfNeeded(
@@ -1648,7 +1674,7 @@ public actor TranslationCoordinator {
                     ? utteranceID
                     : nil
             chunks.append(contentsOf:
-                inboundBuffer.finish(isSpeech: true)
+                inboundBuffer.finish(isSpeech: inboundUtteranceWasSpeech)
             )
             await playInboundFinish(
                 chunks,
@@ -1666,6 +1692,7 @@ public actor TranslationCoordinator {
         inboundFinishTask = nil
         inboundFinishState = nil
         inboundUtteranceActive = false
+        inboundUtteranceWasSpeech = false
         activeInboundUtteranceID = nil
         inboundLegacyTranslationAvailable = false
         inboundDeadlineTask?.cancel()
@@ -1911,10 +1938,15 @@ public actor TranslationCoordinator {
     }
 
     private func applyRouting() async {
+        let outboundMode = routing.outbound
         await audioEngine.setRouting(
             inbound: effectiveInboundAudioMode,
-            outbound: routing.outbound
+            outbound: outboundMode
         )
+        if usesAutomaticOutboundBypass,
+           outboundMode == .originalBypass {
+            state.outbound = .bypassed
+        }
     }
 
     private var effectiveInboundAudioMode: InboundOutputMode {
@@ -1970,6 +2002,7 @@ public actor TranslationCoordinator {
         inboundLegacyTranslationAvailable = false
         inboundRendererFailedOpen = false
         inboundUtteranceActive = false
+        inboundUtteranceWasSpeech = false
         state.subtitles = SubtitleSnapshot()
         state.latency = .empty
     }
@@ -2005,17 +2038,28 @@ public actor TranslationCoordinator {
     }
 
     private func publish(_ event: TranslationCoordinatorEvent) {
-        if !eventWaiters.isEmpty {
-            eventWaiters.removeFirst().continuation.resume(returning: event)
+        while !eventWaiters.isEmpty {
+            let waiter = eventWaiters.removeFirst()
+            if waiter.cancellation.cancelled {
+                waiter.continuation.resume(returning: .stopped)
+                continue
+            }
+            waiter.continuation.resume(returning: event)
             return
         }
         if case .audioLevels = event,
            let index = events.lastIndex(where: { queued in
-               if case .audioLevels = queued { return true }
+               guard queued.lifecycle == lifecycleGeneration else {
+                   return false
+               }
+               if case .audioLevels = queued.payload { return true }
                return false
            }) {
             events.remove(at: index)
-            events.append(event)
+            events.append(QueuedEvent(
+                lifecycle: lifecycleGeneration,
+                payload: event
+            ))
             return
         }
         if case .audioLevels = event,
@@ -2023,10 +2067,16 @@ public actor TranslationCoordinator {
             return
         }
         if events.count < Self.maximumQueuedEvents {
-            events.append(event)
+            events.append(QueuedEvent(
+                lifecycle: lifecycleGeneration,
+                payload: event
+            ))
         } else {
             events.removeFirst()
-            events.append(event)
+            events.append(QueuedEvent(
+                lifecycle: lifecycleGeneration,
+                payload: event
+            ))
         }
     }
 }

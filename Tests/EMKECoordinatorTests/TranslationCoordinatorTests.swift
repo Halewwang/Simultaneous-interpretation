@@ -57,6 +57,9 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     private var inboundOutputErrors: [CoordinatorTestError] = []
     private(set) var blockedInboundOutputCount = 0
     private var inboundOutputWaiters: [CheckedContinuation<Void, Never>] = []
+    private var routingBlocksRemaining = 0
+    private(set) var blockedRoutingCount = 0
+    private var routingWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(blocksStart: Bool = false) {
         self.blocksStart = blocksStart
@@ -83,6 +86,13 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
         inbound: InboundOutputMode,
         outbound: OutboundOutputMode
     ) async {
+        if routingBlocksRemaining > 0 {
+            routingBlocksRemaining -= 1
+            blockedRoutingCount += 1
+            await withCheckedContinuation { continuation in
+                routingWaiters.append(continuation)
+            }
+        }
         routings.append((inbound, outbound))
     }
 
@@ -142,6 +152,18 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     func releaseInboundOutputs() {
         let waiters = inboundOutputWaiters
         inboundOutputWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    func blockNextRouting() {
+        routingBlocksRemaining += 1
+    }
+
+    func releaseRoutings() {
+        let waiters = routingWaiters
+        routingWaiters.removeAll()
         for waiter in waiters {
             waiter.resume()
         }
@@ -477,6 +499,86 @@ func deliveredProductionEventWinsWhenCancellationArrivesAfterConsumption() async
     }
     #expect(await consumer.value == .stateChanged(deliveredState))
     consumer.cancel()
+}
+
+@Test
+func restartDropsOnlyThePreviousLifecycleAndContinuesNewEvents() async throws {
+    let restartedInbound = CoordinatorSessionFake()
+    let restartedOutbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [restartedInbound, restartedOutbound]
+    )
+    try await harness.start()
+    await harness.drainStartupEvents()
+    await harness.coordinator.stop()
+
+    try await harness.start()
+
+    let firstRestartEvent = await harness.coordinator.nextEvent()
+    #expect(firstRestartEvent != .stopped)
+    guard case .stateChanged(let firstRestartState) = firstRestartEvent else {
+        await harness.coordinator.stop()
+        return
+    }
+    #expect(firstRestartState.inbound == .connecting)
+    #expect(firstRestartState.outbound == .connecting)
+
+    await restartedInbound.emit(
+        .success(.inputTranscript(transcriptDelta("new lifecycle")))
+    )
+    await restartedInbound.waitUntilDeliveredEventCount(1)
+    await harness.audio.emit(.outboundNetworkAudio(
+        levelMeterPCM16(amplitude: 12_000, sampleCount: 4_800)
+    ))
+    try #require(await eventually {
+        let appendedCount = await restartedOutbound.appended.count
+        let source = await harness.coordinator.state.subtitles.inboundSource
+        return appendedCount == 1 && source == "new lifecycle"
+    })
+
+    var receivedSubtitle = false
+    var receivedLevel = false
+    while !receivedSubtitle || !receivedLevel {
+        switch await harness.coordinator.nextEvent() {
+        case .stateChanged(let state):
+            receivedSubtitle =
+                receivedSubtitle
+                || state.subtitles.inboundSource == "new lifecycle"
+        case .audioLevels:
+            receivedLevel = true
+        case .audioBackpressure:
+            break
+        case .stopped:
+            Issue.record("New lifecycle observer received stale stopped")
+            await harness.coordinator.stop()
+            return
+        }
+    }
+    await harness.coordinator.stop()
+}
+
+@Test
+func cancelledProductionWaiterCannotConsumeTheImmediatelyPublishedEvent() async {
+    let coordinator = TranslationCoordinator()
+    let cancelledWaiter = Task {
+        await coordinator.nextEvent()
+    }
+    for _ in 0..<100 {
+        await Task.yield()
+    }
+
+    cancelledWaiter.cancel()
+    let state = TranslationCoordinatorState(
+        audioEngineStarted: true,
+        inbound: .connecting,
+        outbound: .connecting
+    )
+    await coordinator.publishEventForTesting(.stateChanged(state))
+
+    let cancelledResult = await cancelledWaiter.value
+    #expect(cancelledResult == .stopped)
+    guard cancelledResult == .stopped else { return }
+    #expect(await coordinator.nextEvent() == .stateChanged(state))
 }
 
 private struct CoordinatorHarness {
@@ -1945,6 +2047,38 @@ func matchingLanguagesUseLocalOutboundBypassWithoutSecondSession() async throws 
 }
 
 @Test
+func matchingLanguageBypassIsReadyOnlyAfterRoutingIsApplied() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    await audio.blockNextRouting()
+    let harness = CoordinatorHarness(
+        preferences: TranslationPreferences(
+            motherLanguage: .english,
+            meetingOutputLanguage: .english
+        ),
+        audio: audio
+    )
+
+    let startTask = Task {
+        try await harness.start()
+    }
+    try #require(await eventually {
+        await audio.blockedRoutingCount == 1
+    })
+
+    let beforeRouting = await harness.coordinator.currentState()
+    #expect(beforeRouting.audioEngineStarted)
+    #expect(beforeRouting.outbound == .connecting)
+    #expect(!beforeRouting.canSpeak)
+
+    await audio.releaseRoutings()
+    try await startTask.value
+    let afterRouting = await harness.coordinator.currentState()
+    #expect(afterRouting.outbound == .bypassed)
+    #expect(afterRouting.canSpeak)
+    await harness.coordinator.stop()
+}
+
+@Test
 func inboundFailureFailsOpenWithoutStoppingOutbound() async throws {
     let harness = CoordinatorHarness(inboundError: .disconnected)
 
@@ -2070,6 +2204,73 @@ func lateContinuousTranslationDeltasExtendTheInboundTailWindow() async throws {
             await harness.audio.inboundPlayback.last == Data([3, 3])
         }
     )
+    await harness.coordinator.stop()
+}
+
+@Test
+func speechEndedTailStillCrossfadesLateTranslationAtDeadline() async throws {
+    let harness = CoordinatorHarness(audioStability: .production)
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    try #require(await eventually {
+        !(await harness.audio.inboundPlayback).isEmpty
+    })
+
+    for _ in 0..<30 {
+        await harness.audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+    let playbackCountBeforeTranslation =
+        await harness.audio.inboundPlayback.count
+    let translated = constantPCM16(2_000, samples: 1_920)
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(translated)
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+
+    try #require(await eventually {
+        await harness.coordinator.state.latency.latest?
+            .speechToRouteDecisionMilliseconds != nil
+    })
+    try #require(await eventually {
+        let latePlayback = Array(
+            (await harness.audio.inboundPlayback)
+                .dropFirst(playbackCountBeforeTranslation)
+        ).flatMap(decodePCM16)
+        return latePlayback.contains {
+            abs(Int($0) - 2_000) <= 1
+        }
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func legacySpeechEndedTailStillSelectsAvailableLateTranslation() async throws {
+    let harness = CoordinatorHarness(audioStability: .legacy)
+    try await harness.start()
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(8_000, samples: 240)
+    ))
+    for _ in 0..<30 {
+        await harness.audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+
+    let translated = Data([2, 2])
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(translated)
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+
+    try #require(await eventually {
+        await harness.coordinator.state.latency.latest?
+            .speechToRouteDecisionMilliseconds != nil
+    })
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).contains(translated)
+    })
     await harness.coordinator.stop()
 }
 

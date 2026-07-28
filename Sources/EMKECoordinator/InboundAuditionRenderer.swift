@@ -37,6 +37,7 @@ public struct InboundAuditionRenderer: Sendable {
     private var originalQueue = Data()
     private var translationQueue = Data()
     private var remainingCrossfadeSamples = 0
+    private var crossfadeUsesSilence = false
 
     public init(maximumQueuedBytesPerSource: Int = 240_000) {
         precondition(maximumQueuedBytesPerSource > 0)
@@ -57,6 +58,7 @@ public struct InboundAuditionRenderer: Sendable {
             clearQueues()
             mode = .original
             remainingCrossfadeSamples = 0
+            crossfadeUsesSilence = false
             translationRamp = PCM16GainRamp(initialGain: 0)
             originalRamp.setTarget(gain, overSamples: rampSamples)
             return []
@@ -80,6 +82,7 @@ public struct InboundAuditionRenderer: Sendable {
             clearQueues()
             mode = rampSamples == 0 ? .translation : .crossfade
             remainingCrossfadeSamples = rampSamples
+            crossfadeUsesSilence = false
             originalRamp.setTarget(0, overSamples: rampSamples)
             translationRamp = PCM16GainRamp(initialGain: 0)
             translationRamp.setTarget(1, overSamples: rampSamples)
@@ -90,6 +93,12 @@ public struct InboundAuditionRenderer: Sendable {
             }
             return []
 
+        case .completeCrossfadeWithSilence:
+            guard mode == .crossfade else { return [] }
+            crossfadeUsesSilence = true
+            appendCrossfadeSilenceIfNeeded()
+            return try drainCrossfade()
+
         case let .translation(pcm16):
             try validatePCM16(pcm16)
             return try consumeTranslation(pcm16)
@@ -99,6 +108,7 @@ public struct InboundAuditionRenderer: Sendable {
             clearQueues()
             mode = .original
             remainingCrossfadeSamples = 0
+            crossfadeUsesSilence = false
             translationRamp = PCM16GainRamp(initialGain: 0)
             originalRamp.setTarget(1, overSamples: rampSamples)
             return []
@@ -107,6 +117,7 @@ public struct InboundAuditionRenderer: Sendable {
             clearQueues()
             mode = .original
             remainingCrossfadeSamples = 0
+            crossfadeUsesSilence = false
             originalRamp = PCM16GainRamp(
                 initialGain: Self.previewGain
             )
@@ -153,8 +164,18 @@ public struct InboundAuditionRenderer: Sendable {
         case .crossfade:
             try ensureQueueLimitBeforeAddingTranslation(pcm16.count)
             translationQueue.append(pcm16)
+            if crossfadeUsesSilence {
+                appendCrossfadeSilenceIfNeeded()
+            }
             return try drainCrossfade()
         }
+    }
+
+    private mutating func appendCrossfadeSilenceIfNeeded() {
+        let missingByteCount =
+            max(translationQueue.count - originalQueue.count, 0)
+        guard missingByteCount > 0 else { return }
+        originalQueue.append(Data(repeating: 0, count: missingByteCount))
     }
 
     private mutating func drainCrossfade()
@@ -193,6 +214,7 @@ public struct InboundAuditionRenderer: Sendable {
 
         if mode == .crossfade, remainingCrossfadeSamples == 0 {
             mode = .translation
+            crossfadeUsesSilence = false
             originalQueue.removeAll(keepingCapacity: false)
             output.append(contentsOf: try flushTranslationQueue())
         }

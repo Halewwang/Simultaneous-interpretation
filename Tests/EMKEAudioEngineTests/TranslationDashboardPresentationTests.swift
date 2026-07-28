@@ -205,6 +205,23 @@ func startupShowsAudioEngineReadinessOnlyAfterTheEngineStarts() {
 }
 
 @Test
+func startupPreservesPerChannelReadinessWhileAnotherChannelConnects() {
+    let value = DashboardFixture(
+        readiness: .active,
+        coordinatorState: TranslationCoordinatorState(
+            audioEngineStarted: true,
+            inbound: .active,
+            outbound: .connecting
+        ),
+        isStarting: true
+    ).makePresentation(copy: AppCopy(language: .english))
+
+    #expect(value.primaryStatus == "Audio engine ready")
+    #expect(value.inbound.status == "Can listen")
+    #expect(value.outbound.status == "Connecting")
+}
+
+@Test
 func stoppingDashboardDoesNotContinueToPresentListenOrSpeakReadiness() {
     let value = DashboardFixture(
         readiness: .active,

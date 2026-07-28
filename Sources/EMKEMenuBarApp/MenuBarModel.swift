@@ -147,13 +147,9 @@ struct TranslationDashboardPresentation: Equatable {
     ) -> TranslationDashboardPresentation {
         let running = coordinatorState.isRunning
         let effectiveInboundState: TranslationChannelState =
-            isStopping ? .stopped : isStarting && !running
-                ? .connecting
-                : coordinatorState.inbound
+            isStopping ? .stopped : coordinatorState.inbound
         let effectiveOutboundState: TranslationChannelState =
-            isStopping ? .stopped : isStarting && !running
-                ? .connecting
-                : coordinatorState.outbound
+            isStopping ? .stopped : coordinatorState.outbound
         let inbound = TranslationChannelPresentation.make(
             channel: .inbound,
             state: effectiveInboundState,
@@ -1258,6 +1254,20 @@ final class MenuBarModel: ObservableObject {
                 case .audioBackpressure(let droppedFrames):
                     inventoryErrorValue = .droppedFrames(droppedFrames)
                 case .stopped:
+                    let latest = await coordinator.currentState()
+                    guard !Task.isCancelled,
+                          observationGeneration
+                            == coordinatorObservationGeneration
+                    else { return }
+                    if isStarting || latest.hasActivePresentation(
+                        translationStartedAt: translationStartedAt
+                    ) {
+                        coordinatorState = latest
+                        if latest.isRunning, translationStartedAt == nil {
+                            translationStartedAt = Date()
+                        }
+                        continue
+                    }
                     finishCoordinatorSession()
                     return
                 }

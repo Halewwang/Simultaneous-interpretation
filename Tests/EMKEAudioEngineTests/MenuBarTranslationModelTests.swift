@@ -1523,6 +1523,45 @@ func failedStartRestartKeepsOneWaiterAndRendersEveryStartupPhase() async {
     await model.stop()
 }
 
+@Test @MainActor
+func queuedStoppedBeforeRestartDoesNotEndTheNewObservation() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configureAndStart(model)
+    await model.stop()
+    await coordinator.emit(.stopped)
+
+    await model.start()
+    #expect(model.coordinatorState.isRunning)
+    await model.setMenuBarVisible(true)
+
+    let followUp = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .active,
+        outbound: .active,
+        subtitles: SubtitleSnapshot(
+            inboundSource: "new source",
+            inboundTranslation: "new translation"
+        )
+    )
+    await coordinator.emit(.audioLevels(
+        AudioLevelSnapshot(inbound: 0.42, outbound: 0.37)
+    ))
+    await coordinator.emit(.stateChanged(followUp))
+    for _ in 0..<100 {
+        await Task.yield()
+    }
+
+    #expect(model.coordinatorState == followUp)
+    #expect(model.inboundLevel == 0.42)
+    #expect(model.outboundLevel == 0.37)
+    await model.stop()
+}
+
 @Test
 func cancelledEventWaiterIsRemovedBeforeTheNextEventArrives() async {
     let coordinator = TranslationCoordinatorStub()

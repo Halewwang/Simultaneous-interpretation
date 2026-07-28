@@ -6,6 +6,7 @@ public enum InboundAuditionCommand: Equatable, Sendable {
     case original(Data)
     case setOriginalGain(Double, rampSamples: Int)
     case beginCrossfade([Data], rampSamples: Int)
+    case completeCrossfadeWithSilence
     case translation(Data)
     case failOpen(rampSamples: Int)
     case reset
