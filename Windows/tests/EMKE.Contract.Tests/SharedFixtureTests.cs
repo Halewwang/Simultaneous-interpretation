@@ -334,15 +334,17 @@ public sealed class SharedFixtureTests
     [TestMethod]
     [TestCategory("FixtureAdapter")]
     [TestCategory("Settings")]
-    public void SettingsFixturesUseOwnedCompatibilityAdapter()
+    public async Task SettingsFixturesUseOwnedCompatibilityAdapter()
     {
         using JsonDocument compatibility =
             LoadFixture("Settings/compatibility-gate.json");
         using JsonDocument migration =
             LoadFixture("Settings/v1-migration.json");
 
-        SettingsFixtureAdapter.ValidateCompatibility(compatibility.RootElement);
-        SettingsFixtureAdapter.ValidateMigration(migration.RootElement);
+        await SettingsFixtureAdapter.ValidateCompatibilityAsync(
+            compatibility.RootElement).ConfigureAwait(false);
+        await SettingsFixtureAdapter.ValidateMigrationAsync(
+            migration.RootElement).ConfigureAwait(false);
     }
 
     internal static FixtureInventory LoadFixtureInventory()

@@ -164,6 +164,14 @@ add_test(NAME EMKE.NativeAudio.Abi COMMAND EMKE.NativeAudio.Tests Abi)
 add_test(NAME EMKE.NativeAudio.FakeBackend COMMAND EMKE.NativeAudio.Tests FakeBackend)
 add_test(NAME EMKE.NativeAudio.Ring COMMAND EMKE.NativeAudio.Tests Ring)
 add_test(NAME EMKE.NativeAudio.PCM COMMAND EMKE.NativeAudio.Tests PCM)
+add_test(
+  NAME EMKE.NativeAudio.UnknownExplicitFilter
+  COMMAND EMKE.NativeAudio.Tests __emke_unknown_explicit_filter__
+)
+set_tests_properties(
+  EMKE.NativeAudio.UnknownExplicitFilter
+  PROPERTIES WILL_FAIL TRUE
+)
 add_test(NAME EMKE.NativeAudio.Device COMMAND EMKE.NativeAudio.Tests Device)
 add_test(
   NAME EMKE.NativeAudio.Lifecycle
