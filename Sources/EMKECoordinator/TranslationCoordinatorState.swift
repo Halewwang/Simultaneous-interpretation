@@ -47,17 +47,20 @@ public struct TranslationCoordinatorState: Equatable, Sendable {
     public var inbound: TranslationChannelState
     public var outbound: TranslationChannelState
     public var subtitles: SubtitleSnapshot
+    public var latency: TranslationLatencyDiagnostics
 
     public init(
         isRunning: Bool = false,
         inbound: TranslationChannelState = .stopped,
         outbound: TranslationChannelState = .stopped,
-        subtitles: SubtitleSnapshot = SubtitleSnapshot()
+        subtitles: SubtitleSnapshot = SubtitleSnapshot(),
+        latency: TranslationLatencyDiagnostics = .empty
     ) {
         self.isRunning = isRunning
         self.inbound = inbound
         self.outbound = outbound
         self.subtitles = subtitles
+        self.latency = latency
     }
 }
 

@@ -408,6 +408,7 @@ private struct CoordinatorHarness {
         outboundCloseEvents: [TranslationServerEvent] = [],
         additionalSessions: [CoordinatorSessionFake] = [],
         reconnectDelays: [Duration] = [],
+        audioStability: AudioStabilityConfiguration = .legacy,
         classifier: @escaping @Sendable (String) -> LanguageHypotheses = {
             _ in LanguageHypotheses(["de": 0.9])
         }
@@ -436,7 +437,8 @@ private struct CoordinatorHarness {
             audioConfiguration: AudioEngineConfiguration(
                 selection: coordinatorAudioSelection()
             ),
-            apiKey: "test-key"
+            apiKey: "test-key",
+            audioStability: audioStability
         )
     }
 
@@ -459,6 +461,17 @@ private struct CoordinatorHarness {
             case .stateChanged, .audioBackpressure, .stopped:
                 continue
             }
+        }
+    }
+
+    func emitInboundSpeechFrames(
+        amplitude: Int16,
+        count: Int
+    ) async {
+        for _ in 0..<count {
+            await audio.emit(.inboundNetworkAudio(
+                constantPCM16(amplitude, samples: 240)
+            ))
         }
     }
 }
@@ -504,7 +517,8 @@ private func coordinatorConfiguration(
     preferences: TranslationPreferences = TranslationPreferences(
         motherLanguage: .chinese,
         meetingOutputLanguage: .german
-    )
+    ),
+    audioStability: AudioStabilityConfiguration = .legacy
 ) -> TranslationCoordinatorConfiguration {
     TranslationCoordinatorConfiguration(
         apiConfiguration: .default,
@@ -512,8 +526,27 @@ private func coordinatorConfiguration(
         audioConfiguration: AudioEngineConfiguration(
             selection: coordinatorAudioSelection()
         ),
-        apiKey: "test-key"
+        apiKey: "test-key",
+        audioStability: audioStability
     )
+}
+
+private func constantPCM16(_ amplitude: Int16, samples: Int) -> Data {
+    let bits = UInt16(bitPattern: amplitude)
+    var data = Data(capacity: samples * 2)
+    for _ in 0..<samples {
+        data.append(UInt8(truncatingIfNeeded: bits))
+        data.append(UInt8(truncatingIfNeeded: bits >> 8))
+    }
+    return data
+}
+
+private func decodePCM16(_ data: Data) -> [Int16] {
+    stride(from: 0, to: data.count, by: 2).map { index in
+        Int16(bitPattern:
+            UInt16(data[index]) | UInt16(data[index + 1]) << 8
+        )
+    }
 }
 
 private func voicedPCM16(byteCount: Int = 9_600) -> Data {
@@ -548,6 +581,348 @@ private func eventually(
         try? await Task.sleep(for: .milliseconds(1))
     }
     return false
+}
+
+@Test
+func undecidedInboundSpeechPlaysTwelvePercentPreview() async throws {
+    let harness = CoordinatorHarness(audioStability: .production)
+    try await harness.start()
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+
+    try #require(await eventually {
+        !(await harness.audio.inboundPlayback).isEmpty
+    })
+    let firstChunk = try #require(
+        (await harness.audio.inboundPlayback).first
+    )
+    let first = decodePCM16(firstChunk)
+    #expect(first.allSatisfy { $0 == 1_200 })
+    await harness.coordinator.stop()
+}
+
+@Test
+func motherLanguageRecoveryRampsFromLivePointWithoutReplay() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .production,
+        classifier: { _ in LanguageHypotheses(["zh-Hans": 0.9]) }
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("你好")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 8)
+
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).count == 9
+    })
+    let played = (await harness.audio.inboundPlayback).flatMap(decodePCM16)
+    #expect(played.count == 9 * 240)
+    #expect(played.prefix(240).allSatisfy { $0 == 1_200 })
+    #expect(abs(Int(played.last ?? 0) - 10_000) <= 1)
+    await harness.coordinator.stop()
+}
+
+@Test
+func foreignSpeechCrossfadesThenDropsFollowingOriginal() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .production,
+        classifier: { _ in LanguageHypotheses(["de": 0.9]) }
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 1_920))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 8)
+
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 9
+    })
+    let playbackCount = await harness.audio.inboundPlayback.count
+    let mixed = (await harness.audio.inboundPlayback).flatMap(decodePCM16)
+    #expect(mixed.contains { abs(Int($0) - 2_000) <= 1 })
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 1)
+    _ = await harness.coordinator.currentState()
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    await harness.coordinator.stop()
+}
+
+@Test
+func translationBeforeClassificationIsHeldForForeignCrossfade() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .production,
+        classifier: { _ in LanguageHypotheses(["de": 0.9]) }
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 1_920))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 8)
+
+    #expect(await eventually {
+        let samples = (await harness.audio.inboundPlayback)
+            .flatMap(decodePCM16)
+        return samples.contains { abs(Int($0) - 2_000) <= 1 }
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func inboundFailureRampsOriginalFromTheLivePointBeforeReconnect() async throws {
+    let recoveredInbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [recoveredInbound],
+        reconnectDelays: [.zero],
+        audioStability: .production
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+    let playbackCountBeforeFailure =
+        await harness.audio.inboundPlayback.count
+
+    await harness.inbound.emit(.failure(.disconnected))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+    #expect(await harness.audio.lastRouting?.0 == .translated)
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 8)
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.count
+            == playbackCountBeforeFailure + 8
+    })
+    let recovery = Array(
+        (await harness.audio.inboundPlayback)
+            .dropFirst(playbackCountBeforeFailure)
+    ).flatMap(decodePCM16)
+    #expect(recovery.count == 1_920)
+    #expect(abs(Int(recovery.last ?? 0) - 10_000) <= 1)
+    await harness.coordinator.stop()
+}
+
+@Test
+func providerProbeUsesFortyMillisecondNetworkFrames() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .providerProbe40ms
+    )
+    try await harness.start()
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 4)
+
+    #expect(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    #expect(await harness.inbound.appended[0].count == 1_920)
+    await harness.coordinator.stop()
+}
+
+@Test
+func latencyMilestonesUseFirstMonotonicTimestampPerUtterance() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .providerProbe40ms,
+        classifier: { _ in LanguageHypotheses(["de": 0.9]) }
+    )
+    try await harness.start()
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+    let previewState = await harness.coordinator.currentState()
+    #expect(
+        previewState.latency.latest?
+            .translationAudioToPlaybackMilliseconds == nil
+    )
+
+    harness.levelClock.advance(milliseconds: 5)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually { await harness.inbound.appended.count == 1 })
+
+    harness.levelClock.advance(milliseconds: 7)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    #expect(await eventually {
+        await harness.coordinator.state.subtitles.inboundSource == "Deutsch"
+    })
+
+    harness.levelClock.advance(milliseconds: 11)
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 1_920))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+    harness.levelClock.advance(milliseconds: 13)
+    let playbackCountBeforeCrossfade =
+        await harness.audio.inboundPlayback.count
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 1)
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.count
+            == playbackCountBeforeCrossfade + 1
+    })
+
+    harness.levelClock.advance(milliseconds: 100)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta(" weiter")))
+    )
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(3_000, samples: 240))
+    )))
+    #expect(await eventually {
+        await harness.coordinator.state.subtitles.inboundSource
+            == "Deutsch weiter"
+    })
+
+    let state = await harness.coordinator.currentState()
+    let latest = try #require(state.latency.latest)
+    #expect(latest.speechToFirstNetworkFrameMilliseconds == 5)
+    #expect(latest.speechToFirstSourceTranscriptMilliseconds == 12)
+    #expect(latest.speechToRouteDecisionMilliseconds == 12)
+    #expect(latest.speechToFirstTranslationAudioMilliseconds == 23)
+    #expect(latest.translationAudioToPlaybackMilliseconds == 13)
+    await harness.coordinator.stop()
+}
+
+@Test
+func manualInboundBypassResetsAuditionWithoutDuplicatePlayback() async throws {
+    let harness = CoordinatorHarness(
+        audioStability: .providerProbe40ms
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+    let playbackCount = await harness.audio.inboundPlayback.count
+
+    await harness.coordinator.setInboundBypass(true)
+    #expect(await harness.audio.lastRouting?.0 == .originalBypass)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 4)
+    #expect(await eventually {
+        await harness.inbound.appended.count >= 1
+    })
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    await harness.coordinator.stop()
+}
+
+@Test
+func manualInboundBypassKeepsLatencyUtteranceIdentifiersUnique()
+    async throws
+{
+    let harness = CoordinatorHarness(
+        audioStability: .providerProbe40ms
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+    let firstState = await harness.coordinator.currentState()
+    let firstID = try #require(
+        firstState.latency.latest?.utteranceID
+    )
+
+    await harness.coordinator.setInboundBypass(true)
+    await harness.coordinator.setInboundBypass(false)
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 2
+    })
+
+    let secondState = await harness.coordinator.currentState()
+    let secondID = try #require(
+        secondState.latency.latest?.utteranceID
+    )
+    #expect(secondID != firstID)
+    await harness.coordinator.stop()
+}
+
+@Test
+func stopClearsAuditionBatcherVADAndLatencyState() async throws {
+    let secondInbound = CoordinatorSessionFake()
+    let secondOutbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [secondInbound, secondOutbound],
+        audioStability: .providerProbe40ms
+    )
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+    #expect(
+        await harness.coordinator.currentState().latency.latest != nil
+    )
+
+    await harness.coordinator.stop()
+    try await harness.start()
+    let playbackCount = await harness.audio.inboundPlayback.count
+    #expect(
+        await harness.coordinator.currentState().latency == .empty
+    )
+
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        await harness.audio.inboundPlayback.count == playbackCount + 1
+    })
+    #expect(await secondInbound.appended.isEmpty)
+    let restartedPreview = decodePCM16(
+        (await harness.audio.inboundPlayback).last ?? Data()
+    )
+    #expect(restartedPreview.allSatisfy { $0 == 1_200 })
+    await harness.coordinator.stop()
+}
+
+@Test
+func rendererFailureFallsBackDirectlyAndRejectsLaterTranslation() async throws {
+    let harness = CoordinatorHarness(audioStability: .production)
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    #expect(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(Data(repeating: 1, count: 240_002))
+    )))
+    #expect(await eventually {
+        await harness.audio.lastRouting?.0 == .originalFailOpen
+    })
+    let playbackCount = await harness.audio.inboundPlayback.count
+
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 240))
+    )))
+    _ = await harness.coordinator.currentState()
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    await harness.coordinator.stop()
 }
 
 @Test
@@ -691,7 +1066,8 @@ func localAudioLevelIsPublishedWhileRealtimeConnectionsArePending() async throws
         audioConfiguration: AudioEngineConfiguration(
             selection: coordinatorAudioSelection()
         ),
-        apiKey: "test-key"
+        apiKey: "test-key",
+        audioStability: .legacy
     )
     let recorder = AudioLevelEventRecorder()
     let eventTask = Task {
@@ -741,7 +1117,8 @@ func startupAudioWaitsForHandshakeBeforeReachingSessions() async throws {
         audioConfiguration: AudioEngineConfiguration(
             selection: coordinatorAudioSelection()
         ),
-        apiKey: "test-key"
+        apiKey: "test-key",
+        audioStability: .legacy
     )
     let startTask = Task {
         try await coordinator.start(configuration: configuration)
@@ -783,7 +1160,8 @@ func connectedInboundStartsBeforeOutboundHandshakeCompletes() async throws {
         audioConfiguration: AudioEngineConfiguration(
             selection: coordinatorAudioSelection()
         ),
-        apiKey: "test-key"
+        apiKey: "test-key",
+        audioStability: .legacy
     )
     let startTask = Task {
         try await coordinator.start(configuration: configuration)
@@ -828,7 +1206,8 @@ func preActivePartialAudioDoesNotLeakIntoFirstLiveFrame() async throws {
         audioConfiguration: AudioEngineConfiguration(
             selection: coordinatorAudioSelection()
         ),
-        apiKey: "test-key"
+        apiKey: "test-key",
+        audioStability: .legacy
     )
     let startTask = Task {
         try await coordinator.start(configuration: configuration)
