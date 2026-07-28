@@ -27,6 +27,27 @@ const deliveryPlanPath = path.join(
   '2026-07-27-emke-windows-internal-msix.md',
 );
 
+function assertEnvironmentScopedSecretCommands(document) {
+  const commands = [
+    ...document.matchAll(/^\s*gh secret (set|list)\b[^\n]*$/gm),
+  ].map((match) => match[0].trim());
+
+  for (const command of commands) {
+    assert.doesNotMatch(
+      command,
+      /(?:^|\s)--(?:org|app)(?:\s|=|$)/,
+      'GitHub secret commands must not use --org or --app.',
+    );
+    assert.match(
+      command,
+      /^gh secret (?:set|list) --env windows-internal-signing(?:\s|$)/,
+      'Every GitHub secret command must use exact --env windows-internal-signing scope.',
+    );
+  }
+
+  return commands;
+}
+
 test('verifier exposes only path, environment-variable, subject, and CER inputs', () => {
   const command = [
     '$ErrorActionPreference = "Stop"',
@@ -76,8 +97,13 @@ test('provisioning guide keeps PFX material in a named temporary directory', asy
 
 test('provisioning guide scopes both secrets to the protected environment', async () => {
   const guide = await readFile(readmePath, 'utf8');
-  const secretSetCommands = guide.match(/^gh secret set[^\n]*$/gm) ?? [];
-  const secretListCommands = guide.match(/^gh secret list[^\n]*$/gm) ?? [];
+  const secretCommands = assertEnvironmentScopedSecretCommands(guide);
+  const secretSetCommands = secretCommands.filter(
+    (command) => command.startsWith('gh secret set '),
+  );
+  const secretListCommands = secretCommands.filter(
+    (command) => command.startsWith('gh secret list '),
+  );
 
   assert.deepEqual(secretSetCommands, [
     'gh secret set --env windows-internal-signing WINDOWS_INTERNAL_SIGNING_PFX_BASE64 \\',
@@ -86,7 +112,6 @@ test('provisioning guide scopes both secrets to the protected environment', asyn
   assert.deepEqual(secretListCommands, [
     'gh secret list --env windows-internal-signing',
   ]);
-  assert.doesNotMatch(guide, /gh secret (?:set|list) --app actions/);
   assert.match(guide, /GitHub Environment named `windows-internal-signing`/i);
   assert.match(guide, /required reviewers/i);
   assert.match(
@@ -97,9 +122,50 @@ test('provisioning guide scopes both secrets to the protected environment', asyn
 
 test('delivery plan checks only environment-scoped secret names', async () => {
   const plan = await readFile(deliveryPlanPath, 'utf8');
+  const provisioningStart = plan.indexOf(
+    '- [ ] **Step 2: Provision the persistent Internal certificate secrets**',
+  );
+  const provisioningEnd = plan.indexOf(
+    '- [ ] **Step 3: Push and monitor Windows CI**',
+    provisioningStart,
+  );
+  assert.notEqual(provisioningStart, -1);
+  assert.notEqual(provisioningEnd, -1);
+  const provisioningSection = plan.slice(provisioningStart, provisioningEnd);
 
-  assert.match(plan, /^gh secret list --env windows-internal-signing \| rg \\$/m);
-  assert.doesNotMatch(plan, /gh secret list --app actions/);
+  assertEnvironmentScopedSecretCommands(provisioningSection);
+  assert.match(
+    provisioningSection,
+    /^gh secret list --env windows-internal-signing \| rg \\$/m,
+  );
+});
+
+test('secret command scanner rejects indented and alternate-scope commands', () => {
+  const rejectedCommands = [
+    [
+      '  gh secret set WINDOWS_INTERNAL_SIGNING_PFX_BASE64',
+      /must use exact --env windows-internal-signing scope/,
+    ],
+    [
+      'gh secret list',
+      /must use exact --env windows-internal-signing scope/,
+    ],
+    [
+      'gh secret set --org emke WINDOWS_INTERNAL_SIGNING_PFX_BASE64',
+      /must not use --org or --app/,
+    ],
+    [
+      'gh secret list --app actions',
+      /must not use --org or --app/,
+    ],
+  ];
+
+  for (const [command, expectedFailure] of rejectedCommands) {
+    assert.throws(
+      () => assertEnvironmentScopedSecretCommands(command),
+      expectedFailure,
+    );
+  }
 });
 
 test('provisioning guide requires exact cleanup and prohibits disclosure', async () => {

@@ -155,3 +155,46 @@ No GitHub Environment, protection rule, certificate, or secret was created or
 changed. Hosted approval behavior and secret availability remain unverified
 until the administrator configures the Environment and a real workflow run
 passes its required-reviewer gate.
+
+## Review round — reject whitespace and alternate secret scopes
+
+The review found that the first Environment-scope contract enumerated only
+commands beginning in column zero. An additional indented repository-level
+`gh secret set` or `--org` list command could therefore coexist with the valid
+commands without entering the checked command arrays.
+
+The pre-fix mutation added both unsafe lines to the real README while retaining
+the three valid Environment-scoped commands. The focused suite incorrectly
+reported:
+
+```text
+tests 5
+pass 5
+fail 0
+```
+
+This demonstrated the real leak in the previous scan. The README mutation was
+then removed before implementing the test fix.
+
+The revised scanner matches every line satisfying
+`^\s*gh secret (set|list)`, normalizes leading whitespace, explicitly rejects
+`--org` and `--app`, and requires the exact immediate scope
+`--env windows-internal-signing` on every detected command. Dedicated malicious
+fixtures cover an indented repository-level set, a repository-level list,
+an organization-level set, and an Actions-app list.
+
+Replaying the same real-README mutation after the fix produced the required
+RED:
+
+```text
+tests 6
+pass 5
+fail 1
+actual: gh secret set WINDOWS_INTERNAL_SIGNING_PFX_BASE64
+expected: exact --env windows-internal-signing scope
+```
+
+After restoring the real README, the focused suite returned 6/6 GREEN and
+`git diff --check` passed. The Task 9 plan check applies the same scanner to
+its exact provisioning section. No provisioning document, workflow, secret,
+Environment, certificate, or private material was changed by this review fix.
