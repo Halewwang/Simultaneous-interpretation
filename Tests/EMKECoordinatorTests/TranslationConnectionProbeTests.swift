@@ -191,6 +191,40 @@ func completeTranslationCapabilitiesAreReportedSeparately() async {
 }
 
 @Test
+func probeCanSendFortyMillisecondSpeechChunks() async {
+    let inbound = ProbeSessionFake(
+        closingEvents: [
+            .inputTranscript(
+                TranslationTranscriptDelta(
+                    text: "hello",
+                    elapsedMilliseconds: nil
+                )
+            ),
+            .outputAudio(probeAudioDelta(Data([1, 2]))),
+        ]
+    )
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: Data(repeating: 1, count: 3_840)
+    )
+
+    #expect(await inbound.appended.map(\.count) == [1_920, 1_920])
+}
+
+@Test
 func invalidAPIKeyIsReportedAsAuthenticationFailure() async {
     let first = ProbeSessionFake(
         connectError: TranslationSessionError.server(
