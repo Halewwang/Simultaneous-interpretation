@@ -20,6 +20,7 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     private var waiters: [CheckedContinuation<AudioEngineEvent, Never>] = []
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var inboundOutputBlocksRemaining = 0
+    private var inboundOutputErrors: [CoordinatorTestError] = []
     private(set) var blockedInboundOutputCount = 0
     private var inboundOutputWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -61,6 +62,9 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     }
 
     func enqueueInboundOutput(_ pcm16: Data) async throws {
+        let error = inboundOutputErrors.isEmpty
+            ? nil
+            : inboundOutputErrors.removeFirst()
         if inboundOutputBlocksRemaining > 0 {
             inboundOutputBlocksRemaining -= 1
             blockedInboundOutputCount += 1
@@ -68,6 +72,7 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
                 inboundOutputWaiters.append(continuation)
             }
         }
+        if let error { throw error }
         inboundPlayback.append(pcm16)
     }
 
@@ -106,6 +111,12 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
         for waiter in waiters {
             waiter.resume()
         }
+    }
+
+    func failNextInboundOutput(
+        with error: CoordinatorTestError = .disconnected
+    ) {
+        inboundOutputErrors.append(error)
     }
 
     var lastRouting: (InboundOutputMode, OutboundOutputMode)? {
@@ -583,6 +594,54 @@ private func eventually(
     return false
 }
 
+private let auditionWithFixedVAD = AudioStabilityConfiguration(
+    inboundAuditionEnabled: true,
+    adaptiveVADEnabled: false,
+    inputFrameDurationMilliseconds: 200
+)
+
+private func prepareBlockedTwoChunkAuditionBatch(
+    _ harness: CoordinatorHarness
+) async throws -> Int {
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 240))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(1)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).count == 2
+    })
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 4_320)
+    ))
+    try #require(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+
+    await harness.audio.blockNextInboundOutput()
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 2_000))
+    )))
+    try #require(await eventually {
+        await harness.audio.blockedInboundOutputCount == 1
+    })
+    return await harness.audio.inboundPlayback.count
+}
+
 @Test
 func undecidedInboundSpeechPlaysTwelvePercentPreview() async throws {
     let harness = CoordinatorHarness(audioStability: .production)
@@ -922,6 +981,312 @@ func rendererFailureFallsBackDirectlyAndRejectsLaterTranslation() async throws {
     )))
     _ = await harness.coordinator.currentState()
     #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    await harness.coordinator.stop()
+}
+
+@Test
+func blockedAuditionBatchStopsAfterManualBypassReset() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let harness = CoordinatorHarness(
+        audio: audio,
+        audioStability: auditionWithFixedVAD
+    )
+    try await harness.start()
+    let playbackCount = try await prepareBlockedTwoChunkAuditionBatch(
+        harness
+    )
+
+    await harness.coordinator.setInboundBypass(true)
+    await audio.releaseInboundOutputs()
+    await harness.inbound.waitUntilDeliveredEventCount(3)
+
+    #expect(await eventually {
+        await audio.inboundPlayback.count == playbackCount + 1
+    })
+    #expect(await audio.lastRouting?.0 == .originalBypass)
+    await harness.coordinator.stop()
+}
+
+@Test
+func blockedAuditionBatchCannotContinueIntoANewUtterance() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let harness = CoordinatorHarness(
+        audio: audio,
+        audioStability: auditionWithFixedVAD
+    )
+    try await harness.start()
+    let playbackCount = try await prepareBlockedTwoChunkAuditionBatch(
+        harness
+    )
+
+    for _ in 0..<30 {
+        await audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+    await audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    try #require(await eventually {
+        await audio.inboundPlayback.count == playbackCount + 1
+    })
+
+    await audio.releaseInboundOutputs()
+    await harness.inbound.waitUntilDeliveredEventCount(3)
+    #expect(await eventually {
+        await audio.inboundPlayback.count == playbackCount + 2
+    })
+
+    harness.levelClock.advance(milliseconds: 10)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Neu")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(4)
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 1_920))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(5)
+    await audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 1_920)
+    ))
+    try #require(await eventually {
+        await audio.inboundPlayback.count == playbackCount + 3
+    })
+    #expect(
+        await harness.coordinator.currentState().latency.latest?
+            .translationAudioToPlaybackMilliseconds != nil
+    )
+    await harness.coordinator.stop()
+}
+
+@Test
+func blockedAuditionBatchStopsAfterDirectFailOpen() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let harness = CoordinatorHarness(
+        audio: audio,
+        audioStability: auditionWithFixedVAD
+    )
+    try await harness.start()
+    let playbackCount = try await prepareBlockedTwoChunkAuditionBatch(
+        harness
+    )
+
+    for _ in 0..<30 {
+        await audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+    await audio.failNextInboundOutput()
+    await audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    try #require(await eventually {
+        await audio.lastRouting?.0 == .originalFailOpen
+    })
+
+    await audio.releaseInboundOutputs()
+    await harness.inbound.waitUntilDeliveredEventCount(3)
+    #expect(await eventually {
+        await audio.inboundPlayback.count == playbackCount + 1
+    })
+    #expect(await audio.lastRouting?.0 == .originalFailOpen)
+    await harness.coordinator.stop()
+}
+
+@Test
+func directRendererFailOpenRemainsStickyAcrossLaterSpeech() async throws {
+    let harness = CoordinatorHarness(audioStability: .production)
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(Data(repeating: 1, count: 240_002))
+    )))
+    try #require(await eventually {
+        await harness.audio.lastRouting?.0 == .originalFailOpen
+    })
+    let playbackCount = await harness.audio.inboundPlayback.count
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+
+    for _ in 0..<30 {
+        await harness.audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 23
+    ))
+    while await harness.coordinator.nextEvent()
+        != .audioBackpressure(droppedFrames: 23) {
+        continue
+    }
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 1_920))
+    )))
+    await harness.inbound.emit(.success(.outputTranscript(
+        transcriptDelta("sticky fallback")
+    )))
+    try #require(await eventually {
+        await harness.coordinator.state.subtitles.inboundTranslation
+            == "sticky fallback"
+    })
+
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    #expect(await harness.audio.lastRouting?.0 == .originalFailOpen)
+    await harness.coordinator.stop()
+}
+
+private func assertAdaptiveVADAcceptsPartialCallbacks(
+    audioStability: AudioStabilityConfiguration
+) async throws {
+    let harness = CoordinatorHarness(audioStability: audioStability)
+    try await harness.start()
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+
+    var pieces = [
+        constantPCM16(10_000, samples: 50),
+        constantPCM16(10_000, samples: 190),
+        constantPCM16(10_000, samples: 100),
+        constantPCM16(10_000, samples: 140),
+    ]
+    let targetBlockCount = PCMFrameBatcher(
+        frameDurationMilliseconds:
+            audioStability.inputFrameDurationMilliseconds
+    ).frameByteCount / 480
+    for _ in 2..<targetBlockCount {
+        pieces.append(constantPCM16(10_000, samples: 240))
+    }
+    var expectedNetworkFrame = Data()
+    for piece in pieces {
+        expectedNetworkFrame.append(piece)
+        await harness.audio.emit(.inboundNetworkAudio(piece))
+    }
+
+    _ = await eventually {
+        let appended = await harness.inbound.appended.count
+        let state = await harness.coordinator.state.inbound
+        return appended == 1 || state != .active
+    }
+    #expect(await harness.coordinator.state.inbound == .active)
+    #expect(await harness.builder.requests.count == 2)
+    #expect(await harness.inbound.appended == [expectedNetworkFrame])
+    #expect(!(await harness.audio.inboundPlayback).isEmpty)
+    await harness.coordinator.stop()
+}
+
+@Test
+func productionAdaptiveVADAccumulatesPartialCallbacks() async throws {
+    try await assertAdaptiveVADAcceptsPartialCallbacks(
+        audioStability: .production
+    )
+}
+
+@Test
+func probeAdaptiveVADAccumulatesPartialCallbacks() async throws {
+    try await assertAdaptiveVADAcceptsPartialCallbacks(
+        audioStability: .providerProbe40ms
+    )
+}
+
+@Test
+func legacyForeignPlaybackMarksFirstPlaybackLatency() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    try #require(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+
+    harness.levelClock.advance(milliseconds: 5)
+    await harness.inbound.emit(
+        .success(.outputAudio(audioDelta(Data([2, 2]))))
+    )
+    try #require(await eventually {
+        await harness.coordinator.currentState().latency.latest?
+            .speechToFirstTranslationAudioMilliseconds == 5
+    })
+    harness.levelClock.advance(milliseconds: 7)
+    await harness.inbound.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
+    )
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+    try #require(await eventually {
+        await harness.audio.inboundPlayback == [Data([2, 2])]
+    })
+
+    #expect(
+        await harness.coordinator.currentState().latency.latest?
+            .translationAudioToPlaybackMilliseconds == 7
+    )
+    await harness.coordinator.stop()
+}
+
+@Test
+func legacyNoDeltaFinishMarksRouteDecisionBeforeReset() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    for _ in 0..<30 {
+        await harness.audio.emit(.inboundNetworkAudio(
+            constantPCM16(0, samples: 240)
+        ))
+    }
+    try #require(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    _ = await eventually {
+        let hasPlayback = !(await harness.audio.inboundPlayback).isEmpty
+        let decided = await harness.coordinator.currentState()
+            .latency.latest?.speechToRouteDecisionMilliseconds != nil
+        return hasPlayback || decided
+    }
+
+    #expect(
+        await harness.coordinator.currentState().latency.latest?
+            .speechToRouteDecisionMilliseconds != nil
+    )
+    #expect(await eventually {
+        !(await harness.audio.inboundPlayback).isEmpty
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func latencyMilestonesPublishAStateChangedEvent() async throws {
+    let harness = CoordinatorHarness()
+    try await harness.start()
+    await harness.drainStartupEvents()
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    try #require(await eventually {
+        await harness.inbound.appended.count == 1
+    })
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 19
+    ))
+
+    var publishedNetworkMilestone = false
+    while true {
+        let event = await harness.coordinator.nextEvent()
+        if case .stateChanged(let state) = event,
+           state.latency.latest?
+            .speechToFirstNetworkFrameMilliseconds != nil {
+            publishedNetworkMilestone = true
+        }
+        if event == .audioBackpressure(droppedFrames: 19) {
+            break
+        }
+    }
+    #expect(publishedNetworkMilestone)
     await harness.coordinator.stop()
 }
 

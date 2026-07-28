@@ -164,9 +164,12 @@ public actor TranslationCoordinator {
         motherLanguage: .chinese
     )
     private var inboundRenderer = InboundAuditionRenderer()
+    private var inboundRendererGeneration: UInt64 = 0
+    private var inboundVADBuffer = Data()
     private var latencyTracker = TranslationLatencyTracker()
     private var activeInboundUtteranceID: UInt64?
     private var nextLegacyInboundUtteranceID: UInt64 = 0
+    private var inboundLegacyTranslationAvailable = false
     private var inboundRendererFailedOpen = false
     private var inboundUtteranceActive = false
     private var routing = RoutingStateMachine()
@@ -785,10 +788,11 @@ public actor TranslationCoordinator {
     private func handleInboundAudio(_ pcm16: Data) async {
         let epoch = inboundEpoch
         do {
-            let vadEvent = try inboundVAD.observe(pcm16)
-            if vadEvent == .speechStarted {
+            let vadEvents = try inboundVoiceActivityEvents(for: pcm16)
+            for vadEvent in vadEvents where vadEvent == .speechStarted {
                 cancelInboundFinish()
-                if routing.inbound != .originalBypass {
+                if routing.inbound != .originalBypass,
+                   !inboundRendererFailedOpen {
                     await beginInboundUtterance(epoch: epoch)
                 }
             }
@@ -801,11 +805,18 @@ public actor TranslationCoordinator {
                             pcm16,
                             utteranceID: utteranceID
                         ),
-                        epoch: epoch
+                        epoch: epoch,
+                        utteranceID: utteranceID
                     )
                 } else {
+                    let routeBefore = currentInboundRoute
+                    let chunks = inboundBuffer.appendOriginal(pcm16)
+                    markRouteDecisionIfNeeded(
+                        from: routeBefore,
+                        utteranceID: utteranceID
+                    )
                     await playInbound(
-                        inboundBuffer.appendOriginal(pcm16),
+                        chunks,
                         epoch: epoch
                     )
                 }
@@ -842,8 +853,10 @@ public actor TranslationCoordinator {
                 inboundBatcher.reset()
             }
 
-            if vadEvent == .speechEnded {
-                scheduleInboundFinish(epoch: epoch)
+            for vadEvent in vadEvents where vadEvent == .speechEnded {
+                if inboundUtteranceActive {
+                    scheduleInboundFinish(epoch: epoch)
+                }
             }
         } catch {
             await handleChannelFailure(
@@ -852,6 +865,30 @@ public actor TranslationCoordinator {
                 epoch: epoch
             )
         }
+    }
+
+    private func inboundVoiceActivityEvents(
+        for pcm16: Data
+    ) throws -> [PCMVoiceActivityEvent] {
+        guard pcm16.count.isMultiple(of: 2) else {
+            throw PCMVoiceActivityDetectorError.invalidPCM16ByteCount
+        }
+        guard configuration?.audioStability.adaptiveVADEnabled == true
+        else {
+            return [try inboundVAD.observe(pcm16)]
+        }
+
+        inboundVADBuffer.append(pcm16)
+        var events: [PCMVoiceActivityEvent] = []
+        while inboundVADBuffer.count >= 480 {
+            let block = Data(inboundVADBuffer.prefix(480))
+            inboundVADBuffer.removeFirst(480)
+            let event = try inboundVAD.observe(block)
+            if event != .none {
+                events.append(event)
+            }
+        }
+        return events
     }
 
     private func handleOutboundAudio(_ pcm16: Data) async {
@@ -906,26 +943,38 @@ public actor TranslationCoordinator {
             )
             let routeBefore = currentInboundRoute
             if inboundAuditionEnabled {
+                let commands = inboundAudition.appendTranslation(
+                    delta.data,
+                    utteranceID: utteranceID
+                )
+                markRouteDecisionIfNeeded(
+                    from: routeBefore,
+                    utteranceID: utteranceID
+                )
                 await executeInbound(
-                    inboundAudition.appendTranslation(
-                        delta.data,
-                        utteranceID: utteranceID
-                    ),
-                    epoch: epoch
+                    commands,
+                    epoch: epoch,
+                    utteranceID: utteranceID
                 )
             } else {
+                inboundLegacyTranslationAvailable = true
+                let chunks = inboundBuffer.appendTranslation(delta.data)
+                markRouteDecisionIfNeeded(
+                    from: routeBefore,
+                    utteranceID: utteranceID
+                )
                 await playInbound(
-                    inboundBuffer.appendTranslation(delta.data),
-                    epoch: epoch
+                    chunks,
+                    epoch: epoch,
+                    translationPlaybackUtteranceID:
+                        currentInboundRoute == .translated
+                            ? utteranceID
+                            : nil
                 )
             }
             guard isCurrent(epoch, for: .inbound), !isStopping else {
                 return false
             }
-            markRouteDecisionIfNeeded(
-                from: routeBefore,
-                utteranceID: utteranceID
-            )
             if currentInboundRoute == .undecided {
                 scheduleInboundDeadline(epoch: epoch)
             }
@@ -950,26 +999,37 @@ public actor TranslationCoordinator {
                 )
                 let routeBefore = currentInboundRoute
                 if inboundAuditionEnabled {
+                    let commands = inboundAudition.observe(
+                        hypotheses,
+                        utteranceID: utteranceID
+                    )
+                    markRouteDecisionIfNeeded(
+                        from: routeBefore,
+                        utteranceID: utteranceID
+                    )
                     await executeInbound(
-                        inboundAudition.observe(
-                            hypotheses,
-                            utteranceID: utteranceID
-                        ),
-                        epoch: epoch
+                        commands,
+                        epoch: epoch,
+                        utteranceID: utteranceID
                     )
                 } else {
+                    let chunks = inboundBuffer.observe(hypotheses)
+                    markRouteDecisionIfNeeded(
+                        from: routeBefore,
+                        utteranceID: utteranceID
+                    )
                     await playInbound(
-                        inboundBuffer.observe(hypotheses),
-                        epoch: epoch
+                        chunks,
+                        epoch: epoch,
+                        translationPlaybackUtteranceID:
+                            currentInboundRoute == .translated
+                                ? utteranceID
+                                : nil
                     )
                 }
                 guard isCurrent(epoch, for: .inbound), !isStopping else {
                     return false
                 }
-                markRouteDecisionIfNeeded(
-                    from: routeBefore,
-                    utteranceID: utteranceID
-                )
                 cancelDeadlineIfResolved()
                 extendInboundFinishWindowIfDraining(epoch: epoch)
             }
@@ -1067,6 +1127,8 @@ public actor TranslationCoordinator {
     }
 
     private func beginInboundUtterance(epoch: UInt64) async {
+        guard !inboundRendererFailedOpen else { return }
+        advanceInboundRendererGeneration()
         let utteranceID: UInt64
         if inboundAuditionEnabled {
             utteranceID = inboundAudition.beginUtterance()
@@ -1077,6 +1139,7 @@ public actor TranslationCoordinator {
             )
             utteranceID = nextLegacyInboundUtteranceID
             inboundBuffer.begin()
+            inboundLegacyTranslationAvailable = false
         }
         activeInboundUtteranceID = utteranceID
         inboundUtteranceActive = true
@@ -1086,12 +1149,14 @@ public actor TranslationCoordinator {
         if inboundAuditionEnabled,
            routing.inbound == .originalFailOpen {
             let routeBefore = currentInboundRoute
-            await executeInbound(
-                inboundAudition.failOpen(),
-                epoch: epoch
-            )
+            let commands = inboundAudition.failOpen()
             markRouteDecisionIfNeeded(
                 from: routeBefore,
+                utteranceID: utteranceID
+            )
+            await executeInbound(
+                commands,
+                epoch: epoch,
                 utteranceID: utteranceID
             )
         }
@@ -1101,12 +1166,16 @@ public actor TranslationCoordinator {
         _ milestone: TranslationLatencyMilestone,
         utteranceID: UInt64
     ) {
+        let previousDiagnostics = latencyTracker.diagnostics
         latencyTracker.mark(
             milestone,
             utteranceID: utteranceID,
             at: levelTimeNanoseconds()
         )
         state.latency = latencyTracker.diagnostics
+        if state.latency != previousDiagnostics {
+            publish(.stateChanged(state))
+        }
     }
 
     private func markRouteDecisionIfNeeded(
@@ -1121,10 +1190,16 @@ public actor TranslationCoordinator {
 
     private func executeInbound(
         _ commands: [InboundAuditionCommand],
-        epoch: UInt64
+        epoch: UInt64,
+        utteranceID: UInt64
     ) async {
+        let generation = inboundRendererGeneration
         for command in commands {
-            guard isCurrent(epoch, for: .inbound), !isStopping else {
+            guard isCurrentInboundRendererExecution(
+                epoch: epoch,
+                generation: generation,
+                utteranceID: utteranceID
+            ) else {
                 return
             }
             let chunks: [InboundRenderedChunk]
@@ -1135,11 +1210,14 @@ public actor TranslationCoordinator {
                 return
             }
             for chunk in chunks {
-                guard isCurrent(epoch, for: .inbound), !isStopping else {
+                guard isCurrentInboundRendererExecution(
+                    epoch: epoch,
+                    generation: generation,
+                    utteranceID: utteranceID
+                ) else {
                     return
                 }
-                if let utteranceID = activeInboundUtteranceID,
-                   chunk.source == .crossfade
+                if chunk.source == .crossfade
                     || chunk.source == .translation
                 {
                     markLatency(
@@ -1153,16 +1231,54 @@ public actor TranslationCoordinator {
                     await forceDirectInboundFailOpen(error)
                     return
                 }
-                guard isCurrent(epoch, for: .inbound), !isStopping else {
+                guard isCurrentInboundRendererExecution(
+                    epoch: epoch,
+                    generation: generation,
+                    utteranceID: utteranceID
+                ) else {
                     return
                 }
             }
         }
     }
 
-    private func playInbound(_ chunks: [Data], epoch: UInt64) async {
+    @discardableResult
+    private func advanceInboundRendererGeneration() -> UInt64 {
+        inboundRendererGeneration = Self.nextGeneration(
+            after: inboundRendererGeneration,
+            name: "inbound renderer"
+        )
+        return inboundRendererGeneration
+    }
+
+    private func isCurrentInboundRendererExecution(
+        epoch: UInt64,
+        generation: UInt64,
+        utteranceID: UInt64
+    ) -> Bool {
+        isCurrent(epoch, for: .inbound)
+            && !isStopping
+            && inboundRendererGeneration == generation
+            && activeInboundUtteranceID == utteranceID
+            && !inboundRendererFailedOpen
+            && routing.inbound != .originalBypass
+    }
+
+    private func playInbound(
+        _ chunks: [Data],
+        epoch: UInt64,
+        translationPlaybackUtteranceID: UInt64? = nil
+    ) async {
         for chunk in chunks {
             guard isCurrent(epoch, for: .inbound), !isStopping else { return }
+            if let utteranceID = translationPlaybackUtteranceID,
+               activeInboundUtteranceID == utteranceID,
+               routing.inbound != .originalBypass {
+                markLatency(
+                    .firstPlaybackScheduled,
+                    utteranceID: utteranceID
+                )
+            }
             do {
                 try await audioEngine.enqueueInboundOutput(chunk)
             } catch {
@@ -1176,7 +1292,8 @@ public actor TranslationCoordinator {
     private func playInboundFinish(
         _ chunks: [Data],
         epoch: UInt64,
-        token: UInt64
+        token: UInt64,
+        translationPlaybackUtteranceID: UInt64? = nil
     ) async {
         for chunk in chunks {
             guard isCurrentInboundFinish(
@@ -1184,6 +1301,14 @@ public actor TranslationCoordinator {
                 token: token,
                 phase: .draining
             ) else { return }
+            if let utteranceID = translationPlaybackUtteranceID,
+               activeInboundUtteranceID == utteranceID,
+               routing.inbound != .originalBypass {
+                markLatency(
+                    .firstPlaybackScheduled,
+                    utteranceID: utteranceID
+                )
+            }
             do {
                 try await audioEngine.enqueueInboundOutput(chunk)
             } catch {
@@ -1201,14 +1326,21 @@ public actor TranslationCoordinator {
     private func executeInboundFinish(
         _ commands: [InboundAuditionCommand],
         epoch: UInt64,
-        token: UInt64
+        token: UInt64,
+        utteranceID: UInt64
     ) async {
+        let generation = inboundRendererGeneration
         for command in commands {
             guard isCurrentInboundFinish(
                 epoch: epoch,
                 token: token,
                 phase: .draining
-            ) else { return }
+            ),
+                  isCurrentInboundRendererExecution(
+                    epoch: epoch,
+                    generation: generation,
+                    utteranceID: utteranceID
+                  ) else { return }
             let chunks: [InboundRenderedChunk]
             do {
                 chunks = try inboundRenderer.consume(command)
@@ -1221,9 +1353,13 @@ public actor TranslationCoordinator {
                     epoch: epoch,
                     token: token,
                     phase: .draining
-                ) else { return }
-                if let utteranceID = activeInboundUtteranceID,
-                   chunk.source == .crossfade
+                ),
+                      isCurrentInboundRendererExecution(
+                        epoch: epoch,
+                        generation: generation,
+                        utteranceID: utteranceID
+                      ) else { return }
+                if chunk.source == .crossfade
                     || chunk.source == .translation
                 {
                     markLatency(
@@ -1241,19 +1377,28 @@ public actor TranslationCoordinator {
                     epoch: epoch,
                     token: token,
                     phase: .draining
-                ) else { return }
+                ),
+                      isCurrentInboundRendererExecution(
+                        epoch: epoch,
+                        generation: generation,
+                        utteranceID: utteranceID
+                      ) else { return }
             }
         }
     }
 
     private func forceDirectInboundFailOpen(_ error: any Error) async {
         guard !isStopping else { return }
+        advanceInboundRendererGeneration()
         cancelInboundFinish()
         inboundDeadlineTask?.cancel()
         inboundDeadlineTask = nil
         _ = inboundAudition.reset()
         inboundRenderer = InboundAuditionRenderer()
+        inboundVAD.reset()
+        inboundVADBuffer.removeAll(keepingCapacity: false)
         inboundBuffer.reset()
+        inboundLegacyTranslationAvailable = false
         inboundUtteranceActive = false
         activeInboundUtteranceID = nil
         inboundRendererFailedOpen = true
@@ -1268,10 +1413,12 @@ public actor TranslationCoordinator {
     }
 
     private func resetInboundAudition() async {
+        advanceInboundRendererGeneration()
         cancelInboundFinish()
         inboundDeadlineTask?.cancel()
         inboundDeadlineTask = nil
         inboundVAD.reset()
+        inboundVADBuffer.removeAll(keepingCapacity: false)
         let resetCommands = inboundAudition.reset()
         do {
             for command in resetCommands {
@@ -1282,9 +1429,9 @@ public actor TranslationCoordinator {
             return
         }
         inboundBuffer.reset()
+        inboundLegacyTranslationAvailable = false
         inboundUtteranceActive = false
         activeInboundUtteranceID = nil
-        inboundRendererFailedOpen = false
     }
 
     private func scheduleInboundDeadline(epoch: UInt64) {
@@ -1305,25 +1452,36 @@ public actor TranslationCoordinator {
               currentInboundRoute == .undecided else { return }
         let routeBefore = currentInboundRoute
         if inboundAuditionEnabled {
+            let commands = inboundAudition.resolveDeadline(
+                isSpeech: inboundVAD.isSpeaking,
+                utteranceID: utteranceID
+            )
+            markRouteDecisionIfNeeded(
+                from: routeBefore,
+                utteranceID: utteranceID
+            )
             await executeInbound(
-                inboundAudition.resolveDeadline(
-                    isSpeech: inboundVAD.isSpeaking,
-                    utteranceID: utteranceID
-                ),
-                epoch: epoch
+                commands,
+                epoch: epoch,
+                utteranceID: utteranceID
             )
         } else {
+            let chunks = inboundBuffer.resolveDeadline(
+                isSpeech: inboundVAD.isSpeaking
+            )
+            markRouteDecisionIfNeeded(
+                from: routeBefore,
+                utteranceID: utteranceID
+            )
             await playInbound(
-                inboundBuffer.resolveDeadline(
-                    isSpeech: inboundVAD.isSpeaking
-                ),
-                epoch: epoch
+                chunks,
+                epoch: epoch,
+                translationPlaybackUtteranceID:
+                    currentInboundRoute == .translated
+                        ? utteranceID
+                        : nil
             )
         }
-        markRouteDecisionIfNeeded(
-            from: routeBefore,
-            utteranceID: utteranceID
-        )
     }
 
     private func cancelDeadlineIfResolved() {
@@ -1374,23 +1532,62 @@ public actor TranslationCoordinator {
             token: token,
             phase: .scheduled
         ),
-              inboundUtteranceActive else { return }
+              inboundUtteranceActive,
+              let utteranceID = activeInboundUtteranceID else { return }
         inboundFinishState?.phase = .draining
         if inboundAuditionEnabled {
-            if let utteranceID = activeInboundUtteranceID {
+            if currentInboundRoute == .undecided {
+                let routeBefore = currentInboundRoute
+                let decisionCommands = inboundAudition.resolveDeadline(
+                    isSpeech: true,
+                    utteranceID: utteranceID
+                )
+                markRouteDecisionIfNeeded(
+                    from: routeBefore,
+                    utteranceID: utteranceID
+                )
                 await executeInboundFinish(
-                    inboundAudition.finish(
-                        utteranceID: utteranceID
-                    ),
+                    decisionCommands,
                     epoch: epoch,
-                    token: token
+                    token: token,
+                    utteranceID: utteranceID
                 )
             }
-        } else {
-            await playInboundFinish(
-                inboundBuffer.finish(isSpeech: true),
+            await executeInboundFinish(
+                inboundAudition.finish(
+                    utteranceID: utteranceID
+                ),
                 epoch: epoch,
-                token: token
+                token: token,
+                utteranceID: utteranceID
+            )
+        } else {
+            var chunks: [Data] = []
+            if currentInboundRoute == .undecided {
+                let routeBefore = currentInboundRoute
+                chunks.append(contentsOf:
+                    inboundBuffer.resolveDeadline(
+                        isSpeech: inboundLegacyTranslationAvailable
+                    )
+                )
+                markRouteDecisionIfNeeded(
+                    from: routeBefore,
+                    utteranceID: utteranceID
+                )
+            }
+            let translationPlaybackUtteranceID =
+                currentInboundRoute == .translated
+                    ? utteranceID
+                    : nil
+            chunks.append(contentsOf:
+                inboundBuffer.finish(isSpeech: true)
+            )
+            await playInboundFinish(
+                chunks,
+                epoch: epoch,
+                token: token,
+                translationPlaybackUtteranceID:
+                    translationPlaybackUtteranceID
             )
         }
         guard isCurrentInboundFinish(
@@ -1402,6 +1599,7 @@ public actor TranslationCoordinator {
         inboundFinishState = nil
         inboundUtteranceActive = false
         activeInboundUtteranceID = nil
+        inboundLegacyTranslationAvailable = false
         inboundDeadlineTask?.cancel()
         inboundDeadlineTask = nil
         routing.handle(.utteranceEnded)
@@ -1440,12 +1638,14 @@ public actor TranslationCoordinator {
                let utteranceID = activeInboundUtteranceID,
                !inboundRendererFailedOpen {
                 let routeBefore = currentInboundRoute
-                await executeInbound(
-                    inboundAudition.failOpen(),
-                    epoch: epoch
-                )
+                let commands = inboundAudition.failOpen()
                 markRouteDecisionIfNeeded(
                     from: routeBefore,
+                    utteranceID: utteranceID
+                )
+                await executeInbound(
+                    commands,
+                    epoch: epoch,
                     utteranceID: utteranceID
                 )
             }
@@ -1680,6 +1880,7 @@ public actor TranslationCoordinator {
         inboundVAD = InboundVoiceActivityDetector(
             audioStability: audioStability
         )
+        inboundVADBuffer.removeAll(keepingCapacity: false)
         inboundLevelMeter.reset()
         outboundLevelMeter.reset()
         audioLevels = AudioLevelSnapshot()
@@ -1688,12 +1889,14 @@ public actor TranslationCoordinator {
             motherLanguage: motherLanguage
         )
         inboundRenderer = InboundAuditionRenderer()
+        advanceInboundRendererGeneration()
         inboundBuffer = InboundUtteranceBuffer(
             motherLanguage: motherLanguage
         )
         latencyTracker.reset()
         activeInboundUtteranceID = nil
         nextLegacyInboundUtteranceID = 0
+        inboundLegacyTranslationAvailable = false
         inboundRendererFailedOpen = false
         inboundUtteranceActive = false
         state.subtitles = SubtitleSnapshot()
