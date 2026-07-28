@@ -1,6 +1,8 @@
 import Foundation
 
 public struct AdaptivePCMVoiceActivityDetector: Sendable {
+    private static let pcm16BlockByteCount = 480
+
     public private(set) var isSpeaking = false
     public private(set) var noiseFloor: Double
 
@@ -49,10 +51,10 @@ public struct AdaptivePCMVoiceActivityDetector: Sendable {
     public mutating func observe(
         _ pcm16: Data
     ) throws -> PCMVoiceActivityEvent {
-        guard pcm16.count.isMultiple(of: 2) else {
-            throw PCMVoiceActivityDetectorError.invalidPCM16ByteCount
-        }
         guard !pcm16.isEmpty else { return .none }
+        guard pcm16.count == Self.pcm16BlockByteCount else {
+            throw PCM16ProcessingError.invalidPCM16ByteCount
+        }
 
         let rms = rms(for: pcm16)
         if isSpeaking {
