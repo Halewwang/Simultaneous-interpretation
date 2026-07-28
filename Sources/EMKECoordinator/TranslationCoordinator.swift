@@ -1850,6 +1850,9 @@ public actor TranslationCoordinator {
     }
 
     private var effectiveInboundAudioMode: InboundOutputMode {
+        if routing.inbound == .originalBypass {
+            return .originalBypass
+        }
         if inboundRendererFailedOpen {
             return .originalFailOpen
         }

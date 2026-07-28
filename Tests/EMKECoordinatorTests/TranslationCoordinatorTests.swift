@@ -1141,6 +1141,82 @@ func directRendererFailOpenRemainsStickyAcrossLaterSpeech() async throws {
     await harness.coordinator.stop()
 }
 
+@Test
+func manualBypassOverridesStickyRendererFailOpenWithoutCoordinatorPlayback()
+async throws {
+    let harness = CoordinatorHarness(audioStability: .production)
+    try await harness.start()
+    await harness.emitInboundSpeechFrames(amplitude: 10_000, count: 2)
+    try #require(await eventually {
+        (await harness.audio.inboundPlayback).count == 1
+    })
+
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(Data(repeating: 1, count: 240_002))
+    )))
+    try #require(await eventually {
+        await harness.audio.lastRouting?.0 == .originalFailOpen
+    })
+    let playbackCount = await harness.audio.inboundPlayback.count
+    await harness.coordinator.setAudioLevelUpdatesEnabled(false)
+
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 240))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(2)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 31
+    ))
+    while await harness.coordinator.nextEvent()
+        != .audioBackpressure(droppedFrames: 31) {
+        continue
+    }
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+
+    await harness.coordinator.setInboundBypass(true)
+    #expect(await harness.audio.lastRouting?.0 == .originalBypass)
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 240))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(3)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 32
+    ))
+    while await harness.coordinator.nextEvent()
+        != .audioBackpressure(droppedFrames: 32) {
+        continue
+    }
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+
+    await harness.coordinator.setInboundBypass(false)
+    #expect(await harness.audio.lastRouting?.0 == .originalFailOpen)
+    await harness.audio.emit(.inboundNetworkAudio(
+        constantPCM16(10_000, samples: 240)
+    ))
+    await harness.inbound.emit(.success(.outputAudio(
+        audioDelta(constantPCM16(2_000, samples: 240))
+    )))
+    await harness.inbound.waitUntilDeliveredEventCount(4)
+    await harness.audio.emit(.outputBackpressure(
+        role: .physicalOutput,
+        droppedFrames: 33
+    ))
+    while await harness.coordinator.nextEvent()
+        != .audioBackpressure(droppedFrames: 33) {
+        continue
+    }
+    #expect(await harness.audio.inboundPlayback.count == playbackCount)
+    await harness.coordinator.stop()
+}
+
 private func assertAdaptiveVADAcceptsPartialCallbacks(
     audioStability: AudioStabilityConfiguration
 ) async throws {
