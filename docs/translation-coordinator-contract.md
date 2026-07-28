@@ -94,7 +94,7 @@ API Key 输入框是临时草稿。开始翻译或测试连接时，非空草稿
 
 未提供真实语音样本时，前四项和关闭可以通过协议握手验证；源字幕和输出音频标记为 `requiresInteractiveAudio`。此状态显示为“协议连接通过，需要音频测试”，不等同于完全兼容。鉴权、模型、目标语言、端点、源字幕、音频输出和关闭失败保持为不同错误类别，不能统一误报为 API Key 无效。
 
-仓库中的 live Provider probe 只有在 `EMKE_RUN_LIVE_TRANSLATION_TESTS=1` 时启用；默认测试运行在进入测试体前跳过该用例，不读取 Key 或样本，也不尝试网络。启用后先读取本地有声 PCM 样本，并用终止式校验拒绝空样本以及任何不是 1,920 bytes 整数倍的长度（包括奇数字节和短尾）；只有样本通过后才读取 Key、Base URL 和模型并构造网络 probe。live test 使用覆盖整个测试体的 1 分钟上限，因此 connect、握手、append、响应收集和 drain 都在同一边界内。它通过 `speechChunkByteCount: 1_920` 真正连续 append 40 ms 有声块，只断言 live 握手、有声源字幕和译音输出。鉴权、模型、目标语言、端点、缺失字幕、缺失音频和关闭错误的分类由无网络的 deterministic probe tests 证明。两类测试都不打印或持久化样本、字幕、凭据或身份信息。
+仓库中的 live Provider probe 只有在 `EMKE_RUN_LIVE_TRANSLATION_TESTS=1` 时启用；默认测试运行在进入测试体前跳过该用例，不读取 Key 或样本，也不尝试网络。启用后先读取本地有声 PCM 样本，并用终止式校验拒绝空样本以及任何不是 1,920 bytes 整数倍的长度（包括奇数字节和短尾）；只有样本通过后才读取 Key、Base URL 和模型并构造网络 probe。live test 使用覆盖整个测试体的 1 分钟上限，因此 connect、握手、append、响应收集和 drain 都在同一边界内。它通过 `speechChunkByteCount: 1_920` 真正连续 append 40 ms 有声块，只断言 live 握手、有声源字幕和译音输出成功。无网络的 deterministic probe tests 明确覆盖 Translation endpoint 握手失败、鉴权失败、模型拒绝、目标语言更新拒绝、无语音样本时的 interactive 状态、完整 dual-session 成功路径、missing source transcript 分类不误报鉴权，以及 chunk append 边界；成功路径也断言 graceful close 为 passed。missing audio output failure 与 graceful-close failure 虽有静态实现分支，但当前没有专门的 deterministic failure test，不能视为已验证分类。两类测试都不打印或持久化样本、字幕、凭据或身份信息。
 
 40 ms 的本地分帧与 fake-session 测试通过，只证明 chunk 循环及本地 PCM 边界。只有对目标 Provider/Base URL 执行真实有声 probe 并通过后，未来发布才可评估把 `.production` 从 200 ms 切为 40 ms；当前生产默认仍为 200 ms。
 
