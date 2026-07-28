@@ -1,0 +1,313 @@
+name: Windows Internal MSIX
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Windows/**"
+      - "Shared/**"
+      - "Scripts/validate-shared-contracts.mjs"
+      - ".github/workflows/windows-internal-msix.yml"
+  push:
+    branches:
+      - main
+      - codex/windows-internal-msix
+    paths:
+      - "Windows/**"
+      - "Shared/**"
+      - "Scripts/validate-shared-contracts.mjs"
+      - ".github/workflows/windows-internal-msix.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-install-check:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate portable contracts and locked restore
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
+            throw "Internal MSIX build requires an x64 hosted process."
+          }
+          node Scripts/validate-shared-contracts.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Shared contract validation failed."
+          }
+          node --test Windows/driver/tests/*.test.mjs Windows/tools/tests/*.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows portable contract tests failed."
+          }
+          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows locked restore failed."
+          }
+
+      - name: Build and test native Release audio
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          Push-Location Windows/native
+          try {
+            cmake --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake configuration failed."
+            }
+            cmake --build --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native Release build failed."
+            }
+            ctest --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CTest gate failed."
+            }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Build and test managed Release product
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          dotnet build Windows/EMKE.Windows.slnx `
+            --configuration Release `
+            --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows managed Release build failed."
+          }
+          dotnet test Windows/EMKE.Windows.slnx `
+            --configuration Release `
+            --no-build `
+            --logger "trx;LogFileName=windows-internal-msix.trx"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows managed test gate failed."
+          }
+
+      - name: Reconstruct, sign, and verify Internal MSIX
+        id: package
+        shell: pwsh
+        env:
+          WINDOWS_INTERNAL_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_BASE64 }}
+          WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $signingRoot = Join-Path `
+            $env:RUNNER_TEMP `
+            ("emke-msix-signing-" + [Guid]::NewGuid().ToString("N"))
+          $pfxPath = Join-Path $signingRoot "app.pfx"
+          $pfxBytes = $null
+          try {
+            if (
+              [string]::IsNullOrWhiteSpace(
+                $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64
+              ) -or
+              [string]::IsNullOrEmpty(
+                $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD
+              )
+            ) {
+              throw "Required Internal signing secrets are unavailable."
+            }
+            [IO.Directory]::CreateDirectory($signingRoot) | Out-Null
+            try {
+              $pfxBytes = [Convert]::FromBase64String(
+                $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64
+              )
+            } catch {
+              throw "Internal signing PFX reconstruction failed."
+            }
+            [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+
+            $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
+            [IO.Directory]::CreateDirectory($artifactRoot) | Out-Null
+            $certificatePath = Join-Path `
+              $artifactRoot `
+              "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            pwsh -NoProfile -File `
+              Windows/tools/verify-internal-signing-certificate.ps1 `
+              -PfxPath $pfxPath `
+              -PasswordEnvironmentVariable `
+                WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD `
+              -ExpectedSubject "CN=EMKE Internal Test" `
+              -ExportPublicCertificatePath $certificatePath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Internal signing certificate verification failed."
+            }
+
+            pwsh -NoProfile -File Windows/tools/package-msix.ps1 `
+              -Configuration Release `
+              -PfxPath $pfxPath `
+              -PasswordEnvironmentVariable `
+                WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD
+            if ($LASTEXITCODE -ne 0) {
+              throw "Internal MSIX packaging failed."
+            }
+
+            $packagePath = Join-Path `
+              $artifactRoot `
+              "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            pwsh -NoProfile -File Windows/tools/verify-msix.ps1 `
+              -Package $packagePath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Internal MSIX verification failed."
+            }
+
+            $publicCertificate =
+              [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                [IO.File]::ReadAllBytes($certificatePath)
+              )
+            try {
+              $thumbprint =
+                $publicCertificate.Thumbprint.ToUpperInvariant()
+              "certificate_thumbprint=$thumbprint" |
+                Out-File `
+                  -FilePath $env:GITHUB_OUTPUT `
+                  -Encoding utf8 `
+                  -Append
+            } finally {
+              $publicCertificate.Dispose()
+            }
+          } finally {
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
+            if ($null -ne $pfxBytes) {
+              [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
+            }
+            if (Test-Path -LiteralPath $pfxPath) {
+              Remove-Item -LiteralPath $pfxPath -Force
+            }
+            if (
+              Test-Path -LiteralPath $signingRoot -PathType Container
+            ) {
+              Remove-Item -LiteralPath $signingRoot -Force
+            }
+          }
+
+      - name: Install, query, smoke, and remove exact Internal MSIX
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
+          pwsh -NoProfile -File Windows/tools/test-hosted-msix-install.ps1 `
+            -PackagePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            ) `
+            -CertificatePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            ) `
+            -ExpectedCertificateThumbprint `
+              "${{ steps.package.outputs.certificate_thumbprint }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Hosted Internal MSIX install validation failed."
+          }
+
+      - name: Ensure exact certificate cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $thumbprint =
+            "${{ steps.package.outputs.certificate_thumbprint }}".ToUpperInvariant()
+          if ($thumbprint -match "^[0-9A-F]{40}$") {
+            $store =
+              [Security.Cryptography.X509Certificates.X509Store]::new(
+                [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+                [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+              )
+            try {
+              $store.Open(
+                [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+              )
+              $matches = @(
+                $store.Certificates |
+                  Where-Object {
+                    $_.Thumbprint.ToUpperInvariant() -ceq $thumbprint
+                  }
+              )
+              foreach ($match in $matches) {
+                $store.Remove($match)
+              }
+            } finally {
+              $store.Close()
+              $store.Dispose()
+            }
+          }
+
+      - name: Build exact handoff bundle
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
+          $bundleRoot = Join-Path $PWD "Windows/artifacts/internal-bundle"
+          pwsh -NoProfile -File `
+            Windows/tools/build-internal-msix-bundle.ps1 `
+            -PackagePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            ) `
+            -CertificatePath (
+              Join-Path `
+                $artifactRoot `
+                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            ) `
+            -InstallScriptPath (
+              Join-Path `
+                $PWD `
+                "Windows/packaging/App/Install-EMKE-Translation-Internal.ps1"
+            ) `
+            -UninstallScriptPath (
+              Join-Path `
+                $PWD `
+                "Windows/packaging/App/Uninstall-EMKE-Translation-Internal.ps1"
+            ) `
+            -OutputDirectory $bundleRoot `
+            -SourceCommit "${{ github.sha }}" `
+            -WorkflowRunId "${{ github.run_id }}" `
+            -PackageIdentity "EMKE.Translation.Internal" `
+            -CertificateThumbprint `
+              "${{ steps.package.outputs.certificate_thumbprint }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Internal handoff bundle construction failed."
+          }
+
+      - name: Upload verified Internal bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          path: Windows/artifacts/internal-bundle
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
