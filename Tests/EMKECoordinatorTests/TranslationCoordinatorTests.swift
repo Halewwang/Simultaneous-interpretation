@@ -10,6 +10,40 @@ private enum CoordinatorTestError: Error, Equatable {
     case disconnected
 }
 
+private actor CoordinatorEventReadGate {
+    private var entered = false
+    private var released = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+    func waitForRelease() async {
+        entered = true
+        let waiters = enteredWaiters
+        enteredWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiter = continuation
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { continuation in
+            enteredWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+}
+
 private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
     private let blocksStart: Bool
     private(set) var startConfigurations: [AudioEngineConfiguration] = []
@@ -396,6 +430,53 @@ func readerDispositionProbeWaitIsBoundedWhenNoRecordArrives() async {
     let probe = CoordinatorReaderDispositionProbe()
     let record = await probe.nextRecord(maximumYields: 1)
     #expect(record == nil)
+}
+
+@Test
+func cancelledQueuedEventReadLeavesTheProductionCoordinatorQueueIntact() async {
+    let coordinator = TranslationCoordinator()
+    let gate = CoordinatorEventReadGate()
+    await coordinator.setNextEventReadBarrierForTesting {
+        await gate.waitForRelease()
+    }
+
+    let cancelledConsumer = Task {
+        await coordinator.nextEvent()
+    }
+    await gate.waitUntilEntered()
+    cancelledConsumer.cancel()
+
+    let queuedState = TranslationCoordinatorState(
+        audioEngineStarted: true,
+        inbound: .connecting,
+        outbound: .connecting
+    )
+    await coordinator.publishEventForTesting(.stateChanged(queuedState))
+    await gate.release()
+
+    let cancelledResult = await cancelledConsumer.value
+    #expect(cancelledResult == .stopped)
+    guard cancelledResult == .stopped else { return }
+    await coordinator.setNextEventReadBarrierForTesting(nil)
+    #expect(await coordinator.nextEvent() == .stateChanged(queuedState))
+}
+
+@Test
+func deliveredProductionEventWinsWhenCancellationArrivesAfterConsumption() async {
+    let coordinator = TranslationCoordinator()
+    let deliveredState = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .active,
+        outbound: .active
+    )
+    await coordinator.publishEventForTesting(.stateChanged(deliveredState))
+
+    let consumer = Task {
+        await coordinator.nextEvent()
+    }
+    #expect(await consumer.value == .stateChanged(deliveredState))
+    consumer.cancel()
 }
 
 private struct CoordinatorHarness {

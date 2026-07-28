@@ -203,6 +203,7 @@ public actor TranslationCoordinator {
     private var events: [TranslationCoordinatorEvent] = []
     private var eventWaiters: [EventWaiter] = []
     private var nextEventWaiterID: UInt = 0
+    private var nextEventReadBarrierForTesting: (@Sendable () async -> Void)?
 
     public private(set) var state = TranslationCoordinatorState()
 
@@ -423,6 +424,8 @@ public actor TranslationCoordinator {
     }
 
     public func nextEvent() async -> TranslationCoordinatorEvent {
+        await nextEventReadBarrierForTesting?()
+        guard !Task.isCancelled else { return .stopped }
         if !events.isEmpty {
             return events.removeFirst()
         }
@@ -457,6 +460,16 @@ public actor TranslationCoordinator {
         }) else { return }
         let waiter = eventWaiters.remove(at: index)
         waiter.continuation.resume(returning: .stopped)
+    }
+
+    func setNextEventReadBarrierForTesting(
+        _ barrier: (@Sendable () async -> Void)?
+    ) {
+        nextEventReadBarrierForTesting = barrier
+    }
+
+    func publishEventForTesting(_ event: TranslationCoordinatorEvent) {
+        publish(event)
     }
 
     public func currentState() -> TranslationCoordinatorState {
