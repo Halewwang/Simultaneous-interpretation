@@ -15,6 +15,11 @@ The app resolves devices by UID every time it starts. It never changes the macOS
 
 Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtual devices are excluded from the physical input/output pickers to prevent a feedback route.
 
+The current AUHAL path does not provide acoustic echo cancellation. A physical
+speaker and physical microphone in the same room can therefore feed inbound
+playback back into the outbound translation session. Use headphones for full
+duplex meetings until an independently verified echo-cancellation path exists.
+
 ## Audio Formats
 
 - The device-facing AUHAL input uses the selected device's native sample rate and at most two native channels. A mono input is duplicated into stereo in the preallocated callback scratch buffer after `AudioUnitRender` succeeds.
@@ -22,7 +27,7 @@ Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtu
 - Each worker cycle processes at most 480 frames, or 10 ms at 48 kHz.
 - The default endpoint ring capacity is 4,800 frames, or 100 ms.
 - Translation input/output uses 24,000 Hz, mono, signed little-endian PCM16.
-- Encoding downmixes stereo, applies a two-frame averaging filter, and downsamples 2:1. Decoding converts each PCM16 sample to Float32 and duplicates it across two frames and two channels.
+- Encoding downmixes stereo, applies a two-frame averaging filter, and downsamples 2:1. Decoding converts PCM16 to stereo Float32 and uses a streaming 127-tap Blackman-windowed half-band FIR to interpolate 24 kHz to 48 kHz. The filter adds about 1.31 ms of fixed group delay and suppresses the high-frequency image that zero-order sample repetition would make audible.
 - Conversion runs on the Swift audio worker, never in an AUHAL callback.
 
 ## Real-Time Boundary
