@@ -824,6 +824,7 @@ final class MenuBarModel: ObservableObject {
     func start() async {
         await stopAudioInputTest()
         await reloadDevicesAsync()
+        configurationErrorValue = nil
         guard canStart,
               let selectedInputUID,
               let selectedOutputUID else { return }
@@ -835,7 +836,6 @@ final class MenuBarModel: ObservableObject {
                 isStarting = false
             }
         }
-        configurationErrorValue = nil
         var observationGeneration: UInt?
         do {
             try await requireMicrophonePermission()
@@ -860,11 +860,13 @@ final class MenuBarModel: ObservableObject {
                     apiKey: apiKey
                 )
             )
+            let state = await coordinator.currentState()
             guard startGeneration == startOperationGeneration,
-                  observationGeneration == coordinatorObservationGeneration
+                  observationGeneration == coordinatorObservationGeneration,
+                  !isStopping
             else { return }
-            coordinatorState = await coordinator.currentState()
-            if coordinatorState.isRunning {
+            coordinatorState = state
+            if state.isRunning {
                 translationStartedAt = Date()
             } else {
                 resetRuntimePresentation()

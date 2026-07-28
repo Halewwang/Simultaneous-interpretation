@@ -163,51 +163,154 @@ private actor AudioLevelVisibilityGate {
 }
 
 private actor CoordinatorStartGate {
-    private var engineReadyPublished = false
-    private var handshakeReleased = false
-    private var engineReadyWaiters: [CheckedContinuation<Void, Never>] = []
-    private var handshakeWaiter: CheckedContinuation<Void, Never>?
+    private var connectingCount = 0
+    private var engineReadyCount = 0
+    private var releasedEngineStartCount = 0
+    private var releasedHandshakeCount = 0
+    private var connectingWaiters: [
+        (Int, CheckedContinuation<Void, Never>)
+    ] = []
+    private var engineReadyWaiters: [
+        (Int, CheckedContinuation<Void, Never>)
+    ] = []
+    private var engineStartWaiters: [
+        Int: CheckedContinuation<Void, Never>
+    ] = [:]
+    private var handshakeWaiters: [
+        Int: CheckedContinuation<Void, Never>
+    ] = [:]
 
-    func markEngineReadyPublished() {
-        guard !engineReadyPublished else { return }
-        engineReadyPublished = true
-        let waiters = engineReadyWaiters
-        engineReadyWaiters.removeAll()
-        for waiter in waiters {
+    func markConnectingPublished() {
+        connectingCount += 1
+        let ready = connectingWaiters.filter { $0.0 <= connectingCount }
+        connectingWaiters.removeAll { $0.0 <= connectingCount }
+        for (_, waiter) in ready {
             waiter.resume()
         }
     }
 
-    func waitUntilEngineReadyPublished() async {
-        guard !engineReadyPublished else { return }
+    func waitUntilConnectingPublished(_ count: Int = 1) async {
+        guard connectingCount < count else { return }
         await withCheckedContinuation { continuation in
-            engineReadyWaiters.append(continuation)
+            connectingWaiters.append((count, continuation))
+        }
+    }
+
+    func waitForEngineStartRelease() async {
+        let attempt = connectingCount
+        guard releasedEngineStartCount < attempt else { return }
+        await withCheckedContinuation { continuation in
+            engineStartWaiters[attempt] = continuation
+        }
+    }
+
+    func releaseEngineStart() {
+        let attempt = releasedEngineStartCount + 1
+        releasedEngineStartCount = attempt
+        engineStartWaiters.removeValue(forKey: attempt)?.resume()
+    }
+
+    func markEngineReadyPublished() {
+        engineReadyCount += 1
+        let ready = engineReadyWaiters.filter { $0.0 <= engineReadyCount }
+        engineReadyWaiters.removeAll { $0.0 <= engineReadyCount }
+        for (_, waiter) in ready {
+            waiter.resume()
+        }
+    }
+
+    func waitUntilEngineReadyPublished(_ count: Int = 1) async {
+        guard engineReadyCount < count else { return }
+        await withCheckedContinuation { continuation in
+            engineReadyWaiters.append((count, continuation))
         }
     }
 
     func waitForHandshakeRelease() async {
-        guard !handshakeReleased else { return }
+        let attempt = engineReadyCount
+        guard releasedHandshakeCount < attempt else { return }
         await withCheckedContinuation { continuation in
-            handshakeWaiter = continuation
+            handshakeWaiters[attempt] = continuation
         }
     }
 
     func releaseHandshake() {
-        guard !handshakeReleased else { return }
-        handshakeReleased = true
-        handshakeWaiter?.resume()
-        handshakeWaiter = nil
+        let attempt = releasedHandshakeCount + 1
+        releasedHandshakeCount = attempt
+        handshakeWaiters.removeValue(forKey: attempt)?.resume()
+    }
+}
+
+private actor CoordinatorStartEntryGate {
+    private var entryCount = 0
+    private var releasedCount = 0
+    private var entryWaiters: [
+        (Int, CheckedContinuation<Void, Never>)
+    ] = []
+    private var releaseWaiters: [
+        Int: CheckedContinuation<Void, Never>
+    ] = [:]
+
+    func enterAndWaitForRelease() async {
+        entryCount += 1
+        let attempt = entryCount
+        let entered = entryWaiters.filter { $0.0 <= entryCount }
+        entryWaiters.removeAll { $0.0 <= entryCount }
+        for (_, waiter) in entered {
+            waiter.resume()
+        }
+        guard releasedCount < attempt else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiters[attempt] = continuation
+        }
+    }
+
+    func waitUntilEntered(_ count: Int) async {
+        guard entryCount < count else { return }
+        await withCheckedContinuation { continuation in
+            entryWaiters.append((count, continuation))
+        }
+    }
+
+    func releaseNextStart() {
+        let attempt = releasedCount + 1
+        releasedCount = attempt
+        releaseWaiters.removeValue(forKey: attempt)?.resume()
+    }
+}
+
+private final class CoordinatorEventWaiterCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiterID: UInt?
+    private var isCancelled = false
+
+    func install(waiterID: UInt) -> Bool {
+        lock.withLock {
+            self.waiterID = waiterID
+            return isCancelled
+        }
+    }
+
+    func cancel() -> UInt? {
+        lock.withLock {
+            isCancelled = true
+            return waiterID
+        }
     }
 }
 
 private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
+    private struct EventWaiter {
+        let id: UInt
+        let continuation: CheckedContinuation<TranslationCoordinatorEvent, Never>
+    }
+
     private(set) var configurations: [
         TranslationCoordinatorConfiguration
     ] = []
     private var current = TranslationCoordinatorState()
-    private var eventWaiters: [
-        CheckedContinuation<TranslationCoordinatorEvent, Never>
-    ] = []
+    private var eventWaiters: [EventWaiter] = []
+    private var nextEventWaiterID: UInt = 0
     private var queuedEvents: [TranslationCoordinatorEvent] = []
     private(set) var audioLevelUpdateFlags: [Bool] = []
     private(set) var inboundBypassValues: [Bool] = []
@@ -218,8 +321,10 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     private let audioLevelVisibilityGate: AudioLevelVisibilityGate?
     private let stopResultState: TranslationCoordinatorState?
     private let startGate: CoordinatorStartGate?
-    private let startFailure: Bool
+    private let startEntryGate: CoordinatorStartEntryGate?
+    private var remainingStartFailures: Int
     private var cancelledPendingStart = false
+    private(set) var maximumEventWaiterCount = 0
     private var shouldGateNextCurrentState = false
     private var currentStateSnapshotCaptured = false
     private var currentStateGateReleased = false
@@ -232,12 +337,15 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         audioLevelVisibilityGate: AudioLevelVisibilityGate? = nil,
         stopResultState: TranslationCoordinatorState? = nil,
         startGate: CoordinatorStartGate? = nil,
-        startFailure: Bool = false
+        startEntryGate: CoordinatorStartEntryGate? = nil,
+        startFailure: Bool = false,
+        startFailureCount: Int = 0
     ) {
         self.audioLevelVisibilityGate = audioLevelVisibilityGate
         self.stopResultState = stopResultState
         self.startGate = startGate
-        self.startFailure = startFailure
+        self.startEntryGate = startEntryGate
+        self.remainingStartFailures = startFailure ? 1 : startFailureCount
     }
 
     func start(
@@ -245,17 +353,23 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
     ) async throws {
         cancelledPendingStart = false
         configurations.append(configuration)
+        await startEntryGate?.enterAndWaitForRelease()
         if let startGate {
             current = TranslationCoordinatorState(
-                audioEngineStarted: true,
                 inbound: .connecting,
                 outbound: .connecting
             )
             emit(.stateChanged(current))
+            await startGate.markConnectingPublished()
+            await startGate.waitForEngineStartRelease()
+            guard !cancelledPendingStart else { return }
+            current.audioEngineStarted = true
+            emit(.stateChanged(current))
             await startGate.markEngineReadyPublished()
             await startGate.waitForHandshakeRelease()
             guard !cancelledPendingStart else { return }
-            if startFailure {
+            if remainingStartFailures > 0 {
+                remainingStartFailures -= 1
                 throw TranslationCoordinatorStubStartError.failed
             }
         }
@@ -282,7 +396,7 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         }
         current = TranslationCoordinatorState()
         if !eventWaiters.isEmpty {
-            eventWaiters.removeFirst().resume(returning: .stopped)
+            eventWaiters.removeFirst().continuation.resume(returning: .stopped)
         }
     }
 
@@ -290,9 +404,41 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         if !queuedEvents.isEmpty {
             return queuedEvents.removeFirst()
         }
-        return await withCheckedContinuation { continuation in
-            eventWaiters.append(continuation)
-        }
+        let cancellation = CoordinatorEventWaiterCancellation()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(returning: .stopped)
+                    return
+                }
+                nextEventWaiterID &+= 1
+                let waiterID = nextEventWaiterID
+                if cancellation.install(waiterID: waiterID) {
+                    continuation.resume(returning: .stopped)
+                    return
+                }
+                eventWaiters.append(
+                    EventWaiter(id: waiterID, continuation: continuation)
+                )
+                maximumEventWaiterCount = max(
+                    maximumEventWaiterCount,
+                    eventWaiters.count
+                )
+            }
+        }, onCancel: {
+            guard let waiterID = cancellation.cancel() else { return }
+            Task {
+                await self.cancelEventWaiter(id: waiterID)
+            }
+        })
+    }
+
+    private func cancelEventWaiter(id: UInt) {
+        guard let index = eventWaiters.firstIndex(where: {
+            $0.id == id
+        }) else { return }
+        let waiter = eventWaiters.remove(at: index)
+        waiter.continuation.resume(returning: .stopped)
     }
 
     func eventWaiterCount() -> Int {
@@ -311,7 +457,7 @@ private actor TranslationCoordinatorStub: TranslationCoordinatorControlling {
         if eventWaiters.isEmpty {
             queuedEvents.append(event)
         } else {
-            eventWaiters.removeFirst().resume(returning: event)
+            eventWaiters.removeFirst().continuation.resume(returning: event)
         }
     }
 
@@ -774,6 +920,48 @@ private func reachesEngineReadyPresentation(
     return false
 }
 
+@MainActor
+private func reachesConnectingCoordinatorState(
+    _ model: MenuBarModel
+) async -> Bool {
+    for _ in 0..<1_000 {
+        let state = model.coordinatorState
+        if !state.audioEngineStarted,
+           state.inbound == .connecting,
+           state.outbound == .connecting {
+            return true
+        }
+        await Task.yield()
+    }
+    return false
+}
+
+private func reachesEventWaiterCount(
+    _ coordinator: TranslationCoordinatorStub,
+    _ expectedCount: Int
+) async -> Bool {
+    for _ in 0..<1_000 {
+        if await coordinator.eventWaiterCount() == expectedCount {
+            return true
+        }
+        await Task.yield()
+    }
+    return false
+}
+
+@MainActor
+private func reachesRunningCoordinatorState(
+    _ model: MenuBarModel
+) async -> Bool {
+    for _ in 0..<1_000 {
+        if model.coordinatorState.isRunning {
+            return true
+        }
+        await Task.yield()
+    }
+    return false
+}
+
 @Test @MainActor
 func missingDriverAndPhysicalSelectionsBlockStartInOrder() async {
     let withoutDriver = makeTranslationMenuModel(
@@ -1161,6 +1349,8 @@ func engineReadinessIsVisibleWhileCoordinatorStartIsStillBlocked() async {
     let startTask = Task { @MainActor in
         await model.start()
     }
+    await gate.waitUntilConnectingPublished()
+    await gate.releaseEngineStart()
     await gate.waitUntilEngineReadyPublished()
 
     #expect(await reachesEngineReadyPresentation(model))
@@ -1190,6 +1380,8 @@ func failedOrStoppedStartCannotLetAnOldObserverReviveTheSession() async {
     let failingStart = Task { @MainActor in
         await failingModel.start()
     }
+    await failingGate.waitUntilConnectingPublished()
+    await failingGate.releaseEngineStart()
     await failingGate.waitUntilEngineReadyPublished()
     #expect(await reachesEngineReadyPresentation(failingModel))
     await failingGate.releaseHandshake()
@@ -1219,6 +1411,8 @@ func failedOrStoppedStartCannotLetAnOldObserverReviveTheSession() async {
     let blockedStart = Task { @MainActor in
         await stoppingModel.start()
     }
+    await stoppingGate.waitUntilConnectingPublished()
+    await stoppingGate.releaseEngineStart()
     await stoppingGate.waitUntilEngineReadyPublished()
     await stoppingModel.stop()
     await blockedStart.value
@@ -1237,9 +1431,138 @@ func failedOrStoppedStartCannotLetAnOldObserverReviveTheSession() async {
     }
     #expect(stoppingModel.coordinatorState == TranslationCoordinatorState())
 
-    await stoppingModel.start()
-    #expect(stoppingModel.coordinatorState.isRunning)
+    let restartedStart = Task { @MainActor in
+        await stoppingModel.start()
+    }
+    await stoppingGate.waitUntilConnectingPublished(2)
+    await stoppingGate.releaseEngineStart()
+    await stoppingGate.waitUntilEngineReadyPublished(2)
+    await stoppingGate.releaseHandshake()
+    await restartedStart.value
+    #expect(await reachesRunningCoordinatorState(stoppingModel))
     await stoppingModel.stop()
+}
+
+@Test @MainActor
+func stoppedStartCannotApplyItsLateCurrentStateSnapshot() async {
+    let coordinator = TranslationCoordinatorStub()
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configure(model)
+    await coordinator.armNextCurrentStateGate()
+
+    let startTask = Task { @MainActor in
+        await model.start()
+    }
+    await coordinator.waitUntilCurrentStateSnapshotIsCaptured()
+
+    await model.stop()
+    #expect(model.coordinatorState == TranslationCoordinatorState())
+    #expect(model.translationStartedAt == nil)
+
+    await coordinator.releaseCurrentStateGate()
+    await startTask.value
+
+    #expect(model.coordinatorState == TranslationCoordinatorState())
+    #expect(model.translationStartedAt == nil)
+}
+
+@Test @MainActor
+func failedStartRestartKeepsOneWaiterAndRendersEveryStartupPhase() async {
+    let startupGate = CoordinatorStartGate()
+    let entryGate = CoordinatorStartEntryGate()
+    let coordinator = TranslationCoordinatorStub(
+        startGate: startupGate,
+        startEntryGate: entryGate,
+        startFailureCount: 1
+    )
+    let model = makeTranslationMenuModel(
+        secret: "test-key",
+        coordinator: coordinator
+    )
+    await configure(model)
+    model.interfaceLanguage = .english
+
+    let failedStart = Task { @MainActor in
+        await model.start()
+    }
+    await entryGate.waitUntilEntered(1)
+    await entryGate.releaseNextStart()
+    await startupGate.waitUntilConnectingPublished(1)
+    #expect(await reachesConnectingCoordinatorState(model))
+    await startupGate.releaseEngineStart()
+    await startupGate.waitUntilEngineReadyPublished(1)
+    #expect(await reachesEngineReadyPresentation(model))
+    await startupGate.releaseHandshake()
+    await failedStart.value
+    #expect(model.coordinatorState == TranslationCoordinatorState())
+
+    let restartedStart = Task { @MainActor in
+        await model.start()
+    }
+    await entryGate.waitUntilEntered(2)
+    for _ in 0..<100 {
+        await Task.yield()
+    }
+    #expect(await coordinator.maximumEventWaiterCount <= 1)
+
+    await entryGate.releaseNextStart()
+    await startupGate.waitUntilConnectingPublished(2)
+    #expect(await reachesConnectingCoordinatorState(model))
+    await startupGate.releaseEngineStart()
+    await startupGate.waitUntilEngineReadyPublished(2)
+    #expect(await reachesEngineReadyPresentation(model))
+    #expect(!model.coordinatorState.isRunning)
+    #expect(await coordinator.maximumEventWaiterCount <= 1)
+
+    await startupGate.releaseHandshake()
+    await restartedStart.value
+    #expect(model.coordinatorState.isRunning)
+    await model.stop()
+}
+
+@Test
+func cancelledEventWaiterIsRemovedBeforeTheNextEventArrives() async {
+    let coordinator = TranslationCoordinatorStub()
+    let waiter = Task {
+        await coordinator.nextEvent()
+    }
+    #expect(await reachesEventWaiterCount(coordinator, 1))
+
+    waiter.cancel()
+    #expect(await reachesEventWaiterCount(coordinator, 0))
+    #expect(await waiter.value == .stopped)
+
+    let state = TranslationCoordinatorState(
+        audioEngineStarted: true,
+        inbound: .connecting,
+        outbound: .connecting
+    )
+    await coordinator.emit(.stateChanged(state))
+    #expect(await coordinator.nextEvent() == .stateChanged(state))
+}
+
+@Test
+func deliveredEventIsNotOverriddenByACancelThatArrivesLater() async {
+    let coordinator = TranslationCoordinatorStub()
+    let waiter = Task {
+        await coordinator.nextEvent()
+    }
+    #expect(await reachesEventWaiterCount(coordinator, 1))
+
+    let state = TranslationCoordinatorState(
+        isRunning: true,
+        audioEngineStarted: true,
+        inbound: .active,
+        outbound: .active
+    )
+    await coordinator.emit(.stateChanged(state))
+    #expect(await waiter.value == .stateChanged(state))
+
+    waiter.cancel()
+    #expect(await reachesEventWaiterCount(coordinator, 0))
 }
 
 @Test @MainActor

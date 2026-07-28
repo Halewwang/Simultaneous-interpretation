@@ -4,6 +4,26 @@ import EMKERealtime
 import EMKERouting
 import Foundation
 
+private final class EventWaiterCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiterID: UInt?
+    private var isCancelled = false
+
+    func install(waiterID: UInt) -> Bool {
+        lock.withLock {
+            self.waiterID = waiterID
+            return isCancelled
+        }
+    }
+
+    func cancel() -> UInt? {
+        lock.withLock {
+            isCancelled = true
+            return waiterID
+        }
+    }
+}
+
 public protocol TranslationAudioEngine: Sendable {
     func start(configuration: AudioEngineConfiguration) async throws
     func stop() async
@@ -101,6 +121,11 @@ public struct TranslationCoordinatorConfiguration: Sendable {
 }
 
 public actor TranslationCoordinator {
+    private struct EventWaiter {
+        let id: UInt
+        let continuation: CheckedContinuation<TranslationCoordinatorEvent, Never>
+    }
+
     private static let maximumQueuedEvents = 128
     private static let maximumSubtitleCharacters = 4_096
     private static let minimumLevelPublishInterval: UInt64 = 33_333_334
@@ -176,9 +201,8 @@ public actor TranslationCoordinator {
     private var isStarting = false
     private var isStopping = false
     private var events: [TranslationCoordinatorEvent] = []
-    private var eventWaiters: [
-        CheckedContinuation<TranslationCoordinatorEvent, Never>
-    ] = []
+    private var eventWaiters: [EventWaiter] = []
+    private var nextEventWaiterID: UInt = 0
 
     public private(set) var state = TranslationCoordinatorState()
 
@@ -402,9 +426,37 @@ public actor TranslationCoordinator {
         if !events.isEmpty {
             return events.removeFirst()
         }
-        return await withCheckedContinuation { continuation in
-            eventWaiters.append(continuation)
-        }
+        let cancellation = EventWaiterCancellation()
+        return await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume(returning: .stopped)
+                    return
+                }
+                nextEventWaiterID &+= 1
+                let waiterID = nextEventWaiterID
+                if cancellation.install(waiterID: waiterID) {
+                    continuation.resume(returning: .stopped)
+                    return
+                }
+                eventWaiters.append(
+                    EventWaiter(id: waiterID, continuation: continuation)
+                )
+            }
+        }, onCancel: {
+            guard let waiterID = cancellation.cancel() else { return }
+            Task {
+                await self.cancelEventWaiter(id: waiterID)
+            }
+        })
+    }
+
+    private func cancelEventWaiter(id: UInt) {
+        guard let index = eventWaiters.firstIndex(where: {
+            $0.id == id
+        }) else { return }
+        let waiter = eventWaiters.remove(at: index)
+        waiter.continuation.resume(returning: .stopped)
     }
 
     public func currentState() -> TranslationCoordinatorState {
@@ -1941,7 +1993,7 @@ public actor TranslationCoordinator {
 
     private func publish(_ event: TranslationCoordinatorEvent) {
         if !eventWaiters.isEmpty {
-            eventWaiters.removeFirst().resume(returning: event)
+            eventWaiters.removeFirst().continuation.resume(returning: event)
             return
         }
         if case .audioLevels = event,
