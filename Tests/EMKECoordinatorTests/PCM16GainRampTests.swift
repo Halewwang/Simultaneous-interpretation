@@ -34,6 +34,17 @@ func eightyMillisecondRampReachesTargetAcrossChunks() throws {
 }
 
 @Test
+func completedRampFinalSampleUsesExactTargetGain() throws {
+    var ramp = PCM16GainRamp(initialGain: 0.12)
+    let target = Double(-1_723) / Double(-30_001)
+    ramp.setTarget(target, overSamples: 2)
+
+    let output = try ramp.process(constantPCM16(-30_001, samples: 2))
+
+    #expect(decodePCM16(output).last == -1_723)
+}
+
+@Test
 func mixerSaturatesInsteadOfWrapping() throws {
     let mixed = try PCM16Mixer.mix(
         constantPCM16(30_000, samples: 2),

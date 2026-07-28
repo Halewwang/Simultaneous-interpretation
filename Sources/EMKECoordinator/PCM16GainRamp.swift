@@ -52,7 +52,7 @@ public struct PCM16GainRamp: Sendable {
         guard processedSamples < totalSamples else { return currentGain }
 
         let gain: Double
-        if totalSamples == 1 {
+        if processedSamples == totalSamples - 1 {
             gain = targetGain
         } else {
             gain = startGain + (targetGain - startGain)
