@@ -1,6 +1,8 @@
 using EMKE.Application;
 using EMKE.Core;
 using EMKE.Platform.Driver;
+using EMKE.Platform.Security;
+using EMKE.Platform.Settings;
 using EMKE.Windows.App.Bootstrap;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Presentation;
@@ -116,6 +118,30 @@ public sealed class ProductionCompositionTests
         {
             Assert.IsInstanceOfType<WindowsDriverManager>(
                 bundle.RuntimeDependencies.DriverManager);
+        }
+        finally
+        {
+            await bundle.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ProductionCoreSharesRealSettingsAndCredentialAdaptersWithUi()
+    {
+        AppCoreAdapterBundle bundle =
+            await ProductionCoreAdapters.CreateAsync(CancellationToken.None);
+        try
+        {
+            Assert.IsInstanceOfType<WindowsSettingsStore>(
+                bundle.RuntimeDependencies.SettingsStore);
+            Assert.IsInstanceOfType<CredentialManagerSecretStore>(
+                bundle.RuntimeDependencies.SecretStore);
+            Assert.AreSame(
+                (object)bundle.RuntimeDependencies.SettingsStore,
+                (object?)bundle.ProductSettings);
+            Assert.AreSame(
+                bundle.RuntimeDependencies.SecretStore,
+                bundle.SecretStore);
         }
         finally
         {

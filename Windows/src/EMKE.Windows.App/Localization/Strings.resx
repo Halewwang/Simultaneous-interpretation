@@ -36,6 +36,7 @@
   <data name="DashboardTranslatedCaption" xml:space="preserve"><value>Translated caption</value></data>
   <data name="DashboardTitle" xml:space="preserve"><value>Translation Dashboard</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="LanguageGerman" xml:space="preserve"><value>German</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>Simplified Chinese</value></data>
   <data name="PlaceholderClose" xml:space="preserve"><value>Close</value></data>
   <data name="PlaceholderDiagnosticsBody" xml:space="preserve"><value>Audio diagnostics are not yet available in this Internal build.</value></data>
@@ -81,6 +82,29 @@
   <data name="RuntimeStarting" xml:space="preserve"><value>Translation starting</value></data>
   <data name="RuntimeStopped" xml:space="preserve"><value>Translation stopped</value></data>
   <data name="RuntimeStopping" xml:space="preserve"><value>Translation stopping</value></data>
+  <data name="SettingsApiKey" xml:space="preserve"><value>API key</value></data>
+  <data name="SettingsAppearanceSection" xml:space="preserve"><value>Appearance</value></data>
+  <data name="SettingsAudioSection" xml:space="preserve"><value>Audio</value></data>
+  <data name="SettingsBaseUrl" xml:space="preserve"><value>Base URL</value></data>
+  <data name="SettingsDriverStatus" xml:space="preserve"><value>Driver status</value></data>
+  <data name="SettingsExportDiagnostics" xml:space="preserve"><value>Export diagnostics</value></data>
+  <data name="SettingsFloatingStatus" xml:space="preserve"><value>Show floating status</value></data>
+  <data name="SettingsFollowSystem" xml:space="preserve"><value>Follow system</value></data>
+  <data name="SettingsFollowDefaultInput" xml:space="preserve"><value>Follow default input device</value></data>
+  <data name="SettingsFollowDefaultOutput" xml:space="preserve"><value>Follow default output device</value></data>
+  <data name="SettingsInputDevice" xml:space="preserve"><value>Physical input</value></data>
+  <data name="SettingsInterfaceLanguage" xml:space="preserve"><value>Interface language</value></data>
+  <data name="SettingsLocalDiagnostics" xml:space="preserve"><value>Run local audio diagnostics</value></data>
+  <data name="SettingsMeetingLanguage" xml:space="preserve"><value>Meeting language</value></data>
+  <data name="SettingsModel" xml:space="preserve"><value>Model</value></data>
+  <data name="SettingsOutputDevice" xml:space="preserve"><value>Physical output</value></data>
+  <data name="SettingsReopenOnboarding" xml:space="preserve"><value>Reopen setup</value></data>
+  <data name="SettingsSave" xml:space="preserve"><value>Save</value></data>
+  <data name="SettingsServiceSection" xml:space="preserve"><value>Service</value></data>
+  <data name="SettingsSystemSection" xml:space="preserve"><value>System</value></data>
+  <data name="SettingsTestConnection" xml:space="preserve"><value>Test connection</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>Settings</value></data>
+  <data name="SettingsTranslationSection" xml:space="preserve"><value>Translation</value></data>
   <data name="TrayCheckForUpdates" xml:space="preserve"><value>Check for Updates</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
   <data name="TrayOpenDashboard" xml:space="preserve"><value>Open Dashboard</value></data>

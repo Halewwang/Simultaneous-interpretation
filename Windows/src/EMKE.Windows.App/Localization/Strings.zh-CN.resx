@@ -36,6 +36,7 @@
   <data name="DashboardTranslatedCaption" xml:space="preserve"><value>译文字幕</value></data>
   <data name="DashboardTitle" xml:space="preserve"><value>同传控制台</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>英语</value></data>
+  <data name="LanguageGerman" xml:space="preserve"><value>德语</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="PlaceholderClose" xml:space="preserve"><value>关闭</value></data>
   <data name="PlaceholderDiagnosticsBody" xml:space="preserve"><value>当前内部版本暂未开放音频诊断。</value></data>
@@ -81,6 +82,29 @@
   <data name="RuntimeStarting" xml:space="preserve"><value>翻译正在启动</value></data>
   <data name="RuntimeStopped" xml:space="preserve"><value>翻译已停止</value></data>
   <data name="RuntimeStopping" xml:space="preserve"><value>翻译正在停止</value></data>
+  <data name="SettingsApiKey" xml:space="preserve"><value>API 密钥</value></data>
+  <data name="SettingsAppearanceSection" xml:space="preserve"><value>外观</value></data>
+  <data name="SettingsAudioSection" xml:space="preserve"><value>音频</value></data>
+  <data name="SettingsBaseUrl" xml:space="preserve"><value>基础 URL</value></data>
+  <data name="SettingsDriverStatus" xml:space="preserve"><value>驱动状态</value></data>
+  <data name="SettingsExportDiagnostics" xml:space="preserve"><value>导出诊断</value></data>
+  <data name="SettingsFloatingStatus" xml:space="preserve"><value>显示悬浮状态</value></data>
+  <data name="SettingsFollowSystem" xml:space="preserve"><value>跟随系统</value></data>
+  <data name="SettingsFollowDefaultInput" xml:space="preserve"><value>跟随默认输入设备</value></data>
+  <data name="SettingsFollowDefaultOutput" xml:space="preserve"><value>跟随默认输出设备</value></data>
+  <data name="SettingsInputDevice" xml:space="preserve"><value>物理输入</value></data>
+  <data name="SettingsInterfaceLanguage" xml:space="preserve"><value>界面语言</value></data>
+  <data name="SettingsLocalDiagnostics" xml:space="preserve"><value>运行本地音频诊断</value></data>
+  <data name="SettingsMeetingLanguage" xml:space="preserve"><value>会议语言</value></data>
+  <data name="SettingsModel" xml:space="preserve"><value>模型</value></data>
+  <data name="SettingsOutputDevice" xml:space="preserve"><value>物理输出</value></data>
+  <data name="SettingsReopenOnboarding" xml:space="preserve"><value>重新打开设置向导</value></data>
+  <data name="SettingsSave" xml:space="preserve"><value>保存</value></data>
+  <data name="SettingsServiceSection" xml:space="preserve"><value>服务</value></data>
+  <data name="SettingsSystemSection" xml:space="preserve"><value>系统</value></data>
+  <data name="SettingsTestConnection" xml:space="preserve"><value>测试连接</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>设置</value></data>
+  <data name="SettingsTranslationSection" xml:space="preserve"><value>翻译</value></data>
   <data name="TrayCheckForUpdates" xml:space="preserve"><value>检查更新</value></data>
   <data name="TrayExit" xml:space="preserve"><value>退出</value></data>
   <data name="TrayOpenDashboard" xml:space="preserve"><value>打开控制台</value></data>

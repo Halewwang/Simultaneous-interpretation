@@ -1,5 +1,6 @@
 using EMKE.Application;
 using EMKE.Core;
+using EMKE.Platform.Settings;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Localization;
 using EMKE.Windows.App.Presentation;
@@ -80,7 +81,9 @@ internal sealed class AppCoreAdapterBundle : IAsyncDisposable
     public AppCoreAdapterBundle(
         TranslationRuntimeDependencies runtimeDependencies,
         IAppDiagnosticsLifetime diagnostics,
-        IAsyncDisposable ownedAdapters)
+        IAsyncDisposable ownedAdapters,
+        IWindowsProductSettingsStore? productSettings = null,
+        ISecretStore? secretStore = null)
     {
         RuntimeDependencies = runtimeDependencies
             ?? throw new ArgumentNullException(nameof(runtimeDependencies));
@@ -88,11 +91,18 @@ internal sealed class AppCoreAdapterBundle : IAsyncDisposable
             diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _ownedAdapters = ownedAdapters
             ?? throw new ArgumentNullException(nameof(ownedAdapters));
+        ProductSettings = productSettings
+            ?? runtimeDependencies.SettingsStore as IWindowsProductSettingsStore;
+        SecretStore = secretStore ?? runtimeDependencies.SecretStore;
     }
 
     public TranslationRuntimeDependencies RuntimeDependencies { get; }
 
     public IAppDiagnosticsLifetime Diagnostics { get; }
+
+    public IWindowsProductSettingsStore? ProductSettings { get; }
+
+    public ISecretStore SecretStore { get; }
 
     public ValueTask DisposeAsync()
     {
@@ -131,7 +141,9 @@ internal sealed record AppUiCompositionContext
         IRuntimeCommandSink runtimeCommands,
         AppSnapshotStore snapshots,
         PresentationCoordinator presentation,
-        LocalizationService localization)
+        LocalizationService localization,
+        IWindowsProductSettingsStore? productSettings = null,
+        ISecretStore? secretStore = null)
     {
         RuntimeCommands = runtimeCommands
             ?? throw new ArgumentNullException(nameof(runtimeCommands));
@@ -141,6 +153,8 @@ internal sealed record AppUiCompositionContext
             ?? throw new ArgumentNullException(nameof(presentation));
         Localization = localization
             ?? throw new ArgumentNullException(nameof(localization));
+        ProductSettings = productSettings;
+        SecretStore = secretStore;
     }
 
     public IRuntimeCommandSink RuntimeCommands { get; }
@@ -150,6 +164,10 @@ internal sealed record AppUiCompositionContext
     public PresentationCoordinator Presentation { get; }
 
     public LocalizationService Localization { get; }
+
+    public IWindowsProductSettingsStore? ProductSettings { get; }
+
+    public ISecretStore? SecretStore { get; }
 }
 
 internal sealed class UiCommandGate
@@ -315,7 +333,9 @@ internal sealed class AppCompositionRoot
                 runtime,
                 snapshots.Store,
                 snapshots.Presentation,
-                localization);
+                localization,
+                coreAdapters.ProductSettings,
+                coreAdapters.SecretStore);
             uiAdapters = await adapterFactory
                 .CreateUiAsync(uiContext, cancellationToken)
                 .ConfigureAwait(false);

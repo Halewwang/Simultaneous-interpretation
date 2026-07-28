@@ -7,10 +7,13 @@ using EMKE.Application;
 using EMKE.Core;
 using EMKE.Platform.Driver;
 using EMKE.Platform.Native;
+using EMKE.Platform.Security;
+using EMKE.Platform.Settings;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
 using EMKE.Windows.App.Floating;
 using EMKE.Windows.App.Localization;
+using EMKE.Windows.App.Settings;
 using EMKE.Windows.App.Tray;
 
 namespace EMKE.Windows.App.Bootstrap;
@@ -90,10 +93,14 @@ internal static class ProductionCoreAdapters
         WindowsDriverManager driverManager = new(
             new WindowsDriverSnapshotSource(),
             compatibilityManifest);
+        WindowsSettingsStore settingsStore = new(
+            new FileSystemWindowsSettingsPersistence());
+        CredentialManagerSecretStore secretStore = new(
+            WindowsCredentialChannel.Internal);
         TranslationRuntimeDependencies dependencies = new(
             new Windows25H2BuildGate(),
-            new PendingSettingsStore(),
-            new PendingSecretStore(),
+            settingsStore,
+            secretStore,
             driverManager,
             new PendingAudioDeviceCatalog(),
             audio,
@@ -105,7 +112,9 @@ internal static class ProductionCoreAdapters
             new AppCoreAdapterBundle(
                 dependencies,
                 PendingDiagnosticsLifetime.Instance,
-                new NativeAudioLifetime(audio)));
+                new NativeAudioLifetime(audio),
+                settingsStore,
+                secretStore));
     }
 
     private sealed class Windows25H2BuildGate : IWindowsBuildGate
@@ -126,57 +135,6 @@ internal static class ProductionCoreAdapters
                         "translationRuntime.windowsBuildUnsupported",
                         new Dictionary<string, string>(),
                         RecoveryAction.ReportCompatibility));
-        }
-    }
-
-    private sealed class PendingSettingsStore : ISettingsStore
-    {
-        public ValueTask<RuntimeSettings?> LoadAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult<RuntimeSettings?>(null);
-        }
-
-        public ValueTask SaveAsync(
-            RuntimeSettings settings,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(settings);
-            return ValueTask.FromException(
-                new InvalidOperationException(
-                    "Settings persistence is not available in this Internal build."));
-        }
-    }
-
-    private sealed class PendingSecretStore : ISecretStore
-    {
-        public ValueTask<ISecretBuffer?> LoadAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(name);
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult<ISecretBuffer?>(null);
-        }
-
-        public ValueTask SaveAsync(
-            string name,
-            ReadOnlyMemory<char> secret,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.FromException(
-                new InvalidOperationException(
-                    "Credential Manager integration is not available in this Internal build."));
-        }
-
-        public ValueTask DeleteAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.FromException(
-                new InvalidOperationException(
-                    "Credential Manager integration is not available in this Internal build."));
         }
     }
 
@@ -300,6 +258,16 @@ internal static class ProductionUiAdapters
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(exitAsync);
         ArgumentNullException.ThrowIfNull(context);
+        IWindowsProductSettingsStore productSettings =
+            context.ProductSettings
+            ?? throw new InvalidOperationException(
+                "Production product settings were not composed.");
+        ISecretStore secretStore = context.SecretStore
+            ?? throw new InvalidOperationException(
+                "Production secret storage was not composed.");
+        WindowsProductSettings initialSettings =
+            await productSettings.LoadProductSettingsAsync(cancellationToken)
+                .ConfigureAwait(false);
 
         AppUiAdapterBundle? result = null;
         await dispatcher.InvokeAsync(
@@ -307,6 +275,17 @@ internal static class ProductionUiAdapters
             {
                 WpfProductViews? views = null;
                 DelegatingSurfaceActions surfaceActions = new(
+                    token =>
+                        views?.ShowSettingsAsync(token)
+                        ?? ValueTask.FromException(
+                            new InvalidOperationException(
+                                "Product views have not finished composing.")),
+                    (surface, token) =>
+                        views?.ShowPlaceholderAsync(surface, token)
+                        ?? ValueTask.FromException(
+                            new InvalidOperationException(
+                                "Product views have not finished composing.")));
+                DelegatingSettingsSystemActions settingsSystemActions = new(
                     (surface, token) =>
                         views?.ShowPlaceholderAsync(surface, token)
                         ?? ValueTask.FromException(
@@ -320,11 +299,20 @@ internal static class ProductionUiAdapters
                 FloatingStatusViewModel floatingViewModel = new(
                     context.Presentation,
                     context.RuntimeCommands);
+                SettingsViewModel settingsViewModel = new(
+                    initialSettings,
+                    productSettings,
+                    secretStore,
+                    context.RuntimeCommands,
+                    UnavailableSettingsCapabilityTester.Instance,
+                    settingsSystemActions,
+                    context.Localization);
                 views = new WpfProductViews(
                     dispatcher,
                     context.Localization,
                     new DashboardWindow(dashboardViewModel),
-                    new FloatingStatusWindow(floatingViewModel));
+                    new FloatingStatusWindow(floatingViewModel),
+                    new SettingsWindow(settingsViewModel));
                 ProductionTrayActions trayActions = new(
                     views,
                     exitAsync);
@@ -345,7 +333,6 @@ internal static class ProductionUiAdapters
 
     private enum PlaceholderSurface
     {
-        Settings,
         Onboarding,
         Updates,
         Diagnostics,
@@ -354,11 +341,47 @@ internal static class ProductionUiAdapters
     private sealed class DelegatingSurfaceActions : IAppSurfaceActions
     {
         private readonly Func<
+            CancellationToken,
+            ValueTask> _openSettings;
+        private readonly Func<
             PlaceholderSurface,
             CancellationToken,
             ValueTask> _show;
 
         public DelegatingSurfaceActions(
+            Func<CancellationToken, ValueTask> openSettings,
+            Func<
+                PlaceholderSurface,
+                CancellationToken,
+                ValueTask> show)
+        {
+            _openSettings = openSettings
+                ?? throw new ArgumentNullException(nameof(openSettings));
+            _show = show ?? throw new ArgumentNullException(nameof(show));
+        }
+
+        public ValueTask OpenSettingsAsync(
+            CancellationToken cancellationToken)
+        {
+            return _openSettings(cancellationToken);
+        }
+
+        public ValueTask OpenDiagnosticsAsync(
+            CancellationToken cancellationToken)
+        {
+            return _show(PlaceholderSurface.Diagnostics, cancellationToken);
+        }
+    }
+
+    private sealed class DelegatingSettingsSystemActions
+        : ISettingsSystemActions
+    {
+        private readonly Func<
+            PlaceholderSurface,
+            CancellationToken,
+            ValueTask> _show;
+
+        public DelegatingSettingsSystemActions(
             Func<
                 PlaceholderSurface,
                 CancellationToken,
@@ -367,16 +390,48 @@ internal static class ProductionUiAdapters
             _show = show ?? throw new ArgumentNullException(nameof(show));
         }
 
-        public ValueTask OpenSettingsAsync(
-            CancellationToken cancellationToken)
-        {
-            return _show(PlaceholderSurface.Settings, cancellationToken);
-        }
-
-        public ValueTask OpenDiagnosticsAsync(
+        public ValueTask RunLocalDiagnosticsAsync(
             CancellationToken cancellationToken)
         {
             return _show(PlaceholderSurface.Diagnostics, cancellationToken);
+        }
+
+        public ValueTask CheckForUpdatesAsync(
+            CancellationToken cancellationToken)
+        {
+            return _show(PlaceholderSurface.Updates, cancellationToken);
+        }
+
+        public ValueTask ReopenOnboardingAsync(
+            CancellationToken cancellationToken)
+        {
+            return _show(PlaceholderSurface.Onboarding, cancellationToken);
+        }
+
+        public ValueTask ExportDiagnosticsAsync(
+            CancellationToken cancellationToken)
+        {
+            return _show(PlaceholderSurface.Diagnostics, cancellationToken);
+        }
+    }
+
+    private sealed class UnavailableSettingsCapabilityTester
+        : ISettingsCapabilityTester
+    {
+        public static UnavailableSettingsCapabilityTester Instance { get; } =
+            new();
+
+        private UnavailableSettingsCapabilityTester()
+        {
+        }
+
+        public Task TestConnectionAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromException(
+                new InvalidOperationException(
+                    "Connection testing is not available until the capability probe is composed."));
         }
     }
 
@@ -403,9 +458,7 @@ internal static class ProductionUiAdapters
         public ValueTask ShowSettingsAsync(
             CancellationToken cancellationToken)
         {
-            return _views.ShowPlaceholderAsync(
-                PlaceholderSurface.Settings,
-                cancellationToken);
+            return _views.ShowSettingsAsync(cancellationToken);
         }
 
         public ValueTask ShowOnboardingAsync(
@@ -439,6 +492,7 @@ internal static class ProductionUiAdapters
         private readonly LocalizationService _localization;
         private readonly DashboardWindow _dashboard;
         private readonly FloatingStatusWindow _floating;
+        private readonly SettingsWindow _settings;
         private readonly PlaceholderSurfaceWindow _placeholder = new();
         private int _disposed;
 
@@ -446,7 +500,8 @@ internal static class ProductionUiAdapters
             IUiDispatcher dispatcher,
             LocalizationService localization,
             DashboardWindow dashboard,
-            FloatingStatusWindow floating)
+            FloatingStatusWindow floating,
+            SettingsWindow settings)
         {
             _dispatcher = dispatcher
                 ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -456,6 +511,8 @@ internal static class ProductionUiAdapters
                 ?? throw new ArgumentNullException(nameof(dashboard));
             _floating = floating
                 ?? throw new ArgumentNullException(nameof(floating));
+            _settings = settings
+                ?? throw new ArgumentNullException(nameof(settings));
         }
 
         public ValueTask ShowInitialSurfaceAsync(
@@ -472,6 +529,14 @@ internal static class ProductionUiAdapters
                 cancellationToken);
         }
 
+        public ValueTask ShowSettingsAsync(
+            CancellationToken cancellationToken)
+        {
+            return _dispatcher.InvokeAsync(
+                _settings.ShowOrActivate,
+                cancellationToken);
+        }
+
         public ValueTask ShowPlaceholderAsync(
             PlaceholderSurface surface,
             CancellationToken cancellationToken)
@@ -482,9 +547,6 @@ internal static class ProductionUiAdapters
                     (LocalizedString titleKey, LocalizedString bodyKey) =
                         surface switch
                         {
-                            PlaceholderSurface.Settings =>
-                                (LocalizedString.PlaceholderSettingsTitle,
-                                    LocalizedString.PlaceholderSettingsBody),
                             PlaceholderSurface.Onboarding =>
                                 (LocalizedString.PlaceholderOnboardingTitle,
                                     LocalizedString.PlaceholderOnboardingBody),
@@ -522,6 +584,7 @@ internal static class ProductionUiAdapters
                 () =>
                 {
                     _placeholder.CloseForApplicationExit();
+                    _settings.CloseForApplicationExit();
                     _floating.CloseForApplicationExit();
                     _dashboard.CloseForApplicationExit();
                 }).ConfigureAwait(false);
