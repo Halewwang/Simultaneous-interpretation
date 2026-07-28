@@ -855,6 +855,7 @@ try {
             [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
             [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
         )
+        $resultExitCode = 0
         try {
             $store.Open(
                 [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
@@ -884,6 +885,11 @@ try {
             }
             if ($request.operation -ceq "Import" -and $matches.Count -eq 0) {
                 $store.Add($certificate)
+            } elseif (
+                $request.operation -ceq "Import" -and
+                $matches.Count -eq 1
+            ) {
+                $resultExitCode = 10
             } elseif (
                 $request.operation -ceq "Remove" -and
                 $matches.Count -eq 1
@@ -931,7 +937,7 @@ try {
             $certificateBytes.Length
         )
     }
-    exit 0
+    exit $resultExitCode
 } catch {
     Write-Error "Elevated certificate operation failed."
     exit 23
@@ -985,6 +991,7 @@ function Invoke-ElevatedCertificateOperation {
     )
     $requestLock = $null
     $certificateLock = $null
+    $operationResult = $null
     try {
         $requestLock = [IO.FileStream]::new(
             $request.RequestPath,
@@ -1024,7 +1031,18 @@ function Invoke-ElevatedCertificateOperation {
             -Verb RunAs `
             -Wait `
             -PassThru
-        if ($process.ExitCode -ne 0) {
+        if ($Operation -ceq "Import") {
+            $operationResult = switch ([int]$process.ExitCode) {
+                0 { "Added"; break }
+                10 { "AlreadyPresent"; break }
+                default {
+                    throw (
+                        "Elevated certificate operation failed or UAC was " +
+                        "cancelled; the exact operation can be retried."
+                    )
+                }
+            }
+        } elseif ($process.ExitCode -ne 0) {
             throw (
                 "Elevated certificate operation failed or UAC was " +
                 "cancelled; the exact operation can be retried."
@@ -1050,6 +1068,7 @@ function Invoke-ElevatedCertificateOperation {
         )
         Remove-ProtectedElevatedRequest -Request $request
     }
+    return $operationResult
 }
 
 function Invoke-ElevatedCertificateImport {
@@ -1112,7 +1131,6 @@ function Get-OptionalInstalledInternalPackage {
     if ($matches.Count -eq 0) {
         return $null
     }
-    Assert-InternalPackageIdentity -Package $matches[0]
     return $matches[0]
 }
 
@@ -1168,6 +1186,19 @@ function Assert-InternalPackageIdentity {
     }
 }
 
+function Get-RequiredPackageFullName {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$Package
+    )
+
+    $packageFullName = [string]$Package.PackageFullName
+    if ([string]::IsNullOrWhiteSpace($packageFullName)) {
+        throw "Installed package PackageFullName validation failed."
+    }
+    return $packageFullName
+}
+
 function Assert-InstalledInternalPackage {
     $package = Get-ExactInstalledInternalPackage
     Assert-InternalPackageIdentity -Package $package
@@ -1207,8 +1238,15 @@ function Remove-CertificateInstallRecord {
 
 function Invoke-InstallRollback {
     param(
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$PackageFullNameAddedByThisInstall,
+
         [Parameter(Mandatory)]
-        [bool]$CertificateTrustCompleted,
+        [bool]$CertificateAddedByThisInstall,
+
+        [Parameter(Mandatory)]
+        [bool]$CertificateImportOutcomeKnown,
 
         [Parameter(Mandatory)]
         [string]$CertificatePath,
@@ -1222,16 +1260,17 @@ function Invoke-InstallRollback {
 
     $errors = [Collections.Generic.List[string]]::new()
     try {
-        $package = Get-OptionalInstalledInternalPackage
-        if ($null -ne $package) {
+        if (-not [string]::IsNullOrWhiteSpace(
+            $PackageFullNameAddedByThisInstall
+        )) {
             Invoke-RemoveExactAppxPackage `
-                -PackageFullName $package.PackageFullName
+                -PackageFullName $PackageFullNameAddedByThisInstall
         }
         Assert-InternalPackageAbsent
     } catch {
         $errors.Add("exact package rollback failed")
     }
-    if ($CertificateTrustCompleted) {
+    if ($CertificateAddedByThisInstall) {
         try {
             Invoke-ElevatedCertificateOperation `
                 -Operation "Remove" `
@@ -1241,6 +1280,10 @@ function Invoke-InstallRollback {
         } catch {
             $errors.Add("exact certificate rollback failed or UAC was cancelled")
         }
+    } elseif (-not $CertificateImportOutcomeKnown) {
+        $errors.Add(
+            "certificate import outcome is unknown; certificate was preserved"
+        )
     }
     try {
         Remove-CertificateInstallRecord
@@ -1292,13 +1335,24 @@ function Invoke-InstallInternalMsix {
         -ExpectedThumbprint $trustedThumbprint
     Assert-InternalPackageAbsent
 
-    $certificateTrustMayHaveChanged = $false
+    $certificateAddedByThisInstall = $false
+    $certificateImportOutcomeKnown = $false
+    $packageMutationMayHaveChanged = $false
+    $packageFullNameAddedByThisInstall = $null
     try {
-        $certificateTrustMayHaveChanged = $true
-        Invoke-ElevatedCertificateImport `
+        $certificateImportResult = Invoke-ElevatedCertificateImport `
             -CertificatePath $inventory.CertificatePath `
             -ExpectedCertificateSha256 $inventory.CertificateSha256 `
             -ExpectedCertificateThumbprint $trustedThumbprint
+        if ($certificateImportResult -cnotin @(
+            "Added",
+            "AlreadyPresent"
+        )) {
+            throw "Certificate import returned an invalid stable result."
+        }
+        $certificateImportOutcomeKnown = $true
+        $certificateAddedByThisInstall =
+            $certificateImportResult -ceq "Added"
         Assert-BundleInventoryUnchanged -Inventory $inventory
         $postElevationEvidence = Get-InternalCertificateEvidence `
             -Path $inventory.CertificatePath
@@ -1307,15 +1361,36 @@ function Invoke-InstallInternalMsix {
             -ExpectedSha256 $inventory.CertificateSha256 `
             -ExpectedThumbprint $trustedThumbprint
 
+        $packageMutationMayHaveChanged = $true
         Invoke-AddExactAppxPackage -PackagePath $inventory.PackagePath
-        $null = Assert-InstalledInternalPackage
+        $installedPackage = Get-ExactInstalledInternalPackage
+        $packageFullNameAddedByThisInstall =
+            Get-RequiredPackageFullName -Package $installedPackage
+        Assert-InternalPackageIdentity -Package $installedPackage
         Write-CertificateInstallRecord `
             -CertificateEvidence $postElevationEvidence
         Write-Output "Installed package: $($script:PackageName)"
     } catch {
         $originalFailure = $_
+        if ($packageMutationMayHaveChanged -and
+            [string]::IsNullOrWhiteSpace(
+                $packageFullNameAddedByThisInstall
+            )) {
+            try {
+                $newPackage = Get-OptionalInstalledInternalPackage
+                if ($null -ne $newPackage) {
+                    $packageFullNameAddedByThisInstall =
+                        Get-RequiredPackageFullName -Package $newPackage
+                }
+            } catch {
+                $packageFullNameAddedByThisInstall = $null
+            }
+        }
         $rollback = Invoke-InstallRollback `
-            -CertificateTrustCompleted $certificateTrustMayHaveChanged `
+            -PackageFullNameAddedByThisInstall `
+                $packageFullNameAddedByThisInstall `
+            -CertificateAddedByThisInstall $certificateAddedByThisInstall `
+            -CertificateImportOutcomeKnown $certificateImportOutcomeKnown `
             -CertificatePath $inventory.CertificatePath `
             -ExpectedCertificateSha256 $inventory.CertificateSha256 `
             -ExpectedCertificateThumbprint $trustedThumbprint
@@ -1329,7 +1404,10 @@ function Invoke-InstallInternalMsix {
             )
         }
         throw [InvalidOperationException]::new(
-            "Internal MSIX installation failed. $recovery",
+            (
+                "Internal MSIX installation failed: " +
+                "$($originalFailure.Exception.Message) $recovery"
+            ),
             $originalFailure.Exception
         )
     }

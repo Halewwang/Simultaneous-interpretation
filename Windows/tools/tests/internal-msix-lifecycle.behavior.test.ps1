@@ -333,6 +333,7 @@ function Set-SafeInstallOrchestratorDefaults {
             $ExpectedCertificateThumbprint
         )
         $script:installEvents.Add("elevate-import")
+        "Added"
     }
     Set-TestFunction -Name Invoke-AddExactAppxPackage -Body {
         param($PackagePath)
@@ -340,6 +341,16 @@ function Set-SafeInstallOrchestratorDefaults {
     }
     Set-TestFunction -Name Assert-InternalPackageAbsent -Body {
         $script:installEvents.Add("verify-pre-absent")
+    }
+    Set-TestFunction -Name Get-ExactInstalledInternalPackage -Body {
+        $script:installEvents.Add("query-installed")
+        [pscustomobject]@{
+            Name = "EMKE.Translation.Internal"
+            Publisher = "CN=EMKE Internal Test"
+            Version = "0.1.0.0"
+            Architecture = "x64"
+            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+        }
     }
     Set-TestFunction -Name Assert-InstalledInternalPackage -Body {
         $script:installEvents.Add("verify-identity")
@@ -357,13 +368,19 @@ function Set-SafeInstallOrchestratorDefaults {
     }
     Set-TestFunction -Name Invoke-InstallRollback -Body {
         param(
-            $CertificateTrustCompleted,
+            $PackageFullNameAddedByThisInstall,
+            $CertificateAddedByThisInstall,
+            $CertificateImportOutcomeKnown,
             $CertificatePath,
             $ExpectedCertificateSha256,
             $ExpectedCertificateThumbprint
         )
         $script:installEvents.Add(
-            "rollback:cert=$([bool]$CertificateTrustCompleted)"
+            (
+                "rollback:package=$PackageFullNameAddedByThisInstall" +
+                ":certAdded=$([bool]$CertificateAddedByThisInstall)" +
+                ":known=$([bool]$CertificateImportOutcomeKnown)"
+            )
         )
         [pscustomobject]@{
             Complete = $true
@@ -832,11 +849,15 @@ try {
             [pscustomobject]@{ ExitCode = 0 }
         }
 
-        Invoke-ElevatedCertificateOperation `
+        $addedResult = Invoke-ElevatedCertificateOperation `
             -Operation "Import" `
             -CertificatePath $certificate `
             -ExpectedCertificateSha256 $evidence.Sha256 `
             -ExpectedCertificateThumbprint $evidence.Thumbprint
+        Assert-Equal `
+            $addedResult `
+            "Added" `
+            "A successful new trust import did not return Added."
         Assert-True `
             ($script:capturedArgumentList -match "-EncodedCommand") `
             "Elevation did not use EncodedCommand."
@@ -854,6 +875,26 @@ try {
         Assert-True `
             (-not (Test-Path -LiteralPath $script:capturedRequestPath)) `
             "Protected request was not cleaned after elevation."
+
+        Set-TestFunction -Name Start-Process -Body {
+            param(
+                $FilePath,
+                $ArgumentList,
+                $Verb,
+                [switch]$Wait,
+                [switch]$PassThru
+            )
+            [pscustomobject]@{ ExitCode = 10 }
+        }
+        $presentResult = Invoke-ElevatedCertificateOperation `
+            -Operation "Import" `
+            -CertificatePath $certificate `
+            -ExpectedCertificateSha256 $evidence.Sha256 `
+            -ExpectedCertificateThumbprint $evidence.Thumbprint
+        Assert-Equal `
+            $presentResult `
+            "AlreadyPresent" `
+            "A preexisting exact trust import did not return AlreadyPresent."
 
         Set-TestFunction -Name Start-Process -Body {
             param(
@@ -942,7 +983,7 @@ try {
             (
                 "parent|inventory|certificate|verify-pre-absent|" +
                 "elevate-import|inventory-unchanged|certificate|" +
-                "add-appx|verify-identity|record"
+                "add-appx|query-installed|record"
             ) `
             "Installer mutation sequence differs."
     }
@@ -991,8 +1032,10 @@ try {
                     -ConfirmTrust
             }
         Assert-True `
-            ($script:installEvents.Contains("rollback:cert=True")) `
-            "UAC cancellation did not enter exact certificate recovery."
+            ($script:installEvents.Contains(
+                "rollback:package=:certAdded=False:known=False"
+            )) `
+            "UAC cancellation did not preserve unknown certificate trust."
         Assert-True `
             (-not $script:installEvents.Contains("add-appx")) `
             "UAC cancellation reached Add-AppxPackage."
@@ -1021,11 +1064,188 @@ try {
                     -ConfirmTrust
             }
         Assert-True `
-            ($script:installEvents.Contains("rollback:cert=True")) `
+            ($script:installEvents.Contains(
+                "rollback:package=:certAdded=True:known=True"
+            )) `
             "Add-AppxPackage failure did not roll back exact certificate."
         Assert-True `
             (-not $script:installEvents.Contains("record")) `
             "Add-AppxPackage failure wrote an install record."
+    }
+
+    Invoke-Case "preexisting certificate survives Add identity and record failures" {
+        foreach ($failureStage in @("Add", "Identity", "Record")) {
+            Reset-InstallFunctions
+            Set-SafeInstallOrchestratorDefaults
+            $script:rollbackCertificateAdded = $null
+            $script:rollbackOutcomeKnown = $null
+            Set-TestFunction -Name Invoke-ElevatedCertificateImport -Body {
+                param(
+                    $CertificatePath,
+                    $ExpectedCertificateSha256,
+                    $ExpectedCertificateThumbprint
+                )
+                $script:installEvents.Add("elevate-import")
+                "AlreadyPresent"
+            }
+            Set-TestFunction -Name Get-ExactInstalledInternalPackage -Body {
+                [pscustomobject]@{
+                    Name = "EMKE.Translation.Internal"
+                    Publisher = "CN=EMKE Internal Test"
+                    Version = "0.1.0.0"
+                    Architecture = "x64"
+                    PackageFullName =
+                        "EMKE.Translation.Internal_0.1.0.0_x64__test"
+                }
+            }
+            if ($failureStage -ceq "Add") {
+                Set-TestFunction -Name Invoke-AddExactAppxPackage -Body {
+                    throw "Synthetic Add failure."
+                }
+            } elseif ($failureStage -ceq "Identity") {
+                Set-TestFunction `
+                    -Name Get-ExactInstalledInternalPackage `
+                    -Body {
+                        [pscustomobject]@{
+                            Name = "EMKE.Translation.Internal"
+                            Publisher = "CN=Other"
+                            Version = "0.1.0.0"
+                            Architecture = "x64"
+                            PackageFullName =
+                                "EMKE.Translation.Internal_bad__test"
+                        }
+                    }
+            } else {
+                Set-TestFunction -Name Write-CertificateInstallRecord -Body {
+                    throw "Synthetic record failure."
+                }
+            }
+            Set-TestFunction -Name Invoke-InstallRollback -Body {
+                param(
+                    $PackageFullNameAddedByThisInstall,
+                    $CertificateAddedByThisInstall,
+                    $CertificateImportOutcomeKnown,
+                    $CertificatePath,
+                    $ExpectedCertificateSha256,
+                    $ExpectedCertificateThumbprint
+                )
+                $script:rollbackCertificateAdded =
+                    [bool]$CertificateAddedByThisInstall
+                $script:rollbackOutcomeKnown =
+                    [bool]$CertificateImportOutcomeKnown
+                [pscustomobject]@{
+                    Complete = $true
+                    RecoveryRequired = $false
+                }
+            }
+
+            Assert-Throws `
+                -Pattern "failed|Publisher|record" `
+                -Action {
+                    Invoke-InstallInternalMsix `
+                        -PackagePath "/tmp/product.msix" `
+                        -CertificatePath "/tmp/product.cer" `
+                        -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                        -ExpectedCertificateThumbprint ("B" * 40) `
+                        -ConfirmTrust
+                }
+            Assert-Equal `
+                $script:rollbackCertificateAdded `
+                $false `
+                (
+                    "Preexisting certificate was marked for rollback after " +
+                    "$failureStage failure."
+                )
+            Assert-Equal `
+                $script:rollbackOutcomeKnown `
+                $true `
+                (
+                    "Preexisting certificate result was not stable after " +
+                    "$failureStage failure."
+                )
+        }
+    }
+
+    Invoke-Case "identity failure forwards the newly appeared exact full name" {
+        Reset-InstallFunctions
+        Set-SafeInstallOrchestratorDefaults
+        $script:rollbackPackageFullName = $null
+        Set-TestFunction -Name Invoke-ElevatedCertificateImport -Body {
+            "Added"
+        }
+        Set-TestFunction -Name Get-ExactInstalledInternalPackage -Body {
+            [pscustomobject]@{
+                Name = "EMKE.Translation.Internal"
+                Publisher = "CN=Other"
+                Version = "0.1.0.0"
+                Architecture = "x64"
+                PackageFullName = "EMKE.Translation.Internal_bad__test"
+            }
+        }
+        Set-TestFunction -Name Invoke-InstallRollback -Body {
+            param(
+                $PackageFullNameAddedByThisInstall,
+                $CertificateAddedByThisInstall,
+                $CertificateImportOutcomeKnown,
+                $CertificatePath,
+                $ExpectedCertificateSha256,
+                $ExpectedCertificateThumbprint
+            )
+            $script:rollbackPackageFullName =
+                $PackageFullNameAddedByThisInstall
+            [pscustomobject]@{
+                Complete = $true
+                RecoveryRequired = $false
+            }
+        }
+
+        Assert-Throws `
+            -Pattern "Publisher" `
+            -Action {
+                Invoke-InstallInternalMsix `
+                    -PackagePath "/tmp/product.msix" `
+                    -CertificatePath "/tmp/product.cer" `
+                    -ChecksumsPath "/tmp/SHA256SUMS.txt" `
+                    -ExpectedCertificateThumbprint ("B" * 40) `
+                    -ConfirmTrust
+            }
+        Assert-Equal `
+            $script:rollbackPackageFullName `
+            "EMKE.Translation.Internal_bad__test" `
+            "Identity failure lost the newly appeared exact PackageFullName."
+    }
+
+    Invoke-Case "rollback removes only the captured newly appeared package" {
+        Reset-InstallFunctions
+        $script:rollbackRemoveCalls = [Collections.Generic.List[string]]::new()
+        Set-TestFunction -Name Invoke-RemoveExactAppxPackage -Body {
+            param($PackageFullName)
+            $script:rollbackRemoveCalls.Add($PackageFullName)
+        }
+        Set-TestFunction -Name Assert-InternalPackageAbsent -Body {}
+        Set-TestFunction -Name Invoke-ElevatedCertificateOperation -Body {
+            throw "Certificate removal must not run."
+        }
+        Set-TestFunction -Name Remove-CertificateInstallRecord -Body {}
+
+        $rollback = Invoke-InstallRollback `
+            -PackageFullNameAddedByThisInstall `
+                "EMKE.Translation.Internal_bad__test" `
+            -CertificateAddedByThisInstall:$false `
+            -CertificateImportOutcomeKnown:$true `
+            -CertificatePath "/tmp/product.cer" `
+            -ExpectedCertificateSha256 ("A" * 64) `
+            -ExpectedCertificateThumbprint ("B" * 40)
+        Assert-True $rollback.Complete "Exact package rollback was incomplete."
+        Assert-Equal `
+            ($script:rollbackRemoveCalls -join "|") `
+            "EMKE.Translation.Internal_bad__test" `
+            "Rollback removed a package other than the captured new package."
+        Assert-True `
+            (-not $script:rollbackRemoveCalls.Contains(
+                "Other.Application_1.0.0.0_x64__test"
+            )) `
+            "Rollback removed an unrelated package."
     }
 
     Invoke-Case "AppX install and identity verification target exact current user package" {
@@ -1072,6 +1292,64 @@ try {
         Assert-Throws `
             -Pattern "Publisher" `
             -Action { Assert-InstalledInternalPackage }
+    }
+
+    Invoke-Case "uninstaller recovers an exact-name identity mismatch safely" {
+        Reset-UninstallFunctions
+        Set-TestFunction -Name Assert-SupportedUninstallParent -Body {}
+        $script:uninstallQueryCount = 0
+        Set-TestFunction -Name Get-AppxPackage -Body {
+            param($Name, $ErrorAction)
+            $script:uninstallQueryCount++
+            if ($script:uninstallQueryCount -eq 1) {
+                @(
+                    [pscustomobject]@{
+                        Name = "EMKE.Translation.Internal"
+                        Publisher = "CN=Other"
+                        Version = "9.9.9.9"
+                        Architecture = "arm64"
+                        PackageFullName =
+                            "EMKE.Translation.Internal_bad__test"
+                    },
+                    [pscustomobject]@{
+                        Name = "Other.Application"
+                        Publisher = "CN=Other"
+                        Version = "1.0.0.0"
+                        Architecture = "x64"
+                        PackageFullName =
+                            "Other.Application_1.0.0.0_x64__test"
+                    }
+                )
+            } else {
+                @([pscustomobject]@{
+                    Name = "Other.Application"
+                    Publisher = "CN=Other"
+                    Version = "1.0.0.0"
+                    Architecture = "x64"
+                    PackageFullName =
+                        "Other.Application_1.0.0.0_x64__test"
+                })
+            }
+        }
+        $script:mismatchRemoveCalls =
+            [Collections.Generic.List[string]]::new()
+        Set-TestFunction -Name Remove-AppxPackage -Body {
+            param($Package, $ErrorAction)
+            $script:mismatchRemoveCalls.Add($Package)
+        }
+
+        Invoke-UninstallInternalMsix `
+            -RemoveCertificate:$false `
+            -ConfirmRemoveCertificate:$false
+        Assert-Equal `
+            ($script:mismatchRemoveCalls -join "|") `
+            "EMKE.Translation.Internal_bad__test" `
+            "Identity-mismatch recovery removed the wrong package."
+        Assert-True `
+            (-not $script:mismatchRemoveCalls.Contains(
+                "Other.Application_1.0.0.0_x64__test"
+            )) `
+            "Identity-mismatch recovery removed an unrelated package."
     }
 
     Invoke-Case "uninstaller removes only exact current-user package and retains certificate" {

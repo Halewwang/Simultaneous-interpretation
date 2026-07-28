@@ -904,6 +904,7 @@ try {
             [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
             [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
         )
+        $resultExitCode = 0
         try {
             $store.Open(
                 [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
@@ -933,6 +934,11 @@ try {
             }
             if ($request.operation -ceq "Import" -and $matches.Count -eq 0) {
                 $store.Add($certificate)
+            } elseif (
+                $request.operation -ceq "Import" -and
+                $matches.Count -eq 1
+            ) {
+                $resultExitCode = 10
             } elseif (
                 $request.operation -ceq "Remove" -and
                 $matches.Count -eq 1
@@ -980,7 +986,7 @@ try {
             $certificateBytes.Length
         )
     }
-    exit 0
+    exit $resultExitCode
 } catch {
     Write-Error "Elevated certificate operation failed."
     exit 23
@@ -1032,6 +1038,7 @@ function Invoke-ElevatedCertificateOperation {
     )
     $requestLock = $null
     $certificateLock = $null
+    $operationResult = $null
     try {
         $requestLock = [IO.FileStream]::new(
             $request.RequestPath,
@@ -1071,7 +1078,18 @@ function Invoke-ElevatedCertificateOperation {
             -Verb RunAs `
             -Wait `
             -PassThru
-        if ($process.ExitCode -ne 0) {
+        if ($Operation -ceq "Import") {
+            $operationResult = switch ([int]$process.ExitCode) {
+                0 { "Added"; break }
+                10 { "AlreadyPresent"; break }
+                default {
+                    throw (
+                        "Elevated certificate operation failed or UAC was " +
+                        "cancelled; the exact operation can be retried."
+                    )
+                }
+            }
+        } elseif ($process.ExitCode -ne 0) {
             throw (
                 "Elevated certificate operation failed or UAC was " +
                 "cancelled; the exact operation can be retried."
@@ -1097,6 +1115,7 @@ function Invoke-ElevatedCertificateOperation {
         )
         Remove-ProtectedElevatedRequest -Request $request
     }
+    return $operationResult
 }
 
 function Invoke-ElevatedCertificateRemoval {
@@ -1187,7 +1206,6 @@ function Get-OptionalInstalledInternalPackage {
     if ($matches.Count -eq 0) {
         return $null
     }
-    Assert-InternalPackageIdentity -Package $matches[0]
     return $matches[0]
 }
 

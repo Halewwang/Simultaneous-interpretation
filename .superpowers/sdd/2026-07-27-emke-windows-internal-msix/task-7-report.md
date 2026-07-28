@@ -39,7 +39,7 @@ tests 6; pass 6; fail 0; exit 0
 
 pwsh -NoLogo -NoProfile -File \
   Windows/tools/tests/internal-msix-lifecycle.behavior.test.ps1
-cases 19; pass 19; fail 0; exit 0
+cases 23; pass 23; fail 0; exit 0
 ```
 
 Round-one security review added a second RED/GREEN cycle. RED proved that the
@@ -48,6 +48,14 @@ that UAC cancellation did not yet enter certificate recovery. GREEN proves an
 externally pinned thumbprint, an exact four-file checksum inventory, a fixed
 encoded elevation child, protected request tamper detection, and exact rollback
 after UAC or Add-Appx failure.
+
+Round-two review added five failing behavior cases before implementation. RED
+proved that the elevated import had no stable added-versus-preexisting result,
+rollback could remove persistent preexisting trust, identity mismatch prevented
+capturing the new package full name, strict identity validation blocked
+rollback, and the uninstaller could not recover that exact-name mismatch.
+GREEN proves stable `Added`/`AlreadyPresent` outcomes, rollback ownership, and
+raw exact-name package cleanup without touching unrelated packages.
 
 ## Hardened safety boundary
 
@@ -75,14 +83,20 @@ The installer:
 - independently parses and validates the request schema, request digest, local
   non-reparse CER path, CER bytes, subject, fixed thumbprint, and exact
   `LocalMachine\TrustedPeople` postcondition inside the encoded child;
+- maps fixed elevated-child exit codes to the only two import outcomes,
+  `Added` and `AlreadyPresent`, without returning certificate data;
 - returns to the original non-elevated process, re-verifies both inputs, then
   calls `Add-AppxPackage` for that user;
-- verifies exact Name, Publisher, Version, and Architecture;
+- captures the newly appeared exact-name package and its `PackageFullName`
+  before verifying Publisher, Version, and Architecture;
 - writes the invoking-user install record only after Add-Appx succeeds and the
   exact package identity is observed;
 - on UAC cancellation, child failure, Add-Appx failure, identity mismatch, or
-  record failure, attempts exact package/certificate/record rollback and emits
-  explicit complete-versus-recovery-required guidance.
+  record failure, removes only the captured new package full name and removes
+  certificate trust only when the stable result proves this run added it;
+- preserves an `AlreadyPresent` certificate across every rollback, preserves
+  trust when the import outcome is unknown, and emits explicit
+  complete-versus-recovery-required guidance.
 
 The uninstaller:
 
@@ -96,8 +110,10 @@ The uninstaller:
 - validates the CER against the exact invoking-user install record when one
   exists, while allowing explicit exact-certificate cleanup after a failed
   install left no package or record;
-- removes the package first when present, verifies it absent, and elevates only
-  the constrained exact-certificate-removal child;
+- accepts the raw current-user package only after an ordinal exact Name match,
+  so a Publisher/Version/Architecture mismatch cannot deadlock cleanup;
+- removes only that returned exact `PackageFullName`, verifies the exact Name
+  absent, and elevates only the constrained exact-certificate-removal child;
 - re-verifies the CER bytes, subject, thumbprint, and exact
   `LocalMachine\TrustedPeople` certificate before removal;
 - never matches or removes a certificate by subject alone.
@@ -117,7 +133,9 @@ The behavior suite specifically covers same-subject CER replacement with
 updated checksums, extra/duplicate inventory entries, paths containing spaces
 and single quotes, caller-controlled data exclusion from elevated argv,
 protected-request tampering, UAC cancellation recovery, Add-Appx failure
-rollback, no-record cleanup, and install-record ordering.
+rollback, preexisting certificate preservation across Add/identity/record
+failures, identity-mismatch removal by captured exact `PackageFullName`,
+unrelated-package preservation, no-record cleanup, and install-record ordering.
 
 ## Task 8 handoff
 
