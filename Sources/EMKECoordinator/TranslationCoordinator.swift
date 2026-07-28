@@ -65,19 +65,22 @@ public struct TranslationCoordinatorConfiguration: Sendable {
     public let audioConfiguration: AudioEngineConfiguration
     public let apiKey: String
     public let inputTranscriptionModel: String
+    public let audioStability: AudioStabilityConfiguration
 
     public init(
         apiConfiguration: APIConfiguration,
         preferences: TranslationPreferences,
         audioConfiguration: AudioEngineConfiguration,
         apiKey: String,
-        inputTranscriptionModel: String = "gpt-realtime-whisper"
+        inputTranscriptionModel: String = "gpt-realtime-whisper",
+        audioStability: AudioStabilityConfiguration = .production
     ) {
         self.apiConfiguration = apiConfiguration
         self.preferences = preferences
         self.audioConfiguration = audioConfiguration
         self.apiKey = apiKey
         self.inputTranscriptionModel = inputTranscriptionModel
+        self.audioStability = audioStability
     }
 }
 

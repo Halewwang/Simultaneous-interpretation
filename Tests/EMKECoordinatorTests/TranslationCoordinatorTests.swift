@@ -582,7 +582,7 @@ func preActivePartialAudioDoesNotLeakIntoFirstLiveFrame() async throws {
 
     await inbound.releaseConnections()
     try await startTask.value
-    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher.frameByteCount)
+    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher().frameByteCount)
     await audio.emit(.inboundNetworkAudio(liveFrame))
     #expect(await eventually { await inbound.appendCount == 1 })
     let appended = await inbound.appended
@@ -613,7 +613,7 @@ func reconnectDropsPartialAudioFromThePreviousSession() async throws {
         return requestCount == 3 && inboundState == .active
     })
 
-    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher.frameByteCount)
+    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher().frameByteCount)
     await harness.audio.emit(.inboundNetworkAudio(liveFrame))
     #expect(await eventually {
         await reconnectedInbound.appended.count == 1
