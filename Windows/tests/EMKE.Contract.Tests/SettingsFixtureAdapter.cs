@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EMKE.Core;
+using EMKE.Platform.Driver;
 using EMKE.Platform.Settings;
 
 namespace EMKE.Contract.Tests;
@@ -31,18 +32,32 @@ internal static class SettingsFixtureAdapter
             RecordingDriverSnapshotSource source = new(
                 new WindowsInstalledDriverSnapshot(
                     installedJson.GetProperty("present").GetBoolean(),
-                    installedJson.GetProperty("signatureValid").GetBoolean(),
-                    installedJson.GetProperty("abi").GetInt32(),
+                    installedJson.GetProperty("present").GetBoolean()
+                        ? @"ROOT\EMKEVIRTUALAUDIO"
+                        : null,
                     Version.Parse(ReadRequiredString(installedJson, "version")),
-                    installedJson.GetProperty("endpointCount").GetInt32()));
+                    installedJson.GetProperty("abi").GetInt32(),
+                    installedJson.GetProperty("signatureValid").GetBoolean()
+                        ? "fixture signer"
+                        : null,
+                    installedJson.GetProperty("signatureValid").GetBoolean(),
+                    CreateEndpointStates(
+                        installedJson.GetProperty("endpointCount").GetInt32())));
             RecordingDriverCompatibilityDiagnostics diagnostics = new();
             IDriverManager manager = new WindowsDriverManager(
                 source,
-                new WindowsDriverCompatibilityOptions(
-                    requiredAbi: 1,
-                    minimumVersion: DefaultDriverVersion,
-                    recommendedVersion: recommendedVersion,
-                    requiredEndpointCount: 2),
+                new CompatibilityManifest(
+                    appVersion: DefaultDriverVersion,
+                    contractVersion: 1,
+                    settingsSchemaVersion: 1,
+                    driverAbiVersion: 1,
+                    minimumDriverVersion: DefaultDriverVersion,
+                    recommendedDriverVersion: recommendedVersion,
+                    driverPackageAvailable: true,
+                    channel: "contract",
+                    minimumWindowsBuild: 0,
+                    requiredEndpointRoleCount: 2),
+                ContractWindowsHostCompatibilitySource.Instance,
                 diagnostics);
 
             DriverCompatibility actual =
@@ -219,6 +234,23 @@ internal static class SettingsFixtureAdapter
             JsonSerializer.Serialize(language))!;
     }
 
+    private static IReadOnlyList<WindowsInstalledDriverEndpointState>
+        CreateEndpointStates(int count)
+    {
+        string[] roles =
+        [
+            "meetingSpeakerRender",
+            "appSpeakerCapture",
+            "appMicrophoneRender",
+            "meetingMicrophoneCapture",
+        ];
+        return roles
+            .Take(Math.Min(count, roles.Length))
+            .Select(static role =>
+                new WindowsInstalledDriverEndpointState(role, "active"))
+            .ToArray();
+    }
+
     private static string ReadRequiredString(JsonElement element, string name)
     {
         return element.GetProperty(name).GetString()
@@ -310,6 +342,22 @@ internal static class SettingsFixtureAdapter
         public void Record(WindowsDriverCompatibilityObservation observation)
         {
             LastObservation = observation;
+        }
+    }
+
+    private sealed class ContractWindowsHostCompatibilitySource
+        : IWindowsHostCompatibilitySource
+    {
+        public static ContractWindowsHostCompatibilitySource Instance { get; } =
+            new();
+
+        private ContractWindowsHostCompatibilitySource()
+        {
+        }
+
+        public int GetCurrentWindowsBuild()
+        {
+            return 0;
         }
     }
 }

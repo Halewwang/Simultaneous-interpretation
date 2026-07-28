@@ -25,7 +25,10 @@ internal sealed class AppPresentationMapper
             RuntimeSeverity(snapshot.RuntimeState),
             snapshot.RuntimeState
                 is RuntimeState.Starting or RuntimeState.Stopping,
-            StartAction(snapshot.RuntimeState, language),
+            StartAction(
+                snapshot.RuntimeState,
+                snapshot.DriverCompatibility,
+                language),
             StopAction(snapshot.RuntimeState, language),
             InboundChannel(snapshot, language),
             OutboundChannel(snapshot, language),
@@ -75,8 +78,13 @@ internal sealed class AppPresentationMapper
 
     private PresentationAction StartAction(
         RuntimeState state,
+        DriverCompatibility driverCompatibility,
         AppInterfaceLanguage language)
     {
+        ArgumentNullException.ThrowIfNull(driverCompatibility);
+        bool driverAllowsStart =
+            driverCompatibility.IsCompatible
+            || string.IsNullOrEmpty(driverCompatibility.StatusLabel);
         return state switch
         {
             RuntimeState.Stopped or RuntimeState.Failed =>
@@ -84,7 +92,7 @@ internal sealed class AppPresentationMapper
                     PresentationActionKind.Start,
                     LocalizedString.ActionStart,
                     isVisible: true,
-                    isEnabled: true,
+                    isEnabled: driverAllowsStart,
                     language),
             RuntimeState.Starting =>
                 Action(

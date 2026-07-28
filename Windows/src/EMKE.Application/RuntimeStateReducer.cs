@@ -102,7 +102,10 @@ internal sealed class RuntimeStateReducer
         return Current;
     }
 
-    public AppSnapshot FailStart(long generation, RuntimeError error)
+    public AppSnapshot FailStart(
+        long generation,
+        RuntimeError error,
+        DriverCompatibility? driverCompatibility = null)
     {
         ArgumentNullException.ThrowIfNull(error);
         if (generation != _generation)
@@ -121,7 +124,7 @@ internal sealed class RuntimeStateReducer
             sourceCaption: string.Empty,
             translatedCaption: string.Empty,
             Current.AudioSelection,
-            Current.DriverCompatibility,
+            driverCompatibility ?? Current.DriverCompatibility,
             error);
         return Current;
     }

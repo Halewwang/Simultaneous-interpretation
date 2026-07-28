@@ -29,6 +29,23 @@ public sealed class AppPresentationMapperTests
         Assert.IsFalse(presentation.StopAction.IsVisible);
     }
 
+    [TestMethod]
+    public void DriverMissingDisablesStart()
+    {
+        AppPresentation presentation = Mapper.Map(
+            Snapshot(
+                RuntimeState.Stopped,
+                driverCompatibility: new DriverCompatibility(
+                    isCompatible: false,
+                    statusLabel: "driverMissing",
+                    updateRecommended: true,
+                    repairAvailable: false)),
+            AppInterfaceLanguage.English);
+
+        Assert.IsTrue(presentation.StartAction.IsVisible);
+        Assert.IsFalse(presentation.StartAction.IsEnabled);
+    }
+
     [DataRow(RuntimeState.Starting, "Translation starting", true, true)]
     [DataRow(RuntimeState.Stopping, "Translation stopping", true, false)]
     [TestMethod]
@@ -449,7 +466,8 @@ public sealed class AppPresentationMapperTests
         ChannelState outboundChannelState = ChannelState.Inactive,
         InboundRoute inboundRoute = InboundRoute.Stopped,
         OutboundRoute outboundRoute = OutboundRoute.Stopped,
-        RuntimeError? error = null)
+        RuntimeError? error = null,
+        DriverCompatibility? driverCompatibility = null)
     {
         return new AppSnapshot(
             contractVersion: 1,
@@ -464,7 +482,7 @@ public sealed class AppPresentationMapperTests
             sourceCaption: "source",
             translatedCaption: "translated",
             new AudioSelection("input", "output"),
-            new DriverCompatibility(true, "compatible"),
+            driverCompatibility ?? new DriverCompatibility(true, "compatible"),
             connectionReport: null,
             new AudioDiagnostics(true, 0),
             new UpdateAvailability(false, string.Empty),

@@ -60,14 +60,33 @@ public sealed record AudioSelection
 public sealed record DriverCompatibility
 {
     public DriverCompatibility(bool isCompatible, string statusLabel)
+        : this(
+            isCompatible,
+            statusLabel,
+            updateRecommended: false,
+            repairAvailable: !isCompatible)
+    {
+    }
+
+    public DriverCompatibility(
+        bool isCompatible,
+        string statusLabel,
+        bool updateRecommended,
+        bool repairAvailable)
     {
         IsCompatible = isCompatible;
         StatusLabel = statusLabel ?? throw new ArgumentNullException(nameof(statusLabel));
+        UpdateRecommended = updateRecommended;
+        RepairAvailable = repairAvailable;
     }
 
     public bool IsCompatible { get; }
 
     public string StatusLabel { get; }
+
+    public bool UpdateRecommended { get; }
+
+    public bool RepairAvailable { get; }
 }
 
 public sealed class TranslationCompatibilityReport : IEquatable<TranslationCompatibilityReport>

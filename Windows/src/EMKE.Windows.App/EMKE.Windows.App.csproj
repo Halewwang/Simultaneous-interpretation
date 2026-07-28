@@ -18,6 +18,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource
+      Include="../../packaging/compatibility.internal.json"
+      Link="Compatibility/compatibility.internal.json"
+      LogicalName="EMKE.Windows.App.compatibility.internal.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <FrameworkReference
       Update="Microsoft.WindowsDesktop.App.WPF"
       PrivateAssets="all" />

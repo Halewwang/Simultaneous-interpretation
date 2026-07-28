@@ -741,10 +741,14 @@ public sealed class TranslationRuntime :
                     cancellationToken).ConfigureAwait(false);
             if (!driver.IsCompatible)
             {
-                return StartOutcome.Failed(Error(
-                    ErrorCategory.Driver,
-                    "translationRuntime.driverIncompatible",
-                    RecoveryAction.InstallDriver));
+                return StartOutcome.Failed(
+                    Error(
+                        ErrorCategory.Driver,
+                        "translationRuntime.driverIncompatible",
+                        driver.RepairAvailable
+                            ? RecoveryAction.InstallDriver
+                            : RecoveryAction.ReportCompatibility),
+                    driver);
             }
 
             AudioDeviceSnapshot devices =
@@ -908,7 +912,8 @@ public sealed class TranslationRuntime :
                 outcome.Error ?? Error(
                     ErrorCategory.Protocol,
                     "translationRuntime.startFailed",
-                    RecoveryAction.Retry)));
+                    RecoveryAction.Retry),
+                outcome.Driver));
             CompleteStart(outcome.Error);
             return;
         }
@@ -2510,11 +2515,13 @@ public sealed class TranslationRuntime :
         bool OutboundBypassed,
         RuntimeError? Error)
     {
-        public static StartOutcome Failed(RuntimeError error)
+        public static StartOutcome Failed(
+            RuntimeError error,
+            DriverCompatibility? driver = null)
         {
             return new StartOutcome(
                 null,
-                null,
+                driver,
                 null,
                 null,
                 null,
