@@ -10,7 +10,8 @@
 - 正常双向翻译创建两条独立 WebSocket：入站目标语言是“我的母语”，出站目标语言是“会议输出语言”。
 - 当母语与会议输出语言相同，出站使用本地原声旁路且不创建第二条 Translation 会话；入站会话仍继续执行母语门控。
 - 会话必须依次收到 `session.created`，发送 `session.update`，再收到 `session.updated` 后才视为连接成功。
-- 握手期间本地音频仍可用于电平显示，但音频发送循环只允许向状态为 `active` 的会话追加音频，避免把启动流量误判为断线并触发重复连接。
+- 两条会话的握手结果独立生效；任一通道完成握手后立即进入 `active` 并开始收发，不等待另一通道。
+- 握手期间本地音频仍可用于电平显示，但音频发送循环只允许向状态为 `active` 的会话追加音频；连接前的音频和断线时残留的不足一帧数据会被丢弃，不能混入新会话的首帧。
 - 入站 `session.update` 配置目标语言、`gpt-realtime-whisper` 源转写和 `far_field` 降噪；出站只配置目标语言。
 
 普通 Chat Completions 请求成功只能证明 HTTP Chat API、Key 和模型名称在该路径可用，不能证明 `/realtime/translations`、Translation 事件、双并发会话或流式音频兼容。

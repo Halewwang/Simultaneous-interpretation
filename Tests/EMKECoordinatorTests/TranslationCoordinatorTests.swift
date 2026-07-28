@@ -169,6 +169,7 @@ private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
 private actor BlockingCoordinatorSession: TranslationSessionControlling {
     private(set) var connectCount = 0
     private(set) var appendCount = 0
+    private(set) var appended: [Data] = []
     private var connectWaiters: [CheckedContinuation<Void, Never>] = []
     private var eventWaiters: [
         CheckedContinuation<TranslationServerEvent, any Error>
@@ -183,6 +184,7 @@ private actor BlockingCoordinatorSession: TranslationSessionControlling {
 
     func appendAudio(_ pcm16: Data) async throws {
         appendCount += 1
+        appended.append(pcm16)
     }
 
     func nextEvent() async throws -> TranslationServerEvent {
@@ -221,6 +223,22 @@ private actor RepeatingCoordinatorSessionBuilder: TranslationSessionBuilding {
         apiKey: String
     ) async -> any TranslationSessionControlling {
         session
+    }
+}
+
+private actor BlockingCoordinatorSessionBuilder: TranslationSessionBuilding {
+    private var sessions: [BlockingCoordinatorSession]
+
+    init(sessions: [BlockingCoordinatorSession]) {
+        self.sessions = sessions
+    }
+
+    func makeSession(
+        configuration: APIConfiguration,
+        sessionConfiguration: TranslationSessionConfiguration,
+        apiKey: String
+    ) async -> any TranslationSessionControlling {
+        sessions.removeFirst()
     }
 }
 
@@ -286,6 +304,8 @@ private struct CoordinatorHarness {
     }
 
     func drainStartupEvents() async {
+        _ = await coordinator.nextEvent()
+        _ = await coordinator.nextEvent()
         _ = await coordinator.nextEvent()
         _ = await coordinator.nextEvent()
     }
@@ -481,6 +501,127 @@ func startupAudioWaitsForHandshakeBeforeReachingSessions() async throws {
     await session.releaseConnections()
     try await startTask.value
     await coordinator.stop()
+}
+
+@Test
+func connectedInboundStartsBeforeOutboundHandshakeCompletes() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let inbound = BlockingCoordinatorSession()
+    let outbound = BlockingCoordinatorSession()
+    let coordinator = TranslationCoordinator(
+        audioEngine: audio,
+        sessionBuilder: BlockingCoordinatorSessionBuilder(
+            sessions: [inbound, outbound]
+        )
+    )
+    let configuration = TranslationCoordinatorConfiguration(
+        apiConfiguration: .default,
+        preferences: TranslationPreferences(
+            motherLanguage: .chinese,
+            meetingOutputLanguage: .german
+        ),
+        audioConfiguration: AudioEngineConfiguration(
+            selection: coordinatorAudioSelection()
+        ),
+        apiKey: "test-key"
+    )
+    let startTask = Task {
+        try await coordinator.start(configuration: configuration)
+    }
+
+    #expect(await eventually {
+        let inboundCount = await inbound.connectCount
+        let outboundCount = await outbound.connectCount
+        return inboundCount == 1 && outboundCount == 1
+    })
+    await inbound.releaseConnections()
+    let inboundBecameActive = await eventually {
+        await coordinator.state.inbound == .active
+    }
+    await audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    let inboundReceivedAudio = await eventually {
+        await inbound.appendCount == 1
+    }
+
+    await outbound.releaseConnections()
+    try await startTask.value
+    await coordinator.stop()
+
+    #expect(inboundBecameActive)
+    #expect(inboundReceivedAudio)
+}
+
+@Test
+func preActivePartialAudioDoesNotLeakIntoFirstLiveFrame() async throws {
+    let audio = CoordinatorAudioEngineFake()
+    let inbound = BlockingCoordinatorSession()
+    let coordinator = TranslationCoordinator(
+        audioEngine: audio,
+        sessionBuilder: RepeatingCoordinatorSessionBuilder(session: inbound)
+    )
+    let configuration = TranslationCoordinatorConfiguration(
+        apiConfiguration: .default,
+        preferences: TranslationPreferences(
+            motherLanguage: .chinese,
+            meetingOutputLanguage: .chinese
+        ),
+        audioConfiguration: AudioEngineConfiguration(
+            selection: coordinatorAudioSelection()
+        ),
+        apiKey: "test-key"
+    )
+    let startTask = Task {
+        try await coordinator.start(configuration: configuration)
+    }
+
+    #expect(await eventually { await inbound.connectCount == 1 })
+    await audio.emit(.inboundNetworkAudio(
+        Data(repeating: 0x11, count: 2_000)
+    ))
+    _ = await coordinator.currentState()
+
+    await inbound.releaseConnections()
+    try await startTask.value
+    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher.frameByteCount)
+    await audio.emit(.inboundNetworkAudio(liveFrame))
+    #expect(await eventually { await inbound.appendCount == 1 })
+    let appended = await inbound.appended
+    await coordinator.stop()
+
+    #expect(appended == [liveFrame])
+}
+
+@Test
+func reconnectDropsPartialAudioFromThePreviousSession() async throws {
+    let reconnectedInbound = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [reconnectedInbound],
+        reconnectDelays: [.zero]
+    )
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(
+        Data(repeating: 0x11, count: 2_000)
+    ))
+    _ = await harness.coordinator.currentState()
+    #expect(await harness.inbound.appended.isEmpty)
+
+    await harness.inbound.emit(.failure(.disconnected))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+
+    let liveFrame = Data(repeating: 0x22, count: PCMFrameBatcher.frameByteCount)
+    await harness.audio.emit(.inboundNetworkAudio(liveFrame))
+    #expect(await eventually {
+        await reconnectedInbound.appended.count == 1
+    })
+    let appended = await reconnectedInbound.appended
+    await harness.coordinator.stop()
+
+    #expect(appended == [liveFrame])
 }
 
 @Test

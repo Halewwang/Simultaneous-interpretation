@@ -206,39 +206,18 @@ public actor TranslationCoordinator {
             outboundSession = newOutbound
         }
 
-        async let inboundError = Self.connectError(for: inbound)
-        async let outboundError: (any Error)? = {
-            guard let outbound else { return nil }
-            return await Self.connectError(for: outbound)
-        }()
-
-        let resolvedInboundError = await inboundError
-        let resolvedOutboundError = await outboundError
-
-        if let resolvedInboundError {
-            inboundSession = nil
-            state.inbound = .failed(
-                message: String(describing: resolvedInboundError)
+        if let outbound {
+            async let inboundConnection: Void = connectInitialSession(
+                inbound,
+                channel: .inbound
             )
-            routing.handle(.inboundConnectionFailed)
-            scheduleReconnect(channel: .inbound, attempt: 0)
+            async let outboundConnection: Void = connectInitialSession(
+                outbound,
+                channel: .outbound
+            )
+            _ = await (inboundConnection, outboundConnection)
         } else {
-            state.inbound = .active
-            startInboundReceiveLoop(session: inbound)
-        }
-
-        if usesOutboundBypass {
-            state.outbound = .bypassed
-        } else if let resolvedOutboundError {
-            outboundSession = nil
-            state.outbound = .failed(
-                message: String(describing: resolvedOutboundError)
-            )
-            routing.handle(.outboundConnectionFailed)
-            scheduleReconnect(channel: .outbound, attempt: 0)
-        } else if let outbound {
-            state.outbound = .active
-            startOutboundReceiveLoop(session: outbound)
+            await connectInitialSession(inbound, channel: .inbound)
         }
 
         await applyRouting()
@@ -358,6 +337,36 @@ public actor TranslationCoordinator {
         }
     }
 
+    private func connectInitialSession(
+        _ session: any TranslationSessionControlling,
+        channel: Channel
+    ) async {
+        if let error = await Self.connectError(for: session) {
+            switch channel {
+            case .inbound:
+                inboundSession = nil
+                state.inbound = .failed(message: String(describing: error))
+                routing.handle(.inboundConnectionFailed)
+            case .outbound:
+                outboundSession = nil
+                state.outbound = .failed(message: String(describing: error))
+                routing.handle(.outboundConnectionFailed)
+            }
+            scheduleReconnect(channel: channel, attempt: 0)
+        } else {
+            switch channel {
+            case .inbound:
+                state.inbound = .active
+                startInboundReceiveLoop(session: session)
+            case .outbound:
+                state.outbound = .active
+                startOutboundReceiveLoop(session: session)
+            }
+        }
+        await applyRouting()
+        publishState()
+    }
+
     private func startAudioLoop() {
         let audioEngine = self.audioEngine
         audioTask = Task { [weak self] in
@@ -471,8 +480,8 @@ public actor TranslationCoordinator {
                 await playInbound(inboundBuffer.appendOriginal(pcm16))
             }
 
-            let frames = try inboundBatcher.append(pcm16)
             if state.inbound == .active, let inboundSession {
+                let frames = try inboundBatcher.append(pcm16)
                 for frame in frames {
                     do {
                         try await inboundSession.appendAudio(frame)
@@ -481,6 +490,8 @@ public actor TranslationCoordinator {
                         break
                     }
                 }
+            } else {
+                inboundBatcher.reset()
             }
 
             if vadEvent == .speechEnded {
@@ -493,8 +504,8 @@ public actor TranslationCoordinator {
 
     private func handleOutboundAudio(_ pcm16: Data) async {
         do {
-            let frames = try outboundBatcher.append(pcm16)
             if state.outbound == .active, let outboundSession {
+                let frames = try outboundBatcher.append(pcm16)
                 for frame in frames {
                     do {
                         try await outboundSession.appendAudio(frame)
@@ -503,6 +514,8 @@ public actor TranslationCoordinator {
                         break
                     }
                 }
+            } else {
+                outboundBatcher.reset()
             }
         } catch {
             await handleChannelFailure(.outbound, error: error)
@@ -675,6 +688,7 @@ public actor TranslationCoordinator {
             guard inboundSession != nil || state.inbound == .active else {
                 return
             }
+            inboundBatcher.reset()
             inboundSession = nil
             state.inbound = .failed(message: String(describing: error))
             routing.handle(.inboundConnectionFailed)
@@ -683,6 +697,7 @@ public actor TranslationCoordinator {
             guard outboundSession != nil || state.outbound == .active else {
                 return
             }
+            outboundBatcher.reset()
             outboundSession = nil
             state.outbound = .failed(message: String(describing: error))
             routing.handle(.outboundConnectionFailed)
