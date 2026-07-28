@@ -19,6 +19,22 @@ does not establish public publisher trust.
 Run this only from the trusted macOS controller, from a checkout connected to
 the intended GitHub repository:
 
+Before generating private material, a repository administrator must create a
+GitHub Environment named `windows-internal-signing`. Configure its required reviewers.
+Do not create repository-level or organization-level copies of these signing
+secrets.
+
+Only the signing workflow job may reference this Environment. That job must
+declare this exact binding and pass its protection rules before GitHub exposes
+the Environment secrets:
+
+```yaml
+environment: windows-internal-signing
+```
+
+No workflow job without `environment: windows-internal-signing` may receive
+either signing secret.
+
 ```bash
 signing_temp="$(mktemp -d /tmp/emke-msix-signing.XXXXXX)"
 openssl rand -base64 48 > "$signing_temp/password"
@@ -34,13 +50,14 @@ openssl pkcs12 -export \
   -in "$signing_temp/cert.pem" \
   -passout "file:$signing_temp/password"
 base64 < "$signing_temp/app.pfx" > "$signing_temp/app.pfx.base64"
-gh secret set WINDOWS_INTERNAL_SIGNING_PFX_BASE64 \
+gh secret set --env windows-internal-signing WINDOWS_INTERNAL_SIGNING_PFX_BASE64 \
   < "$signing_temp/app.pfx.base64"
-gh secret set WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD \
+gh secret set --env windows-internal-signing WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD \
   < "$signing_temp/password"
+gh secret list --env windows-internal-signing
 ```
 
-Run `gh secret list` and confirm that both
+From that list, confirm that both
 `WINDOWS_INTERNAL_SIGNING_PFX_BASE64` and
 `WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD` are present. The command confirms only
 the secret names; it must not reveal either value.

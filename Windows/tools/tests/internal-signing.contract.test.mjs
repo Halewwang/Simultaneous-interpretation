@@ -19,6 +19,13 @@ const readmePath = path.join(
   'InternalSigning',
   'README.md',
 );
+const deliveryPlanPath = path.join(
+  repositoryRoot,
+  'docs',
+  'superpowers',
+  'plans',
+  '2026-07-27-emke-windows-internal-msix.md',
+);
 
 test('verifier exposes only path, environment-variable, subject, and CER inputs', () => {
   const command = [
@@ -67,20 +74,32 @@ test('provisioning guide keeps PFX material in a named temporary directory', asy
   assert.match(guide, /-passout "file:\$signing_temp\/password"/);
 });
 
-test('provisioning guide configures only the two named GitHub secrets', async () => {
+test('provisioning guide scopes both secrets to the protected environment', async () => {
   const guide = await readFile(readmePath, 'utf8');
+  const secretSetCommands = guide.match(/^gh secret set[^\n]*$/gm) ?? [];
+  const secretListCommands = guide.match(/^gh secret list[^\n]*$/gm) ?? [];
 
+  assert.deepEqual(secretSetCommands, [
+    'gh secret set --env windows-internal-signing WINDOWS_INTERNAL_SIGNING_PFX_BASE64 \\',
+    'gh secret set --env windows-internal-signing WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD \\',
+  ]);
+  assert.deepEqual(secretListCommands, [
+    'gh secret list --env windows-internal-signing',
+  ]);
+  assert.doesNotMatch(guide, /gh secret (?:set|list) --app actions/);
+  assert.match(guide, /GitHub Environment named `windows-internal-signing`/i);
+  assert.match(guide, /required reviewers/i);
   assert.match(
     guide,
-    /gh secret set WINDOWS_INTERNAL_SIGNING_PFX_BASE64\s+\\\s*\n\s*< "\$signing_temp\/app\.pfx\.base64"/,
+    /workflow job[\s\S]*environment:\s*windows-internal-signing/i,
   );
-  assert.match(
-    guide,
-    /gh secret set WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD\s+\\\s*\n\s*< "\$signing_temp\/password"/,
-  );
-  assert.match(guide, /gh secret list/);
-  assert.match(guide, /WINDOWS_INTERNAL_SIGNING_PFX_BASE64/);
-  assert.match(guide, /WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD/);
+});
+
+test('delivery plan checks only environment-scoped secret names', async () => {
+  const plan = await readFile(deliveryPlanPath, 'utf8');
+
+  assert.match(plan, /^gh secret list --env windows-internal-signing \| rg \\$/m);
+  assert.doesNotMatch(plan, /gh secret list --app actions/);
 });
 
 test('provisioning guide requires exact cleanup and prohibits disclosure', async () => {

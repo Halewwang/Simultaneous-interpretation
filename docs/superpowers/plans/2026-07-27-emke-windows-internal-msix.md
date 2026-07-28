@@ -665,10 +665,14 @@ Resolve all Critical and Important findings before push.
 - [ ] **Step 2: Provision the persistent Internal certificate secrets**
 
 Execute the exact controller-only procedure in
-`Windows/packaging/InternalSigning/README.md`. Confirm only secret names:
+`Windows/packaging/InternalSigning/README.md`. The GitHub Environment
+`windows-internal-signing` must already have required reviewers configured,
+and only the signing workflow job may declare
+`environment: windows-internal-signing`. Confirm only Environment secret
+names:
 
 ```bash
-gh secret list --app actions | rg \
+gh secret list --env windows-internal-signing | rg \
   'WINDOWS_INTERNAL_SIGNING_PFX_BASE64|WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD'
 ```
 

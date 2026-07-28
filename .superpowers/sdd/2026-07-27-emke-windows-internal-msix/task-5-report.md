@@ -108,3 +108,50 @@ a Windows hosted runner, a real Internal signing secret, a signed MSIX,
 certificate installation, package installation, driver signing, real-device
 operation, meeting behavior, or release acceptance. Those remain later plan
 gates.
+
+## Cross-task security fix — Environment-scoped secrets
+
+The follow-up commit containing this section uses message
+`docs: protect Windows signing environment secrets`. It closes the
+repository-level secret provisioning gap without creating or reading any
+secret.
+
+TDD RED:
+
+```text
+PATH=/tmp/emke-pwsh-7bLsUP:$PATH node --test \
+  Windows/tools/tests/internal-signing.contract.test.mjs
+
+tests 5
+pass 3
+fail 2
+```
+
+The README test observed both old `gh secret set NAME` commands instead of the
+required `gh secret set --env windows-internal-signing NAME` commands. The
+Task 9 test also rejected the old `gh secret list --app actions` command.
+
+TDD GREEN:
+
+```text
+tests 5
+pass 5
+fail 0
+```
+
+The provisioning guide now requires an administrator-created
+`windows-internal-signing` GitHub Environment with required reviewers. Both
+secret writes and the name-only list are scoped with `--env
+windows-internal-signing`; repository-level and `--app actions` command shapes
+are rejected. The guide and Task 9 require only the signing workflow job to
+declare `environment: windows-internal-signing`.
+
+A read-only inspection confirmed that the existing
+`sign-package-bundle` workflow job already has that exact Environment binding
+and that its two secret references are confined to its signing step. No
+workflow file needed modification. `git diff --check` passed.
+
+No GitHub Environment, protection rule, certificate, or secret was created or
+changed. Hosted approval behavior and secret availability remain unverified
+until the administrator configures the Environment and a real workflow run
+passes its required-reviewer gate.
