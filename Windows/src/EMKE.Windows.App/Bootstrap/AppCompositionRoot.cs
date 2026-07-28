@@ -290,10 +290,17 @@ internal sealed class AppCompositionRoot
             coreAdapters = await adapterFactory
                 .CreateCoreAsync(cancellationToken)
                 .ConfigureAwait(false);
+            DriverCompatibility preflight =
+                await ReadDriverPreflightAsync(
+                    coreAdapters.RuntimeDependencies.DriverManager,
+                    cancellationToken).ConfigureAwait(false);
             runtime = new TranslationRuntimeLifetime(
                 new TranslationRuntime(coreAdapters.RuntimeDependencies));
             snapshotStore = new AppSnapshotStore(
-                new CallbackAppDispatcher(postToUi));
+                new CallbackAppDispatcher(postToUi),
+                WithDriverCompatibility(
+                    runtime.CurrentSnapshot,
+                    preflight));
             runtimeSubscription = runtime.Snapshots.Subscribe(snapshotStore);
             LocalizationService localization = new();
             presentation = new PresentationCoordinator(
@@ -361,6 +368,58 @@ internal sealed class AppCompositionRoot
             Interlocked.Exchange(ref s_processRuntimeClaimed, 0);
             throw;
         }
+    }
+
+    private static async ValueTask<DriverCompatibility>
+        ReadDriverPreflightAsync(
+            IDriverManager driverManager,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await driverManager.CheckCompatibilityAsync(
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new DriverCompatibility(
+                isCompatible: false,
+                statusLabel: "driverMissing",
+                updateRecommended: true,
+                repairAvailable: false);
+        }
+    }
+
+    private static AppSnapshot WithDriverCompatibility(
+        AppSnapshot snapshot,
+        DriverCompatibility driverCompatibility)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(driverCompatibility);
+        return new AppSnapshot(
+            snapshot.ContractVersion,
+            snapshot.Version,
+            snapshot.RuntimeState,
+            snapshot.InboundChannelState,
+            snapshot.OutboundChannelState,
+            snapshot.InboundRoute,
+            snapshot.OutboundRoute,
+            snapshot.InboundLevel,
+            snapshot.OutboundLevel,
+            snapshot.SourceCaption,
+            snapshot.TranslatedCaption,
+            snapshot.AudioSelection,
+            driverCompatibility,
+            snapshot.ConnectionReport,
+            snapshot.AudioDiagnostics,
+            snapshot.UpdateAvailability,
+            snapshot.Error);
     }
 
     public Task<bool> TryRunUiCommandAsync(
@@ -516,6 +575,8 @@ internal sealed class AppCompositionRoot
         }
 
         public IObservable<AppSnapshot> Snapshots => _runtime.Snapshots;
+
+        public AppSnapshot CurrentSnapshot => _runtime.CurrentSnapshot;
 
         public Task<RuntimeError?> SubmitAsync(
             RuntimeCommand command,

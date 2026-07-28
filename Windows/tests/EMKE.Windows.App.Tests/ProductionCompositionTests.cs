@@ -1,5 +1,6 @@
 using EMKE.Application;
 using EMKE.Core;
+using EMKE.Platform.Driver;
 using EMKE.Windows.App.Bootstrap;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Presentation;
@@ -106,6 +107,90 @@ public sealed class ProductionCompositionTests
         Assert.IsInstanceOfType<ProductionAppAdapterFactory>(factory);
     }
 
+    [TestMethod]
+    public async Task ProductionCoreUsesRealReadOnlyDriverPreflight()
+    {
+        AppCoreAdapterBundle bundle =
+            await ProductionCoreAdapters.CreateAsync(CancellationToken.None);
+        try
+        {
+            Assert.IsInstanceOfType<WindowsDriverManager>(
+                bundle.RuntimeDependencies.DriverManager);
+        }
+        finally
+        {
+            await bundle.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task StartupPreflightControlsStartWithoutOpeningNetworkOrAudio()
+    {
+        await AssertStartupPreflightAsync(
+            new DriverCompatibility(
+                isCompatible: false,
+                statusLabel: "driverMissing",
+                updateRecommended: true,
+                repairAvailable: false),
+            expectedStartEnabled: false);
+        await AssertStartupPreflightAsync(
+            new DriverCompatibility(
+                isCompatible: true,
+                statusLabel: "compatible",
+                updateRecommended: false,
+                repairAvailable: false),
+            expectedStartEnabled: true);
+    }
+
+    private static async Task AssertStartupPreflightAsync(
+        DriverCompatibility compatibility,
+        bool expectedStartEnabled)
+    {
+        RecordingDriverManager driver = new(compatibility);
+        RecordingAudioEngine audio = new();
+        RecordingSessionFactory sessions = new();
+        AppPresentation? presentationSeenBeforeUiCreation = null;
+        IAppAdapterFactory factory = AppStartupFactory.Create(
+            _ => ValueTask.FromResult(
+                new AppCoreAdapterBundle(
+                    Dependencies(driver, audio, sessions),
+                    new NoOpDiagnostics(),
+                    new NoOpAsyncDisposable())),
+            (context, _) =>
+            {
+                presentationSeenBeforeUiCreation =
+                    context.Presentation.Current;
+                return ValueTask.FromResult(
+                    new AppUiAdapterBundle(
+                        new CapturingTray(context),
+                        new CapturingViews(context),
+                        new NoOpAsyncDisposable()));
+            });
+
+        AppCompositionRoot root =
+            await AppCompositionRoot.CreateForProcessAsync(
+                factory,
+                new NoOpAsyncDisposable(),
+                TimeSpan.FromSeconds(1),
+                static callback => callback(),
+                static () => { },
+                CancellationToken.None);
+        try
+        {
+            Assert.IsNotNull(presentationSeenBeforeUiCreation);
+            Assert.AreEqual(
+                expectedStartEnabled,
+                presentationSeenBeforeUiCreation.StartAction.IsEnabled);
+            Assert.AreEqual(1, driver.ReadCount);
+            Assert.AreEqual(0, audio.StartCount);
+            Assert.AreEqual(0, sessions.CreateCount);
+        }
+        finally
+        {
+            _ = await root.ExitAsync();
+        }
+    }
+
     private static TranslationRuntimeDependencies Dependencies()
     {
         return new TranslationRuntimeDependencies(
@@ -116,6 +201,24 @@ public sealed class ProductionCompositionTests
             new EmptyDeviceCatalog(),
             new NoOpAudioEngine(),
             new UnreachableSessionFactory(),
+            new UniformLanguageClassifier(),
+            new ImmediateClock(),
+            new NoOpRuntimeLog());
+    }
+
+    private static TranslationRuntimeDependencies Dependencies(
+        IDriverManager driverManager,
+        ITranslationAudioEngine audioEngine,
+        ITranslationSessionFactory sessionFactory)
+    {
+        return new TranslationRuntimeDependencies(
+            new PassingBuildGate(),
+            new MissingSettingsStore(),
+            new MissingSecretStore(),
+            driverManager,
+            new EmptyDeviceCatalog(),
+            audioEngine,
+            sessionFactory,
             new UniformLanguageClassifier(),
             new ImmediateClock(),
             new NoOpRuntimeLog());
@@ -294,6 +397,21 @@ public sealed class ProductionCompositionTests
         }
     }
 
+    private sealed class RecordingDriverManager(
+        DriverCompatibility compatibility)
+        : IDriverManager
+    {
+        public int ReadCount { get; private set; }
+
+        public Task<DriverCompatibility> CheckCompatibilityAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReadCount++;
+            return Task.FromResult(compatibility);
+        }
+    }
+
     private sealed class EmptyDeviceCatalog : IAudioDeviceCatalog
     {
         public Task<AudioDeviceSnapshot> GetSnapshotAsync(
@@ -353,6 +471,58 @@ public sealed class ProductionCompositionTests
         }
     }
 
+    private sealed class RecordingAudioEngine : ITranslationAudioEngine
+    {
+        public int StartCount { get; private set; }
+
+        public Task StartAsync(
+            AudioEngineConfiguration configuration,
+            CancellationToken cancellationToken)
+        {
+            StartCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
+        public ValueTask<AudioEngineEvent?> PollEventAsync(
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<AudioEngineEvent?>(null);
+        }
+
+        public ValueTask EnqueueInboundTranslationAsync(
+            ReadOnlyMemory<byte> pcm16,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask EnqueueOutboundTranslationAsync(
+            ReadOnlyMemory<byte> pcm16,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask SetInboundRouteAsync(
+            InboundRoute route,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask SetOutboundRouteAsync(
+            OutboundRoute route,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class UnreachableSessionFactory :
         ITranslationSessionFactory
     {
@@ -363,6 +533,22 @@ public sealed class ProductionCompositionTests
             return ValueTask.FromException<ITranslationSession>(
                 new InvalidOperationException(
                     "The test runtime must not create a session."));
+        }
+    }
+
+    private sealed class RecordingSessionFactory :
+        ITranslationSessionFactory
+    {
+        public int CreateCount { get; private set; }
+
+        public ValueTask<ITranslationSession> CreateAsync(
+            TranslationSessionConfiguration configuration,
+            CancellationToken cancellationToken)
+        {
+            CreateCount++;
+            return ValueTask.FromException<ITranslationSession>(
+                new InvalidOperationException(
+                    "Startup preflight must not create a Translation session."));
         }
     }
 

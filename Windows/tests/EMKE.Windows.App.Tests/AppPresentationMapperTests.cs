@@ -46,6 +46,21 @@ public sealed class AppPresentationMapperTests
         Assert.IsFalse(presentation.StartAction.IsEnabled);
     }
 
+    [TestMethod]
+    public void UnknownDriverCompatibilityDisablesStart()
+    {
+        AppPresentation presentation = Mapper.Map(
+            Snapshot(
+                RuntimeState.Stopped,
+                driverCompatibility: new DriverCompatibility(
+                    isCompatible: false,
+                    statusLabel: string.Empty)),
+            AppInterfaceLanguage.English);
+
+        Assert.IsTrue(presentation.StartAction.IsVisible);
+        Assert.IsFalse(presentation.StartAction.IsEnabled);
+    }
+
     [DataRow(RuntimeState.Starting, "Translation starting", true, true)]
     [DataRow(RuntimeState.Stopping, "Translation stopping", true, false)]
     [TestMethod]

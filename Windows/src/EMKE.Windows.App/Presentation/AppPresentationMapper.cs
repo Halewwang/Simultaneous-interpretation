@@ -82,9 +82,7 @@ internal sealed class AppPresentationMapper
         AppInterfaceLanguage language)
     {
         ArgumentNullException.ThrowIfNull(driverCompatibility);
-        bool driverAllowsStart =
-            driverCompatibility.IsCompatible
-            || string.IsNullOrEmpty(driverCompatibility.StatusLabel);
+        bool driverAllowsStart = driverCompatibility.IsCompatible;
         return state switch
         {
             RuntimeState.Stopped or RuntimeState.Failed =>

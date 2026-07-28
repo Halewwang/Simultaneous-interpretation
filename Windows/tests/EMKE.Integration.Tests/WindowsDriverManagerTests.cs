@@ -8,6 +8,10 @@ namespace EMKE.Integration.Tests;
 [TestClass]
 public sealed class WindowsDriverManagerTests
 {
+    private static readonly string[] CompleteEvidenceCalls =
+        ["root", "catalog", "endpoints"];
+    private static readonly string[] RootEvidenceCalls = ["root"];
+
     [TestMethod]
     public async Task WindowsDriverManagerUsesReadOnlyInstalledEvidence()
     {
@@ -105,6 +109,96 @@ public sealed class WindowsDriverManagerTests
         Assert.AreEqual(0, source.MutationCount);
     }
 
+    [TestMethod]
+    public async Task WindowsSnapshotSourceMapsEveryReadOnlyWin32EvidenceField()
+    {
+        RecordingWindowsEvidenceApi api = new()
+        {
+            Root = new WindowsRootDriverEvidence(
+                Present: true,
+                HardwareId: @"ROOT\EMKEVIRTUALAUDIO",
+                DriverFileVersion: new Version(1, 0, 0, 1),
+                DriverAbi: 1,
+                CatalogPath: @"C:\Windows\System32\DriverStore\emke.cat"),
+            Catalog = new WindowsCatalogEvidence(
+                "CN=EMKE Internal Test",
+                ChainValid: true),
+            Endpoints =
+            [
+                new("meetingSpeakerRender", "active"),
+                new("appSpeakerCapture", "active"),
+                new("appMicrophoneRender", "active"),
+                new("meetingMicrophoneCapture", "disabled"),
+            ],
+        };
+        WindowsDriverSnapshotSource source = new(api);
+
+        WindowsInstalledDriverSnapshot snapshot =
+            await source.ReadAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+
+        Assert.IsTrue(snapshot.Present);
+        Assert.AreEqual(@"ROOT\EMKEVIRTUALAUDIO", snapshot.RootDevnodeHardwareId);
+        Assert.AreEqual(new Version(1, 0, 0, 1), snapshot.DriverFileVersion);
+        Assert.AreEqual(1, snapshot.DriverAbiProperty);
+        Assert.AreEqual("CN=EMKE Internal Test", snapshot.CatalogSigner);
+        Assert.IsTrue(snapshot.CatalogChainValid);
+        Assert.HasCount(4, snapshot.EndpointStates);
+        Assert.AreEqual("disabled", snapshot.EndpointStates[3].State);
+        CollectionAssert.AreEqual(
+            CompleteEvidenceCalls,
+            api.Calls);
+    }
+
+    [TestMethod]
+    public async Task WindowsSnapshotSourceSkipsLaterReadsWhenRootDriverIsMissing()
+    {
+        RecordingWindowsEvidenceApi api = new()
+        {
+            Root = WindowsRootDriverEvidence.Missing,
+        };
+        WindowsDriverSnapshotSource source = new(api);
+
+        WindowsInstalledDriverSnapshot snapshot =
+            await source.ReadAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+
+        Assert.IsFalse(snapshot.Present);
+        CollectionAssert.AreEqual(RootEvidenceCalls, api.Calls);
+    }
+
+    [TestMethod]
+    public async Task WindowsSnapshotSourceFailsClosedWhenWin32EvidenceReadFails()
+    {
+        RecordingWindowsEvidenceApi api = new()
+        {
+            RootFailure = new InvalidDataException("synthetic Win32 failure"),
+        };
+        WindowsDriverSnapshotSource source = new(api);
+
+        WindowsInstalledDriverSnapshot snapshot =
+            await source.ReadAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+
+        Assert.IsFalse(snapshot.Present);
+        Assert.IsFalse(snapshot.CatalogChainValid);
+        Assert.IsEmpty(snapshot.EndpointStates);
+        CollectionAssert.AreEqual(RootEvidenceCalls, api.Calls);
+    }
+
+    [TestMethod]
+    public void ProductionWin32EvidenceApiNeverRunsOffWindows()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive(
+                "The off-Windows P/Invoke guard is covered only on non-Windows hosts.");
+        }
+
+        Assert.ThrowsExactly<PlatformNotSupportedException>(
+            WindowsDriverEvidenceApi.Instance.ReadRootDriver);
+    }
+
     private static CompatibilityManifest CreateManifest()
     {
         return new CompatibilityManifest(
@@ -146,6 +240,50 @@ public sealed class WindowsDriverManagerTests
         {
             ReadCount++;
             return windowsBuild;
+        }
+    }
+
+    private sealed class RecordingWindowsEvidenceApi
+        : IWindowsDriverEvidenceApi
+    {
+        public List<string> Calls { get; } = [];
+
+        public WindowsRootDriverEvidence Root { get; init; } =
+            WindowsRootDriverEvidence.Missing;
+
+        public WindowsCatalogEvidence Catalog { get; init; } =
+            new(null, ChainValid: false);
+
+        public IReadOnlyList<WindowsInstalledDriverEndpointState> Endpoints
+        {
+            get;
+            init;
+        } = [];
+
+        public Exception? RootFailure { get; init; }
+
+        public WindowsRootDriverEvidence ReadRootDriver()
+        {
+            Calls.Add("root");
+            if (RootFailure is not null)
+            {
+                throw RootFailure;
+            }
+
+            return Root;
+        }
+
+        public WindowsCatalogEvidence ReadCatalog(string catalogPath)
+        {
+            Calls.Add("catalog");
+            return Catalog;
+        }
+
+        public IReadOnlyList<WindowsInstalledDriverEndpointState>
+            ReadEndpointStates()
+        {
+            Calls.Add("endpoints");
+            return Endpoints;
         }
     }
 }

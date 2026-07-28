@@ -21,9 +21,17 @@ internal sealed class AppSnapshotStore :
     private bool _disposed;
 
     public AppSnapshotStore(IAppDispatcher dispatcher)
+        : this(dispatcher, initialSnapshot: null)
+    {
+    }
+
+    public AppSnapshotStore(
+        IAppDispatcher dispatcher,
+        AppSnapshot? initialSnapshot)
     {
         _dispatcher =
             dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _current = initialSnapshot;
     }
 
     public AppSnapshot? Current

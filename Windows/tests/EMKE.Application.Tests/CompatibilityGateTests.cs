@@ -70,6 +70,61 @@ public sealed class CompatibilityGateTests
     }
 
     [TestMethod]
+    [DataRow(0, "disabled")]
+    [DataRow(0, "inactive")]
+    [DataRow(0, "missing")]
+    [DataRow(1, "disabled")]
+    [DataRow(1, "inactive")]
+    [DataRow(1, "missing")]
+    [DataRow(2, "disabled")]
+    [DataRow(2, "inactive")]
+    [DataRow(2, "missing")]
+    [DataRow(3, "disabled")]
+    [DataRow(3, "inactive")]
+    [DataRow(3, "missing")]
+    public void EveryRequiredEndpointRoleMustBeActive(
+        int endpointIndex,
+        string state)
+    {
+        InstalledDriverEndpointEvidence[] endpoints =
+            CompleteEndpointRoles
+                .Select(static role =>
+                    new InstalledDriverEndpointEvidence(role, "active"))
+                .ToArray();
+        endpoints[endpointIndex] = new InstalledDriverEndpointEvidence(
+            endpoints[endpointIndex].Role,
+            state);
+
+        CompatibilityGateDecision decision = CompatibilityGate.Evaluate(
+            CreateManifest(),
+            currentWindowsBuild: 26200,
+            CreateEvidence(endpoints));
+
+        Assert.IsFalse(decision.Allowed);
+        Assert.AreEqual("virtualEndpointsIncomplete", decision.Reason);
+    }
+
+    [TestMethod]
+    public void DuplicateRequiredEndpointRoleFailsClosed()
+    {
+        InstalledDriverEndpointEvidence[] endpoints =
+        [
+            new("meetingSpeakerRender", "active"),
+            new("appSpeakerCapture", "active"),
+            new("appMicrophoneRender", "active"),
+            new("appMicrophoneRender", "active"),
+        ];
+
+        CompatibilityGateDecision decision = CompatibilityGate.Evaluate(
+            CreateManifest(),
+            currentWindowsBuild: 26200,
+            CreateEvidence(endpoints));
+
+        Assert.IsFalse(decision.Allowed);
+        Assert.AreEqual("virtualEndpointsIncomplete", decision.Reason);
+    }
+
+    [TestMethod]
     public void UnavailableDriverPackageDisablesRepairAction()
     {
         CompatibilityGateDecision decision = CompatibilityGate.Evaluate(
@@ -181,5 +236,18 @@ public sealed class CompatibilityGateTests
                 .Take(endpointCount)
                 .Select(static role =>
                     new InstalledDriverEndpointEvidence(role, "active")));
+    }
+
+    private static InstalledDriverEvidence CreateEvidence(
+        IEnumerable<InstalledDriverEndpointEvidence> endpoints)
+    {
+        return new InstalledDriverEvidence(
+            present: true,
+            rootDevnodeHardwareId: @"ROOT\EMKEVIRTUALAUDIO",
+            driverFileVersion: new Version(0, 1, 0),
+            driverAbiProperty: 1,
+            catalogSigner: "EMKE test signer",
+            catalogChainValid: true,
+            endpoints);
     }
 }

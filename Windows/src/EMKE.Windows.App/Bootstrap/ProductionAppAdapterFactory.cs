@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using EMKE.Application;
 using EMKE.Core;
+using EMKE.Platform.Driver;
 using EMKE.Platform.Native;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
@@ -82,11 +83,18 @@ internal static class ProductionCoreAdapters
     {
         cancellationToken.ThrowIfCancellationRequested();
         NativeAudioEngine audio = new();
+        CompatibilityManifest compatibilityManifest =
+            CompatibilityManifest.LoadEmbedded(
+                typeof(ProductionCoreAdapters).Assembly,
+                "EMKE.Windows.App.compatibility.internal.json");
+        WindowsDriverManager driverManager = new(
+            new WindowsDriverSnapshotSource(),
+            compatibilityManifest);
         TranslationRuntimeDependencies dependencies = new(
             new Windows25H2BuildGate(),
             new PendingSettingsStore(),
             new PendingSecretStore(),
-            new PendingDriverManager(),
+            driverManager,
             new PendingAudioDeviceCatalog(),
             audio,
             new PendingTranslationSessionFactory(),
@@ -169,19 +177,6 @@ internal static class ProductionCoreAdapters
             return ValueTask.FromException(
                 new InvalidOperationException(
                     "Credential Manager integration is not available in this Internal build."));
-        }
-    }
-
-    private sealed class PendingDriverManager : IDriverManager
-    {
-        public Task<DriverCompatibility> CheckCompatibilityAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(
-                new DriverCompatibility(
-                    isCompatible: false,
-                    "Driver detection is not available in this Internal build."));
         }
     }
 

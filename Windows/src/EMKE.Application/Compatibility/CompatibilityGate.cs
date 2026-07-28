@@ -106,7 +106,12 @@ public static class CompatibilityGate
         HashSet<string> actual = new(
             installed.EndpointStates.Select(static endpoint => endpoint.Role),
             StringComparer.Ordinal);
-        return actual.Count == manifest.RequiredEndpointRoleCount
+        return installed.EndpointStates.All(static endpoint =>
+                   string.Equals(
+                       endpoint.State,
+                       "active",
+                       StringComparison.Ordinal))
+            && actual.Count == manifest.RequiredEndpointRoleCount
             && EndpointRoles
                 .Take(manifest.RequiredEndpointRoleCount)
                 .All(actual.Contains);
