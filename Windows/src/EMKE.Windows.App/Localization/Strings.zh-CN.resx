@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ActionDismiss" xml:space="preserve"><value>关闭提示</value></data>
+  <data name="ActionEditApiKey" xml:space="preserve"><value>编辑 API 密钥</value></data>
+  <data name="ActionEditSettings" xml:space="preserve"><value>编辑设置</value></data>
+  <data name="ActionInstallOrRepairDriver" xml:space="preserve"><value>安装或修复驱动</value></data>
+  <data name="ActionOpenPrivacySettings" xml:space="preserve"><value>打开隐私设置</value></data>
+  <data name="ActionReportCompatibility" xml:space="preserve"><value>查看兼容性报告</value></data>
+  <data name="ActionRetry" xml:space="preserve"><value>重试</value></data>
+  <data name="ActionSelectDevice" xml:space="preserve"><value>选择音频设备</value></data>
+  <data name="ActionStart" xml:space="preserve"><value>开始</value></data>
+  <data name="ActionStop" xml:space="preserve"><value>停止</value></data>
+  <data name="BypassBadge" xml:space="preserve"><value>旁路已开启</value></data>
+  <data name="ChannelBypassed" xml:space="preserve"><value>已旁路</value></data>
+  <data name="ChannelConnected" xml:space="preserve"><value>已连接</value></data>
+  <data name="ChannelConnecting" xml:space="preserve"><value>正在连接</value></data>
+  <data name="ChannelDegraded" xml:space="preserve"><value>服务降级</value></data>
+  <data name="ChannelFailed" xml:space="preserve"><value>失败</value></data>
+  <data name="ChannelInactive" xml:space="preserve"><value>未启用</value></data>
+  <data name="ChannelReconnecting" xml:space="preserve"><value>正在重连</value></data>
+  <data name="ErrorAuthentication" xml:space="preserve"><value>身份验证失败，请检查 API 密钥。</value></data>
+  <data name="ErrorBackpressure" xml:space="preserve"><value>音频处理无法安全跟上实时速度。</value></data>
+  <data name="ErrorCloseTimeout" xml:space="preserve"><value>翻译未能在安全时限内关闭。</value></data>
+  <data name="ErrorConfiguration" xml:space="preserve"><value>翻译设置需要处理。</value></data>
+  <data name="ErrorDefaultDeviceMissing" xml:space="preserve"><value>物理输入或输出设备不可用。</value></data>
+  <data name="ErrorDevice" xml:space="preserve"><value>音频设备不可用。</value></data>
+  <data name="ErrorDriver" xml:space="preserve"><value>EMKE 虚拟音频驱动需要处理。</value></data>
+  <data name="ErrorDriverIncompatible" xml:space="preserve"><value>EMKE 虚拟音频驱动缺失或不兼容。</value></data>
+  <data name="ErrorEndpointModel" xml:space="preserve"><value>翻译端点或模型不兼容。</value></data>
+  <data name="ErrorNetwork" xml:space="preserve"><value>翻译服务连接已中断。</value></data>
+  <data name="ErrorPermission" xml:space="preserve"><value>Windows 隐私设置阻止了麦克风访问。</value></data>
+  <data name="ErrorProtocol" xml:space="preserve"><value>翻译服务返回了不兼容的响应。</value></data>
+  <data name="ErrorSecretMissing" xml:space="preserve"><value>开始翻译前请先添加 API 密钥。</value></data>
+  <data name="ErrorSettingsMissing" xml:space="preserve"><value>开始翻译前请先完成翻译设置。</value></data>
+  <data name="InboundFailOpenExplanation" xml:space="preserve"><value>入站翻译恢复期间，仍会播放会议原声。</value></data>
+  <data name="OutboundFailClosedWarning" xml:space="preserve"><value>出站翻译恢复期间，发送到会议的麦克风将保持静音。</value></data>
+  <data name="RouteOriginalBypass" xml:space="preserve"><value>原声旁路</value></data>
+  <data name="RouteOriginalFailOpen" xml:space="preserve"><value>原声故障开放</value></data>
+  <data name="RouteStopped" xml:space="preserve"><value>已停止</value></data>
+  <data name="RouteTranslated" xml:space="preserve"><value>翻译音频</value></data>
+  <data name="RouteMutedFailClosed" xml:space="preserve"><value>静音故障关闭</value></data>
+  <data name="RuntimeDegraded" xml:space="preserve"><value>翻译服务降级</value></data>
+  <data name="RuntimeFailed" xml:space="preserve"><value>翻译失败</value></data>
+  <data name="RuntimeRunning" xml:space="preserve"><value>翻译运行中</value></data>
+  <data name="RuntimeStarting" xml:space="preserve"><value>翻译正在启动</value></data>
+  <data name="RuntimeStopped" xml:space="preserve"><value>翻译已停止</value></data>
+  <data name="RuntimeStopping" xml:space="preserve"><value>翻译正在停止</value></data>
+</root>

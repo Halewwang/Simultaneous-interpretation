@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ActionDismiss" xml:space="preserve"><value>Dismiss</value></data>
+  <data name="ActionEditApiKey" xml:space="preserve"><value>Edit API Key</value></data>
+  <data name="ActionEditSettings" xml:space="preserve"><value>Edit Settings</value></data>
+  <data name="ActionInstallOrRepairDriver" xml:space="preserve"><value>Install or Repair Driver</value></data>
+  <data name="ActionOpenPrivacySettings" xml:space="preserve"><value>Open Privacy Settings</value></data>
+  <data name="ActionReportCompatibility" xml:space="preserve"><value>View Compatibility Report</value></data>
+  <data name="ActionRetry" xml:space="preserve"><value>Retry</value></data>
+  <data name="ActionSelectDevice" xml:space="preserve"><value>Select Audio Device</value></data>
+  <data name="ActionStart" xml:space="preserve"><value>Start</value></data>
+  <data name="ActionStop" xml:space="preserve"><value>Stop</value></data>
+  <data name="BypassBadge" xml:space="preserve"><value>Bypass on</value></data>
+  <data name="ChannelBypassed" xml:space="preserve"><value>Bypassed</value></data>
+  <data name="ChannelConnected" xml:space="preserve"><value>Connected</value></data>
+  <data name="ChannelConnecting" xml:space="preserve"><value>Connecting</value></data>
+  <data name="ChannelDegraded" xml:space="preserve"><value>Degraded</value></data>
+  <data name="ChannelFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="ChannelInactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="ChannelReconnecting" xml:space="preserve"><value>Reconnecting</value></data>
+  <data name="ErrorAuthentication" xml:space="preserve"><value>Authentication failed. Check the API key.</value></data>
+  <data name="ErrorBackpressure" xml:space="preserve"><value>Audio processing could not keep up safely.</value></data>
+  <data name="ErrorCloseTimeout" xml:space="preserve"><value>Translation did not close within the safe deadline.</value></data>
+  <data name="ErrorConfiguration" xml:space="preserve"><value>Translation settings need attention.</value></data>
+  <data name="ErrorDefaultDeviceMissing" xml:space="preserve"><value>A physical input or output device is unavailable.</value></data>
+  <data name="ErrorDevice" xml:space="preserve"><value>An audio device is unavailable.</value></data>
+  <data name="ErrorDriver" xml:space="preserve"><value>The EMKE virtual audio driver needs attention.</value></data>
+  <data name="ErrorDriverIncompatible" xml:space="preserve"><value>The EMKE virtual audio driver is missing or incompatible.</value></data>
+  <data name="ErrorEndpointModel" xml:space="preserve"><value>The Translation endpoint or model is incompatible.</value></data>
+  <data name="ErrorNetwork" xml:space="preserve"><value>The Translation service connection was interrupted.</value></data>
+  <data name="ErrorPermission" xml:space="preserve"><value>Windows privacy settings are blocking microphone access.</value></data>
+  <data name="ErrorProtocol" xml:space="preserve"><value>The Translation service returned an incompatible response.</value></data>
+  <data name="ErrorSecretMissing" xml:space="preserve"><value>Add an API key before starting translation.</value></data>
+  <data name="ErrorSettingsMissing" xml:space="preserve"><value>Complete the Translation settings before starting.</value></data>
+  <data name="InboundFailOpenExplanation" xml:space="preserve"><value>Original audio remains audible while inbound translation recovers.</value></data>
+  <data name="OutboundFailClosedWarning" xml:space="preserve"><value>Your meeting microphone is muted while outbound translation recovers.</value></data>
+  <data name="RouteOriginalBypass" xml:space="preserve"><value>Original audio bypass</value></data>
+  <data name="RouteOriginalFailOpen" xml:space="preserve"><value>Original audio fail-open</value></data>
+  <data name="RouteStopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="RouteTranslated" xml:space="preserve"><value>Translated audio</value></data>
+  <data name="RouteMutedFailClosed" xml:space="preserve"><value>Muted fail-closed</value></data>
+  <data name="RuntimeDegraded" xml:space="preserve"><value>Translation degraded</value></data>
+  <data name="RuntimeFailed" xml:space="preserve"><value>Translation failed</value></data>
+  <data name="RuntimeRunning" xml:space="preserve"><value>Translation running</value></data>
+  <data name="RuntimeStarting" xml:space="preserve"><value>Translation starting</value></data>
+  <data name="RuntimeStopped" xml:space="preserve"><value>Translation stopped</value></data>
+  <data name="RuntimeStopping" xml:space="preserve"><value>Translation stopping</value></data>
+</root>
