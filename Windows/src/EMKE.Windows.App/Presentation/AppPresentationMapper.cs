@@ -224,6 +224,11 @@ internal sealed class AppPresentationMapper
         ChannelState state,
         bool hasSafetyMessage)
     {
+        if (state == ChannelState.Failed)
+        {
+            return PresentationSeverity.Critical;
+        }
+
         if (hasSafetyMessage)
         {
             return PresentationSeverity.Warning;
@@ -234,7 +239,6 @@ internal sealed class AppPresentationMapper
             ChannelState.Connecting => PresentationSeverity.Progress,
             ChannelState.Reconnecting or ChannelState.Degraded =>
                 PresentationSeverity.Warning,
-            ChannelState.Failed => PresentationSeverity.Critical,
             ChannelState.Inactive
                 or ChannelState.Connected
                 or ChannelState.Bypassed => PresentationSeverity.Normal,

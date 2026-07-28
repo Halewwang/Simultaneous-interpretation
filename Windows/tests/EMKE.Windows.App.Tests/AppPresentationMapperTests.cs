@@ -125,6 +125,46 @@ public sealed class AppPresentationMapperTests
     }
 
     [TestMethod]
+    public void FailedInboundRemainsCriticalWhenFailOpenMessageIsPresent()
+    {
+        AppPresentation presentation = Mapper.Map(
+            Snapshot(
+                RuntimeState.Degraded,
+                ChannelState.Failed,
+                ChannelState.Connected,
+                InboundRoute.OriginalFailOpen,
+                OutboundRoute.Translated),
+            AppInterfaceLanguage.English);
+
+        Assert.AreEqual(
+            PresentationSeverity.Critical,
+            presentation.InboundChannel.Severity);
+        Assert.AreEqual(
+            "Original audio remains audible while inbound translation recovers.",
+            presentation.InboundChannel.SafetyMessage);
+    }
+
+    [TestMethod]
+    public void FailedOutboundRemainsCriticalWhenFailClosedMessageIsPresent()
+    {
+        AppPresentation presentation = Mapper.Map(
+            Snapshot(
+                RuntimeState.Degraded,
+                ChannelState.Connected,
+                ChannelState.Failed,
+                InboundRoute.Translated,
+                OutboundRoute.MutedFailClosed),
+            AppInterfaceLanguage.English);
+
+        Assert.AreEqual(
+            PresentationSeverity.Critical,
+            presentation.OutboundChannel.Severity);
+        Assert.AreEqual(
+            "Your meeting microphone is muted while outbound translation recovers.",
+            presentation.OutboundChannel.SafetyMessage);
+    }
+
+    [TestMethod]
     public void ExplicitBypassProducesPersistentBadgesForEachDirection()
     {
         AppPresentation presentation = Mapper.Map(
