@@ -5,6 +5,7 @@ namespace EMKE.Windows.App.Localization;
 
 internal enum LocalizedString
 {
+    AppName,
     ActionDismiss,
     ActionEditApiKey,
     ActionEditSettings,
@@ -15,6 +16,20 @@ internal enum LocalizedString
     ActionSelectDevice,
     ActionStart,
     ActionStop,
+    DashboardDiagnostics,
+    DashboardInbound,
+    DashboardInboundBypass,
+    DashboardLevel,
+    DashboardMeetingLanguage,
+    DashboardNativeLanguage,
+    DashboardOutbound,
+    DashboardOutboundBypass,
+    DashboardSettings,
+    DashboardSourceCaption,
+    DashboardTranslatedCaption,
+    DashboardTitle,
+    LanguageEnglish,
+    LanguageSimplifiedChinese,
     BypassBadge,
     ChannelBypassed,
     ChannelConnected,
@@ -50,6 +65,11 @@ internal enum LocalizedString
     RuntimeStarting,
     RuntimeStopped,
     RuntimeStopping,
+    TrayCheckForUpdates,
+    TrayExit,
+    TrayOpenDashboard,
+    TrayOpenOnboarding,
+    TrayOpenSettings,
 }
 
 internal sealed class AppInterfaceLanguageChangedEventArgs : EventArgs

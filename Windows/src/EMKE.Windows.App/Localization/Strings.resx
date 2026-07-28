@@ -12,6 +12,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
+  <data name="AppName" xml:space="preserve"><value>EMKE Translation</value></data>
   <data name="ActionDismiss" xml:space="preserve"><value>Dismiss</value></data>
   <data name="ActionEditApiKey" xml:space="preserve"><value>Edit API Key</value></data>
   <data name="ActionEditSettings" xml:space="preserve"><value>Edit Settings</value></data>
@@ -22,6 +23,20 @@
   <data name="ActionSelectDevice" xml:space="preserve"><value>Select Audio Device</value></data>
   <data name="ActionStart" xml:space="preserve"><value>Start</value></data>
   <data name="ActionStop" xml:space="preserve"><value>Stop</value></data>
+  <data name="DashboardDiagnostics" xml:space="preserve"><value>Diagnostics</value></data>
+  <data name="DashboardInbound" xml:space="preserve"><value>Meeting audio</value></data>
+  <data name="DashboardInboundBypass" xml:space="preserve"><value>Use original meeting audio</value></data>
+  <data name="DashboardLevel" xml:space="preserve"><value>Level</value></data>
+  <data name="DashboardMeetingLanguage" xml:space="preserve"><value>Meeting language</value></data>
+  <data name="DashboardNativeLanguage" xml:space="preserve"><value>My language</value></data>
+  <data name="DashboardOutbound" xml:space="preserve"><value>My microphone</value></data>
+  <data name="DashboardOutboundBypass" xml:space="preserve"><value>Use my original microphone</value></data>
+  <data name="DashboardSettings" xml:space="preserve"><value>Settings</value></data>
+  <data name="DashboardSourceCaption" xml:space="preserve"><value>Source caption</value></data>
+  <data name="DashboardTranslatedCaption" xml:space="preserve"><value>Translated caption</value></data>
+  <data name="DashboardTitle" xml:space="preserve"><value>Translation Dashboard</value></data>
+  <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>Simplified Chinese</value></data>
   <data name="BypassBadge" xml:space="preserve"><value>Bypass on</value></data>
   <data name="ChannelBypassed" xml:space="preserve"><value>Bypassed</value></data>
   <data name="ChannelConnected" xml:space="preserve"><value>Connected</value></data>
@@ -57,4 +72,9 @@
   <data name="RuntimeStarting" xml:space="preserve"><value>Translation starting</value></data>
   <data name="RuntimeStopped" xml:space="preserve"><value>Translation stopped</value></data>
   <data name="RuntimeStopping" xml:space="preserve"><value>Translation stopping</value></data>
+  <data name="TrayCheckForUpdates" xml:space="preserve"><value>Check for Updates</value></data>
+  <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
+  <data name="TrayOpenDashboard" xml:space="preserve"><value>Open Dashboard</value></data>
+  <data name="TrayOpenOnboarding" xml:space="preserve"><value>Open Setup</value></data>
+  <data name="TrayOpenSettings" xml:space="preserve"><value>Settings</value></data>
 </root>

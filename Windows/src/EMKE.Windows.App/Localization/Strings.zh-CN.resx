@@ -12,6 +12,7 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
+  <data name="AppName" xml:space="preserve"><value>EMKE 同传</value></data>
   <data name="ActionDismiss" xml:space="preserve"><value>关闭提示</value></data>
   <data name="ActionEditApiKey" xml:space="preserve"><value>编辑 API 密钥</value></data>
   <data name="ActionEditSettings" xml:space="preserve"><value>编辑设置</value></data>
@@ -22,6 +23,20 @@
   <data name="ActionSelectDevice" xml:space="preserve"><value>选择音频设备</value></data>
   <data name="ActionStart" xml:space="preserve"><value>开始</value></data>
   <data name="ActionStop" xml:space="preserve"><value>停止</value></data>
+  <data name="DashboardDiagnostics" xml:space="preserve"><value>诊断</value></data>
+  <data name="DashboardInbound" xml:space="preserve"><value>会议声音</value></data>
+  <data name="DashboardInboundBypass" xml:space="preserve"><value>使用会议原声</value></data>
+  <data name="DashboardLevel" xml:space="preserve"><value>电平</value></data>
+  <data name="DashboardMeetingLanguage" xml:space="preserve"><value>会议语言</value></data>
+  <data name="DashboardNativeLanguage" xml:space="preserve"><value>我的语言</value></data>
+  <data name="DashboardOutbound" xml:space="preserve"><value>我的麦克风</value></data>
+  <data name="DashboardOutboundBypass" xml:space="preserve"><value>使用我的原声麦克风</value></data>
+  <data name="DashboardSettings" xml:space="preserve"><value>设置</value></data>
+  <data name="DashboardSourceCaption" xml:space="preserve"><value>原文字幕</value></data>
+  <data name="DashboardTranslatedCaption" xml:space="preserve"><value>译文字幕</value></data>
+  <data name="DashboardTitle" xml:space="preserve"><value>同传控制台</value></data>
+  <data name="LanguageEnglish" xml:space="preserve"><value>英语</value></data>
+  <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>简体中文</value></data>
   <data name="BypassBadge" xml:space="preserve"><value>旁路已开启</value></data>
   <data name="ChannelBypassed" xml:space="preserve"><value>已旁路</value></data>
   <data name="ChannelConnected" xml:space="preserve"><value>已连接</value></data>
@@ -57,4 +72,9 @@
   <data name="RuntimeStarting" xml:space="preserve"><value>翻译正在启动</value></data>
   <data name="RuntimeStopped" xml:space="preserve"><value>翻译已停止</value></data>
   <data name="RuntimeStopping" xml:space="preserve"><value>翻译正在停止</value></data>
+  <data name="TrayCheckForUpdates" xml:space="preserve"><value>检查更新</value></data>
+  <data name="TrayExit" xml:space="preserve"><value>退出</value></data>
+  <data name="TrayOpenDashboard" xml:space="preserve"><value>打开控制台</value></data>
+  <data name="TrayOpenOnboarding" xml:space="preserve"><value>打开设置向导</value></data>
+  <data name="TrayOpenSettings" xml:space="preserve"><value>设置</value></data>
 </root>
