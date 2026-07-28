@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -269,24 +270,93 @@ internal sealed class SingleInstanceCoordinator : IAsyncDisposable
         }
     }
 
-    private sealed class NamedPipeSingleInstanceCommandTransport
+    internal sealed class NamedPipeSingleInstanceCommandTransport
         : ISingleInstanceCommandTransport
     {
+        private static readonly TimeSpan DefaultListenerStartTimeout =
+            TimeSpan.FromMilliseconds(500);
+
+        private static readonly TimeSpan DefaultInitialRetryDelay =
+            TimeSpan.FromMilliseconds(25);
+
+        private static readonly TimeSpan DefaultMaximumRetryDelay =
+            TimeSpan.FromMilliseconds(100);
+
+        private readonly TimeSpan _listenerStartTimeout;
+        private readonly TimeSpan _initialRetryDelay;
+        private readonly TimeSpan _maximumRetryDelay;
+
         public static NamedPipeSingleInstanceCommandTransport Instance { get; } =
             new();
 
         private NamedPipeSingleInstanceCommandTransport()
+            : this(
+                DefaultListenerStartTimeout,
+                DefaultInitialRetryDelay,
+                DefaultMaximumRetryDelay)
         {
         }
 
-        public ValueTask<IAsyncDisposable> ListenAsync(
+        internal NamedPipeSingleInstanceCommandTransport(
+            TimeSpan listenerStartTimeout,
+            TimeSpan initialRetryDelay,
+            TimeSpan maximumRetryDelay)
+        {
+            if (listenerStartTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(listenerStartTimeout),
+                    listenerStartTimeout,
+                    "The listener startup timeout must be positive.");
+            }
+
+            if (initialRetryDelay <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(initialRetryDelay),
+                    initialRetryDelay,
+                    "The initial retry delay must be positive.");
+            }
+
+            if (maximumRetryDelay < initialRetryDelay)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumRetryDelay),
+                    maximumRetryDelay,
+                    "The maximum retry delay cannot be shorter than the initial delay.");
+            }
+
+            _listenerStartTimeout = listenerStartTimeout;
+            _initialRetryDelay = initialRetryDelay;
+            _maximumRetryDelay = maximumRetryDelay;
+        }
+
+        public async ValueTask<IAsyncDisposable> ListenAsync(
             string pipeName,
             Func<string, CancellationToken, ValueTask> handler,
             CancellationToken cancellationToken)
         {
+            ArgumentException.ThrowIfNullOrEmpty(pipeName);
+            ArgumentNullException.ThrowIfNull(handler);
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult<IAsyncDisposable>(
-                new NamedPipeCommandListener(pipeName, handler));
+            NamedPipeServerStream initialServer =
+                await CreateServerWithBoundedRetryAsync(
+                    pipeName,
+                    cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return new NamedPipeCommandListener(
+                    initialServer,
+                    handler,
+                    token => CreateServerWithBoundedRetryAsync(
+                        pipeName,
+                        token));
+            }
+            catch
+            {
+                await initialServer.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
 
         public async ValueTask SendAsync(
@@ -326,25 +396,87 @@ internal sealed class SingleInstanceCoordinator : IAsyncDisposable
                     "The primary instance did not accept the command in time.");
             }
         }
+
+        private async ValueTask<NamedPipeServerStream>
+            CreateServerWithBoundedRetryAsync(
+                string pipeName,
+                CancellationToken cancellationToken)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            TimeSpan retryDelay = _initialRetryDelay;
+            IOException? lastFailure = null;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (lastFailure is not null
+                    && stopwatch.Elapsed >= _listenerStartTimeout)
+                {
+                    throw new IOException(
+                        $"Named pipe listener '{pipeName}' could not start within its bounded startup window.",
+                        lastFailure);
+                }
+
+                try
+                {
+                    return new NamedPipeServerStream(
+                        pipeName,
+                        PipeDirection.In,
+                        maxNumberOfServerInstances: 1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous
+                            | PipeOptions.CurrentUserOnly);
+                }
+                catch (IOException exception)
+                {
+                    lastFailure = exception;
+                }
+
+                TimeSpan remaining =
+                    _listenerStartTimeout - stopwatch.Elapsed;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    continue;
+                }
+
+                TimeSpan boundedDelay = retryDelay <= remaining
+                    ? retryDelay
+                    : remaining;
+                await Task.Delay(
+                    boundedDelay,
+                    cancellationToken).ConfigureAwait(false);
+                retryDelay = retryDelay.Ticks
+                    >= _maximumRetryDelay.Ticks / 2
+                    ? _maximumRetryDelay
+                    : TimeSpan.FromTicks(retryDelay.Ticks * 2);
+            }
+        }
     }
 
     private sealed class NamedPipeCommandListener : IAsyncDisposable
     {
-        private readonly string _pipeName;
         private readonly Func<string, CancellationToken, ValueTask> _handler;
+        private readonly Func<
+            CancellationToken,
+            ValueTask<NamedPipeServerStream>> _serverFactory;
         private readonly CancellationTokenSource _cancellation = new();
         private readonly Task _listenTask;
         private int _disposed;
 
         public NamedPipeCommandListener(
-            string pipeName,
-            Func<string, CancellationToken, ValueTask> handler)
+            NamedPipeServerStream initialServer,
+            Func<string, CancellationToken, ValueTask> handler,
+            Func<
+                CancellationToken,
+                ValueTask<NamedPipeServerStream>> serverFactory)
         {
-            _pipeName = pipeName
-                ?? throw new ArgumentNullException(nameof(pipeName));
+            ArgumentNullException.ThrowIfNull(initialServer);
             _handler = handler
                 ?? throw new ArgumentNullException(nameof(handler));
-            _listenTask = ListenLoopAsync(_cancellation.Token);
+            _serverFactory = serverFactory
+                ?? throw new ArgumentNullException(nameof(serverFactory));
+            _listenTask = ListenLoopAsync(
+                initialServer,
+                _cancellation.Token);
         }
 
         public async ValueTask DisposeAsync()
@@ -368,40 +500,50 @@ internal sealed class SingleInstanceCoordinator : IAsyncDisposable
             }
         }
 
-        private async Task ListenLoopAsync(CancellationToken cancellationToken)
+        private async Task ListenLoopAsync(
+            NamedPipeServerStream initialServer,
+            CancellationToken cancellationToken)
         {
+            NamedPipeServerStream server = initialServer;
             while (!cancellationToken.IsCancellationRequested)
             {
-                try
+                NamedPipeServerStream currentServer = server;
+                await using (currentServer.ConfigureAwait(false))
                 {
-                    using NamedPipeServerStream server = new(
-                        _pipeName,
-                        PipeDirection.In,
-                        maxNumberOfServerInstances: 1,
-                        PipeTransmissionMode.Byte,
-                        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-                    await server.WaitForConnectionAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                    using StreamReader reader = new(
-                        server,
-                        Encoding.UTF8,
-                        detectEncodingFromByteOrderMarks: true,
-                        bufferSize: 256,
-                        leaveOpen: true);
-                    string? command =
-                        await reader.ReadLineAsync(cancellationToken)
-                            .ConfigureAwait(false);
-                    if (command is not null)
+                    try
                     {
-                        await _handler(command, cancellationToken)
+                        await currentServer
+                            .WaitForConnectionAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                        using StreamReader reader = new(
+                            currentServer,
+                            Encoding.UTF8,
+                            detectEncodingFromByteOrderMarks: true,
+                            bufferSize: 256,
+                            leaveOpen: true);
+                        string? command =
+                            await reader.ReadLineAsync(cancellationToken)
+                                .ConfigureAwait(false);
+                        if (command is not null)
+                        {
+                            await _handler(command, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+                    }
+                    catch (IOException)
+                        when (!cancellationToken.IsCancellationRequested)
+                    {
+                        await Task.Delay(
+                            TimeSpan.FromMilliseconds(50),
+                            cancellationToken)
                             .ConfigureAwait(false);
                     }
                 }
-                catch (IOException) when (!cancellationToken.IsCancellationRequested)
+
+                if (!cancellationToken.IsCancellationRequested)
                 {
-                    await Task.Delay(
-                        TimeSpan.FromMilliseconds(50),
-                        cancellationToken).ConfigureAwait(false);
+                    server = await _serverFactory(cancellationToken)
+                        .ConfigureAwait(false);
                 }
             }
         }

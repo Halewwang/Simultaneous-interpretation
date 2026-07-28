@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.IO;
+using System.IO.Pipes;
 using EMKE.Windows.App.Bootstrap;
 
 namespace EMKE.Windows.App.Tests;
@@ -76,6 +79,64 @@ public sealed class SingleInstanceCoordinatorTests
 
         Assert.AreEqual(SingleInstanceStartResult.Primary, result);
         Assert.AreEqual(0, commands.SendAttemptCount);
+    }
+
+    [TestMethod]
+    public async Task RealBusyPipeFailsBoundedListenerStartAndRecoversAfterRelease()
+    {
+        string pipeName =
+            $"e{Guid.NewGuid():N}"[..13];
+        NamedPipeServerStream blocker = new(
+            pipeName,
+            PipeDirection.In,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        IAsyncDisposable? unexpectedListener = null;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            IOException failure =
+                await Assert.ThrowsExactlyAsync<IOException>(
+                    async () =>
+                    {
+                        unexpectedListener =
+                            await SingleInstanceCoordinator
+                                .NamedPipeSingleInstanceCommandTransport
+                                .Instance
+                                .ListenAsync(
+                                    pipeName,
+                                    static (_, _) => ValueTask.CompletedTask,
+                                    CancellationToken.None);
+                    });
+
+            Assert.Contains(
+                "bounded startup window",
+                failure.Message,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (unexpectedListener is not null)
+            {
+                await unexpectedListener.DisposeAsync();
+            }
+
+            await blocker.DisposeAsync();
+        }
+
+        stopwatch.Stop();
+        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(3));
+
+        await using IAsyncDisposable recovered =
+            await SingleInstanceCoordinator
+                .NamedPipeSingleInstanceCommandTransport
+                .Instance
+                .ListenAsync(
+                    pipeName,
+                    static (_, _) => ValueTask.CompletedTask,
+                    CancellationToken.None);
     }
 
     [TestMethod]
