@@ -2,6 +2,8 @@
 
 ## Evidence identity
 
+- Tested Task 10 review-round-1 fix source commit:
+  `3a1aa071399da45b996a199fbb86b8685e82ccb1`
 - Tested Task 10 runtime CI implementation source commit:
   `775b84ff1349a217208183e32b94a12b3e13ab58`
 - Tested Task 9 implementation source commit:
@@ -38,18 +40,29 @@ Fresh Release solution results on 2026-07-28:
 | Managed solution total | 314 | 0 | 0 |
 
 Release solution build completed with 0 warnings and 0 errors. The contract
-suite now executes the production settings migration and driver-compatibility
-policies against both canonical settings fixtures. The default solution gate
-does not discover the nine Windows-isolated tests: one owned native PCM
-contract adapter, seven native-fake P/Invoke tests, and one real-DLL ABI test.
-The Windows workflow runs those categories explicitly after building native
-artifacts.
+suite now executes the concrete production `ISettingsStore` and
+`IDriverManager` Platform adapters through their Core ports. Those adapters
+invoke settings migration and driver-compatibility policies on their real
+load/check paths. The default solution gate does not discover the nine
+Windows-isolated tests: one owned native PCM contract adapter, seven
+native-fake P/Invoke tests, and one real-DLL ABI test. The Windows workflow
+runs those categories explicitly after building native artifacts.
 
 The shared contract validator passed with 3 schemas and 8 canonical fixtures.
 The routing language corpus is separately parsed and validated as a named
 auxiliary vector rather than being misclassified as a ninth canonical fixture.
 The incomplete-source scan over `Windows/src` and `Windows/tests` produced no
 matches.
+
+The Contract source also contains no direct calls to
+`WindowsSettingsMigrationPolicy` or `WindowsDriverCompatibilityPolicy`.
+Fixture validation instantiates `WindowsSettingsStore` and
+`WindowsDriverManager`, assigns them to `ISettingsStore` and `IDriverManager`,
+then verifies persistence reads, canonical overwrites, quarantine payloads,
+runtime settings, driver compatibility, and adapter-path diagnostics. The
+public adapter constructors accept deterministic persistence and installed
+driver snapshot sources, so later WPF composition can instantiate these
+production adapters without changing the Core interfaces.
 
 All server-to-client JSON events are WebSocket Text messages. Binary is
 emitted only by the explicit protocol negative case.
@@ -75,7 +88,27 @@ The workflow YAML and its PowerShell run block passed local static parsing.
 The hosted Windows workflow itself, native CTest, owned native PCM adapter,
 native-fake DLL, and real production DLL were not executed locally and remain
 pending remote CI observation for source commit
-`775b84ff1349a217208183e32b94a12b3e13ab58`.
+`3a1aa071399da45b996a199fbb86b8685e82ccb1`.
+
+## Review-round-1 native runner closure
+
+The native test runner now counts matched tests and returns exit code 2 when
+an explicit group matches zero registered tests. A direct local C++20 runner
+probe against `test_main.cpp` observed:
+
+| Invocation | Exit code |
+| --- | ---: |
+| Unknown explicit group | 2 |
+| Registered `PCM` group | 0 |
+| No filter | 0 |
+
+CMake retains the production `EMKE.NativeAudio.PCM` test and adds
+`EMKE.NativeAudio.UnknownExplicitFilter` with `WILL_FAIL`, so an accidental
+return to zero-match success makes CTest fail. The local probe used a minimal
+registered-test stub and proves runner dispatch semantics only; it does not
+claim that the production PCM converter or canonical PCM fixture executed.
+No `cmake` executable was available on this macOS host, so the complete native
+CTest suite and production PCM fixture remain pending the hosted Windows gate.
 
 ## Scenario coverage
 
