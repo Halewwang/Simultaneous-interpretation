@@ -100,6 +100,12 @@
   <data name="SettingsOutputDevice" xml:space="preserve"><value>Physical output</value></data>
   <data name="SettingsReopenOnboarding" xml:space="preserve"><value>Reopen setup</value></data>
   <data name="SettingsSave" xml:space="preserve"><value>Save</value></data>
+  <data name="SettingsSavedResult" xml:space="preserve"><value>Settings saved.</value></data>
+  <data name="SettingsConnectionSucceededResult" xml:space="preserve"><value>Connection test succeeded.</value></data>
+  <data name="SettingsStartRequestedResult" xml:space="preserve"><value>Translation start requested.</value></data>
+  <data name="SettingsSaveFailedError" xml:space="preserve"><value>Could not save settings. Check the settings and try again.</value></data>
+  <data name="SettingsConnectionFailedError" xml:space="preserve"><value>Connection test failed. Check the service settings and try again.</value></data>
+  <data name="SettingsStartFailedError" xml:space="preserve"><value>Translation could not start. Check the settings and try again.</value></data>
   <data name="SettingsServiceSection" xml:space="preserve"><value>Service</value></data>
   <data name="SettingsSystemSection" xml:space="preserve"><value>System</value></data>
   <data name="SettingsTestConnection" xml:space="preserve"><value>Test connection</value></data>

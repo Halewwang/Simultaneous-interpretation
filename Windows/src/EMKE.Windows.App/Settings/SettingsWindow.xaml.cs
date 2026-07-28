@@ -1,9 +1,45 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security;
 using System.Windows;
 using System.Windows.Controls;
 
 namespace EMKE.Windows.App.Settings;
+
+internal delegate void SettingsPasswordConsumer(ReadOnlySpan<char> secret);
+
+internal static class SettingsPasswordTransfer
+{
+    public static unsafe void Transfer(
+        Func<SecureString?> readSecret,
+        SettingsPasswordConsumer consume)
+    {
+        ArgumentNullException.ThrowIfNull(readSecret);
+        ArgumentNullException.ThrowIfNull(consume);
+
+        using SecureString secret = readSecret()
+            ?? throw new InvalidOperationException(
+                "The password control did not return a secure value.");
+        int length = secret.Length;
+        IntPtr characters = IntPtr.Zero;
+        try
+        {
+            characters =
+                Marshal.SecureStringToGlobalAllocUnicode(secret);
+            consume(
+                new ReadOnlySpan<char>(
+                    (void*)characters,
+                    length));
+        }
+        finally
+        {
+            if (characters != IntPtr.Zero)
+            {
+                Marshal.ZeroFreeGlobalAllocUnicode(characters);
+            }
+        }
+    }
+}
 
 internal sealed class SettingsWindowLifetime
 {
@@ -85,7 +121,7 @@ internal partial class SettingsWindow : Window
         base.OnClosed(e);
     }
 
-    private unsafe void OnApiKeyPasswordChanged(
+    private void OnApiKeyPasswordChanged(
         object sender,
         RoutedEventArgs e)
     {
@@ -96,23 +132,9 @@ internal partial class SettingsWindow : Window
         }
 
         PasswordBox passwordBox = (PasswordBox)sender;
-        IntPtr characters = IntPtr.Zero;
-        try
-        {
-            characters = Marshal.SecureStringToGlobalAllocUnicode(
-                passwordBox.SecurePassword);
-            _viewModel.ReplaceApiKeyDraft(
-                new ReadOnlySpan<char>(
-                    (void*)characters,
-                    passwordBox.SecurePassword.Length));
-        }
-        finally
-        {
-            if (characters != IntPtr.Zero)
-            {
-                Marshal.ZeroFreeGlobalAllocUnicode(characters);
-            }
-        }
+        SettingsPasswordTransfer.Transfer(
+            () => passwordBox.SecurePassword,
+            _viewModel.ReplaceApiKeyDraft);
     }
 
     private void OnApiKeyClearRequested(object? sender, EventArgs e)

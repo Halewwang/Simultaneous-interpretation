@@ -1,10 +1,12 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Security;
 using System.Xml.Linq;
 using EMKE.Core;
 using EMKE.Platform.Settings;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Localization;
+using EMKE.Windows.App.Presentation;
 using EMKE.Windows.App.Settings;
 
 namespace EMKE.Windows.App.Tests;
@@ -48,6 +50,8 @@ public sealed class SettingsViewModelTests
         fixture.ViewModel.ModelId = "new-model";
         fixture.ViewModel.NativeLanguage = LanguageCode.En;
         fixture.ViewModel.MeetingLanguage = LanguageCode.De;
+        fixture.ViewModel.FloatingStatusEnabled = false;
+        Assert.IsFalse(fixture.FloatingVisibility.Enabled);
         fixture.ViewModel.ReplaceApiKeyDraft(
             "temporary-api-key".AsSpan());
         int clearRequests = 0;
@@ -62,6 +66,7 @@ public sealed class SettingsViewModelTests
         Assert.AreEqual("new-model", fixture.Settings.Saved.ModelId);
         Assert.AreEqual(LanguageCode.En, fixture.Settings.Saved.NativeLanguage);
         Assert.AreEqual(LanguageCode.De, fixture.Settings.Saved.MeetingLanguage);
+        Assert.IsFalse(fixture.Settings.Saved.FloatingStatusEnabled);
         CollectionAssert.AreEqual(
             PrivacyPreferences,
             fixture.Settings.Saved.OnboardingPreferenceIdentifiers.ToArray());
@@ -104,6 +109,57 @@ public sealed class SettingsViewModelTests
         Assert.IsInstanceOfType<RuntimeCommand.Start>(
             fixture.Runtime.Commands[0]);
         Assert.IsFalse(fixture.ViewModel.HasApiKeyDraft);
+    }
+
+    [TestMethod]
+    public async Task CommandFailureIsVisibleLocalizedAndClearedBySuccess()
+    {
+        SettingsFixture fixture = new();
+        fixture.Capability.Error =
+            new InvalidOperationException("raw probe detail must stay hidden");
+        TaskCompletionSource failed = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.ViewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName
+                    == nameof(SettingsViewModel.OperationResult)
+                && fixture.ViewModel.OperationResult
+                    == SettingsOperationResult.ConnectionFailed)
+            {
+                failed.TrySetResult();
+            }
+        };
+
+        ((System.Windows.Input.ICommand)
+            fixture.ViewModel.TestConnectionCommand).Execute(null);
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.AreEqual(
+            SettingsOperationResult.ConnectionFailed,
+            fixture.ViewModel.OperationResult);
+        Assert.AreEqual(
+            "Connection test failed. Check the service settings and try again.",
+            fixture.ViewModel.ErrorMessage);
+        Assert.AreEqual(
+            fixture.ViewModel.ResultMessage,
+            fixture.ViewModel.ResultAutomationDescription);
+        Assert.IsFalse(
+            fixture.ViewModel.ErrorMessage!.Contains(
+                "raw probe detail",
+                StringComparison.Ordinal));
+
+        fixture.ViewModel.InterfaceLanguage = AppInterfaceLanguage.ZhHans;
+        Assert.AreEqual(
+            "连接测试失败，请检查服务设置后重试。",
+            fixture.ViewModel.ErrorMessage);
+
+        fixture.Capability.Error = null;
+        Assert.IsTrue(await fixture.ViewModel.SaveCommand.ExecuteAsync());
+        Assert.AreEqual(
+            SettingsOperationResult.Saved,
+            fixture.ViewModel.OperationResult);
+        Assert.IsNull(fixture.ViewModel.ErrorMessage);
+        Assert.AreEqual("设置已保存。", fixture.ViewModel.ResultMessage);
     }
 
     [TestMethod]
@@ -240,6 +296,20 @@ public sealed class SettingsViewModelTests
                     "SectionLabel}",
                     StringComparison.Ordinal))
                 .ToArray());
+        Assert.IsTrue(
+            settings
+                .Descendants()
+                .Attributes()
+                .Any(static attribute =>
+                    attribute.Value
+                        == "{Binding ResultMessage}"));
+        Assert.IsTrue(
+            settings
+                .Descendants()
+                .Attributes()
+                .Any(static attribute =>
+                    attribute.Value
+                        == "{Binding ResultAutomationDescription}"));
     }
 
     [TestMethod]
@@ -256,6 +326,34 @@ public sealed class SettingsViewModelTests
         CollectionAssert.AreEqual(
             CloseOperations,
             calls);
+    }
+
+    [TestMethod]
+    public void PasswordTransferReadsOnceAndDisposesTheSecureString()
+    {
+        char[] source = ['o', 'n', 'e', '-', 'r', 'e', 'a', 'd'];
+        using SecureString secret = new();
+        foreach (char character in source)
+        {
+            secret.AppendChar(character);
+        }
+
+        int getterCount = 0;
+        char[] observed = [];
+        SettingsPasswordTransfer.Transfer(
+            () =>
+            {
+                getterCount++;
+                return secret;
+            },
+            value => observed = value.ToArray());
+
+        Assert.AreEqual(1, getterCount);
+        CollectionAssert.AreEqual(source, observed);
+        _ = Assert.ThrowsExactly<ObjectDisposedException>(
+            () => secret.Copy());
+        Array.Clear(observed);
+        Array.Clear(source);
     }
 
     private static string SettingsXamlPath(
@@ -288,6 +386,9 @@ public sealed class SettingsViewModelTests
             Localization = new LocalizationService(
                 () => CultureInfo.GetCultureInfo("en-US"));
             Localization.ChangeLanguage(AppInterfaceLanguage.English);
+            Capability = new RecordingCapabilityTester(Operations);
+            FloatingVisibility = new FloatingStatusVisibilityController(
+                enabled: true);
             ViewModel = new SettingsViewModel(
                 new WindowsProductSettings(
                     new Uri("https://api.302.ai"),
@@ -303,8 +404,9 @@ public sealed class SettingsViewModelTests
                 _settings,
                 Secrets,
                 Runtime,
-                new RecordingCapabilityTester(Operations),
+                Capability,
                 new NoOpSettingsSystemActions(),
+                FloatingVisibility,
                 Localization);
         }
 
@@ -320,6 +422,10 @@ public sealed class SettingsViewModelTests
         public RecordingSecretStore Secrets { get; }
 
         public RecordingRuntimeSink Runtime { get; }
+
+        public RecordingCapabilityTester Capability { get; }
+
+        public FloatingStatusVisibilityController FloatingVisibility { get; }
 
         public LocalizationService Localization { get; }
 
@@ -412,12 +518,16 @@ public sealed class SettingsViewModelTests
     private sealed class RecordingCapabilityTester(List<string> operations)
         : ISettingsCapabilityTester
     {
+        public Exception? Error { get; set; }
+
         public Task TestConnectionAsync(
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             operations.Add("connection.test");
-            return Task.CompletedTask;
+            return Error is null
+                ? Task.CompletedTask
+                : Task.FromException(Error);
         }
     }
 

@@ -4,10 +4,22 @@ using EMKE.Core;
 using EMKE.Platform.Settings;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Localization;
+using EMKE.Windows.App.Presentation;
 
 namespace EMKE.Windows.App.Settings;
 
 internal sealed record SettingsChoice<T>(T Value, string Label);
+
+internal enum SettingsOperationResult
+{
+    None,
+    Saved,
+    ConnectionSucceeded,
+    StartRequested,
+    SaveFailed,
+    ConnectionFailed,
+    StartFailed,
+}
 
 internal interface ISettingsCapabilityTester
 {
@@ -35,6 +47,8 @@ internal sealed class SettingsViewModel :
     private readonly ISecretStore _secrets;
     private readonly IRuntimeCommandSink _runtime;
     private readonly ISettingsCapabilityTester _capabilityTester;
+    private readonly FloatingStatusVisibilityController
+        _floatingStatusVisibility;
     private readonly LocalizationService _localization;
     private readonly string[] _onboardingPreferenceIdentifiers;
     private char[] _apiKeyDraft = [];
@@ -48,6 +62,7 @@ internal sealed class SettingsViewModel :
     private bool _followDefaultOutput;
     private AppInterfaceLanguage _interfaceLanguage;
     private bool _floatingStatusEnabled = true;
+    private SettingsOperationResult _operationResult;
     private int _disposed;
 
     public SettingsViewModel(
@@ -57,6 +72,7 @@ internal sealed class SettingsViewModel :
         IRuntimeCommandSink runtime,
         ISettingsCapabilityTester capabilityTester,
         ISettingsSystemActions systemActions,
+        FloatingStatusVisibilityController floatingStatusVisibility,
         LocalizationService localization)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
@@ -68,6 +84,9 @@ internal sealed class SettingsViewModel :
             ?? throw new ArgumentNullException(nameof(runtime));
         _capabilityTester = capabilityTester
             ?? throw new ArgumentNullException(nameof(capabilityTester));
+        _floatingStatusVisibility = floatingStatusVisibility
+            ?? throw new ArgumentNullException(
+                nameof(floatingStatusVisibility));
         ArgumentNullException.ThrowIfNull(systemActions);
         _localization = localization
             ?? throw new ArgumentNullException(nameof(localization));
@@ -83,6 +102,8 @@ internal sealed class SettingsViewModel :
         _interfaceLanguage =
             AppInterfaceLanguageExtensions.ParseStableValue(
                 initialSettings.InterfaceLanguage);
+        _floatingStatusEnabled = initialSettings.FloatingStatusEnabled;
+        _floatingStatusVisibility.SetEnabled(_floatingStatusEnabled);
         _onboardingPreferenceIdentifiers =
             [.. initialSettings.OnboardingPreferenceIdentifiers];
         InputEndpointOptions = initialSettings.InputEndpointId is null
@@ -108,6 +129,10 @@ internal sealed class SettingsViewModel :
             TestConnectionAsync,
             group: group);
         StartCommand = new AsyncRuntimeCommand(StartAsync, group: group);
+        SaveCommand.ExecutionFailed += OnSaveExecutionFailed;
+        TestConnectionCommand.ExecutionFailed +=
+            OnTestConnectionExecutionFailed;
+        StartCommand.ExecutionFailed += OnStartExecutionFailed;
         RunLocalDiagnosticsCommand = new AsyncRuntimeCommand(
             cancellationToken =>
                 systemActions.RunLocalDiagnosticsAsync(cancellationToken)
@@ -151,6 +176,39 @@ internal sealed class SettingsViewModel :
     public AsyncRuntimeCommand ReopenOnboardingCommand { get; }
 
     public AsyncRuntimeCommand ExportDiagnosticsCommand { get; }
+
+    public SettingsOperationResult OperationResult =>
+        _operationResult;
+
+    public string? ResultMessage => OperationResult switch
+    {
+        SettingsOperationResult.None => null,
+        SettingsOperationResult.Saved =>
+            Text(LocalizedString.SettingsSavedResult),
+        SettingsOperationResult.ConnectionSucceeded =>
+            Text(LocalizedString.SettingsConnectionSucceededResult),
+        SettingsOperationResult.StartRequested =>
+            Text(LocalizedString.SettingsStartRequestedResult),
+        SettingsOperationResult.SaveFailed =>
+            Text(LocalizedString.SettingsSaveFailedError),
+        SettingsOperationResult.ConnectionFailed =>
+            Text(LocalizedString.SettingsConnectionFailedError),
+        SettingsOperationResult.StartFailed =>
+            Text(LocalizedString.SettingsStartFailedError),
+        _ => throw new InvalidOperationException(
+            "Undefined settings operation result."),
+    };
+
+    public string? ErrorMessage => OperationResult switch
+    {
+        SettingsOperationResult.SaveFailed
+            or SettingsOperationResult.ConnectionFailed
+            or SettingsOperationResult.StartFailed
+            => ResultMessage,
+        _ => null,
+    };
+
+    public string? ResultAutomationDescription => ResultMessage;
 
     public string BaseAddress
     {
@@ -215,16 +273,24 @@ internal sealed class SettingsViewModel :
     public bool FloatingStatusEnabled
     {
         get => _floatingStatusEnabled;
-        set => SetField(ref _floatingStatusEnabled, value);
+        set
+        {
+            if (SetField(ref _floatingStatusEnabled, value))
+            {
+                _floatingStatusVisibility.SetEnabled(value);
+            }
+        }
     }
 
     public bool HasApiKeyDraft => _apiKeyDraft.Length > 0;
 
     public IReadOnlyList<SettingsChoice<LanguageCode>>
-        TranslationLanguageOptions { get; private set; } = [];
+        TranslationLanguageOptions
+    { get; private set; } = [];
 
     public IReadOnlyList<SettingsChoice<AppInterfaceLanguage>>
-        InterfaceLanguageOptions { get; private set; } = [];
+        InterfaceLanguageOptions
+    { get; private set; } = [];
 
     public IReadOnlyList<SettingsChoice<string>> InputEndpointOptions
     {
@@ -315,26 +381,32 @@ internal sealed class SettingsViewModel :
         OnPropertyChanged(nameof(HasApiKeyDraft));
     }
 
-    public Task SaveAsync(CancellationToken cancellationToken)
+    public async Task SaveAsync(CancellationToken cancellationToken)
     {
-        return PersistAndClearAsync(cancellationToken);
+        SetOperationResult(SettingsOperationResult.None);
+        await PersistAndClearAsync(cancellationToken).ConfigureAwait(true);
+        SetOperationResult(SettingsOperationResult.Saved);
     }
 
     public async Task TestConnectionAsync(
         CancellationToken cancellationToken)
     {
+        SetOperationResult(SettingsOperationResult.None);
         await PersistAndClearAsync(cancellationToken).ConfigureAwait(true);
         await _capabilityTester.TestConnectionAsync(cancellationToken)
             .ConfigureAwait(true);
+        SetOperationResult(SettingsOperationResult.ConnectionSucceeded);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        SetOperationResult(SettingsOperationResult.None);
         await PersistAndClearAsync(cancellationToken).ConfigureAwait(true);
         _ = await _runtime.SubmitAsync(
                 new RuntimeCommand.Start(),
                 cancellationToken)
             .ConfigureAwait(true);
+        SetOperationResult(SettingsOperationResult.StartRequested);
     }
 
     public void Close()
@@ -351,6 +423,10 @@ internal sealed class SettingsViewModel :
         }
 
         _localization.LanguageChanged -= OnLanguageChanged;
+        SaveCommand.ExecutionFailed -= OnSaveExecutionFailed;
+        TestConnectionCommand.ExecutionFailed -=
+            OnTestConnectionExecutionFailed;
+        StartCommand.ExecutionFailed -= OnStartExecutionFailed;
         ClearApiKeyDraft(notifyPasswordBox: true);
         SaveCommand.Dispose();
         TestConnectionCommand.Dispose();
@@ -376,7 +452,8 @@ internal sealed class SettingsViewModel :
                 _followDefaultInput,
                 _followDefaultOutput,
                 _interfaceLanguage.ToStableValue(),
-                _onboardingPreferenceIdentifiers);
+                _onboardingPreferenceIdentifiers,
+                _floatingStatusEnabled);
             if (_apiKeyDraft.Length > 0)
             {
                 await _secrets.SaveAsync(
@@ -419,6 +496,47 @@ internal sealed class SettingsViewModel :
         _interfaceLanguage = e.Language;
         RebuildOptions();
         OnPropertyChanged(string.Empty);
+    }
+
+    private void OnSaveExecutionFailed(
+        object? sender,
+        CommandExecutionFailedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        SetOperationResult(SettingsOperationResult.SaveFailed);
+    }
+
+    private void OnTestConnectionExecutionFailed(
+        object? sender,
+        CommandExecutionFailedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        SetOperationResult(SettingsOperationResult.ConnectionFailed);
+    }
+
+    private void OnStartExecutionFailed(
+        object? sender,
+        CommandExecutionFailedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        SetOperationResult(SettingsOperationResult.StartFailed);
+    }
+
+    private void SetOperationResult(SettingsOperationResult value)
+    {
+        if (_operationResult == value)
+        {
+            return;
+        }
+
+        _operationResult = value;
+        OnPropertyChanged(nameof(OperationResult));
+        OnPropertyChanged(nameof(ResultMessage));
+        OnPropertyChanged(nameof(ErrorMessage));
+        OnPropertyChanged(nameof(ResultAutomationDescription));
     }
 
     private void RebuildOptions()

@@ -13,6 +13,7 @@ using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
 using EMKE.Windows.App.Floating;
 using EMKE.Windows.App.Localization;
+using EMKE.Windows.App.Presentation;
 using EMKE.Windows.App.Settings;
 using EMKE.Windows.App.Tray;
 
@@ -296,9 +297,12 @@ internal static class ProductionUiAdapters
                     context.Localization,
                     context.RuntimeCommands,
                     surfaceActions);
+                FloatingStatusVisibilityController floatingVisibility = new(
+                    initialSettings.FloatingStatusEnabled);
                 FloatingStatusViewModel floatingViewModel = new(
                     context.Presentation,
-                    context.RuntimeCommands);
+                    context.RuntimeCommands,
+                    floatingVisibility);
                 SettingsViewModel settingsViewModel = new(
                     initialSettings,
                     productSettings,
@@ -306,6 +310,7 @@ internal static class ProductionUiAdapters
                     context.RuntimeCommands,
                     UnavailableSettingsCapabilityTester.Instance,
                     settingsSystemActions,
+                    floatingVisibility,
                     context.Localization);
                 views = new WpfProductViews(
                     dispatcher,

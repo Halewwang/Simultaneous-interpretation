@@ -30,12 +30,45 @@ internal interface ICredentialManagerNative
     bool Delete(string target, uint type, out int errorCode);
 }
 
+internal interface ICredentialManagerInterop
+{
+    bool Write(
+        ref NativeCredential credential,
+        uint flags,
+        out int errorCode);
+
+    bool Read(
+        string target,
+        uint type,
+        uint flags,
+        out IntPtr credential,
+        out int errorCode);
+
+    bool Delete(
+        string target,
+        uint type,
+        uint flags,
+        out int errorCode);
+
+    NativeCredential ReadCredential(IntPtr credential);
+
+    void Copy(IntPtr source, byte[] destination, int length);
+
+    void Zero(IntPtr source, int length);
+
+    void Free(IntPtr credential);
+}
+
 internal sealed class CredentialManagerNative : ICredentialManagerNative
 {
-    public static CredentialManagerNative Instance { get; } = new();
+    private readonly ICredentialManagerInterop _interop;
 
-    private CredentialManagerNative()
+    public static CredentialManagerNative Instance { get; } =
+        new(PInvokeCredentialManagerInterop.Instance);
+
+    internal CredentialManagerNative(ICredentialManagerInterop interop)
     {
+        _interop = interop ?? throw new ArgumentNullException(nameof(interop));
     }
 
     public unsafe bool Write(
@@ -54,51 +87,77 @@ internal sealed class CredentialManagerNative : ICredentialManagerNative
                 Persist = request.Persist,
                 UserName = string.Empty,
             };
-            bool result = CredentialManagerInterop.CredWrite(
+            return _interop.Write(
                 ref credential,
-                flags: 0);
-            errorCode = result ? 0 : Marshal.GetLastWin32Error();
-            return result;
+                flags: 0,
+                out errorCode);
         }
     }
 
-    public unsafe bool TryRead(
+    public bool TryRead(
         string target,
         uint type,
         out byte[]? blob,
         out int errorCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        if (!CredentialManagerInterop.CredRead(
+        if (!_interop.Read(
                 target,
                 type,
                 flags: 0,
-                out IntPtr credentialPointer))
+                out IntPtr credentialPointer,
+                out errorCode))
         {
             blob = null;
-            errorCode = Marshal.GetLastWin32Error();
             return false;
         }
 
+        byte[]? managedCopy = null;
+        NativeCredential credential = default;
+        bool credentialRead = false;
+        int nativeBlobLength = 0;
         try
         {
-            NativeCredential credential =
-                Marshal.PtrToStructure<NativeCredential>(credentialPointer);
-            int size = checked((int)credential.CredentialBlobSize);
-            blob = new byte[size];
-            if (size > 0)
+            credential = _interop.ReadCredential(credentialPointer);
+            credentialRead = true;
+            nativeBlobLength =
+                checked((int)credential.CredentialBlobSize);
+            managedCopy = new byte[nativeBlobLength];
+            if (nativeBlobLength > 0)
             {
-                Marshal.Copy(credential.CredentialBlob, blob, 0, size);
-                CryptographicOperations.ZeroMemory(
-                    new Span<byte>((void*)credential.CredentialBlob, size));
+                _interop.Copy(
+                    credential.CredentialBlob,
+                    managedCopy,
+                    nativeBlobLength);
             }
 
+            blob = managedCopy;
+            managedCopy = null;
             errorCode = 0;
             return true;
         }
         finally
         {
-            CredentialManagerInterop.CredFree(credentialPointer);
+            if (managedCopy is not null)
+            {
+                Array.Clear(managedCopy);
+            }
+
+            try
+            {
+                if (credentialRead
+                    && nativeBlobLength > 0
+                    && credential.CredentialBlob != IntPtr.Zero)
+                {
+                    BestEffortZero(
+                        credential.CredentialBlob,
+                        nativeBlobLength);
+                }
+            }
+            finally
+            {
+                _interop.Free(credentialPointer);
+            }
         }
     }
 
@@ -108,13 +167,26 @@ internal sealed class CredentialManagerNative : ICredentialManagerNative
         out int errorCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        bool result = CredentialManagerInterop.CredDelete(
+        return _interop.Delete(
             target,
             type,
-            flags: 0);
-        errorCode = result ? 0 : Marshal.GetLastWin32Error();
-        return result;
+            flags: 0,
+            out errorCode);
     }
+
+#pragma warning disable CA1031 // Clearing native secret memory is best effort before CredFree.
+    private void BestEffortZero(IntPtr source, int length)
+    {
+        try
+        {
+            _interop.Zero(source, length);
+        }
+        catch
+        {
+            // CredFree must still run even if the defensive zero operation fails.
+        }
+    }
+#pragma warning restore CA1031
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -196,4 +268,77 @@ internal static class CredentialManagerInterop
         ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     internal static extern void CredFree(IntPtr credential);
+}
+
+internal sealed class PInvokeCredentialManagerInterop
+    : ICredentialManagerInterop
+{
+    public static PInvokeCredentialManagerInterop Instance { get; } = new();
+
+    private PInvokeCredentialManagerInterop()
+    {
+    }
+
+    public bool Write(
+        ref NativeCredential credential,
+        uint flags,
+        out int errorCode)
+    {
+        bool result = CredentialManagerInterop.CredWrite(
+            ref credential,
+            flags);
+        errorCode = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
+    public bool Read(
+        string target,
+        uint type,
+        uint flags,
+        out IntPtr credential,
+        out int errorCode)
+    {
+        bool result = CredentialManagerInterop.CredRead(
+            target,
+            type,
+            flags,
+            out credential);
+        errorCode = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
+    public bool Delete(
+        string target,
+        uint type,
+        uint flags,
+        out int errorCode)
+    {
+        bool result = CredentialManagerInterop.CredDelete(
+            target,
+            type,
+            flags);
+        errorCode = result ? 0 : Marshal.GetLastWin32Error();
+        return result;
+    }
+
+    public NativeCredential ReadCredential(IntPtr credential)
+    {
+        return Marshal.PtrToStructure<NativeCredential>(credential);
+    }
+
+    public void Copy(IntPtr source, byte[] destination, int length)
+    {
+        Marshal.Copy(source, destination, 0, length);
+    }
+
+    public unsafe void Zero(IntPtr source, int length)
+    {
+        CryptographicOperations.ZeroMemory(
+            new Span<byte>((void*)source, length));
+    }
+
+    public void Free(IntPtr credential)
+    {
+        CredentialManagerInterop.CredFree(credential);
+    }
 }

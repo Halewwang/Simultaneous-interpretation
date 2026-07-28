@@ -153,7 +153,8 @@ public sealed class WindowsSettingsStoreTests
             followDefaultInput: false,
             followDefaultOutput: true,
             "zhHans",
-            ["privacy-v2", "audio-v1"]);
+            ["privacy-v2", "audio-v1"],
+            floatingStatusEnabled: false);
 
         await store.SaveProductSettingsAsync(
             settings,
@@ -171,6 +172,7 @@ public sealed class WindowsSettingsStoreTests
             "baseUrl",
             "followDefaultInput",
             "followDefaultOutput",
+            "floatingStatusEnabled",
             "inputEndpointId",
             "interfaceLanguage",
             "meetingLanguage",
@@ -182,6 +184,41 @@ public sealed class WindowsSettingsStoreTests
         ];
         Array.Sort(expectedNames, StringComparer.Ordinal);
         CollectionAssert.AreEqual(expectedNames, actualNames);
+        WindowsProductSettings reloaded =
+            await new WindowsSettingsStore(
+                    new FileSystemWindowsSettingsPersistence(settingsPath))
+                .LoadProductSettingsAsync(CancellationToken.None);
+        Assert.IsFalse(reloaded.FloatingStatusEnabled);
+    }
+
+    [TestMethod]
+    public async Task ExistingVersionOneSettingsDefaultFloatingStatusToEnabled()
+    {
+        string settingsPath = CreateSettingsPath();
+        await File.WriteAllTextAsync(
+            settingsPath,
+            """
+            {
+              "schemaVersion": 1,
+              "baseUrl": "https://example.test/realtime",
+              "modelId": "gpt-realtime-translate",
+              "nativeLanguage": "zh",
+              "meetingLanguage": "en",
+              "inputEndpointId": null,
+              "outputEndpointId": null,
+              "followDefaultInput": true,
+              "followDefaultOutput": true,
+              "interfaceLanguage": "english",
+              "onboardingPreferenceIdentifiers": []
+            }
+            """);
+
+        WindowsProductSettings loaded =
+            await new WindowsSettingsStore(
+                    new FileSystemWindowsSettingsPersistence(settingsPath))
+                .LoadProductSettingsAsync(CancellationToken.None);
+
+        Assert.IsTrue(loaded.FloatingStatusEnabled);
     }
 
     [TestMethod]

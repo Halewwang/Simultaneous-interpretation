@@ -14,6 +14,7 @@ internal sealed record WindowsSettingsDocument(
     bool FollowDefaultInput,
     bool FollowDefaultOutput,
     string InterfaceLanguage,
+    bool FloatingStatusEnabled,
     string[] OnboardingPreferenceIdentifiers)
 {
     public static WindowsSettingsDocument SafeDefaults { get; } = new(
@@ -27,6 +28,7 @@ internal sealed record WindowsSettingsDocument(
         FollowDefaultInput: true,
         FollowDefaultOutput: true,
         "system",
+        FloatingStatusEnabled: true,
         []);
 }
 
@@ -117,6 +119,7 @@ internal static class WindowsSettingsMigrationPolicy
             ReadOptionalBoolean(root, "followDefaultInput", defaultValue: true),
             ReadOptionalBoolean(root, "followDefaultOutput", defaultValue: true),
             ReadRequiredString(root, "interfaceLanguage"),
+            ReadOptionalBoolean(root, "floatingStatusEnabled", defaultValue: true),
             ReadOptionalStringArray(root, "onboardingPreferenceIdentifiers"));
     }
 

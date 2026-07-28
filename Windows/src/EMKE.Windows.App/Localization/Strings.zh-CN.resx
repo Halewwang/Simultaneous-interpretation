@@ -100,6 +100,12 @@
   <data name="SettingsOutputDevice" xml:space="preserve"><value>物理输出</value></data>
   <data name="SettingsReopenOnboarding" xml:space="preserve"><value>重新打开设置向导</value></data>
   <data name="SettingsSave" xml:space="preserve"><value>保存</value></data>
+  <data name="SettingsSavedResult" xml:space="preserve"><value>设置已保存。</value></data>
+  <data name="SettingsConnectionSucceededResult" xml:space="preserve"><value>连接测试成功。</value></data>
+  <data name="SettingsStartRequestedResult" xml:space="preserve"><value>已请求开始翻译。</value></data>
+  <data name="SettingsSaveFailedError" xml:space="preserve"><value>无法保存设置，请检查设置后重试。</value></data>
+  <data name="SettingsConnectionFailedError" xml:space="preserve"><value>连接测试失败，请检查服务设置后重试。</value></data>
+  <data name="SettingsStartFailedError" xml:space="preserve"><value>无法开始翻译，请检查设置后重试。</value></data>
   <data name="SettingsServiceSection" xml:space="preserve"><value>服务</value></data>
   <data name="SettingsSystemSection" xml:space="preserve"><value>系统</value></data>
   <data name="SettingsTestConnection" xml:space="preserve"><value>测试连接</value></data>

@@ -42,6 +42,33 @@ public sealed class FloatingStatusViewModelTests
     }
 
     [TestMethod]
+    public void FloatingPreferenceImmediatelyControlsWindowVisibility()
+    {
+        using FloatingFixture fixture = new();
+        fixture.Publish(Snapshot(RuntimeState.Running));
+        Assert.IsTrue(fixture.ViewModel.ShouldBeVisible);
+        int visibilityNotifications = 0;
+        fixture.ViewModel.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName
+                == nameof(FloatingStatusViewModel.ShouldBeVisible))
+            {
+                visibilityNotifications++;
+            }
+        };
+
+        fixture.Visibility.SetEnabled(enabled: false);
+
+        Assert.IsFalse(fixture.ViewModel.ShouldBeVisible);
+        Assert.AreEqual(1, visibilityNotifications);
+
+        fixture.Visibility.SetEnabled(enabled: true);
+
+        Assert.IsTrue(fixture.ViewModel.ShouldBeVisible);
+        Assert.AreEqual(2, visibilityNotifications);
+    }
+
+    [TestMethod]
     public async Task FloatingStopUsesThePriorityRuntimeCommand()
     {
         using FloatingFixture fixture = new();
@@ -165,10 +192,16 @@ public sealed class FloatingStatusViewModelTests
                 localization,
                 new AppPresentationMapper(localization));
             Sink = new RecordingRuntimeCommandSink();
-            ViewModel = new FloatingStatusViewModel(_coordinator, Sink);
+            Visibility = new FloatingStatusVisibilityController(enabled: true);
+            ViewModel = new FloatingStatusViewModel(
+                _coordinator,
+                Sink,
+                Visibility);
         }
 
         public RecordingRuntimeCommandSink Sink { get; }
+
+        public FloatingStatusVisibilityController Visibility { get; }
 
         public FloatingStatusViewModel ViewModel { get; }
 

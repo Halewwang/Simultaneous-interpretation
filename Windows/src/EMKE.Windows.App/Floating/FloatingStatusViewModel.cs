@@ -13,23 +13,29 @@ internal sealed class FloatingStatusViewModel :
     private const int CaptionTextElementLimit = 96;
 
     private readonly IRuntimeCommandSink _runtimeCommands;
+    private readonly FloatingStatusVisibilityController
+        _visibilityController;
     private readonly IDisposable _presentationSubscription;
     private AppPresentation? _presentation;
     private int _disposed;
 
     public FloatingStatusViewModel(
         PresentationCoordinator presentationCoordinator,
-        IRuntimeCommandSink runtimeCommands)
+        IRuntimeCommandSink runtimeCommands,
+        FloatingStatusVisibilityController visibilityController)
     {
         ArgumentNullException.ThrowIfNull(presentationCoordinator);
         _runtimeCommands = runtimeCommands
             ?? throw new ArgumentNullException(nameof(runtimeCommands));
+        _visibilityController = visibilityController
+            ?? throw new ArgumentNullException(nameof(visibilityController));
         StopCommand = new AsyncRuntimeCommand(
             SubmitStopAsync,
             () => _presentation?.StopAction.IsEnabled == true,
             isPriority: true);
         _presentationSubscription =
             presentationCoordinator.Subscribe(ApplyPresentation);
+        _visibilityController.EnabledChanged += OnVisibilityEnabledChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -37,7 +43,8 @@ internal sealed class FloatingStatusViewModel :
     public AsyncRuntimeCommand StopCommand { get; }
 
     public bool ShouldBeVisible =>
-        _presentation is not null
+        _visibilityController.Enabled
+        && _presentation is not null
         && (!(_presentation.StartAction.IsVisible
                 && _presentation.StartAction.IsEnabled
                 && !_presentation.StopAction.IsVisible)
@@ -78,6 +85,7 @@ internal sealed class FloatingStatusViewModel :
             return;
         }
 
+        _visibilityController.EnabledChanged -= OnVisibilityEnabledChanged;
         _presentationSubscription.Dispose();
         StopCommand.Dispose();
     }
@@ -96,6 +104,13 @@ internal sealed class FloatingStatusViewModel :
             ?? throw new ArgumentNullException(nameof(presentation));
         OnPropertyChanged(string.Empty);
         StopCommand.NotifyCanExecuteChanged();
+    }
+
+    private void OnVisibilityEnabledChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        OnPropertyChanged(nameof(ShouldBeVisible));
     }
 
     private void OnPropertyChanged(

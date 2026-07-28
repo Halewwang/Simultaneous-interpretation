@@ -31,6 +31,13 @@
                 Content="{Binding StartLabel}" />
         </StackPanel>
 
+        <TextBlock
+            DockPanel.Dock="Bottom"
+            Margin="0,8,0,0"
+            AutomationProperties.Name="{Binding ResultAutomationDescription}"
+            Text="{Binding ResultMessage}"
+            TextWrapping="Wrap" />
+
         <ScrollViewer
             HorizontalScrollBarVisibility="Disabled"
             VerticalScrollBarVisibility="Auto">

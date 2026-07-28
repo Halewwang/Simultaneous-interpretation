@@ -10,6 +10,8 @@ namespace EMKE.Integration.Tests;
 public sealed class CredentialManagerSecretStoreTests
 {
     private const string LogicalSecretName = "translationApiKey";
+    private static readonly string[] FailedCopyOperations =
+        ["read", "structure", "copy", "zero", "free"];
     private CredentialManagerSecretStore? _realStore;
 
 #pragma warning disable CA1031 // Cleanup must not hide the primary Windows integration result.
@@ -161,6 +163,27 @@ public sealed class CredentialManagerSecretStoreTests
     }
 
     [TestMethod]
+    public void NativeCopyFailureZerosNativeAndManagedBlobsBeforeFree()
+    {
+        CopyFailingCredentialManagerInterop interop = new();
+        CredentialManagerNative native = new(interop);
+
+        _ = Assert.ThrowsExactly<InvalidOperationException>(
+            () => native.TryRead(
+                "EMKE.Translation.ApiKey.Internal",
+                CredentialManagerConstants.TypeGeneric,
+                out _,
+                out _));
+
+        CollectionAssert.AreEqual(
+            FailedCopyOperations,
+            interop.Operations);
+        Assert.IsNotNull(interop.RetainedManagedBlob);
+        Assert.IsTrue(
+            interop.RetainedManagedBlob.All(static value => value == 0));
+    }
+
+    [TestMethod]
     [TestCategory("WindowsCredentialManager")]
     public async Task WindowsCredentialManagerRoundTripUsesUniqueCurrentUserTarget()
     {
@@ -265,6 +288,94 @@ public sealed class CredentialManagerSecretStoreTests
             LastDeleteTarget = target;
             errorCode = DeleteError;
             return DeleteResult;
+        }
+    }
+
+    private sealed class CopyFailingCredentialManagerInterop
+        : ICredentialManagerInterop
+    {
+        private static readonly IntPtr CredentialPointer = new(101);
+        private static readonly IntPtr BlobPointer = new(202);
+
+        public List<string> Operations { get; } = [];
+
+        public byte[]? RetainedManagedBlob { get; private set; }
+
+        public bool Write(
+            ref NativeCredential credential,
+            uint flags,
+            out int errorCode)
+        {
+            throw new InvalidOperationException(
+                "Write is not part of this test.");
+        }
+
+        public bool Read(
+            string target,
+            uint type,
+            uint flags,
+            out IntPtr credential,
+            out int errorCode)
+        {
+            _ = target;
+            _ = type;
+            _ = flags;
+            Operations.Add("read");
+            credential = CredentialPointer;
+            errorCode = 0;
+            return true;
+        }
+
+        public bool Delete(
+            string target,
+            uint type,
+            uint flags,
+            out int errorCode)
+        {
+            throw new InvalidOperationException(
+                "Delete is not part of this test.");
+        }
+
+        public NativeCredential ReadCredential(IntPtr credential)
+        {
+            Assert.AreEqual(CredentialPointer, credential);
+            Operations.Add("structure");
+            return new NativeCredential
+            {
+                CredentialBlob = BlobPointer,
+                CredentialBlobSize = 8,
+                TargetName = string.Empty,
+                UserName = string.Empty,
+            };
+        }
+
+        public void Copy(
+            IntPtr source,
+            byte[] destination,
+            int length)
+        {
+            Assert.AreEqual(BlobPointer, source);
+            Assert.AreEqual(8, length);
+            Operations.Add("copy");
+            RetainedManagedBlob = destination;
+            Array.Fill(destination, (byte)0x5A);
+            throw new InvalidOperationException("injected copy failure");
+        }
+
+        public void Zero(IntPtr source, int length)
+        {
+            Assert.AreEqual(BlobPointer, source);
+            Assert.AreEqual(8, length);
+            Operations.Add("zero");
+        }
+
+        public void Free(IntPtr credential)
+        {
+            Assert.AreEqual(CredentialPointer, credential);
+            Assert.IsNotNull(RetainedManagedBlob);
+            Assert.IsTrue(
+                RetainedManagedBlob.All(static value => value == 0));
+            Operations.Add("free");
         }
     }
 }

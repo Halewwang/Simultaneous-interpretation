@@ -16,7 +16,8 @@ public sealed record WindowsProductSettings
         bool followDefaultInput,
         bool followDefaultOutput,
         string interfaceLanguage,
-        IEnumerable<string> onboardingPreferenceIdentifiers)
+        IEnumerable<string> onboardingPreferenceIdentifiers,
+        bool floatingStatusEnabled = true)
     {
         ArgumentNullException.ThrowIfNull(baseUri);
         if (!baseUri.IsAbsoluteUri
@@ -58,6 +59,7 @@ public sealed record WindowsProductSettings
         FollowDefaultInput = followDefaultInput;
         FollowDefaultOutput = followDefaultOutput;
         InterfaceLanguage = interfaceLanguage;
+        FloatingStatusEnabled = floatingStatusEnabled;
         OnboardingPreferenceIdentifiers = Array.AsReadOnly(
             [.. preferenceIdentifiers.Distinct(StringComparer.Ordinal)]);
     }
@@ -80,6 +82,8 @@ public sealed record WindowsProductSettings
 
     public string InterfaceLanguage { get; }
 
+    public bool FloatingStatusEnabled { get; }
+
     public IReadOnlyList<string> OnboardingPreferenceIdentifiers { get; }
 
     public static WindowsProductSettings SafeDefaults { get; } =
@@ -98,6 +102,7 @@ public sealed record WindowsProductSettings
             FollowDefaultInput,
             FollowDefaultOutput,
             InterfaceLanguage,
+            FloatingStatusEnabled,
             [.. OnboardingPreferenceIdentifiers]);
     }
 
@@ -115,7 +120,8 @@ public sealed record WindowsProductSettings
             document.FollowDefaultInput,
             document.FollowDefaultOutput,
             document.InterfaceLanguage,
-            document.OnboardingPreferenceIdentifiers);
+            document.OnboardingPreferenceIdentifiers,
+            document.FloatingStatusEnabled);
     }
 
     internal static LanguageCode ParseLanguage(string stableValue)
