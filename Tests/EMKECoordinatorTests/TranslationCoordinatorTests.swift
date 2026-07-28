@@ -11,15 +11,26 @@ private enum CoordinatorTestError: Error, Equatable {
 }
 
 private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
+    private let blocksStart: Bool
     private(set) var startConfigurations: [AudioEngineConfiguration] = []
     private(set) var routings: [(InboundOutputMode, OutboundOutputMode)] = []
     private(set) var inboundPlayback: [Data] = []
     private(set) var outboundPlayback: [Data] = []
     private var events: [AudioEngineEvent] = []
     private var waiters: [CheckedContinuation<AudioEngineEvent, Never>] = []
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(blocksStart: Bool = false) {
+        self.blocksStart = blocksStart
+    }
 
     func start(configuration: AudioEngineConfiguration) async throws {
         startConfigurations.append(configuration)
+        if blocksStart {
+            await withCheckedContinuation { continuation in
+                startWaiters.append(continuation)
+            }
+        }
     }
 
     func stop() async {
@@ -62,6 +73,14 @@ private actor CoordinatorAudioEngineFake: TranslationAudioEngine {
         }
     }
 
+    func releaseStarts() {
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
     var lastRouting: (InboundOutputMode, OutboundOutputMode)? {
         routings.last
     }
@@ -71,9 +90,14 @@ private actor CoordinatorSessionFake: TranslationSessionControlling {
     let connectError: CoordinatorTestError?
     private(set) var appended: [Data] = []
     private(set) var closeCount = 0
+    private(set) var deliveredEventCount = 0
     private var appendErrors: [CoordinatorTestError]
     private var events: [Result<TranslationServerEvent, CoordinatorTestError>]
     private let closeEvents: [TranslationServerEvent]
+    private let emitsClosedOnClose: Bool
+    private var deliveryWaiters: [
+        (count: Int, continuation: CheckedContinuation<Void, Never>)
+    ] = []
     private var waiters: [
         CheckedContinuation<TranslationServerEvent, any Error>
     ] = []
@@ -82,12 +106,14 @@ private actor CoordinatorSessionFake: TranslationSessionControlling {
         connectError: CoordinatorTestError? = nil,
         appendErrors: [CoordinatorTestError] = [],
         events: [Result<TranslationServerEvent, CoordinatorTestError>] = [],
-        closeEvents: [TranslationServerEvent] = []
+        closeEvents: [TranslationServerEvent] = [],
+        emitsClosedOnClose: Bool = true
     ) {
         self.connectError = connectError
         self.appendErrors = appendErrors
         self.events = events
         self.closeEvents = closeEvents
+        self.emitsClosedOnClose = emitsClosedOnClose
     }
 
     func connect() async throws {
@@ -101,13 +127,30 @@ private actor CoordinatorSessionFake: TranslationSessionControlling {
         appended.append(pcm16)
     }
 
+    func failNextAppend(with error: CoordinatorTestError) {
+        appendErrors.append(error)
+    }
+
     func nextEvent() async throws -> TranslationServerEvent {
+        let event: TranslationServerEvent
         if !events.isEmpty {
-            return try events.removeFirst().get()
+            event = try events.removeFirst().get()
+        } else {
+            event = try await withCheckedThrowingContinuation { continuation in
+                waiters.append(continuation)
+            }
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            waiters.append(continuation)
+        deliveredEventCount += 1
+        let ready = deliveryWaiters.filter {
+            deliveredEventCount >= $0.count
         }
+        deliveryWaiters.removeAll {
+            deliveredEventCount >= $0.count
+        }
+        for waiter in ready {
+            waiter.continuation.resume()
+        }
+        return event
     }
 
     func close() async throws {
@@ -115,7 +158,9 @@ private actor CoordinatorSessionFake: TranslationSessionControlling {
         for event in closeEvents {
             emit(.success(event))
         }
-        emit(.success(.closed))
+        if emitsClosedOnClose {
+            emit(.success(.closed))
+        }
     }
 
     func emit(
@@ -131,6 +176,13 @@ private actor CoordinatorSessionFake: TranslationSessionControlling {
             case .failure(let error):
                 waiter.resume(throwing: error)
             }
+        }
+    }
+
+    func waitUntilDeliveredEventCount(_ count: Int) async {
+        if deliveredEventCount >= count { return }
+        await withCheckedContinuation { continuation in
+            deliveryWaiters.append((count, continuation))
         }
     }
 }
@@ -174,6 +226,7 @@ private actor CoordinatorSessionBuilderFake: TranslationSessionBuilding {
 
 private actor BlockingCoordinatorSession: TranslationSessionControlling {
     private(set) var connectCount = 0
+    private(set) var closeCount = 0
     private(set) var appendCount = 0
     private(set) var appended: [Data] = []
     private var connectWaiters: [CheckedContinuation<Void, Never>] = []
@@ -200,6 +253,7 @@ private actor BlockingCoordinatorSession: TranslationSessionControlling {
     }
 
     func close() async throws {
+        closeCount += 1
         let waiters = eventWaiters
         eventWaiters.removeAll()
         for waiter in waiters {
@@ -213,6 +267,14 @@ private actor BlockingCoordinatorSession: TranslationSessionControlling {
         for waiter in waiters {
             waiter.resume()
         }
+    }
+}
+
+private actor CoordinatorCompletionRecorder {
+    private(set) var isComplete = false
+
+    func complete() {
+        isComplete = true
     }
 }
 
@@ -369,6 +431,22 @@ private func coordinatorAudioSelection() -> AudioDeviceSelection {
     )
 }
 
+private func coordinatorConfiguration(
+    preferences: TranslationPreferences = TranslationPreferences(
+        motherLanguage: .chinese,
+        meetingOutputLanguage: .german
+    )
+) -> TranslationCoordinatorConfiguration {
+    TranslationCoordinatorConfiguration(
+        apiConfiguration: .default,
+        preferences: preferences,
+        audioConfiguration: AudioEngineConfiguration(
+            selection: coordinatorAudioSelection()
+        ),
+        apiKey: "test-key"
+    )
+}
+
 private func voicedPCM16(byteCount: Int = 9_600) -> Data {
     var data = Data(capacity: byteCount)
     let amplitude = UInt16(bitPattern: 8_000)
@@ -401,6 +479,109 @@ private func eventually(
         try? await Task.sleep(for: .milliseconds(1))
     }
     return false
+}
+
+@Test
+func stopWhileAudioStartIsPendingInvalidatesTheOldStart() async throws {
+    let audio = CoordinatorAudioEngineFake(blocksStart: true)
+    let sessions = [
+        CoordinatorSessionFake(),
+        CoordinatorSessionFake(),
+    ]
+    let builder = CoordinatorSessionBuilderFake(sessions: sessions)
+    let coordinator = TranslationCoordinator(
+        audioEngine: audio,
+        sessionBuilder: builder
+    )
+    let startTask = Task {
+        try await coordinator.start(configuration: coordinatorConfiguration())
+    }
+
+    #expect(await eventually {
+        await audio.startConfigurations.count == 1
+    })
+    await coordinator.stop()
+    await audio.releaseStarts()
+    try await startTask.value
+
+    #expect(await builder.requests.isEmpty)
+    #expect(await coordinator.state == TranslationCoordinatorState())
+    await coordinator.stop()
+}
+
+@Test
+func stopWhileOutboundHandshakeIsPendingClosesAllStartupSessions() async throws {
+    let inbound = BlockingCoordinatorSession()
+    let outbound = BlockingCoordinatorSession()
+    let coordinator = TranslationCoordinator(
+        audioEngine: CoordinatorAudioEngineFake(),
+        sessionBuilder: BlockingCoordinatorSessionBuilder(
+            sessions: [inbound, outbound]
+        )
+    )
+    let startTask = Task {
+        try await coordinator.start(configuration: coordinatorConfiguration())
+    }
+
+    #expect(await eventually {
+        let inboundCount = await inbound.connectCount
+        let outboundCount = await outbound.connectCount
+        return inboundCount == 1 && outboundCount == 1
+    })
+    await inbound.releaseConnections()
+    #expect(await eventually {
+        await coordinator.state.inbound == .active
+    })
+
+    await coordinator.stop()
+    #expect(await inbound.closeCount == 1)
+    #expect(await outbound.closeCount == 1)
+
+    await outbound.releaseConnections()
+    try await startTask.value
+    #expect(await coordinator.state == TranslationCoordinatorState())
+    #expect(await inbound.closeCount == 1)
+    #expect(await outbound.closeCount == 1)
+    await coordinator.stop()
+}
+
+@Test
+func secondStartCannotRunInParallelWithPendingStart() async throws {
+    let audio = CoordinatorAudioEngineFake(blocksStart: true)
+    let builder = CoordinatorSessionBuilderFake(
+        sessions: [
+            CoordinatorSessionFake(),
+            CoordinatorSessionFake(),
+            CoordinatorSessionFake(),
+            CoordinatorSessionFake(),
+        ]
+    )
+    let coordinator = TranslationCoordinator(
+        audioEngine: audio,
+        sessionBuilder: builder
+    )
+    let firstStart = Task {
+        try await coordinator.start(configuration: coordinatorConfiguration())
+    }
+    #expect(await eventually {
+        await audio.startConfigurations.count == 1
+    })
+
+    let secondCompletion = CoordinatorCompletionRecorder()
+    let secondStart = Task {
+        try await coordinator.start(configuration: coordinatorConfiguration())
+        await secondCompletion.complete()
+    }
+
+    #expect(await eventually {
+        await secondCompletion.isComplete
+    })
+    #expect(await audio.startConfigurations.count == 1)
+
+    await audio.releaseStarts()
+    try await firstStart.value
+    try await secondStart.value
+    await coordinator.stop()
 }
 
 @Test
@@ -943,10 +1124,115 @@ func failedInboundSessionReconnectsWithoutRestartingOutbound() async throws {
 }
 
 @Test
-func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
-    let stale = CoordinatorSessionFake(
-        appendErrors: [.disconnected]
+func failedInitialConnectClosesTheRejectedSession() async throws {
+    let rejected = CoordinatorSessionFake(connectError: .disconnected)
+    let recovered = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        inbound: rejected,
+        additionalSessions: [recovered],
+        reconnectDelays: [.zero]
     )
+
+    try await harness.start()
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+
+    #expect(await rejected.closeCount == 1)
+    await harness.coordinator.stop()
+}
+
+@Test
+func appendFailureClosesTheReplacedSession() async throws {
+    let replaced = CoordinatorSessionFake(
+        appendErrors: [.disconnected],
+        emitsClosedOnClose: false
+    )
+    let recovered = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        inbound: replaced,
+        additionalSessions: [recovered],
+        reconnectDelays: [.zero]
+    )
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+
+    #expect(await replaced.closeCount == 1)
+    await harness.coordinator.stop()
+}
+
+@Test
+func failedReconnectConnectClosesEveryRejectedSession() async throws {
+    let replaced = CoordinatorSessionFake(
+        appendErrors: [.disconnected],
+        emitsClosedOnClose: false
+    )
+    let rejectedReconnect = CoordinatorSessionFake(
+        connectError: .disconnected
+    )
+    let recovered = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        inbound: replaced,
+        additionalSessions: [rejectedReconnect, recovered],
+        reconnectDelays: [.zero, .zero]
+    )
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 4 && inboundState == .active
+    })
+
+    #expect(await replaced.closeCount == 1)
+    #expect(await rejectedReconnect.closeCount == 1)
+    await harness.coordinator.stop()
+}
+
+@Test
+func inboundFailureAfterSpeechEndedStillCompletesRecovery() async throws {
+    let recovered = CoordinatorSessionFake()
+    let harness = CoordinatorHarness(
+        additionalSessions: [recovered],
+        reconnectDelays: [.zero]
+    )
+    try await harness.start()
+
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    for _ in 0..<30 {
+        await harness.audio.emit(
+            .inboundNetworkAudio(Data(repeating: 0, count: 9_600))
+        )
+    }
+    #expect(await eventually {
+        await harness.inbound.appended.count == 31
+    })
+
+    await harness.inbound.emit(.failure(.disconnected))
+    #expect(await eventually {
+        let requestCount = await harness.builder.requests.count
+        let inboundState = await harness.coordinator.state.inbound
+        return requestCount == 3 && inboundState == .active
+    })
+    #expect(await harness.audio.lastRouting?.0 == .originalFailOpen)
+    #expect(await eventually {
+        await harness.audio.lastRouting?.0 == .translated
+    })
+    await harness.coordinator.stop()
+}
+
+@Test
+func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
+    let stale = CoordinatorSessionFake(emitsClosedOnClose: false)
     let recovered = CoordinatorSessionFake()
     let harness = CoordinatorHarness(
         inbound: stale,
@@ -955,9 +1241,15 @@ func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
     )
     try await harness.start()
 
-    await harness.audio.emit(
-        .inboundNetworkAudio(voicedPCM16())
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
+    await stale.emit(
+        .success(.inputTranscript(transcriptDelta("Deutsch")))
     )
+    #expect(await eventually {
+        await harness.coordinator.state.subtitles.inboundSource == "Deutsch"
+    })
+    await stale.failNextAppend(with: .disconnected)
+    await harness.audio.emit(.inboundNetworkAudio(voicedPCM16()))
     #expect(
         await eventually {
             let requestCount = await harness.builder.requests.count
@@ -967,7 +1259,8 @@ func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
     )
 
     await stale.emit(.success(.outputAudio(audioDelta(Data([9, 9])))))
-    try await Task.sleep(for: .milliseconds(300))
+    await stale.waitUntilDeliveredEventCount(2)
+    _ = await harness.coordinator.currentState()
     #expect(!(await harness.audio.inboundPlayback).contains(Data([9, 9])))
     await harness.coordinator.stop()
 }
@@ -975,7 +1268,8 @@ func staleInboundAudioFromPreviousEpochCannotReachPlayback() async throws {
 @Test
 func staleOutboundAudioFromPreviousEpochCannotReachPlayback() async throws {
     let stale = CoordinatorSessionFake(
-        appendErrors: [.disconnected]
+        appendErrors: [.disconnected],
+        emitsClosedOnClose: false
     )
     let recovered = CoordinatorSessionFake()
     let harness = CoordinatorHarness(
@@ -997,7 +1291,8 @@ func staleOutboundAudioFromPreviousEpochCannotReachPlayback() async throws {
     )
 
     await stale.emit(.success(.outputAudio(audioDelta(Data([8, 8])))))
-    try await Task.sleep(for: .milliseconds(10))
+    await stale.waitUntilDeliveredEventCount(1)
+    _ = await harness.coordinator.currentState()
     #expect(!(await harness.audio.outboundPlayback).contains(Data([8, 8])))
     await harness.coordinator.stop()
 }

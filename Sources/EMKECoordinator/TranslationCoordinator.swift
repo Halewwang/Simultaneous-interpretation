@@ -95,9 +95,17 @@ public actor TranslationCoordinator {
     private let reconnectDelays: [Duration]
     private let levelTimeNanoseconds: @Sendable () -> UInt64
 
+    private struct PendingSession: Sendable {
+        let lifecycle: UInt64
+        let epoch: UInt64
+        let session: any TranslationSessionControlling
+    }
+
     private var configuration: TranslationCoordinatorConfiguration?
     private var inboundSession: (any TranslationSessionControlling)?
     private var outboundSession: (any TranslationSessionControlling)?
+    private var inboundPendingSession: PendingSession?
+    private var outboundPendingSession: PendingSession?
     private var audioTask: Task<Void, Never>?
     private var inboundReceiveTask: Task<Void, Never>?
     private var outboundReceiveTask: Task<Void, Never>?
@@ -107,6 +115,7 @@ public actor TranslationCoordinator {
     private var outboundReconnectTask: Task<Void, Never>?
     private var inboundEpoch: UInt64 = 0
     private var outboundEpoch: UInt64 = 0
+    private var lifecycleGeneration: UInt64 = 0
     private var inboundBatcher = PCMFrameBatcher()
     private var outboundBatcher = PCMFrameBatcher()
     private var inboundVAD = PCMVoiceActivityDetector()
@@ -120,6 +129,7 @@ public actor TranslationCoordinator {
     )
     private var inboundUtteranceActive = false
     private var routing = RoutingStateMachine()
+    private var isStarting = false
     private var isStopping = false
     private var events: [TranslationCoordinatorEvent] = []
     private var eventWaiters: [
@@ -157,8 +167,12 @@ public actor TranslationCoordinator {
     public func start(
         configuration: TranslationCoordinatorConfiguration
     ) async throws {
-        guard !state.isRunning else { return }
+        guard !state.isRunning, !isStarting, !isStopping else { return }
 
+        let lifecycle = advanceLifecycleGeneration()
+        let startInboundEpoch = advanceEpoch(for: .inbound)
+        let startOutboundEpoch = advanceEpoch(for: .outbound)
+        isStarting = true
         self.configuration = configuration
         isStopping = false
         state = TranslationCoordinatorState(
@@ -171,17 +185,26 @@ public actor TranslationCoordinator {
         )
         publishState()
 
-        try await audioEngine.start(
-            configuration: configuration.audioConfiguration
-        )
+        do {
+            try await audioEngine.start(
+                configuration: configuration.audioConfiguration
+            )
+        } catch {
+            if isCurrentLifecycle(lifecycle) {
+                isStarting = false
+            }
+            throw error
+        }
+        guard isCurrentLifecycle(lifecycle),
+              isCurrent(startInboundEpoch, for: .inbound),
+              isCurrent(startOutboundEpoch, for: .outbound),
+              !isStopping else { return }
 
         resetRuntimeBuffers(motherLanguage: configuration.preferences.motherLanguage)
         routing = RoutingStateMachine()
         routing.handle(.translationStarted)
         startAudioLoop()
 
-        let startInboundEpoch = advanceEpoch(for: .inbound)
-        let startOutboundEpoch = advanceEpoch(for: .outbound)
         let inbound = await sessionBuilder.makeSession(
             configuration: configuration.apiConfiguration,
             sessionConfiguration: TranslationSessionConfiguration(
@@ -192,12 +215,18 @@ public actor TranslationCoordinator {
             ),
             apiKey: configuration.apiKey
         )
-        guard isCurrent(startInboundEpoch, for: .inbound),
+        guard isCurrentLifecycle(lifecycle),
+              isCurrent(startInboundEpoch, for: .inbound),
               !isStopping else {
             try? await inbound.close()
             return
         }
-        inboundSession = inbound
+        storePendingSession(
+            inbound,
+            channel: .inbound,
+            lifecycle: lifecycle,
+            epoch: startInboundEpoch
+        )
 
         let usesOutboundBypass = configuration.preferences.motherLanguage
             == configuration.preferences.meetingOutputLanguage
@@ -214,62 +243,93 @@ public actor TranslationCoordinator {
                 ),
                 apiKey: configuration.apiKey
             )
-            guard isCurrent(startOutboundEpoch, for: .outbound),
+            guard isCurrentLifecycle(lifecycle),
+                  isCurrent(startOutboundEpoch, for: .outbound),
                   !isStopping else {
                 try? await newOutbound.close()
                 return
             }
             outbound = newOutbound
-            outboundSession = newOutbound
+            storePendingSession(
+                newOutbound,
+                channel: .outbound,
+                lifecycle: lifecycle,
+                epoch: startOutboundEpoch
+            )
         }
 
         if let outbound {
             async let inboundConnection: Void = connectInitialSession(
                 inbound,
                 channel: .inbound,
-                epoch: startInboundEpoch
+                epoch: startInboundEpoch,
+                lifecycle: lifecycle
             )
             async let outboundConnection: Void = connectInitialSession(
                 outbound,
                 channel: .outbound,
-                epoch: startOutboundEpoch
+                epoch: startOutboundEpoch,
+                lifecycle: lifecycle
             )
             _ = await (inboundConnection, outboundConnection)
         } else {
             await connectInitialSession(
                 inbound,
                 channel: .inbound,
-                epoch: startInboundEpoch
+                epoch: startInboundEpoch,
+                lifecycle: lifecycle
             )
         }
 
-        guard !isStopping,
+        guard isCurrentLifecycle(lifecycle),
+              !isStopping,
               self.configuration != nil else { return }
         let completionInboundEpoch = inboundEpoch
         let completionOutboundEpoch = outboundEpoch
         await applyRouting()
         guard isCurrent(completionInboundEpoch, for: .inbound),
               isCurrent(completionOutboundEpoch, for: .outbound),
+              isCurrentLifecycle(lifecycle),
               !isStopping else { return }
         state.isRunning = true
+        isStarting = false
         publishState()
     }
 
     public func stop() async {
-        guard state.isRunning || state.inbound == .connecting else { return }
+        guard !isStopping,
+              isStarting
+                || state.isRunning
+                || state.inbound != .stopped
+                || state.outbound != .stopped else { return }
         isStopping = true
+        isStarting = false
+        advanceLifecycleGeneration()
         advanceEpoch(for: .inbound)
         advanceEpoch(for: .outbound)
         cancelTimingAndReconnectTasks()
 
         let inbound = inboundSession
         let outbound = outboundSession
+        let pendingInbound = inboundPendingSession?.session
+        let pendingOutbound = outboundPendingSession?.session
+        inboundSession = nil
+        outboundSession = nil
+        inboundPendingSession = nil
+        outboundPendingSession = nil
+        configuration = nil
         await withTaskGroup(of: Void.self) { group in
             if let inbound {
                 group.addTask { try? await inbound.close() }
             }
             if let outbound {
                 group.addTask { try? await outbound.close() }
+            }
+            if let pendingInbound {
+                group.addTask { try? await pendingInbound.close() }
+            }
+            if let pendingOutbound {
+                group.addTask { try? await pendingOutbound.close() }
             }
         }
 
@@ -281,12 +341,9 @@ public actor TranslationCoordinator {
         await inboundReceiveTask?.value
         await outboundReceiveTask?.value
 
-        inboundSession = nil
-        outboundSession = nil
         audioTask = nil
         inboundReceiveTask = nil
         outboundReceiveTask = nil
-        configuration = nil
         resetRuntimeBuffers(motherLanguage: .chinese)
         state = TranslationCoordinatorState()
         routing.handle(.translationStopped)
@@ -358,14 +415,52 @@ public actor TranslationCoordinator {
         case outbound
     }
 
+    private static func nextGeneration(
+        after generation: UInt64,
+        name: StaticString
+    ) -> UInt64 {
+        guard generation != UInt64.max else {
+            fatalError("\(name) generation exhausted")
+        }
+        return generation + 1
+    }
+
+    @discardableResult
+    private func advanceLifecycleGeneration() -> UInt64 {
+        lifecycleGeneration = Self.nextGeneration(
+            after: lifecycleGeneration,
+            name: "lifecycle"
+        )
+        return lifecycleGeneration
+    }
+
+    private func isCurrentLifecycle(_ generation: UInt64) -> Bool {
+        generation == lifecycleGeneration
+    }
+
     @discardableResult
     private func advanceEpoch(for channel: Channel) -> UInt64 {
         switch channel {
         case .inbound:
-            inboundEpoch &+= 1
+            let rebindsFinish = !isStopping
+                && inboundFinishTask != nil
+                && inboundUtteranceActive
+                && !inboundVAD.isSpeaking
+            inboundFinishTask?.cancel()
+            inboundFinishTask = nil
+            inboundEpoch = Self.nextGeneration(
+                after: inboundEpoch,
+                name: "inbound"
+            )
+            if rebindsFinish {
+                scheduleInboundFinish(epoch: inboundEpoch)
+            }
             return inboundEpoch
         case .outbound:
-            outboundEpoch &+= 1
+            outboundEpoch = Self.nextGeneration(
+                after: outboundEpoch,
+                name: "outbound"
+            )
             return outboundEpoch
         }
     }
@@ -376,6 +471,44 @@ public actor TranslationCoordinator {
             epoch == inboundEpoch
         case .outbound:
             epoch == outboundEpoch
+        }
+    }
+
+    private func storePendingSession(
+        _ session: any TranslationSessionControlling,
+        channel: Channel,
+        lifecycle: UInt64,
+        epoch: UInt64
+    ) {
+        let pending = PendingSession(
+            lifecycle: lifecycle,
+            epoch: epoch,
+            session: session
+        )
+        switch channel {
+        case .inbound:
+            inboundPendingSession = pending
+        case .outbound:
+            outboundPendingSession = pending
+        }
+    }
+
+    private func takePendingSession(
+        channel: Channel,
+        lifecycle: UInt64,
+        epoch: UInt64
+    ) -> (any TranslationSessionControlling)? {
+        switch channel {
+        case .inbound:
+            guard inboundPendingSession?.lifecycle == lifecycle,
+                  inboundPendingSession?.epoch == epoch else { return nil }
+            defer { inboundPendingSession = nil }
+            return inboundPendingSession?.session
+        case .outbound:
+            guard outboundPendingSession?.lifecycle == lifecycle,
+                  outboundPendingSession?.epoch == epoch else { return nil }
+            defer { outboundPendingSession = nil }
+            return outboundPendingSession?.session
         }
     }
 
@@ -393,42 +526,71 @@ public actor TranslationCoordinator {
     private func connectInitialSession(
         _ session: any TranslationSessionControlling,
         channel: Channel,
-        epoch: UInt64
+        epoch: UInt64,
+        lifecycle: UInt64
     ) async {
+        let error = await Self.connectError(for: session)
+        guard isCurrentLifecycle(lifecycle),
+              isCurrent(epoch, for: channel),
+              !isStopping else {
+            if let stale = takePendingSession(
+                channel: channel,
+                lifecycle: lifecycle,
+                epoch: epoch
+            ) {
+                try? await stale.close()
+            }
+            return
+        }
+        guard let ownedSession = takePendingSession(
+            channel: channel,
+            lifecycle: lifecycle,
+            epoch: epoch
+        ) else { return }
+
         let resultingEpoch: UInt64
-        if let error = await Self.connectError(for: session) {
-            guard isCurrent(epoch, for: channel), !isStopping else { return }
+        if let error {
             let retryEpoch = advanceEpoch(for: channel)
             resultingEpoch = retryEpoch
             switch channel {
             case .inbound:
-                inboundSession = nil
                 state.inbound = .failed(message: String(describing: error))
                 routing.handle(.inboundConnectionFailed)
             case .outbound:
-                outboundSession = nil
                 state.outbound = .failed(message: String(describing: error))
                 routing.handle(.outboundConnectionFailed)
             }
             scheduleReconnect(
                 channel: channel,
                 attempt: 0,
-                expectedEpoch: retryEpoch
+                expectedEpoch: retryEpoch,
+                lifecycle: lifecycle
             )
         } else {
-            guard isCurrent(epoch, for: channel), !isStopping else { return }
             resultingEpoch = epoch
             switch channel {
             case .inbound:
+                inboundSession = ownedSession
                 state.inbound = .active
-                startInboundReceiveLoop(session: session, epoch: epoch)
+                startInboundReceiveLoop(
+                    session: ownedSession,
+                    epoch: epoch
+                )
             case .outbound:
+                outboundSession = ownedSession
                 state.outbound = .active
-                startOutboundReceiveLoop(session: session, epoch: epoch)
+                startOutboundReceiveLoop(
+                    session: ownedSession,
+                    epoch: epoch
+                )
             }
         }
         await applyRouting()
+        if error != nil {
+            try? await ownedSession.close()
+        }
         guard isCurrent(resultingEpoch, for: channel),
+              isCurrentLifecycle(lifecycle),
               !isStopping else { return }
         publishState()
     }
@@ -837,7 +999,9 @@ public actor TranslationCoordinator {
         epoch: UInt64
     ) async {
         guard isCurrent(epoch, for: channel), !isStopping else { return }
+        let lifecycle = lifecycleGeneration
         let retryEpoch: UInt64
+        let failedSession: (any TranslationSessionControlling)?
         switch channel {
         case .inbound:
             guard inboundSession != nil || state.inbound == .active else {
@@ -846,17 +1010,17 @@ public actor TranslationCoordinator {
             retryEpoch = advanceEpoch(for: .inbound)
             inboundReceiveTask?.cancel()
             inboundDeadlineTask?.cancel()
-            inboundFinishTask?.cancel()
             inboundDeadlineTask = nil
-            inboundFinishTask = nil
             inboundBatcher.reset()
+            failedSession = inboundSession
             inboundSession = nil
             state.inbound = .failed(message: String(describing: error))
             routing.handle(.inboundConnectionFailed)
             scheduleReconnect(
                 channel: .inbound,
                 attempt: 0,
-                expectedEpoch: retryEpoch
+                expectedEpoch: retryEpoch,
+                lifecycle: lifecycle
             )
         case .outbound:
             guard outboundSession != nil || state.outbound == .active else {
@@ -865,17 +1029,23 @@ public actor TranslationCoordinator {
             retryEpoch = advanceEpoch(for: .outbound)
             outboundReceiveTask?.cancel()
             outboundBatcher.reset()
+            failedSession = outboundSession
             outboundSession = nil
             state.outbound = .failed(message: String(describing: error))
             routing.handle(.outboundConnectionFailed)
             scheduleReconnect(
                 channel: .outbound,
                 attempt: 0,
-                expectedEpoch: retryEpoch
+                expectedEpoch: retryEpoch,
+                lifecycle: lifecycle
             )
         }
         await applyRouting()
+        if let failedSession {
+            try? await failedSession.close()
+        }
         guard isCurrent(retryEpoch, for: channel),
+              isCurrentLifecycle(lifecycle),
               !isStopping else { return }
         publishState()
     }
@@ -883,11 +1053,13 @@ public actor TranslationCoordinator {
     private func scheduleReconnect(
         channel: Channel,
         attempt: Int,
-        expectedEpoch: UInt64
+        expectedEpoch: UInt64,
+        lifecycle: UInt64
     ) {
         guard reconnectDelays.indices.contains(attempt),
               configuration != nil,
               !isStopping,
+              isCurrentLifecycle(lifecycle),
               isCurrent(expectedEpoch, for: channel) else { return }
         let delay = reconnectDelays[attempt]
         let task = Task { [weak self] in
@@ -896,7 +1068,8 @@ public actor TranslationCoordinator {
             await self.reconnect(
                 channel: channel,
                 attempt: attempt,
-                expectedEpoch: expectedEpoch
+                expectedEpoch: expectedEpoch,
+                lifecycle: lifecycle
             )
         }
         switch channel {
@@ -912,12 +1085,14 @@ public actor TranslationCoordinator {
     private func reconnect(
         channel: Channel,
         attempt: Int,
-        expectedEpoch: UInt64
+        expectedEpoch: UInt64,
+        lifecycle: UInt64
     ) async {
         guard isCurrent(expectedEpoch, for: channel),
+              isCurrentLifecycle(lifecycle),
               !isStopping,
               let configuration else { return }
-        let sessionEpoch = advanceEpoch(for: channel)
+        let sessionEpoch = expectedEpoch
         switch channel {
         case .inbound:
             state.inbound = .reconnecting(attempt: attempt + 1)
@@ -947,13 +1122,38 @@ public actor TranslationCoordinator {
             sessionConfiguration: sessionConfiguration,
             apiKey: configuration.apiKey
         )
-        guard isCurrent(sessionEpoch, for: channel), !isStopping else {
+        guard isCurrentLifecycle(lifecycle),
+              isCurrent(sessionEpoch, for: channel),
+              !isStopping else {
             try? await session.close()
             return
         }
-        if let error = await Self.connectError(for: session) {
-            guard isCurrent(sessionEpoch, for: channel),
-                  !isStopping else { return }
+        storePendingSession(
+            session,
+            channel: channel,
+            lifecycle: lifecycle,
+            epoch: sessionEpoch
+        )
+        let error = await Self.connectError(for: session)
+        guard isCurrentLifecycle(lifecycle),
+              isCurrent(sessionEpoch, for: channel),
+              !isStopping else {
+            if let stale = takePendingSession(
+                channel: channel,
+                lifecycle: lifecycle,
+                epoch: sessionEpoch
+            ) {
+                try? await stale.close()
+            }
+            return
+        }
+        guard let ownedSession = takePendingSession(
+            channel: channel,
+            lifecycle: lifecycle,
+            epoch: sessionEpoch
+        ) else { return }
+
+        if let error {
             let retryEpoch = advanceEpoch(for: channel)
             switch channel {
             case .inbound:
@@ -965,32 +1165,37 @@ public actor TranslationCoordinator {
             scheduleReconnect(
                 channel: channel,
                 attempt: attempt + 1,
-                expectedEpoch: retryEpoch
+                expectedEpoch: retryEpoch,
+                lifecycle: lifecycle
             )
+            try? await ownedSession.close()
             return
         }
 
-        guard isCurrent(sessionEpoch, for: channel), !isStopping else {
-            try? await session.close()
-            return
-        }
         switch channel {
         case .inbound:
-            inboundSession = session
+            inboundSession = ownedSession
             state.inbound = .active
             routing.handle(.inboundConnectionRecovered)
             if !inboundUtteranceActive {
                 routing.handle(.utteranceEnded)
             }
-            startInboundReceiveLoop(session: session, epoch: sessionEpoch)
+            startInboundReceiveLoop(
+                session: ownedSession,
+                epoch: sessionEpoch
+            )
         case .outbound:
-            outboundSession = session
+            outboundSession = ownedSession
             state.outbound = .active
             routing.handle(.outboundConnectionRecovered)
-            startOutboundReceiveLoop(session: session, epoch: sessionEpoch)
+            startOutboundReceiveLoop(
+                session: ownedSession,
+                epoch: sessionEpoch
+            )
         }
         await applyRouting()
         guard isCurrent(sessionEpoch, for: channel),
+              isCurrentLifecycle(lifecycle),
               !isStopping else { return }
         publishState()
     }
