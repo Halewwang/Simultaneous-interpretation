@@ -44,20 +44,46 @@ public struct SubtitleSnapshot: Equatable, Sendable {
 
 public struct TranslationCoordinatorState: Equatable, Sendable {
     public var isRunning: Bool
+    public var audioEngineStarted: Bool
     public var inbound: TranslationChannelState
     public var outbound: TranslationChannelState
     public var subtitles: SubtitleSnapshot
+    public var latency: TranslationLatencyDiagnostics
 
     public init(
         isRunning: Bool = false,
+        audioEngineStarted: Bool = false,
         inbound: TranslationChannelState = .stopped,
         outbound: TranslationChannelState = .stopped,
-        subtitles: SubtitleSnapshot = SubtitleSnapshot()
+        subtitles: SubtitleSnapshot = SubtitleSnapshot(),
+        latency: TranslationLatencyDiagnostics = .empty
     ) {
         self.isRunning = isRunning
+        self.audioEngineStarted = audioEngineStarted
         self.inbound = inbound
         self.outbound = outbound
         self.subtitles = subtitles
+        self.latency = latency
+    }
+
+    public var canListen: Bool {
+        guard audioEngineStarted else { return false }
+        return switch inbound {
+        case .active, .bypassed, .reconnecting, .failed:
+            true
+        case .stopped, .connecting:
+            false
+        }
+    }
+
+    public var canSpeak: Bool {
+        guard audioEngineStarted else { return false }
+        return switch outbound {
+        case .active, .bypassed:
+            true
+        case .stopped, .connecting, .reconnecting, .failed:
+            false
+        }
     }
 }
 

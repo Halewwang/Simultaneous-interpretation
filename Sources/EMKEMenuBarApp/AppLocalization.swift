@@ -135,6 +135,9 @@ enum AppCopyKey: CaseIterable, Sendable {
     case sendOutboundOriginal
     case stopped
     case channelConnecting
+    case audioEngineStarted
+    case canListen
+    case canSpeak
     case originalBypass
     case stable
     case sameLanguagePassThrough
@@ -437,6 +440,12 @@ struct AppCopy: Equatable, Sendable {
             localized(zhHans: "已停止", english: "Stopped")
         case .channelConnecting:
             localized(zhHans: "连接中", english: "Connecting")
+        case .audioEngineStarted:
+            localized(zhHans: "音频引擎已启动", english: "Audio engine ready")
+        case .canListen:
+            localized(zhHans: "可以收听", english: "Can listen")
+        case .canSpeak:
+            localized(zhHans: "可以发言", english: "Can speak")
         case .originalBypass:
             localized(zhHans: "原音旁路", english: "Original audio bypass")
         case .stable:

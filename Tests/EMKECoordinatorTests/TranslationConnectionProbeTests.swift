@@ -191,6 +191,161 @@ func completeTranslationCapabilitiesAreReportedSeparately() async {
 }
 
 @Test
+func probeCanSendFortyMillisecondSpeechChunks() async {
+    let inbound = ProbeSessionFake(
+        closingEvents: [
+            .inputTranscript(
+                TranslationTranscriptDelta(
+                    text: "hello",
+                    elapsedMilliseconds: nil
+                )
+            ),
+            .outputAudio(probeAudioDelta(Data([1, 2]))),
+        ]
+    )
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+
+    let firstChunk = Data(repeating: 1, count: 1_920)
+    let secondChunk = Data(repeating: 2, count: 1_920)
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: firstChunk + secondChunk
+    )
+
+    #expect(await inbound.appended == [firstChunk, secondChunk])
+}
+
+@Test
+func probeWithoutChunkingUsesOneAppend() async {
+    let inbound = ProbeSessionFake()
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let speech = Data([1, 2, 3, 4])
+
+    _ = await probe.run(
+        configuration: probeConfiguration,
+        speechSample: speech
+    )
+
+    #expect(await inbound.appended == [speech])
+}
+
+@Test
+func chunkedProbeDoesNotAppendAnEmptySample() async {
+    let inbound = ProbeSessionFake()
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: Data()
+    )
+
+    #expect(await inbound.appended.isEmpty)
+}
+
+@Test
+func chunkLargerThanPayloadUsesOneShortAppend() async {
+    let inbound = ProbeSessionFake()
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+    let speech = Data([1, 2, 3, 4])
+
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: speech
+    )
+
+    #expect(await inbound.appended == [speech])
+}
+
+@Test
+func chunkedProbePreservesANonDivisibleEvenTail() async {
+    let inbound = ProbeSessionFake()
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+    let fullChunk = Data(repeating: 1, count: 1_920)
+    let tail = Data([2, 2])
+
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: fullChunk + tail
+    )
+
+    #expect(await inbound.appended == [fullChunk, tail])
+}
+
+@Test
+func chunkedProbePreservesTheCurrentOddPayloadBehavior() async {
+    let inbound = ProbeSessionFake()
+    let probe = TranslationConnectionProbe(
+        sessionBuilder: ProbeBuilderFake(
+            sessions: [inbound, ProbeSessionFake()]
+        )
+    )
+    let configuration = TranslationConnectionProbeConfiguration(
+        apiConfiguration: .default,
+        apiKey: "test-key",
+        inboundTargetLanguage: .chinese,
+        outboundTargetLanguage: .german,
+        speechChunkByteCount: 1_920
+    )
+    let fullChunk = Data(repeating: 1, count: 1_920)
+    let oddTail = Data([2])
+
+    _ = await probe.run(
+        configuration: configuration,
+        speechSample: fullChunk + oddTail
+    )
+
+    #expect(await inbound.appended == [fullChunk, oddTail])
+}
+
+@Test
 func invalidAPIKeyIsReportedAsAuthenticationFailure() async {
     let first = ProbeSessionFake(
         connectError: TranslationSessionError.server(

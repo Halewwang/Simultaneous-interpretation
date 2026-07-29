@@ -147,12 +147,13 @@ struct TranslationDashboardPresentation: Equatable {
     ) -> TranslationDashboardPresentation {
         let running = coordinatorState.isRunning
         let effectiveInboundState: TranslationChannelState =
-            isStarting && !running ? .connecting : coordinatorState.inbound
+            isStopping ? .stopped : coordinatorState.inbound
         let effectiveOutboundState: TranslationChannelState =
-            isStarting && !running ? .connecting : coordinatorState.outbound
+            isStopping ? .stopped : coordinatorState.outbound
         let inbound = TranslationChannelPresentation.make(
             channel: .inbound,
             state: effectiveInboundState,
+            capabilityAvailable: coordinatorState.canListen,
             bypassEnabled: inboundBypassEnabled,
             copy: copy
         )
@@ -162,6 +163,7 @@ struct TranslationDashboardPresentation: Equatable {
         let outbound = TranslationChannelPresentation.make(
             channel: .outbound,
             state: effectiveOutboundState,
+            capabilityAvailable: coordinatorState.canSpeak,
             bypassEnabled: outboundBypassEnabled,
             automaticBypass: usesAutomaticOutboundBypass,
             copy: copy
@@ -198,6 +200,7 @@ struct TranslationDashboardPresentation: Equatable {
                 isStarting: isStarting,
                 isStopping: isStopping,
                 isRunning: running,
+                audioEngineStarted: coordinatorState.audioEngineStarted,
                 inboundState: effectiveInboundState,
                 outboundState: effectiveOutboundState,
                 translationStartedAt: translationStartedAt,
@@ -235,6 +238,7 @@ struct TranslationDashboardPresentation: Equatable {
         isStarting: Bool,
         isStopping: Bool,
         isRunning: Bool,
+        audioEngineStarted: Bool,
         inboundState: TranslationChannelState,
         outboundState: TranslationChannelState,
         translationStartedAt: Date?,
@@ -242,6 +246,9 @@ struct TranslationDashboardPresentation: Equatable {
         copy: AppCopy
     ) -> String {
         if isStopping { return copy.text(.stopping) }
+        if isStarting && audioEngineStarted {
+            return copy.text(.audioEngineStarted)
+        }
         if isStarting { return copy.text(.connecting) }
         if isRunning {
             if case .failed = outboundState {
@@ -359,6 +366,8 @@ final class MenuBarModel: ObservableObject {
     private var driverAvailable = false
     private var hasStoredAPIKey = false
     private var coordinatorLifecycleRevision: UInt = 0
+    private var coordinatorObservationGeneration: UInt = 0
+    private var startOperationGeneration: UInt = 0
     private var eventTask: Task<Void, Never>?
     private var audioInputDiagnosticTask: Task<Void, Never>?
     private var audioInputDiagnosticGeneration: UInt = 0
@@ -811,12 +820,19 @@ final class MenuBarModel: ObservableObject {
     func start() async {
         await stopAudioInputTest()
         await reloadDevicesAsync()
+        configurationErrorValue = nil
         guard canStart,
               let selectedInputUID,
               let selectedOutputUID else { return }
+        startOperationGeneration &+= 1
+        let startGeneration = startOperationGeneration
         isStarting = true
-        defer { isStarting = false }
-        configurationErrorValue = nil
+        defer {
+            if startGeneration == startOperationGeneration {
+                isStarting = false
+            }
+        }
+        var observationGeneration: UInt?
         do {
             try await requireMicrophonePermission()
             try await persistDraftKeyIfNeeded()
@@ -829,6 +845,7 @@ final class MenuBarModel: ObservableObject {
                 physicalInputUID: selectedInputUID,
                 physicalOutputUID: selectedOutputUID
             )
+            observationGeneration = startObservingCoordinator()
             try await coordinator.start(
                 configuration: TranslationCoordinatorConfiguration(
                     apiConfiguration: apiConfiguration,
@@ -839,14 +856,22 @@ final class MenuBarModel: ObservableObject {
                     apiKey: apiKey
                 )
             )
-            coordinatorState = await coordinator.currentState()
-            if coordinatorState.isRunning {
+            let state = await coordinator.currentState()
+            guard startGeneration == startOperationGeneration,
+                  observationGeneration == coordinatorObservationGeneration,
+                  !isStopping
+            else { return }
+            coordinatorState = state
+            if state.isRunning {
                 translationStartedAt = Date()
             } else {
                 resetRuntimePresentation()
             }
-            startObservingCoordinator()
         } catch {
+            guard startGeneration == startOperationGeneration else { return }
+            if observationGeneration == coordinatorObservationGeneration {
+                stopObservingCoordinator()
+            }
             configurationErrorValue = Self.configurationMessage(for: error)
             coordinatorState = TranslationCoordinatorState()
             resetRuntimePresentation()
@@ -854,6 +879,8 @@ final class MenuBarModel: ObservableObject {
     }
 
     func stop() async {
+        startOperationGeneration &+= 1
+        isStarting = false
         isStopping = true
         defer { isStopping = false }
         await coordinator.stop()
@@ -1197,19 +1224,25 @@ final class MenuBarModel: ObservableObject {
         interfaceLanguage = settings.interfaceLanguage
     }
 
-    private func startObservingCoordinator() {
-        eventTask?.cancel()
+    @discardableResult
+    private func startObservingCoordinator() -> UInt {
+        stopObservingCoordinator()
+        coordinatorObservationGeneration &+= 1
+        let observationGeneration = coordinatorObservationGeneration
         eventTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
                 let event = await coordinator.nextEvent()
-                if Task.isCancelled { return }
+                guard !Task.isCancelled,
+                      observationGeneration
+                        == coordinatorObservationGeneration
+                else { return }
                 switch event {
                 case .stateChanged(let state):
                     coordinatorState = state
                     if !state.hasActivePresentation(
                         translationStartedAt: translationStartedAt
-                    ) {
+                    ), !isStarting, !state.audioEngineStarted {
                         finishCoordinatorSession()
                         return
                     }
@@ -1221,17 +1254,37 @@ final class MenuBarModel: ObservableObject {
                 case .audioBackpressure(let droppedFrames):
                     inventoryErrorValue = .droppedFrames(droppedFrames)
                 case .stopped:
+                    let latest = await coordinator.currentState()
+                    guard !Task.isCancelled,
+                          observationGeneration
+                            == coordinatorObservationGeneration
+                    else { return }
+                    if isStarting || latest.hasActivePresentation(
+                        translationStartedAt: translationStartedAt
+                    ) {
+                        coordinatorState = latest
+                        if latest.isRunning, translationStartedAt == nil {
+                            translationStartedAt = Date()
+                        }
+                        continue
+                    }
                     finishCoordinatorSession()
                     return
                 }
             }
         }
+        return observationGeneration
     }
 
-    private func finishCoordinatorSession() {
+    private func stopObservingCoordinator() {
+        coordinatorObservationGeneration &+= 1
         let task = eventTask
         eventTask = nil
         task?.cancel()
+    }
+
+    private func finishCoordinatorSession() {
+        stopObservingCoordinator()
         coordinatorState = TranslationCoordinatorState()
         resetRuntimePresentation()
     }
