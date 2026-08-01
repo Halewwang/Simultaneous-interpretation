@@ -118,6 +118,40 @@ function Get-ExactInstalledPackage {
     return $packages[0]
 }
 
+function Assert-TrustedPackageSignature {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PackagePath,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedPublisher,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedCertificateThumbprint
+    )
+
+    $signature = Get-AuthenticodeSignature -FilePath $PackagePath
+    $signer = $signature.SignerCertificate
+    $signerSubject = if ($null -eq $signer) { '<none>' } else { $signer.Subject }
+    $signerThumbprint = if ($null -eq $signer) {
+        '<none>'
+    } else {
+        $signer.Thumbprint.ToUpperInvariant()
+    }
+    Write-Output (
+        "Hosted MSIX signaturePostTrustStatus=$($signature.Status) " +
+        "signer=$signerSubject thumbprint=$signerThumbprint"
+    )
+    if (
+        $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+        $null -eq $signer -or
+        $signer.Subject -cne $ExpectedPublisher -or
+        $signerThumbprint -cne $ExpectedCertificateThumbprint
+    ) {
+        throw 'Hosted MSIX trusted signature validation failed.'
+    }
+}
+
 function Assert-DriverMissingSmokeRecord {
     param(
         [Parameter(Mandatory)]
@@ -266,6 +300,11 @@ try {
     )
     $trustedPeopleStore.Add($certificate)
     $certificateAdded = $true
+
+    Assert-TrustedPackageSignature `
+        -PackagePath $resolvedPackagePath `
+        -ExpectedPublisher $ExpectedPublisher `
+        -ExpectedCertificateThumbprint $expectedThumbprint
 
     $installationAttempted = $true
     Add-AppxPackage -Path $resolvedPackagePath -ErrorAction Stop

@@ -388,12 +388,18 @@ if ($errors.Count -ne 0) {
 });
 
 test('hosted install validator targets only the exact package and certificate', async () => {
-  const source = await readFile(hostedInstallPath, 'utf8');
+  const [source, workflow] = await Promise.all([
+    readFile(hostedInstallPath, 'utf8'),
+    readFile(workflowPath, 'utf8'),
+  ]);
 
   assert.match(source, /\[string\]\$PackagePath/);
   assert.match(source, /\[string\]\$CertificatePath/);
   assert.match(source, /\[string\]\$ExpectedCertificateThumbprint/);
   assert.match(source, /Cert:\\LocalMachine\\TrustedPeople/);
+  assert.match(source, /function Assert-TrustedPackageSignature/);
+  assert.match(source, /Get-AuthenticodeSignature\s+-FilePath\s+\$PackagePath/);
+  assert.match(source, /signaturePostTrustStatus=/);
   assert.match(source, /Add-AppxPackage\s+-Path\s+\$resolvedPackagePath/);
   assert.match(source, /Get-AppxPackage\s+-Name\s+\$ExpectedPackageIdentity/);
   assert.match(source, /PackageFullName/);
@@ -409,6 +415,22 @@ test('hosted install validator targets only the exact package and certificate', 
   assert.doesNotMatch(
     source,
     /install-test-driver|uninstall-test-driver|pnputil|devcon|sc\.exe/i,
+  );
+
+  const trustedSignatureCall = source.lastIndexOf('Assert-TrustedPackageSignature');
+  assert.ok(
+    source.indexOf('$trustedPeopleStore.Add($certificate)') < trustedSignatureCall,
+    'the exact certificate must be trusted before Valid Authenticode is required',
+  );
+  assert.ok(
+    trustedSignatureCall <
+      source.indexOf('Add-AppxPackage -Path $resolvedPackagePath'),
+    'the trusted signature check must precede installation',
+  );
+  assert.doesNotMatch(
+    workflowJob(workflow, 'install-hosted-preview'),
+    /signature\.Status\s+-ne\s+\[Management\.Automation\.SignatureStatus\]::Valid/,
+    'workflow must not require Valid Authenticode before temporarily trusting the exact certificate',
   );
 });
 
