@@ -2,11 +2,12 @@
 
 ## Status
 
-DONE_WITH_CONCERNS: permanent metadata-driven workflows and the hosted-preview
-fallback are implemented, but a final hosted install run is not yet available.
-The original 25H2 job had no eligible runner; a temporary evidence-only push
-harness has triggered the replacement path but its run is not yet inspectable
-while the GitHub API is rate-limited. No install or smoke success is claimed.
+BLOCKED: permanent metadata-driven workflows and the hosted-preview fallback
+are implemented, but the required final hosted install result is not yet
+available. The original 25H2 job had no eligible runner; a temporary
+evidence-only push harness has triggered the replacement path but its run is
+not yet inspectable while the GitHub API is rate-limited. No install or smoke
+success is claimed.
 
 ## Changes
 
