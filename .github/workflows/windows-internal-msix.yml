@@ -402,11 +402,11 @@ jobs:
             $artifactRoot `
             "$env:PACKAGE_BASE_NAME.msix"
           $packageHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
-          $signature = Get-AuthenticodeSignature -FilePath $packagePath
-          Write-Host "Hosted MSIX sha256=$packageHash signatureStatus=$($signature.Status) signer=$($signature.SignerCertificate.Subject) thumbprint=$($signature.SignerCertificate.Thumbprint)"
-          if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
-            throw "The hosted MSIX signature is not valid."
-          }
+          $signatureBeforeTrust = Get-AuthenticodeSignature -FilePath $packagePath
+          $preTrustSigner = $signatureBeforeTrust.SignerCertificate
+          $preTrustSignerSubject = if ($null -eq $preTrustSigner) { "<none>" } else { $preTrustSigner.Subject }
+          $preTrustSignerThumbprint = if ($null -eq $preTrustSigner) { "<none>" } else { $preTrustSigner.Thumbprint }
+          Write-Host "Hosted MSIX sha256=$packageHash signaturePreTrustStatus=$($signatureBeforeTrust.Status) signer=$preTrustSignerSubject thumbprint=$preTrustSignerThumbprint"
           $cleanupMarker = Join-Path `
             $env:RUNNER_TEMP `
             "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
