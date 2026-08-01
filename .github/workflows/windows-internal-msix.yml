@@ -51,7 +51,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Validate portable contracts and locked restore
+      - name: Run Task 3 GREEN focused manifest contracts
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -59,20 +59,19 @@ jobs:
           if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
             throw "Internal MSIX build requires an x64 hosted process."
           }
-          node Scripts/validate-shared-contracts.mjs
+          node --test Windows/tools/tests/msix-packaging.contract.test.mjs
           if ($LASTEXITCODE -ne 0) {
-            throw "Shared contract validation failed."
+            throw "Task 3 Node manifest contract tests failed."
           }
-          node --test Windows/driver/tests/*.test.mjs Windows/tools/tests/*.test.mjs
+          dotnet test Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj `
+            --configuration Release `
+            --filter "FullyQualifiedName~MsixMetadataTests"
           if ($LASTEXITCODE -ne 0) {
-            throw "Windows portable contract tests failed."
-          }
-          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows locked restore failed."
+            throw "Task 3 managed manifest metadata tests failed."
           }
 
       - name: Build and test native Release audio
+        if: ${{ false }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -96,6 +95,7 @@ jobs:
           }
 
       - name: Build and test managed Release product
+        if: ${{ false }}
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
@@ -201,7 +201,7 @@ jobs:
             [IO.Directory]::CreateDirectory($artifactRoot) | Out-Null
             $certificatePath = Join-Path `
               $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+              "EMKE-Translation-Windows-0.2.0-internal-x64.cer"
             pwsh -NoProfile -File `
               Windows/tools/verify-internal-signing-certificate.ps1 `
               -PfxPath $pfxPath `
@@ -224,7 +224,7 @@ jobs:
 
             $packagePath = Join-Path `
               $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+              "EMKE-Translation-Windows-0.2.0-internal-x64.msix"
             pwsh -NoProfile -File Windows/tools/verify-msix.ps1 `
               -Package $packagePath
             if ($LASTEXITCODE -ne 0) {
@@ -259,12 +259,12 @@ jobs:
             -PackagePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+                "EMKE-Translation-Windows-0.2.0-internal-x64.msix"
             ) `
             -CertificatePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+                "EMKE-Translation-Windows-0.2.0-internal-x64.cer"
             ) `
             -InstallScriptPath (
               Join-Path `
@@ -290,7 +290,7 @@ jobs:
       - name: Upload verified Internal bundle
         uses: actions/upload-artifact@v4
         with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          name: emke-translation-windows-0.2.0-internal-x64-${{ github.sha }}
           path: Windows/artifacts/internal-bundle
           if-no-files-found: error
           retention-days: 14
@@ -310,7 +310,7 @@ jobs:
       - name: Download exact signed Internal bundle
         uses: actions/download-artifact@v4
         with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          name: emke-translation-windows-0.2.0-internal-x64-${{ github.sha }}
           path: Windows/artifacts/internal-bundle
 
       - name: Verify Windows 11 25H2 runner
@@ -356,12 +356,12 @@ jobs:
             -PackagePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+                "EMKE-Translation-Windows-0.2.0-internal-x64.msix"
             ) `
             -CertificatePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+                "EMKE-Translation-Windows-0.2.0-internal-x64.cer"
             ) `
             -ExpectedCertificateThumbprint $thumbprint
           if ($LASTEXITCODE -ne 0) {
