@@ -560,6 +560,7 @@ test('Windows Internal metadata keeps the version and compatibility contract', a
     recommendedDriverVersion: '1.0.0.2',
     driverPackageAvailable: false,
     channel: 'internal',
+    minimumWindowsBuild: 19045,
   });
 });
 
