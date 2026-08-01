@@ -521,6 +521,34 @@ function Write-SignerProvenance {
     }
 }
 
+function Resolve-PublishPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AppProject,
+
+        [Parameter(Mandatory)]
+        [string]$Configuration,
+
+        [Parameter(Mandatory)]
+        [string]$WindowsRoot,
+
+        [Parameter(Mandatory)]
+        [object]$ReleaseMetadata
+    )
+
+    [xml]$buildProps = Get-Content -LiteralPath (
+        Join-Path $WindowsRoot "Directory.Build.props"
+    ) -Raw
+    $targetFramework = [string]$buildProps.Project.PropertyGroup.TargetFramework
+    $expectedTargetFramework = "net10.0-windows$($ReleaseMetadata.MinimumWindowsApiContract)"
+    if ($targetFramework -cne $expectedTargetFramework) {
+        throw "TargetFramework does not match the resolved Windows API contract."
+    }
+    return Join-Path ([IO.Path]::GetDirectoryName($AppProject)) (
+        "bin/$Configuration/$targetFramework/win-$($ReleaseMetadata.Architecture)/publish"
+    )
+}
+
 if ($ValidateStagingOnly) {
     Assert-StagingTree -Path $StagingDirectory
     return
@@ -618,9 +646,11 @@ try {
         throw "Self-contained WPF publish failed."
     }
 
-    $publishPath = Join-Path (
-        [IO.Path]::GetDirectoryName($appProject)
-    ) "bin/$Configuration/net10.0-windows10.0.26100.0/win-x64/publish"
+    $publishPath = Resolve-PublishPath `
+        -AppProject $appProject `
+        -Configuration $Configuration `
+        -WindowsRoot $windowsRoot `
+        -ReleaseMetadata $releaseMetadata
     if (-not (Test-Path -LiteralPath $publishPath -PathType Container)) {
         throw "Expected self-contained WPF publish output is unavailable."
     }
