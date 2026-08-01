@@ -12,6 +12,24 @@ namespace EMKE.Integration.Tests;
 public sealed class WindowsHostCompatibilityProbeTests
 {
     [TestMethod]
+    public void ProductionProbeReadsCurrentWindowsHostEvidence()
+    {
+        Type versionInfoType = typeof(WindowsHostCompatibilityProbe).GetNestedType(
+            "OsVersionInfoEx",
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Production version info layout is missing.");
+        Assert.AreEqual(284, Marshal.SizeOf(versionInfoType));
+
+        WindowsHostEvidence evidence = new WindowsHostCompatibilityProbe().Read();
+
+        Assert.IsTrue(evidence.IsWindows);
+        Assert.IsGreaterThan(0, evidence.Build);
+        Assert.AreEqual(RuntimeInformation.OSArchitecture, evidence.Architecture);
+        Assert.AreEqual(Architecture.X64, evidence.Architecture);
+        Assert.IsTrue(evidence.ProductType is 1 or 2 or 3);
+    }
+
+    [TestMethod]
     [DataRow(true, 19044, Architecture.X64, (byte)1, "unsupportedWindowsBuild")]
     [DataRow(true, 19045, Architecture.X64, (byte)1, null)]
     [DataRow(true, 19045, Architecture.X86, (byte)1, "unsupportedWindowsArchitecture")]
