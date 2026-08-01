@@ -71,7 +71,7 @@ public sealed class WindowsHostBuildGate : IWindowsBuildGate
     }
 }
 
-public sealed class WindowsHostCompatibilityProbe : IWindowsHostEvidenceSource
+public sealed partial class WindowsHostCompatibilityProbe : IWindowsHostEvidenceSource
 {
     private const int StatusSuccess = 0;
 
