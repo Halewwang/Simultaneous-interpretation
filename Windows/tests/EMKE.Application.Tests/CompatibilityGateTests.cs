@@ -242,7 +242,7 @@ public sealed class CompatibilityGateTests
         RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
 
         Assert.AreEqual("unsupportedWindowsBuild", error?.Code);
-        CollectionAssert.AreEqual(["os"], harness.Trace.ToArray());
+        CollectionAssert.AreEqual(new[] { "os" }, harness.Trace.ToArray());
         Assert.AreEqual(0, harness.AudioStartCount);
         Assert.AreEqual(0, harness.SessionCreateCount);
     }
