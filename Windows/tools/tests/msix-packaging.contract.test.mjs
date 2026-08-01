@@ -651,6 +651,32 @@ test('production package mode requires external PFX and password-environment inp
   assert.match(output, /PasswordEnvironmentVariable/);
 });
 
+test('early package-input failure is not masked by null artifact cleanup', async () => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'emke-msix-early-failure-'));
+  try {
+    const missingPfx = path.join(fixtureRoot, 'missing.pfx');
+    const result = spawnSync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-File',
+        packageScriptPath,
+        '-PfxPath',
+        missingPfx,
+        '-PasswordEnvironmentVariable',
+        'EMKE_TEST_PASSWORD',
+      ],
+      { encoding: 'utf8', env: { ...process.env, EMKE_TEST_PASSWORD: 'fixture' } },
+    );
+    assert.notEqual(result.status, 0, 'missing PFX was accepted');
+    assert.match(`${result.stdout}\n${result.stderr}`, /PFX input validation failed/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /partial-artifact|AggregateException/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('packaging consumes the exact CMake and native CI x64 Release artifact', async () => {
   const [cmake, nativeWorkflow, packageScript] = await Promise.all([
     readFile(nativeCmakePath, 'utf8'),

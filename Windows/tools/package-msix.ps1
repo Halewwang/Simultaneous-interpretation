@@ -854,6 +854,9 @@ try {
             $certificatePath,
             $provenancePath
         )) {
+            if ([string]::IsNullOrWhiteSpace($partialArtifact)) {
+                continue
+            }
             $cleanupPartialArtifact = $partialArtifact
             $cleanupActions.Add(
                 [pscustomobject]@{
