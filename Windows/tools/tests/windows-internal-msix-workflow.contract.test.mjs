@@ -22,6 +22,12 @@ const workflowPath = path.join(
   'workflows',
   'windows-internal-msix.yml',
 );
+const runtimeWorkflowPath = path.join(
+  repositoryRoot,
+  '.github',
+  'workflows',
+  'windows-runtime.yml',
+);
 const bundleBuilderPath = path.join(
   repositoryRoot,
   'Windows',
@@ -35,7 +41,7 @@ const hostedInstallPath = path.join(
   'test-hosted-msix-install.ps1',
 );
 
-const packageBaseName = 'EMKE-Translation-Windows-0.1.0-internal-x64';
+const packageBaseName = 'EMKE-Translation-Windows-0.2.0-internal-x64';
 const handoffNames = [
   `${packageBaseName}.msix`,
   `${packageBaseName}.cer`,
@@ -194,6 +200,7 @@ function workflowRunBlocks(source) {
 
 test('workflow gates the Windows build, exact install smoke, cleanup, and upload', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
+  const runtimeWorkflow = await readFile(runtimeWorkflowPath, 'utf8');
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(
@@ -216,7 +223,32 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   assert.match(workflow, /build-internal-msix-bundle\.ps1/);
   assert.match(
     workflow,
-    /name:\s*emke-translation-windows-0\.1\.0-internal-x64-\$\{\{\s*github\.sha\s*\}\}/,
+    /name:\s*"emke-translation-windows-\$\(\$release\.ProductVersion\)-\$\(\$release\.Channel\)-\$\(\$release\.Architecture\)-\$\{\{\s*github\.sha\s*\}\}"/,
+  );
+  assert.match(
+    workflow,
+    /Windows\/tools\/resolve-version\.ps1/,
+    'the MSIX workflow must resolve checked-in Windows metadata',
+  );
+  assert.match(
+    runtimeWorkflow,
+    /Windows\/tools\/resolve-version\.ps1/,
+    'the runtime workflow must resolve checked-in Windows metadata',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /EMKE-Translation-Windows-0\.1\.0-internal-x64/,
+    'the MSIX workflow must not retain stale package or artifact names',
+  );
+  assert.doesNotMatch(
+    workflow,
+    /\b26200\b/,
+    'the MSIX workflow must not retain an independent Windows 25H2 floor',
+  );
+  assert.doesNotMatch(
+    runtimeWorkflow,
+    /\b26200\b/,
+    'the runtime workflow must not retain an independent Windows 25H2 floor',
   );
 
   const buildJob = workflowJob(workflow, 'build-test');
