@@ -632,21 +632,21 @@ try {
     }
     $trustedThumbprint = $provenanceThumbprint
     $trustedPath =
-        "Cert:\CurrentUser\Root\$trustedThumbprint"
+        "Cert:\LocalMachine\TrustedPeople\$trustedThumbprint"
     if (-not (Test-Path -LiteralPath $trustedPath)) {
-        $rootStore =
+        $trustedPeopleStore =
             [Security.Cryptography.X509Certificates.X509Store]::new(
-                [Security.Cryptography.X509Certificates.StoreName]::Root,
-                [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
+                [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
             )
         try {
-            $rootStore.Open(
+            $trustedPeopleStore.Open(
                 [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
             )
-            $rootStore.Add($publicCertificate)
+            $trustedPeopleStore.Add($publicCertificate)
             $addedTrust = $true
         } finally {
-            $rootStore.Dispose()
+            $trustedPeopleStore.Dispose()
         }
         $imported = Get-Item -LiteralPath $trustedPath
         if (
@@ -729,10 +729,10 @@ try {
         -not [string]::IsNullOrEmpty($trustedThumbprint)
     ) {
         $cleanupTrustedPath =
-            "Cert:\CurrentUser\Root\$trustedThumbprint"
+            "Cert:\LocalMachine\TrustedPeople\$trustedThumbprint"
         $cleanupActions.Add(
             [pscustomobject]@{
-                Name = "CurrentUserRoot:$trustedThumbprint"
+                Name = "LocalMachineTrustedPeople:$trustedThumbprint"
                 Action = {
                     if (Test-Path -LiteralPath $cleanupTrustedPath) {
                         Remove-Item `
