@@ -59,7 +59,7 @@ jobs:
           if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
             throw "Internal MSIX build requires an x64 hosted process."
           }
-          node --test Windows/tools/tests/msix-packaging.contract.test.mjs
+          node --test Windows/tools/tests/msix-packaging.contract.test.mjs Windows/tools/tests/windows-internal-msix-workflow.contract.test.mjs
           if ($LASTEXITCODE -ne 0) {
             throw "Task 3 Node manifest contract tests failed."
           }
