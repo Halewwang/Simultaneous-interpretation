@@ -1,0 +1,121 @@
+<Window
+    x:Class="EMKE.Windows.App.Diagnostics.DiagnosticsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:ClassModifier="internal"
+    Title="{Binding WindowTitle}"
+    Width="900"
+    Height="680"
+    MinWidth="700"
+    MinHeight="520"
+    WindowStartupLocation="CenterScreen">
+    <DockPanel Margin="16">
+        <StackPanel
+            DockPanel.Dock="Bottom"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button
+                MinWidth="128"
+                Margin="0,0,8,0"
+                Click="OnRefreshClicked"
+                Content="{Binding RefreshLabel}" />
+            <Button
+                MinWidth="160"
+                Margin="0,0,8,0"
+                Click="OnTestConnectionClicked"
+                Content="{Binding TestConnectionLabel}" />
+            <Button
+                MinWidth="88"
+                Click="OnCloseClicked"
+                Content="{Binding CloseLabel}" />
+        </StackPanel>
+
+        <ScrollViewer
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    Text="{Binding EndpointsLabel}" />
+                <ItemsControl
+                    Margin="0,8,0,0"
+                    ItemsSource="{Binding Endpoints}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border
+                                Margin="0,0,0,6"
+                                Padding="10"
+                                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                                BorderThickness="1"
+                                CornerRadius="4">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="1.4*" />
+                                        <ColumnDefinition Width="1.5*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Text="{Binding DisplayName}"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Margin="12,0,0,0"
+                                        Text="{Binding RoleLabel}"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        Margin="12,0,0,0"
+                                        Text="{Binding CurrentFormat}"
+                                        TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Grid.Column="3"
+                                        Margin="12,0,0,0"
+                                        Text="{Binding AvailabilityLabel}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <WrapPanel Margin="0,12,0,0">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding LastHResultLabel}" />
+                    <TextBlock Margin="6,0,20,0" Text="{Binding LastHResultCategory}" />
+                    <TextBlock FontWeight="SemiBold" Text="{Binding UnderrunsLabel}" />
+                    <TextBlock Margin="6,0,20,0" Text="{Binding Underruns}" />
+                    <TextBlock FontWeight="SemiBold" Text="{Binding OverflowsLabel}" />
+                    <TextBlock Margin="6,0,20,0" Text="{Binding Overflows}" />
+                    <TextBlock FontWeight="SemiBold" Text="{Binding DroppedFramesLabel}" />
+                    <TextBlock Margin="6,0,0,0" Text="{Binding DroppedFrames}" />
+                </WrapPanel>
+
+                <TextBlock
+                    Margin="0,20,0,0"
+                    FontSize="18"
+                    FontWeight="SemiBold"
+                    Text="{Binding ConnectionStagesLabel}" />
+                <ItemsControl
+                    Margin="0,8,0,0"
+                    ItemsSource="{Binding ConnectionStages}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="2*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding StableName}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Margin="12,0,0,0"
+                                    Text="{Binding OutcomeLabel}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

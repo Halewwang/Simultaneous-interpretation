@@ -6,11 +6,13 @@ using System.Windows.Threading;
 using EMKE.Application;
 using EMKE.Core;
 using EMKE.Platform.Driver;
+using EMKE.Platform.Diagnostics;
 using EMKE.Platform.Native;
 using EMKE.Platform.Security;
 using EMKE.Platform.Settings;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
+using EMKE.Windows.App.Diagnostics;
 using EMKE.Windows.App.Floating;
 using EMKE.Windows.App.Localization;
 using EMKE.Windows.App.Presentation;
@@ -266,6 +268,9 @@ internal static class ProductionUiAdapters
         ISecretStore secretStore = context.SecretStore
             ?? throw new InvalidOperationException(
                 "Production secret storage was not composed.");
+        ITranslationSessionFactory sessionFactory = context.SessionFactory
+            ?? throw new InvalidOperationException(
+                "Production Translation session factory was not composed.");
         WindowsProductSettings initialSettings =
             await productSettings.LoadProductSettingsAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -281,12 +286,17 @@ internal static class ProductionUiAdapters
                         ?? ValueTask.FromException(
                             new InvalidOperationException(
                                 "Product views have not finished composing.")),
-                    (surface, token) =>
-                        views?.ShowPlaceholderAsync(surface, token)
+                    token =>
+                        views?.ShowDiagnosticsAsync(token)
                         ?? ValueTask.FromException(
                             new InvalidOperationException(
                                 "Product views have not finished composing.")));
                 DelegatingSettingsSystemActions settingsSystemActions = new(
+                    token =>
+                        views?.ShowDiagnosticsAsync(token)
+                        ?? ValueTask.FromException(
+                            new InvalidOperationException(
+                                "Product views have not finished composing.")),
                     (surface, token) =>
                         views?.ShowPlaceholderAsync(surface, token)
                         ?? ValueTask.FromException(
@@ -303,12 +313,27 @@ internal static class ProductionUiAdapters
                     context.Presentation,
                     context.RuntimeCommands,
                     floatingVisibility);
+                TranslationConnectionProbe connectionProbe = new(
+                    sessionFactory);
+                WindowsAudioDiagnostics audioDiagnostics = new(
+                    new WindowsNativeAudioDiagnosticBackend(),
+                    () => IsTranslationActive(context.Snapshots.Current));
+                DiagnosticsViewModel diagnosticsViewModel = new(
+                    audioDiagnostics,
+                    connectionProbe,
+                    SettingsTranslationCapabilityTester.Inbound(
+                        initialSettings),
+                    SettingsTranslationCapabilityTester.Outbound(
+                        initialSettings),
+                    context.Localization);
                 SettingsViewModel settingsViewModel = new(
                     initialSettings,
                     productSettings,
                     secretStore,
                     context.RuntimeCommands,
-                    UnavailableSettingsCapabilityTester.Instance,
+                    new SettingsTranslationCapabilityTester(
+                        productSettings,
+                        connectionProbe),
                     settingsSystemActions,
                     floatingVisibility,
                     context.Localization);
@@ -317,7 +342,10 @@ internal static class ProductionUiAdapters
                     context.Localization,
                     new DashboardWindow(dashboardViewModel),
                     new FloatingStatusWindow(floatingViewModel),
-                    new SettingsWindow(settingsViewModel));
+                    new SettingsWindow(settingsViewModel),
+                    new DiagnosticsWindow(diagnosticsViewModel),
+                    diagnosticsViewModel,
+                    audioDiagnostics);
                 ProductionTrayActions trayActions = new(
                     views,
                     exitAsync);
@@ -327,6 +355,7 @@ internal static class ProductionUiAdapters
                     context.Localization);
                 result = new AppUiAdapterBundle(
                     tray,
+                    views,
                     views,
                     views);
             },
@@ -340,7 +369,12 @@ internal static class ProductionUiAdapters
     {
         Onboarding,
         Updates,
-        Diagnostics,
+    }
+
+    private static bool IsTranslationActive(AppSnapshot? snapshot)
+    {
+        return snapshot is not null
+            && snapshot.RuntimeState != RuntimeState.Stopped;
     }
 
     private sealed class DelegatingSurfaceActions : IAppSurfaceActions
@@ -349,20 +383,17 @@ internal static class ProductionUiAdapters
             CancellationToken,
             ValueTask> _openSettings;
         private readonly Func<
-            PlaceholderSurface,
             CancellationToken,
-            ValueTask> _show;
+            ValueTask> _openDiagnostics;
 
         public DelegatingSurfaceActions(
             Func<CancellationToken, ValueTask> openSettings,
-            Func<
-                PlaceholderSurface,
-                CancellationToken,
-                ValueTask> show)
+            Func<CancellationToken, ValueTask> openDiagnostics)
         {
             _openSettings = openSettings
                 ?? throw new ArgumentNullException(nameof(openSettings));
-            _show = show ?? throw new ArgumentNullException(nameof(show));
+            _openDiagnostics = openDiagnostics
+                ?? throw new ArgumentNullException(nameof(openDiagnostics));
         }
 
         public ValueTask OpenSettingsAsync(
@@ -374,7 +405,7 @@ internal static class ProductionUiAdapters
         public ValueTask OpenDiagnosticsAsync(
             CancellationToken cancellationToken)
         {
-            return _show(PlaceholderSurface.Diagnostics, cancellationToken);
+            return _openDiagnostics(cancellationToken);
         }
     }
 
@@ -382,23 +413,29 @@ internal static class ProductionUiAdapters
         : ISettingsSystemActions
     {
         private readonly Func<
+            CancellationToken,
+            ValueTask> _showDiagnostics;
+        private readonly Func<
             PlaceholderSurface,
             CancellationToken,
             ValueTask> _show;
 
         public DelegatingSettingsSystemActions(
+            Func<CancellationToken, ValueTask> showDiagnostics,
             Func<
                 PlaceholderSurface,
                 CancellationToken,
                 ValueTask> show)
         {
+            _showDiagnostics = showDiagnostics
+                ?? throw new ArgumentNullException(nameof(showDiagnostics));
             _show = show ?? throw new ArgumentNullException(nameof(show));
         }
 
         public ValueTask RunLocalDiagnosticsAsync(
             CancellationToken cancellationToken)
         {
-            return _show(PlaceholderSurface.Diagnostics, cancellationToken);
+            return _showDiagnostics(cancellationToken);
         }
 
         public ValueTask CheckForUpdatesAsync(
@@ -416,27 +453,7 @@ internal static class ProductionUiAdapters
         public ValueTask ExportDiagnosticsAsync(
             CancellationToken cancellationToken)
         {
-            return _show(PlaceholderSurface.Diagnostics, cancellationToken);
-        }
-    }
-
-    private sealed class UnavailableSettingsCapabilityTester
-        : ISettingsCapabilityTester
-    {
-        public static UnavailableSettingsCapabilityTester Instance { get; } =
-            new();
-
-        private UnavailableSettingsCapabilityTester()
-        {
-        }
-
-        public Task TestConnectionAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromException(
-                new InvalidOperationException(
-                    "Connection testing is not available until the capability probe is composed."));
+            return _showDiagnostics(cancellationToken);
         }
     }
 
@@ -491,6 +508,7 @@ internal static class ProductionUiAdapters
 
     private sealed class WpfProductViews :
         IAppViewLifetime,
+        IAppDiagnosticsLifetime,
         IAsyncDisposable
     {
         private readonly IUiDispatcher _dispatcher;
@@ -498,6 +516,9 @@ internal static class ProductionUiAdapters
         private readonly DashboardWindow _dashboard;
         private readonly FloatingStatusWindow _floating;
         private readonly SettingsWindow _settings;
+        private readonly DiagnosticsWindow _diagnostics;
+        private readonly DiagnosticsViewModel _diagnosticsViewModel;
+        private readonly IAsyncDisposable _audioDiagnostics;
         private readonly PlaceholderSurfaceWindow _placeholder = new();
         private int _disposed;
 
@@ -506,7 +527,10 @@ internal static class ProductionUiAdapters
             LocalizationService localization,
             DashboardWindow dashboard,
             FloatingStatusWindow floating,
-            SettingsWindow settings)
+            SettingsWindow settings,
+            DiagnosticsWindow diagnostics,
+            DiagnosticsViewModel diagnosticsViewModel,
+            IAsyncDisposable audioDiagnostics)
         {
             _dispatcher = dispatcher
                 ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -518,6 +542,12 @@ internal static class ProductionUiAdapters
                 ?? throw new ArgumentNullException(nameof(floating));
             _settings = settings
                 ?? throw new ArgumentNullException(nameof(settings));
+            _diagnostics = diagnostics
+                ?? throw new ArgumentNullException(nameof(diagnostics));
+            _diagnosticsViewModel = diagnosticsViewModel
+                ?? throw new ArgumentNullException(nameof(diagnosticsViewModel));
+            _audioDiagnostics = audioDiagnostics
+                ?? throw new ArgumentNullException(nameof(audioDiagnostics));
         }
 
         public ValueTask ShowInitialSurfaceAsync(
@@ -529,7 +559,7 @@ internal static class ProductionUiAdapters
         public ValueTask ShowDashboardAsync(
             CancellationToken cancellationToken)
         {
-            return _dispatcher.InvokeAsync(
+            return NavigateFromDiagnosticsAsync(
                 _dashboard.ShowOrActivate,
                 cancellationToken);
         }
@@ -537,8 +567,16 @@ internal static class ProductionUiAdapters
         public ValueTask ShowSettingsAsync(
             CancellationToken cancellationToken)
         {
-            return _dispatcher.InvokeAsync(
+            return NavigateFromDiagnosticsAsync(
                 _settings.ShowOrActivate,
+                cancellationToken);
+        }
+
+        public ValueTask ShowDiagnosticsAsync(
+            CancellationToken cancellationToken)
+        {
+            return _dispatcher.InvokeAsync(
+                _diagnostics.ShowOrActivate,
                 cancellationToken);
         }
 
@@ -546,7 +584,7 @@ internal static class ProductionUiAdapters
             PlaceholderSurface surface,
             CancellationToken cancellationToken)
         {
-            return _dispatcher.InvokeAsync(
+            return NavigateFromDiagnosticsAsync(
                 () =>
                 {
                     (LocalizedString titleKey, LocalizedString bodyKey) =
@@ -558,9 +596,6 @@ internal static class ProductionUiAdapters
                             PlaceholderSurface.Updates =>
                                 (LocalizedString.PlaceholderUpdateTitle,
                                     LocalizedString.PlaceholderUpdateBody),
-                            PlaceholderSurface.Diagnostics =>
-                                (LocalizedString.PlaceholderDiagnosticsTitle,
-                                    LocalizedString.PlaceholderDiagnosticsBody),
                             _ => throw new ArgumentOutOfRangeException(
                                 nameof(surface),
                                 surface,
@@ -578,6 +613,11 @@ internal static class ProductionUiAdapters
                 cancellationToken);
         }
 
+        public ValueTask StopAsync(CancellationToken cancellationToken)
+        {
+            return _diagnosticsViewModel.StopAsync(cancellationToken);
+        }
+
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -585,14 +625,34 @@ internal static class ProductionUiAdapters
                 return;
             }
 
+            await _diagnosticsViewModel.StopAsync(CancellationToken.None)
+                .ConfigureAwait(false);
             await _dispatcher.InvokeAsync(
                 () =>
                 {
                     _placeholder.CloseForApplicationExit();
+                    _diagnostics.CloseForApplicationExit();
                     _settings.CloseForApplicationExit();
                     _floating.CloseForApplicationExit();
                     _dashboard.CloseForApplicationExit();
                 }).ConfigureAwait(false);
+            await _diagnosticsViewModel.DisposeAsync().ConfigureAwait(false);
+            await _audioDiagnostics.DisposeAsync().ConfigureAwait(false);
+        }
+
+        private async ValueTask NavigateFromDiagnosticsAsync(
+            Action showTarget,
+            CancellationToken cancellationToken)
+        {
+            await _diagnosticsViewModel.StopAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await _dispatcher.InvokeAsync(
+                () =>
+                {
+                    _diagnostics.Hide();
+                    showTarget();
+                },
+                cancellationToken).ConfigureAwait(false);
         }
     }
 

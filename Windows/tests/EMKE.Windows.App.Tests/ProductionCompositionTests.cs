@@ -168,6 +168,38 @@ public sealed class ProductionCompositionTests
             expectedStartEnabled: true);
     }
 
+    [TestMethod]
+    public async Task UiDiagnosticsLifetimeIsStoppedByApplicationExit()
+    {
+        RecordingDiagnostics coreDiagnostics = new();
+        RecordingDiagnostics uiDiagnostics = new();
+        IAppAdapterFactory factory = AppStartupFactory.Create(
+            _ => ValueTask.FromResult(
+                new AppCoreAdapterBundle(
+                    Dependencies(),
+                    coreDiagnostics,
+                    new NoOpAsyncDisposable())),
+            (context, _) => ValueTask.FromResult(
+                new AppUiAdapterBundle(
+                    new CapturingTray(context),
+                    new CapturingViews(context),
+                    new NoOpAsyncDisposable(),
+                    uiDiagnostics)));
+        AppCompositionRoot root =
+            await AppCompositionRoot.CreateForProcessAsync(
+                factory,
+                new NoOpAsyncDisposable(),
+                TimeSpan.FromSeconds(1),
+                static callback => callback(),
+                static () => { },
+                CancellationToken.None);
+
+        _ = await root.ExitAsync();
+
+        Assert.AreEqual(1, uiDiagnostics.StopCount);
+        Assert.AreEqual(0, coreDiagnostics.StopCount);
+    }
+
     private static async Task AssertStartupPreflightAsync(
         DriverCompatibility compatibility,
         bool expectedStartEnabled)
@@ -351,6 +383,18 @@ public sealed class ProductionCompositionTests
     {
         public ValueTask StopAsync(CancellationToken cancellationToken)
         {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingDiagnostics : IAppDiagnosticsLifetime
+    {
+        public int StopCount { get; private set; }
+
+        public ValueTask StopAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StopCount++;
             return ValueTask.CompletedTask;
         }
     }

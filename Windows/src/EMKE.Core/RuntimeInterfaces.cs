@@ -538,6 +538,20 @@ public interface ITranslationSession
     Task CloseAsync(CancellationToken cancellationToken);
 }
 
+public sealed record TranslationProtocolEvidence(
+    bool AuthenticationSucceeded,
+    bool TranslationHandshakeSucceeded,
+    bool TargetLanguageUpdateSucceeded);
+
+/// <summary>
+/// Marks sessions that obtained translation-specific protocol evidence.
+/// A generic WebSocket or chat connection must not implement this contract.
+/// </summary>
+public interface ITranslationProtocolSessionEvidence
+{
+    TranslationProtocolEvidence ProtocolEvidence { get; }
+}
+
 public interface ITranslationSessionFactory
 {
     ValueTask<ITranslationSession> CreateAsync(

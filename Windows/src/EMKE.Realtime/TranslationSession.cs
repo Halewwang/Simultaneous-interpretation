@@ -71,7 +71,11 @@ public sealed record TranslationSessionCreationPlan(
     int OutboundSocketCount,
     bool OutboundBypassed);
 
-public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyncDisposable
+public sealed class TranslationSession :
+    ITranslationSession,
+    ITranslationProtocolSessionEvidence,
+    IDisposable,
+    IAsyncDisposable
 {
     private const int DefaultEventCapacity = 32;
 
@@ -101,6 +105,9 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
     private Task? _shutdownTask;
     private Task? _shutdownObservation;
     private int _pendingSendCount;
+    private int _authenticationSucceeded;
+    private int _translationHandshakeSucceeded;
+    private int _targetLanguageUpdateSucceeded;
     private int _managedResourcesReleased;
     private int _transportReleased;
 
@@ -165,6 +172,11 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
             }
         }
     }
+
+    public TranslationProtocolEvidence ProtocolEvidence => new(
+        Volatile.Read(ref _authenticationSucceeded) != 0,
+        Volatile.Read(ref _translationHandshakeSucceeded) != 0,
+        Volatile.Read(ref _targetLanguageUpdateSucceeded) != 0);
 
     public Task ConnectAsync(CancellationToken cancellationToken)
     {
@@ -350,6 +362,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
             throw new TranslationSessionException(connectError);
         }
 
+        Volatile.Write(ref _authenticationSucceeded, 1);
         Task receiveLoop = ReceiveLoopAsync();
         lock (_sync)
         {
@@ -455,6 +468,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
                     return FailUnexpectedEvent();
                 }
 
+                Volatile.Write(ref _translationHandshakeSucceeded, 1);
                 RuntimeError? updateError = await _transport.SendSessionUpdateAsync(
                     _configuration.TargetLanguage,
                     _lifetime.Token).ConfigureAwait(false);
@@ -481,6 +495,7 @@ public sealed class TranslationSession : ITranslationSession, IDisposable, IAsyn
                     return FailUnexpectedEvent();
                 }
 
+                Volatile.Write(ref _targetLanguageUpdateSucceeded, 1);
                 _handshake.TrySetResult();
                 return true;
 

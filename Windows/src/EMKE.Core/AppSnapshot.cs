@@ -91,6 +91,18 @@ public sealed record DriverCompatibility
 
 public sealed class TranslationCompatibilityReport : IEquatable<TranslationCompatibilityReport>
 {
+    public static readonly IReadOnlyList<string> StableStageNames =
+        Array.AsReadOnly(
+        [
+            "authentication",
+            "translationWebSocketHandshake",
+            "targetLanguageUpdate",
+            "dualSessionConcurrency",
+            "sourceTranscript",
+            "translatedAudio",
+            "safeClose",
+        ]);
+
     public TranslationCompatibilityReport(bool isCompatible, IEnumerable<string> findings)
     {
         ArgumentNullException.ThrowIfNull(findings);
@@ -103,17 +115,73 @@ public sealed class TranslationCompatibilityReport : IEquatable<TranslationCompa
 
         IsCompatible = isCompatible;
         Findings = Array.AsReadOnly(copy);
+        Stages = Array.Empty<TranslationCompatibilityStageResult>();
+        Overall = isCompatible
+            ? TranslationCompatibilityOverall.Compatible
+            : TranslationCompatibilityOverall.Incompatible;
+    }
+
+    public TranslationCompatibilityReport(
+        IEnumerable<TranslationCompatibilityStageResult> stages)
+    {
+        ArgumentNullException.ThrowIfNull(stages);
+        TranslationCompatibilityStageResult[] copy = [.. stages];
+        if (copy.Length != StableStageNames.Count)
+        {
+            throw new ArgumentException(
+                "A compatibility report must contain all seven stages.",
+                nameof(stages));
+        }
+
+        for (int index = 0; index < copy.Length; index++)
+        {
+            if (!string.Equals(
+                    copy[index].StableName,
+                    StableStageNames[index],
+                    StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Compatibility stages must use the stable order.",
+                    nameof(stages));
+            }
+        }
+
+        Stages = Array.AsReadOnly(copy);
+        Overall = DetermineOverall(copy);
+        IsCompatible = Overall == TranslationCompatibilityOverall.Compatible;
+        Findings = Array.AsReadOnly(
+            copy.Where(static stage =>
+                    stage.Outcome == TranslationCapabilityOutcome.Failed)
+                .Select(static stage =>
+                    stage.FailureCode ?? stage.StableName)
+                .ToArray());
     }
 
     public bool IsCompatible { get; }
 
     public IReadOnlyList<string> Findings { get; }
 
+    public IReadOnlyList<TranslationCompatibilityStageResult> Stages { get; }
+
+    public TranslationCompatibilityOverall Overall { get; }
+
+    public TranslationCompatibilityStageResult Stage(string stableName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(stableName);
+        return Stages.First(
+            stage => string.Equals(
+                stage.StableName,
+                stableName,
+                StringComparison.Ordinal));
+    }
+
     public bool Equals(TranslationCompatibilityReport? other)
     {
         return other is not null
             && IsCompatible == other.IsCompatible
-            && Findings.SequenceEqual(other.Findings, StringComparer.Ordinal);
+            && Overall == other.Overall
+            && Findings.SequenceEqual(other.Findings, StringComparer.Ordinal)
+            && Stages.SequenceEqual(other.Stages);
     }
 
     public override bool Equals(object? obj)
@@ -125,12 +193,36 @@ public sealed class TranslationCompatibilityReport : IEquatable<TranslationCompa
     {
         HashCode hash = new();
         hash.Add(IsCompatible);
+        hash.Add(Overall);
         foreach (string finding in Findings)
         {
             hash.Add(finding, StringComparer.Ordinal);
         }
 
+        foreach (TranslationCompatibilityStageResult stage in Stages)
+        {
+            hash.Add(stage);
+        }
+
         return hash.ToHashCode();
+    }
+
+    private static TranslationCompatibilityOverall DetermineOverall(
+        TranslationCompatibilityStageResult[] stages)
+    {
+        bool protocolPassed = stages
+            .Take(4)
+            .All(static stage =>
+                stage.Outcome == TranslationCapabilityOutcome.Passed);
+        bool audioRequiresInteraction = stages[4].Outcome
+                == TranslationCapabilityOutcome.RequiresInteractiveAudio
+            && stages[5].Outcome
+                == TranslationCapabilityOutcome.RequiresInteractiveAudio;
+        bool closed = stages[6].Outcome
+            == TranslationCapabilityOutcome.Passed;
+        return protocolPassed && audioRequiresInteraction && closed
+            ? TranslationCompatibilityOverall.ProtocolCompatibleRequiresAudio
+            : TranslationCompatibilityOverall.Incompatible;
     }
 }
 

@@ -35,6 +35,34 @@
   <data name="DashboardSourceCaption" xml:space="preserve"><value>原文字幕</value></data>
   <data name="DashboardTranslatedCaption" xml:space="preserve"><value>译文字幕</value></data>
   <data name="DashboardTitle" xml:space="preserve"><value>同传控制台</value></data>
+  <data name="DiagnosticsAvailable" xml:space="preserve"><value>可用</value></data>
+  <data name="DiagnosticsClose" xml:space="preserve"><value>关闭</value></data>
+  <data name="DiagnosticsConnectionStages" xml:space="preserve"><value>翻译能力阶段</value></data>
+  <data name="DiagnosticsDroppedFrames" xml:space="preserve"><value>丢弃帧</value></data>
+  <data name="DiagnosticsEndpointFormat" xml:space="preserve"><value>当前格式</value></data>
+  <data name="DiagnosticsEndpointIdentifier" xml:space="preserve"><value>标识符哈希</value></data>
+  <data name="DiagnosticsEndpointName" xml:space="preserve"><value>设备名称</value></data>
+  <data name="DiagnosticsEndpointRole" xml:space="preserve"><value>角色</value></data>
+  <data name="DiagnosticsEndpoints" xml:space="preserve"><value>音频端点</value></data>
+  <data name="DiagnosticsLastHResult" xml:space="preserve"><value>最近的 HRESULT 类别</value></data>
+  <data name="DiagnosticsOutcomeFailed" xml:space="preserve"><value>失败</value></data>
+  <data name="DiagnosticsOutcomeNotRun" xml:space="preserve"><value>未运行</value></data>
+  <data name="DiagnosticsOutcomePassed" xml:space="preserve"><value>通过</value></data>
+  <data name="DiagnosticsOutcomeRequiresAudio" xml:space="preserve"><value>需要交互式音频验证</value></data>
+  <data name="DiagnosticsOutcome" xml:space="preserve"><value>结果</value></data>
+  <data name="DiagnosticsOverflows" xml:space="preserve"><value>溢出</value></data>
+  <data name="DiagnosticsRefresh" xml:space="preserve"><value>刷新本地音频</value></data>
+  <data name="DiagnosticsRoleAppMicrophoneRender" xml:space="preserve"><value>应用麦克风渲染</value></data>
+  <data name="DiagnosticsRoleAppSpeakerCapture" xml:space="preserve"><value>应用扬声器采集</value></data>
+  <data name="DiagnosticsRoleMeetingMicrophoneCapture" xml:space="preserve"><value>会议麦克风采集</value></data>
+  <data name="DiagnosticsRoleMeetingSpeakerRender" xml:space="preserve"><value>会议扬声器渲染</value></data>
+  <data name="DiagnosticsRolePhysicalInput" xml:space="preserve"><value>物理输入</value></data>
+  <data name="DiagnosticsRolePhysicalOutput" xml:space="preserve"><value>物理输出</value></data>
+  <data name="DiagnosticsStage" xml:space="preserve"><value>阶段</value></data>
+  <data name="DiagnosticsTestConnection" xml:space="preserve"><value>测试翻译连接</value></data>
+  <data name="DiagnosticsTitle" xml:space="preserve"><value>诊断</value></data>
+  <data name="DiagnosticsUnavailable" xml:space="preserve"><value>不可用</value></data>
+  <data name="DiagnosticsUnderruns" xml:space="preserve"><value>欠载</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>英语</value></data>
   <data name="LanguageGerman" xml:space="preserve"><value>德语</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>简体中文</value></data>

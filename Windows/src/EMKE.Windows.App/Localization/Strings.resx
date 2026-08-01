@@ -35,6 +35,34 @@
   <data name="DashboardSourceCaption" xml:space="preserve"><value>Source caption</value></data>
   <data name="DashboardTranslatedCaption" xml:space="preserve"><value>Translated caption</value></data>
   <data name="DashboardTitle" xml:space="preserve"><value>Translation Dashboard</value></data>
+  <data name="DiagnosticsAvailable" xml:space="preserve"><value>Available</value></data>
+  <data name="DiagnosticsClose" xml:space="preserve"><value>Close</value></data>
+  <data name="DiagnosticsConnectionStages" xml:space="preserve"><value>Translation capability stages</value></data>
+  <data name="DiagnosticsDroppedFrames" xml:space="preserve"><value>Dropped frames</value></data>
+  <data name="DiagnosticsEndpointFormat" xml:space="preserve"><value>Current format</value></data>
+  <data name="DiagnosticsEndpointIdentifier" xml:space="preserve"><value>Identifier hash</value></data>
+  <data name="DiagnosticsEndpointName" xml:space="preserve"><value>Friendly name</value></data>
+  <data name="DiagnosticsEndpointRole" xml:space="preserve"><value>Role</value></data>
+  <data name="DiagnosticsEndpoints" xml:space="preserve"><value>Audio endpoints</value></data>
+  <data name="DiagnosticsLastHResult" xml:space="preserve"><value>Last HRESULT category</value></data>
+  <data name="DiagnosticsOutcomeFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="DiagnosticsOutcomeNotRun" xml:space="preserve"><value>Not run</value></data>
+  <data name="DiagnosticsOutcomePassed" xml:space="preserve"><value>Passed</value></data>
+  <data name="DiagnosticsOutcomeRequiresAudio" xml:space="preserve"><value>Requires interactive audio</value></data>
+  <data name="DiagnosticsOutcome" xml:space="preserve"><value>Outcome</value></data>
+  <data name="DiagnosticsOverflows" xml:space="preserve"><value>Overflows</value></data>
+  <data name="DiagnosticsRefresh" xml:space="preserve"><value>Refresh local audio</value></data>
+  <data name="DiagnosticsRoleAppMicrophoneRender" xml:space="preserve"><value>Application microphone render</value></data>
+  <data name="DiagnosticsRoleAppSpeakerCapture" xml:space="preserve"><value>Application speaker capture</value></data>
+  <data name="DiagnosticsRoleMeetingMicrophoneCapture" xml:space="preserve"><value>Meeting microphone capture</value></data>
+  <data name="DiagnosticsRoleMeetingSpeakerRender" xml:space="preserve"><value>Meeting speaker render</value></data>
+  <data name="DiagnosticsRolePhysicalInput" xml:space="preserve"><value>Physical input</value></data>
+  <data name="DiagnosticsRolePhysicalOutput" xml:space="preserve"><value>Physical output</value></data>
+  <data name="DiagnosticsStage" xml:space="preserve"><value>Stage</value></data>
+  <data name="DiagnosticsTestConnection" xml:space="preserve"><value>Test Translation connection</value></data>
+  <data name="DiagnosticsTitle" xml:space="preserve"><value>Diagnostics</value></data>
+  <data name="DiagnosticsUnavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="DiagnosticsUnderruns" xml:space="preserve"><value>Underruns</value></data>
   <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
   <data name="LanguageGerman" xml:space="preserve"><value>German</value></data>
   <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>Simplified Chinese</value></data>

@@ -117,17 +117,21 @@ internal sealed class AppUiAdapterBundle : IAsyncDisposable
     public AppUiAdapterBundle(
         IAppTrayLifetime tray,
         IAppViewLifetime views,
-        IAsyncDisposable ownedAdapters)
+        IAsyncDisposable ownedAdapters,
+        IAppDiagnosticsLifetime? diagnostics = null)
     {
         Tray = tray ?? throw new ArgumentNullException(nameof(tray));
         Views = views ?? throw new ArgumentNullException(nameof(views));
         _ownedAdapters = ownedAdapters
             ?? throw new ArgumentNullException(nameof(ownedAdapters));
+        Diagnostics = diagnostics;
     }
 
     public IAppTrayLifetime Tray { get; }
 
     public IAppViewLifetime Views { get; }
+
+    public IAppDiagnosticsLifetime? Diagnostics { get; }
 
     public ValueTask DisposeAsync()
     {
@@ -143,7 +147,8 @@ internal sealed record AppUiCompositionContext
         PresentationCoordinator presentation,
         LocalizationService localization,
         IWindowsProductSettingsStore? productSettings = null,
-        ISecretStore? secretStore = null)
+        ISecretStore? secretStore = null,
+        ITranslationSessionFactory? sessionFactory = null)
     {
         RuntimeCommands = runtimeCommands
             ?? throw new ArgumentNullException(nameof(runtimeCommands));
@@ -155,6 +160,7 @@ internal sealed record AppUiCompositionContext
             ?? throw new ArgumentNullException(nameof(localization));
         ProductSettings = productSettings;
         SecretStore = secretStore;
+        SessionFactory = sessionFactory;
     }
 
     public IRuntimeCommandSink RuntimeCommands { get; }
@@ -168,6 +174,8 @@ internal sealed record AppUiCompositionContext
     public IWindowsProductSettingsStore? ProductSettings { get; }
 
     public ISecretStore? SecretStore { get; }
+
+    public ITranslationSessionFactory? SessionFactory { get; }
 }
 
 internal sealed class UiCommandGate
@@ -335,7 +343,8 @@ internal sealed class AppCompositionRoot
                 snapshots.Presentation,
                 localization,
                 coreAdapters.ProductSettings,
-                coreAdapters.SecretStore);
+                coreAdapters.SecretStore,
+                coreAdapters.RuntimeDependencies.SessionFactory);
             uiAdapters = await adapterFactory
                 .CreateUiAsync(uiContext, cancellationToken)
                 .ConfigureAwait(false);
@@ -343,7 +352,7 @@ internal sealed class AppCompositionRoot
                 .ConfigureAwait(false);
             return new AppCompositionRoot(
                 new UiCommandGate(),
-                coreAdapters.Diagnostics,
+                uiAdapters.Diagnostics ?? coreAdapters.Diagnostics,
                 runtime,
                 snapshots,
                 new AdapterLifetime(uiAdapters, coreAdapters),
