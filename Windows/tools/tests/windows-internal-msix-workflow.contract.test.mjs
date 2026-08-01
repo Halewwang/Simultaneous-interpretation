@@ -223,7 +223,12 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   assert.match(workflow, /build-internal-msix-bundle\.ps1/);
   assert.match(
     workflow,
-    /name:\s*"emke-translation-windows-\$\(\$release\.ProductVersion\)-\$\(\$release\.Channel\)-\$\(\$release\.Architecture\)-\$\{\{\s*github\.sha\s*\}\}"/,
+    /id:\s*release[^]*?package_base_name=\$packageBaseName[^]*?artifact_name=emke-translation-windows-\$\(\$release\.ProductVersion\)-\$\(\$release\.Channel\)-\$\(\$release\.Architecture\)-\$\{\{\s*github\.sha\s*\}\}/,
+  );
+  assert.match(
+    workflow,
+    /name:\s*\$\{\{\s*steps\.release\.outputs\.artifact_name\s*\}\}/,
+    'the MSIX artifact name must be derived from resolved release metadata',
   );
   assert.match(
     workflow,

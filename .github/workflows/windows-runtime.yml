@@ -55,7 +55,13 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
 
-          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+          $release = & pwsh -NoProfile -Command "& 'Windows/tools/resolve-version.ps1' | ConvertTo-Json -Compress" |
+            ConvertFrom-Json
+          $expectedProcessorArchitecture = switch ($release.Architecture) {
+            "x64" { "AMD64" }
+            default { throw "Unsupported release architecture '$($release.Architecture)'." }
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
             throw "Windows runtime CI requires an x64 hosted process."
           }
 

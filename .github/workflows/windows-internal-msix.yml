@@ -56,7 +56,13 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
+          $release = & pwsh -NoProfile -Command "& 'Windows/tools/resolve-version.ps1' | ConvertTo-Json -Compress" |
+            ConvertFrom-Json
+          $expectedProcessorArchitecture = switch ($release.Architecture) {
+            "x64" { "AMD64" }
+            default { throw "Unsupported release architecture '$($release.Architecture)'." }
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
             throw "Internal MSIX build requires an x64 hosted process."
           }
           node Scripts/validate-shared-contracts.mjs
@@ -122,6 +128,7 @@ jobs:
     environment: windows-internal-signing
     outputs:
       certificate_thumbprint: ${{ steps.package.outputs.certificate_thumbprint }}
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -132,6 +139,25 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+
+      - name: Resolve checked-in Windows release metadata
+        id: release
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $release = & pwsh -NoProfile -Command "& 'Windows/tools/resolve-version.ps1' | ConvertTo-Json -Compress" |
+            ConvertFrom-Json
+          $expectedProcessorArchitecture = switch ($release.Architecture) {
+            "x64" { "AMD64" }
+            default { throw "Unsupported release architecture '$($release.Architecture)'." }
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
+            throw "Internal MSIX packaging requires the resolved architecture."
+          }
+          $packageBaseName = "EMKE-Translation-Windows-$($release.ProductVersion)-$($release.Channel)-$($release.Architecture)"
+          "package_base_name=$packageBaseName" >> $env:GITHUB_OUTPUT
+          "artifact_name=emke-translation-windows-$($release.ProductVersion)-$($release.Channel)-$($release.Architecture)-${{ github.sha }}" >> $env:GITHUB_OUTPUT
 
       - name: Restore locked managed packaging inputs
         shell: pwsh
@@ -168,6 +194,7 @@ jobs:
         env:
           WINDOWS_INTERNAL_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_BASE64 }}
           WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD }}
+          PACKAGE_BASE_NAME: ${{ steps.release.outputs.package_base_name }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -201,7 +228,7 @@ jobs:
             [IO.Directory]::CreateDirectory($artifactRoot) | Out-Null
             $certificatePath = Join-Path `
               $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+              "$env:PACKAGE_BASE_NAME.cer"
             pwsh -NoProfile -File `
               Windows/tools/verify-internal-signing-certificate.ps1 `
               -PfxPath $pfxPath `
@@ -224,7 +251,7 @@ jobs:
 
             $packagePath = Join-Path `
               $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+              "$env:PACKAGE_BASE_NAME.msix"
             pwsh -NoProfile -File Windows/tools/verify-msix.ps1 `
               -Package $packagePath
             if ($LASTEXITCODE -ne 0) {
@@ -248,6 +275,8 @@ jobs:
 
       - name: Build exact handoff bundle
         shell: pwsh
+        env:
+          PACKAGE_BASE_NAME: ${{ steps.release.outputs.package_base_name }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -259,12 +288,12 @@ jobs:
             -PackagePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+                "$env:PACKAGE_BASE_NAME.msix"
             ) `
             -CertificatePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+                "$env:PACKAGE_BASE_NAME.cer"
             ) `
             -InstallScriptPath (
               Join-Path `
@@ -290,7 +319,7 @@ jobs:
       - name: Upload verified Internal bundle
         uses: actions/upload-artifact@v4
         with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          name: ${{ steps.release.outputs.artifact_name }}
           path: Windows/artifacts/internal-bundle
           if-no-files-found: error
           retention-days: 14
@@ -310,24 +339,47 @@ jobs:
       - name: Download exact signed Internal bundle
         uses: actions/download-artifact@v4
         with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
+          name: ${{ needs.sign-package-bundle.outputs.artifact_name }}
           path: Windows/artifacts/internal-bundle
 
-      - name: Verify Windows 11 25H2 runner
+      - name: Resolve and report Windows acceptance metadata
+        id: release
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
-          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
-            throw "The 25H2 install runner must be x64."
+          $release = & pwsh -NoProfile -Command "& 'Windows/tools/resolve-version.ps1' | ConvertTo-Json -Compress" |
+            ConvertFrom-Json
+          $expectedProcessorArchitecture = switch ($release.Architecture) {
+            "x64" { "AMD64" }
+            default { throw "Unsupported release architecture '$($release.Architecture)'." }
           }
+          $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
           $windowsBuild = [Environment]::OSVersion.Version.Build
-          if ($windowsBuild -lt 26200) {
-            throw "The install runner must be Windows build 26200 or newer."
+          Write-Host "Hosted Windows version=$($operatingSystem.Version) build=$windowsBuild architecture=$($operatingSystem.OSArchitecture) productType=$($operatingSystem.ProductType)"
+          if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
+            throw "The install runner architecture does not match release metadata."
           }
+          if ($windowsBuild -lt [int]$release.MinimumWindowsBuild) {
+            throw "The install runner is below the application support floor from release metadata."
+          }
+          $evidenceBuild = ([version]$release.MaximumVersionTested).Build
+          if ($windowsBuild -lt $evidenceBuild) {
+            throw "The 25H2 evidence runner is below the metadata MaximumVersionTested lane."
+          }
+          $packageBaseName = "EMKE-Translation-Windows-$($release.ProductVersion)-$($release.Channel)-$($release.Architecture)"
+          "package_base_name=$packageBaseName" >> $env:GITHUB_OUTPUT
+          "package_version=$($release.PackageVersion)" >> $env:GITHUB_OUTPUT
+          "architecture=$($release.Architecture.ToUpperInvariant())" >> $env:GITHUB_OUTPUT
+          "publisher=$($release.Publisher)" >> $env:GITHUB_OUTPUT
 
       - name: Install, query, smoke, and remove exact Internal MSIX
         shell: pwsh
+        env:
+          PACKAGE_BASE_NAME: ${{ steps.release.outputs.package_base_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          PACKAGE_ARCHITECTURE: ${{ steps.release.outputs.architecture }}
+          PACKAGE_PUBLISHER: ${{ steps.release.outputs.publisher }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -344,6 +396,15 @@ jobs:
           if ($existingCertificate) {
             throw "The ephemeral 25H2 runner already trusts the Internal certificate."
           }
+          $packagePath = Join-Path `
+            $artifactRoot `
+            "$env:PACKAGE_BASE_NAME.msix"
+          $packageHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
+          $signature = Get-AuthenticodeSignature -FilePath $packagePath
+          Write-Host "Hosted MSIX sha256=$packageHash signatureStatus=$($signature.Status) signer=$($signature.SignerCertificate.Subject) thumbprint=$($signature.SignerCertificate.Thumbprint)"
+          if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+            throw "The hosted MSIX signature is not valid."
+          }
           $cleanupMarker = Join-Path `
             $env:RUNNER_TEMP `
             "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
@@ -353,20 +414,20 @@ jobs:
             [Text.UTF8Encoding]::new($false)
           )
           pwsh -NoProfile -File Windows/tools/test-hosted-msix-install.ps1 `
-            -PackagePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-            ) `
+            -PackagePath $packagePath `
             -CertificatePath (
               Join-Path `
                 $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+                "$env:PACKAGE_BASE_NAME.cer"
             ) `
-            -ExpectedCertificateThumbprint $thumbprint
+            -ExpectedCertificateThumbprint $thumbprint `
+            -ExpectedPublisher $env:PACKAGE_PUBLISHER `
+            -ExpectedVersion $env:PACKAGE_VERSION `
+            -ExpectedArchitecture $env:PACKAGE_ARCHITECTURE
           if ($LASTEXITCODE -ne 0) {
             throw "Windows 11 25H2 Internal MSIX install validation failed."
           }
+          Write-Host "Hosted MSIX install=passed identity=EMKE.Translation.Internal version=$env:PACKAGE_VERSION smoke=passed uninstall=passed certificateCleanup=passed"
 
       - name: Ensure exact certificate cleanup
         if: always()
@@ -411,3 +472,4 @@ jobs:
               Remove-Item -LiteralPath $cleanupMarker -Force
             }
           }
+          Write-Host "Hosted signing-certificate cleanup=passed"
