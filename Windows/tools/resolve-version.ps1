@@ -204,6 +204,14 @@ $minimumWindowsBuild = Get-RequiredProperty `
     -Object $version `
     -Name 'minimumWindowsBuild' `
     -Context 'version metadata'
+$minimumWindowsApiContract = Get-RequiredProperty `
+    -Object $version `
+    -Name 'minimumWindowsApiContract' `
+    -Context 'version metadata'
+$maximumVersionTested = Get-RequiredProperty `
+    -Object $version `
+    -Name 'maximumVersionTested' `
+    -Context 'version metadata'
 $architecture = Get-RequiredProperty `
     -Object $version `
     -Name 'architecture' `
@@ -218,6 +226,12 @@ Assert-NonEmptyString -Value $packageVersion -Name 'packageVersion'
 Assert-NonEmptyString -Value $metadataExpectedTag -Name 'expectedTag'
 Assert-NonEmptyString -Value $architecture -Name 'architecture'
 Assert-NonEmptyString -Value $channel -Name 'channel'
+Assert-NonEmptyString `
+    -Value $minimumWindowsApiContract `
+    -Name 'minimumWindowsApiContract'
+Assert-NonEmptyString `
+    -Value $maximumVersionTested `
+    -Name 'maximumVersionTested'
 Assert-JsonInteger -Value $contractVersion -Name 'contractVersion'
 Assert-JsonInteger `
     -Value $settingsSchemaVersion `
@@ -242,8 +256,14 @@ Assert-PackageVersion `
     -Value $packageVersion `
     -ProductVersion $productVersion
 
-if ($minimumWindowsBuild -lt 26200) {
-    throw 'minimumWindowsBuild must be at least 26200.'
+if ($minimumWindowsBuild -ne 19045) {
+    throw 'minimumWindowsBuild must be 19045 for Windows 0.2.0.'
+}
+if ($minimumWindowsApiContract -ne '10.0.19041.0') {
+    throw 'minimumWindowsApiContract must be 10.0.19041.0.'
+}
+if ($maximumVersionTested -ne '10.0.26200.0') {
+    throw 'maximumVersionTested must be 10.0.26200.0.'
 }
 if ($architecture -cne 'x64') {
     throw "Unsupported architecture '$architecture'; expected 'x64'."
@@ -383,12 +403,14 @@ if ($compatibilitySettingsSchemaVersion -le 0) {
 if ($compatibilityDriverAbiVersion -le 0) {
     throw 'Compatibility driverAbiVersion must be greater than zero.'
 }
-Assert-ThreePartVersion `
+Assert-PackageVersion `
     -Value $minimumDriverVersion `
-    -Name 'minimumDriverVersion'
-Assert-ThreePartVersion `
+    -Name 'minimumDriverVersion' `
+    -ProductVersion '1.0.0'
+Assert-PackageVersion `
     -Value $recommendedDriverVersion `
-    -Name 'recommendedDriverVersion'
+    -Name 'recommendedDriverVersion' `
+    -ProductVersion '1.0.0'
 
 if (-not ($driverPackageAvailable -is [bool])) {
     throw 'driverPackageAvailable must be a JSON Boolean.'
@@ -407,6 +429,12 @@ if ($compatibilitySettingsSchemaVersion -ne $settingsSchemaVersion) {
 }
 if ($compatibilityDriverAbiVersion -ne $driverAbiVersion) {
     throw 'Compatibility driverAbiVersion must match version metadata.'
+}
+if ($minimumDriverVersion -cne '1.0.0.2') {
+    throw 'minimumDriverVersion must be 1.0.0.2 for Windows 0.2.0.'
+}
+if ($recommendedDriverVersion -cne '1.0.0.2') {
+    throw 'recommendedDriverVersion must be 1.0.0.2 for Windows 0.2.0.'
 }
 
 $hasDriverPackageUrl = Test-ExactPropertyExists `
@@ -439,6 +467,8 @@ if ($driverPackageAvailable) {
     Channel = $channel
     Architecture = $architecture
     MinimumWindowsBuild = $minimumWindowsBuild
+    MinimumWindowsApiContract = $minimumWindowsApiContract
+    MaximumVersionTested = $maximumVersionTested
     CredentialTarget = $credentialTarget
     AppInstallerPath = $appInstallerPath
     DriverFeedPath = $driverFeedPath
