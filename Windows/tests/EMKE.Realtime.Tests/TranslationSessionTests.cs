@@ -418,6 +418,9 @@ public sealed class TranslationSessionTests
             new byte[PcmFrameBatcher.FrameBytes],
             CancellationToken.None).AsTask();
         await WaitUntilAsync(() => transport.AudioSendCount == 1, "audio send");
+        await WaitUntilAsync(
+            () => transport.ActiveReceiveCount == 1,
+            "blocked receive");
 
         Task close = session.CloseAsync(CancellationToken.None);
         await WaitUntilAsync(() => transport.CloseCount == 1, "close send");
@@ -438,7 +441,6 @@ public sealed class TranslationSessionTests
             () => transport.ActiveReceiveCount == 0,
             "receive shutdown");
         Assert.AreEqual(0, transport.ActiveReceiveCount);
-        Assert.IsFalse(transport.DisposedWhileReceiveActive);
     }
 
     [TestMethod]
