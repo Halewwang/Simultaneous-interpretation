@@ -2,12 +2,12 @@
 
 ## Status
 
-BLOCKED: permanent metadata-driven workflows and the hosted-preview fallback
-are implemented, but the required final hosted install result is not yet
-available. The original 25H2 job had no eligible runner; a temporary
-evidence-only push harness has triggered the replacement path but its run is
-not yet inspectable while the GitHub API is rate-limited. No install or smoke
-success is claimed.
+DONE_WITH_CONCERNS: permanent metadata-driven workflows and hosted-preview
+install evidence are complete. The signed MSIX installed, its exact identity
+was validated, and cleanup succeeded; the WPF smoke process failed because the
+package has no supported `--hosted-driver-missing-smoke` contract. No runtime
+change was made in Task 4, and no smoke/live/driver/four-endpoint acceptance is
+claimed.
 
 ## Changes
 
@@ -21,6 +21,9 @@ success is claimed.
   `windows-2025-vs2026` hosted preview. It reports actual host facts, keeps
   server rejection explicit, removes the helper's stale `0.1.0.0` restriction,
   and preserves exact identity/signing/cleanup validation.
+- `0c4eb23` — moves required Authenticode `Valid` verification behind exact
+  temporary public-certificate trust, verifies signer subject/thumbprint before
+  installation, and retains both cleanup paths.
 
 No application runtime, audio, driver, Setup EXE, macOS code, signing policy,
 or product branch remote state was changed.
@@ -51,8 +54,23 @@ or product branch remote state was changed.
   `UnknownError` and the workflow incorrectly demanded `Valid` before the
   helper added the exact certificate. Product commit `0c4eb23` centralizes the
   mandatory Valid/signer verification after exact temporary trust and before
-  `Add-AppxPackage`; evidence commit `26d7eae` has triggered its replacement
-  run. No post-trust/install/smoke result is claimed yet.
+  `Add-AppxPackage`; evidence-only commit `26d7eae` carried its replacement
+  run and is not part of the product branch.
+- Final hosted run `30706709568`: `build-test` job `91386972863` and protected
+  signing job `91387310561` both succeeded. Artifact `8820627964`, named
+  `emke-translation-windows-0.2.0-internal-x64-26d7eaeaacc6b2759407a993349154fb8e1232e6`,
+  was `161272655` bytes with service digest SHA-256
+  `5acce9bc503fa286276e89224d5f6d6fb14cbd229bf9825ac2b2e077999dc802` and
+  expiration `2026-08-15T15:55:21Z`.
+- Final install job `91387702087` recorded pre-trust MSIX SHA-256
+  `5BCB5D8D7BCF436381F5A4AF022FA6AFD0497ACA378C666F17644913B3BB958E` with
+  `UnknownError`, then post-trust Authenticode `Valid` with signer
+  `CN=EMKE Internal Test` and thumbprint
+  `33E9992B08919BA6522F8A16B95CC2AA5DA6BB98`. `Add-AppxPackage` and exact
+  identity/version/architecture validation completed; helper-finally uninstall
+  and workflow exact-certificate cleanup completed. The subsequent smoke
+  failed at `test-hosted-msix-install.ps1:237` with exit `-532462766` because
+  the WPF package lacks a supported `--hosted-driver-missing-smoke` contract.
 
 Local `git diff --check` and the static workflow gate passed. PowerShell
 execution tests are not runnable on the macOS checkout (`pwsh` absent), so the
@@ -63,12 +81,11 @@ remote Windows gate is the relevant execution proof.
 The hosted job is deliberately named preview rather than 25H2 acceptance and
 prints actual OS/build/product type. It only accepts the app's explicit
 Windows-Server rejection when appropriate; it does not fabricate workstation
-acceptance. Existing repository evidence states that the packaged WPF app does
-not yet implement `--hosted-driver-missing-smoke`; therefore a subsequent
-hosted install run may expose that as a real smoke gap and must not be reported
-as passed without the executable entry point.
+acceptance. The final WPF smoke failure confirms the known missing
+`--hosted-driver-missing-smoke` contract and is reported as a concern, not as
+successful smoke evidence.
 
-Still unproven: Microsoft-signed driver, four endpoints, live translation,
-Setup EXE, physical Windows 10 22H2, physical Windows 11 25H2, device/meeting,
-and audio acceptance. Exact final MSIX hash/signer/thumbprint/install evidence
-for `84ff725` awaits a successfully dispatched hosted run.
+Still unproven: packaged-process smoke, Microsoft-signed driver, four
+endpoints, live translation, Setup EXE, physical Windows 10 22H2, physical
+Windows 11 25H2, device/meeting, and audio acceptance. Product commits,
+including `0c4eb23`, remain local and unpushed.

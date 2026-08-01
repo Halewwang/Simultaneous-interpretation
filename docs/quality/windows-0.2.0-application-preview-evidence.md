@@ -6,9 +6,9 @@
   independent application-preview stream.
 - Tested workflow source before the hosted fallback: `85d06da57f8397b96c7af7af94685565ef33d591` on
   `codex/task4-workflow-evidence-green`.
-- Current permanent-workflow source: `84ff725` (`ci: run hosted Windows preview validation`),
-  retained locally on `codex/windows-internal-msix` and mirrored only to the
-  evidence branch.  The product branch was not pushed.
+- Current permanent-workflow fix: `0c4eb23` (`ci: verify hosted MSIX after
+  certificate trust`), retained locally on `codex/windows-internal-msix`.
+  The product branch was not pushed.
 - Package contract: `EMKE.Translation.Internal`, `0.2.0.0`, x64,
   `CN=EMKE Internal Test`.
 
@@ -61,8 +61,35 @@ before installation. Commit `0c4eb23` moves the required `Valid` check into
 the helper after exact certificate bytes/subject/thumbprint validation and
 temporary TrustedPeople import; it verifies the post-trust signer subject and
 thumbprint before `Add-AppxPackage`, while preserving both cleanup paths.
-Evidence-only commit `26d7eae` carries that fix plus the temporary harness and
-has been pushed for a new protected run. Its result is still pending.
+Evidence-only commit `26d7eae` carries that fix plus the temporary harness;
+it is not a product commit and must not be merged into the product branch.
+
+## Final hosted-preview result
+
+Run [30706709568](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30706709568)
+completed the permanent build/sign path for evidence source
+`26d7eaeaacc6b2759407a993349154fb8e1232e6`.
+
+- `build-test` job `91386972863`: **SUCCESS**.
+- Protected `sign-package-bundle` job `91387310561`: **SUCCESS**.
+- Artifact `8820627964`:
+  `emke-translation-windows-0.2.0-internal-x64-26d7eaeaacc6b2759407a993349154fb8e1232e6`,
+  `161272655` bytes, service digest SHA-256
+  `5acce9bc503fa286276e89224d5f6d6fb14cbd229bf9825ac2b2e077999dc802`,
+  expiring `2026-08-15T15:55:21Z`.
+- `install-hosted-preview` job `91387702087` recorded pre-trust MSIX SHA-256
+  `5BCB5D8D7BCF436381F5A4AF022FA6AFD0497ACA378C666F17644913B3BB958E` with
+  Authenticode `UnknownError`. After importing the exact temporary public
+  certificate, Authenticode was `Valid`; signer was `CN=EMKE Internal Test`
+  with thumbprint `33E9992B08919BA6522F8A16B95CC2AA5DA6BB98`.
+- The helper therefore passed `Add-AppxPackage` and exact installed
+  identity/version/architecture checks before it invoked the smoke process.
+  Its `finally` successfully uninstalled the exact package, and the workflow
+  exact-certificate cleanup step also succeeded.
+- Smoke did **not** pass: `Windows/tools/test-hosted-msix-install.ps1:237`
+  reported `Driver-missing smoke exited with code -532462766.` The packaged
+  WPF application has no supported `--hosted-driver-missing-smoke` contract;
+  no runtime change was made in Task 4.
 
 ## Local and contract checks
 
@@ -81,8 +108,7 @@ has been pushed for a new protected run. Its result is still pending.
 This is application-preview CI evidence only. It does **not** prove a
 Microsoft-signed driver, four endpoints, live translation, Setup EXE, physical
 Windows 10 22H2 (19045) acceptance, or physical Windows 11 25H2 (26200)
-acceptance. The packaged WPF application also has no production
-`--hosted-driver-missing-smoke` entry point, so a successful build/sign job
-must not be read as packaged process-smoke evidence. The current Windows
-runtime rejects Windows Server and non-x64 by contract; a hosted Server result
-is compatibility evidence, not a supported runtime result.
+acceptance. The smoke failure means it also does not prove packaged-process
+smoke, live translation, driver behavior, or four endpoints. The current
+Windows runtime rejects Windows Server and non-x64 by contract; a hosted
+Server result is compatibility evidence, not a supported runtime result.
