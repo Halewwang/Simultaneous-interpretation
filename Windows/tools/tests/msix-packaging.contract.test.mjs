@@ -25,6 +25,11 @@ const manifestPath = path.join(
 );
 const packageScriptPath = path.join(windowsRoot, 'tools', 'package-msix.ps1');
 const verifyScriptPath = path.join(windowsRoot, 'tools', 'verify-msix.ps1');
+const bundleScriptPath = path.join(
+  windowsRoot,
+  'tools',
+  'build-internal-msix-bundle.ps1',
+);
 const nativeCmakePath = path.join(windowsRoot, 'native', 'CMakeLists.txt');
 const nativeWorkflowPath = path.join(
   repositoryRoot,
@@ -586,6 +591,14 @@ test('package publish path derives the target framework from current build prope
   assert.match(source, /Directory\.Build\.props/);
   assert.match(source, /MinimumWindowsApiContract/);
   assert.match(source, /TargetFramework/);
+});
+
+test('bundle package names derive from the resolved internal release metadata', async () => {
+  const source = await readFile(bundleScriptPath, 'utf8');
+  assert.doesNotMatch(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64/);
+  assert.match(source, /resolve-version\.ps1/);
+  assert.match(source, /releaseMetadata\.ProductVersion/);
+  assert.match(source, /releaseMetadata\.Architecture/);
 });
 
 test('verification temporarily trusts and removes only the machine app signer', async () => {
