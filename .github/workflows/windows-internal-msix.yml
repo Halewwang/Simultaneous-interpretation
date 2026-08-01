@@ -2,41 +2,16 @@ name: Windows Internal MSIX
 
 on:
   workflow_dispatch:
-    inputs:
-      run_25h2_install_validation:
-        description: Run install and driver-missing smoke on the ephemeral 25H2 runner
-        required: false
-        type: boolean
-        default: false
-  pull_request:
-    paths:
-      - "Windows/**"
-      - "Shared/**"
-      - "Scripts/validate-shared-contracts.mjs"
-      - ".github/workflows/windows-internal-msix.yml"
-  push:
-    branches:
-      - main
-      - codex/windows-internal-msix
-    paths:
-      - "Windows/**"
-      - "Shared/**"
-      - "Scripts/validate-shared-contracts.mjs"
-      - ".github/workflows/windows-internal-msix.yml"
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-test:
+  prove-task-1-red:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-      - name: Check out source
+      - name: Check out Task 1 RED tree
         uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -51,363 +26,60 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Validate portable contracts and locked restore
+      - name: Prove new contracts fail against old production metadata
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
-            throw "Internal MSIX build requires an x64 hosted process."
+          $ErrorActionPreference = 'Stop'
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'task1-compat-red-evidence'
+          New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+
+          $nodeOutput = & node --test Windows/tools/tests/windows-version.contract.test.mjs 2>&1
+          $nodeExit = $LASTEXITCODE
+          $nodeText = $nodeOutput | Out-String
+          Set-Content -LiteralPath (Join-Path $evidenceRoot 'node-red.log') -Value $nodeText
+          $nodeText | Write-Host
+          if ($nodeExit -eq 0) {
+            throw 'RED Node contract unexpectedly passed against old metadata.'
           }
-          node Scripts/validate-shared-contracts.mjs
-          if ($LASTEXITCODE -ne 0) {
-            throw "Shared contract validation failed."
-          }
-          node --test Windows/driver/tests/*.test.mjs Windows/tools/tests/*.test.mjs
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows portable contract tests failed."
-          }
-          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows locked restore failed."
-          }
-
-      - name: Build and test native Release audio
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          Push-Location Windows/native
-          try {
-            cmake --preset windows-x64-release
-            if ($LASTEXITCODE -ne 0) {
-              throw "Native CMake configuration failed."
-            }
-            cmake --build --preset windows-x64-release
-            if ($LASTEXITCODE -ne 0) {
-              throw "Native Release build failed."
-            }
-            ctest --preset windows-x64-release
-            if ($LASTEXITCODE -ne 0) {
-              throw "Native CTest gate failed."
-            }
-          } finally {
-            Pop-Location
-          }
-
-      - name: Build and test managed Release product
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          dotnet build Windows/EMKE.Windows.slnx `
-            --configuration Release `
-            --no-restore
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows managed Release build failed."
-          }
-          dotnet test Windows/EMKE.Windows.slnx `
-            --configuration Release `
-            --no-build `
-            --logger "trx;LogFileName=windows-internal-msix.trx"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows managed test gate failed."
-          }
-
-  sign-package-bundle:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/windows-internal-msix' }}
-    needs: build-test
-    runs-on: windows-2025-vs2026
-    timeout-minutes: 30
-    environment: windows-internal-signing
-    outputs:
-      certificate_thumbprint: ${{ steps.package.outputs.certificate_thumbprint }}
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Restore locked managed packaging inputs
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows locked packaging restore failed."
-          }
-
-      - name: Build native Release package input
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          Push-Location Windows/native
-          try {
-            cmake --preset windows-x64-release
-            if ($LASTEXITCODE -ne 0) {
-              throw "Native packaging configuration failed."
-            }
-            cmake --build --preset windows-x64-release
-            if ($LASTEXITCODE -ne 0) {
-              throw "Native packaging input build failed."
-            }
-          } finally {
-            Pop-Location
-          }
-
-      - name: Reconstruct, sign, and verify Internal MSIX
-        id: package
-        shell: pwsh
-        env:
-          WINDOWS_INTERNAL_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_BASE64 }}
-          WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD }}
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $signingRoot = Join-Path `
-            $env:RUNNER_TEMP `
-            ("emke-msix-signing-" + [Guid]::NewGuid().ToString("N"))
-          $pfxPath = Join-Path $signingRoot "app.pfx"
-          $pfxBytes = $null
-          try {
-            if (
-              [string]::IsNullOrWhiteSpace(
-                $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64
-              ) -or
-              [string]::IsNullOrEmpty(
-                $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD
-              )
-            ) {
-              throw "Required Internal signing secrets are unavailable."
-            }
-            [IO.Directory]::CreateDirectory($signingRoot) | Out-Null
-            try {
-              $pfxBytes = [Convert]::FromBase64String(
-                $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64
-              )
-            } catch {
-              throw "Internal signing PFX reconstruction failed."
-            }
-            [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
-
-            $artifactRoot = Join-Path $PWD "Windows/artifacts/msix"
-            [IO.Directory]::CreateDirectory($artifactRoot) | Out-Null
-            $certificatePath = Join-Path `
-              $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
-            pwsh -NoProfile -File `
-              Windows/tools/verify-internal-signing-certificate.ps1 `
-              -PfxPath $pfxPath `
-              -PasswordEnvironmentVariable `
-                WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD `
-              -ExpectedSubject "CN=EMKE Internal Test" `
-              -ExportPublicCertificatePath $certificatePath
-            if ($LASTEXITCODE -ne 0) {
-              throw "Internal signing certificate verification failed."
-            }
-
-            pwsh -NoProfile -File Windows/tools/package-msix.ps1 `
-              -Configuration Release `
-              -PfxPath $pfxPath `
-              -PasswordEnvironmentVariable `
-                WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD
-            if ($LASTEXITCODE -ne 0) {
-              throw "Internal MSIX packaging failed."
-            }
-
-            $packagePath = Join-Path `
-              $artifactRoot `
-              "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-            pwsh -NoProfile -File Windows/tools/verify-msix.ps1 `
-              -Package $packagePath
-            if ($LASTEXITCODE -ne 0) {
-              throw "Internal MSIX verification failed."
-            }
-          } finally {
-            $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
-            $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
-            if ($null -ne $pfxBytes) {
-              [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
-            }
-            if (Test-Path -LiteralPath $pfxPath) {
-              Remove-Item -LiteralPath $pfxPath -Force
-            }
-            if (
-              Test-Path -LiteralPath $signingRoot -PathType Container
-            ) {
-              Remove-Item -LiteralPath $signingRoot -Force
+          foreach ($expectedFailure in @(
+            'Windows Internal metadata keeps the version and compatibility contract',
+            'resolver emits the CI package object and accepts only the exact Windows tag',
+            'resolver rejects malformed or inconsistent metadata'
+          )) {
+            if ($nodeText -notmatch [regex]::Escape($expectedFailure)) {
+              throw "RED Node evidence did not include '$expectedFailure'."
             }
           }
-
-      - name: Build exact handoff bundle
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $allowedOutputRoot = Join-Path $PWD "Windows/artifacts"
-          $artifactRoot = Join-Path $allowedOutputRoot "msix"
-          $bundleRoot = Join-Path $allowedOutputRoot "internal-bundle"
-          pwsh -NoProfile -File `
-            Windows/tools/build-internal-msix-bundle.ps1 `
-            -PackagePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-            ) `
-            -CertificatePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
-            ) `
-            -InstallScriptPath (
-              Join-Path `
-                $PWD `
-                "Windows/packaging/App/Install-EMKE-Translation-Internal.ps1"
-            ) `
-            -UninstallScriptPath (
-              Join-Path `
-                $PWD `
-                "Windows/packaging/App/Uninstall-EMKE-Translation-Internal.ps1"
-            ) `
-            -AllowedOutputRoot $allowedOutputRoot `
-            -OutputDirectory $bundleRoot `
-            -SourceCommit "${{ github.sha }}" `
-            -WorkflowRunId "${{ github.run_id }}" `
-            -PackageIdentity "EMKE.Translation.Internal" `
-            -CertificateThumbprint `
-              "${{ steps.package.outputs.certificate_thumbprint }}"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Internal handoff bundle construction failed."
+          if ($nodeText -match '# SKIP') {
+            throw 'RED Node resolver tests must execute on the Windows runner, not skip.'
           }
 
-      - name: Upload verified Internal bundle
+          $managedOutput = & dotnet test Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj --configuration Release --filter 'FullyQualifiedName~VersionMetadataTests' --logger 'console;verbosity=detailed' 2>&1
+          $managedExit = $LASTEXITCODE
+          $managedText = $managedOutput | Out-String
+          Set-Content -LiteralPath (Join-Path $evidenceRoot 'managed-red.log') -Value $managedText
+          $managedText | Write-Host
+          if ($managedExit -eq 0) {
+            throw 'RED managed VersionMetadataTests unexpectedly passed against old metadata.'
+          }
+          if ($managedText -notmatch 'VersionMetadataDefinesCanonicalInternalRelease') {
+            throw 'RED managed evidence did not include VersionMetadataDefinesCanonicalInternalRelease.'
+          }
+
+          @"
+          ## Task 1 RED evidence
+
+          - Source commit: $env:GITHUB_SHA
+          - Node contract: failed as expected (exit $nodeExit); resolver tests executed without skips.
+          - Managed VersionMetadataTests: failed as expected (exit $managedExit).
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload RED logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
-          path: Windows/artifacts/internal-bundle
+          name: task1-compat-red-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/task1-compat-red-evidence
           if-no-files-found: error
           retention-days: 14
-          compression-level: 0
-
-  install-25h2:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_25h2_install_validation }}
-    needs: sign-package-bundle
-    runs-on: [self-hosted, Windows, X64, emke-win11-25h2]
-    timeout-minutes: 15
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Download exact signed Internal bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: emke-translation-windows-0.1.0-internal-x64-${{ github.sha }}
-          path: Windows/artifacts/internal-bundle
-
-      - name: Verify Windows 11 25H2 runner
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          if ($env:PROCESSOR_ARCHITECTURE -cne "AMD64") {
-            throw "The 25H2 install runner must be x64."
-          }
-          $windowsBuild = [Environment]::OSVersion.Version.Build
-          if ($windowsBuild -lt 26200) {
-            throw "The install runner must be Windows build 26200 or newer."
-          }
-
-      - name: Install, query, smoke, and remove exact Internal MSIX
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $artifactRoot = Join-Path $PWD "Windows/artifacts/internal-bundle"
-          $thumbprint =
-            "${{ needs.sign-package-bundle.outputs.certificate_thumbprint }}".
-              ToUpperInvariant()
-          if ($thumbprint -notmatch "^[0-9A-F]{40}$") {
-            throw "The signing job did not emit an exact certificate thumbprint."
-          }
-          $existingCertificate = Test-Path -LiteralPath (
-            "Cert:\LocalMachine\TrustedPeople\$thumbprint"
-          )
-          if ($existingCertificate) {
-            throw "The ephemeral 25H2 runner already trusts the Internal certificate."
-          }
-          $cleanupMarker = Join-Path `
-            $env:RUNNER_TEMP `
-            "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
-          [IO.File]::WriteAllText(
-            $cleanupMarker,
-            $thumbprint,
-            [Text.UTF8Encoding]::new($false)
-          )
-          pwsh -NoProfile -File Windows/tools/test-hosted-msix-install.ps1 `
-            -PackagePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-            ) `
-            -CertificatePath (
-              Join-Path `
-                $artifactRoot `
-                "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
-            ) `
-            -ExpectedCertificateThumbprint $thumbprint
-          if ($LASTEXITCODE -ne 0) {
-            throw "Windows 11 25H2 Internal MSIX install validation failed."
-          }
-
-      - name: Ensure exact certificate cleanup
-        if: always()
-        shell: pwsh
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = "Stop"
-          $cleanupMarker = Join-Path `
-            $env:RUNNER_TEMP `
-            "emke-internal-msix-${{ github.run_id }}-${{ github.run_attempt }}.thumbprint"
-          if (Test-Path -LiteralPath $cleanupMarker -PathType Leaf) {
-            $thumbprint = (
-              [IO.File]::ReadAllText($cleanupMarker)
-            ).Trim().ToUpperInvariant()
-            try {
-              if ($thumbprint -notmatch "^[0-9A-F]{40}$") {
-                throw "The cleanup marker has an invalid thumbprint."
-              }
-              $store =
-                [Security.Cryptography.X509Certificates.X509Store]::new(
-                  [Security.Cryptography.X509Certificates.StoreName]::TrustedPeople,
-                  [Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
-                )
-              try {
-                $store.Open(
-                  [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
-                )
-                $matches = @(
-                  $store.Certificates |
-                    Where-Object {
-                      $_.Thumbprint.ToUpperInvariant() -ceq $thumbprint
-                    }
-                )
-                foreach ($match in $matches) {
-                  $store.Remove($match)
-                }
-              } finally {
-                $store.Close()
-                $store.Dispose()
-              }
-            } finally {
-              Remove-Item -LiteralPath $cleanupMarker -Force
-            }
-          }
