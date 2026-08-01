@@ -220,8 +220,11 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   );
 
   const buildJob = workflowJob(workflow, 'build-test');
+  const crlfWorkflow = workflow
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\n', '\r\n');
   assert.match(
-    workflowJob(workflow.replaceAll('\n', '\r\n'), 'build-test'),
+    workflowJob(crlfWorkflow, 'build-test'),
     /runs-on:\s*windows-2025-vs2026/,
   );
   assert.doesNotMatch(buildJob, /secrets\.|WINDOWS_INTERNAL_SIGNING_PFX/);
