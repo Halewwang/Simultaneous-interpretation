@@ -18,6 +18,8 @@ public sealed class CompatibilityGateTests
         "meetingMicrophoneCapture",
     ];
 
+    private static readonly string[] HostOnlyTrace = ["os"];
+
     [TestMethod]
     [DataRow(26199, true, true, 1, "0.1.0", 4, "unsupportedWindowsBuild", false)]
     [DataRow(26200, false, false, 0, "0.0.0", 0, "driverMissing", false)]
@@ -242,7 +244,7 @@ public sealed class CompatibilityGateTests
         RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
 
         Assert.AreEqual("unsupportedWindowsBuild", error?.Code);
-        CollectionAssert.AreEqual(new[] { "os" }, harness.Trace.ToArray());
+        CollectionAssert.AreEqual(HostOnlyTrace, harness.Trace.ToArray());
         Assert.AreEqual(0, harness.AudioStartCount);
         Assert.AreEqual(0, harness.SessionCreateCount);
     }
