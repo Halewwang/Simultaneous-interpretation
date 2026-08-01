@@ -16,17 +16,17 @@ public sealed class CompatibilityManifestResourceTests
                 typeof(AppPresentationMapper).Assembly,
                 "EMKE.Windows.App.compatibility.internal.json");
 
-        Assert.AreEqual(new Version(0, 1, 0), manifest.AppVersion);
+        Assert.AreEqual(new Version(0, 2, 0), manifest.AppVersion);
         Assert.AreEqual(1, manifest.ContractVersion);
         Assert.AreEqual(1, manifest.SettingsSchemaVersion);
         Assert.AreEqual(1, manifest.DriverAbiVersion);
-        Assert.AreEqual(new Version(0, 1, 0), manifest.MinimumDriverVersion);
+        Assert.AreEqual(new Version(1, 0, 0, 2), manifest.MinimumDriverVersion);
         Assert.AreEqual(
-            new Version(0, 1, 0),
+            new Version(1, 0, 0, 2),
             manifest.RecommendedDriverVersion);
         Assert.IsFalse(manifest.DriverPackageAvailable);
         Assert.AreEqual("internal", manifest.Channel);
-        Assert.AreEqual(26200, manifest.MinimumWindowsBuild);
+        Assert.AreEqual(19045, manifest.MinimumWindowsBuild);
         Assert.AreEqual(4, manifest.RequiredEndpointRoleCount);
     }
 }

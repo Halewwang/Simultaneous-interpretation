@@ -126,6 +126,23 @@ public sealed class ProductionCompositionTests
     }
 
     [TestMethod]
+    public async Task ProductionCoreComposesMetadataBackedWindowsHostGate()
+    {
+        AppCoreAdapterBundle bundle =
+            await ProductionCoreAdapters.CreateAsync(CancellationToken.None);
+        try
+        {
+            Assert.AreEqual(
+                "EMKE.Platform.Compatibility.WindowsHostBuildGate",
+                bundle.RuntimeDependencies.WindowsBuildGate.GetType().FullName);
+        }
+        finally
+        {
+            await bundle.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task ProductionCoreSharesRealSettingsAndCredentialAdaptersWithUi()
     {
         AppCoreAdapterBundle bundle =

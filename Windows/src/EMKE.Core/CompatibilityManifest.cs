@@ -5,7 +5,6 @@ namespace EMKE.Core;
 
 public sealed record CompatibilityManifest
 {
-    private const int InternalMinimumWindowsBuild = 26200;
     private const int InternalRequiredEndpointRoleCount = 4;
 
     public CompatibilityManifest(
@@ -23,7 +22,7 @@ public sealed record CompatibilityManifest
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(contractVersion);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(settingsSchemaVersion);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(driverAbiVersion);
-        ArgumentOutOfRangeException.ThrowIfNegative(minimumWindowsBuild);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(minimumWindowsBuild);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(
             requiredEndpointRoleCount);
 
@@ -112,7 +111,7 @@ public sealed record CompatibilityManifest
                 ParseVersion(root, "recommendedDriverVersion"),
                 driverPackageAvailable,
                 channel,
-                InternalMinimumWindowsBuild,
+                ReadRequiredPositiveInt32(root, "minimumWindowsBuild"),
                 InternalRequiredEndpointRoleCount);
         }
         catch (JsonException exception)

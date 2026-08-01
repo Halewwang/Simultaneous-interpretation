@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using EMKE.Application;
 using EMKE.Core;
+using EMKE.Platform.Compatibility;
 using EMKE.Platform.Driver;
 using EMKE.Platform.Diagnostics;
 using EMKE.Platform.Native;
@@ -101,7 +102,9 @@ internal static class ProductionCoreAdapters
         CredentialManagerSecretStore secretStore = new(
             WindowsCredentialChannel.Internal);
         TranslationRuntimeDependencies dependencies = new(
-            new Windows25H2BuildGate(),
+            new WindowsHostBuildGate(
+                compatibilityManifest,
+                new WindowsHostCompatibilityProbe()),
             settingsStore,
             secretStore,
             driverManager,
@@ -118,27 +121,6 @@ internal static class ProductionCoreAdapters
                 new NativeAudioLifetime(audio),
                 settingsStore,
                 secretStore));
-    }
-
-    private sealed class Windows25H2BuildGate : IWindowsBuildGate
-    {
-        private const int MinimumBuild = 26200;
-
-        public ValueTask<RuntimeError?> CheckAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            bool supported = OperatingSystem.IsWindows()
-                && Environment.OSVersion.Version.Build >= MinimumBuild;
-            return ValueTask.FromResult(
-                supported
-                    ? null
-                    : new RuntimeError(
-                        ErrorCategory.Configuration,
-                        "translationRuntime.windowsBuildUnsupported",
-                        new Dictionary<string, string>(),
-                        RecoveryAction.ReportCompatibility));
-        }
     }
 
     private sealed class PendingAudioDeviceCatalog : IAudioDeviceCatalog
