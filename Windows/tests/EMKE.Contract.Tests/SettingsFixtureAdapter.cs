@@ -357,7 +357,7 @@ internal static class SettingsFixtureAdapter
 
         public int GetCurrentWindowsBuild()
         {
-            return 0;
+            return 19045;
         }
     }
 }
