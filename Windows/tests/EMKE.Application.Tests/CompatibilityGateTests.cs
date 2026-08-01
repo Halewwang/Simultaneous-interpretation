@@ -184,7 +184,8 @@ public sealed class CompatibilityGateTests
               "minimumDriverVersion": "0.1.0",
               "recommendedDriverVersion": "0.1.0",
               "driverPackageAvailable": false,
-              "channel": "internal"
+              "channel": "internal",
+              "minimumWindowsBuild": 19045
             }
             """;
 
@@ -192,11 +193,58 @@ public sealed class CompatibilityGateTests
             CompatibilityManifest.ParseInternalJson(json);
 
         Assert.AreEqual(new Version(0, 1, 0), manifest.AppVersion);
-        Assert.AreEqual(26200, manifest.MinimumWindowsBuild);
+        Assert.AreEqual(19045, manifest.MinimumWindowsBuild);
         Assert.AreEqual(4, manifest.RequiredEndpointRoleCount);
         Assert.IsFalse(manifest.DriverPackageAvailable);
         Assert.ThrowsExactly<InvalidDataException>(
             () => CompatibilityManifest.ParseInternalJson("{}"));
+    }
+
+    [TestMethod]
+    [DataRow("{}")]
+    [DataRow("{\"minimumWindowsBuild\":\"19045\"}")]
+    [DataRow("{\"minimumWindowsBuild\":19045.5}")]
+    [DataRow("{\"minimumWindowsBuild\":0}")]
+    [DataRow("{\"minimumWindowsBuild\":-1}")]
+    public void EmbeddedInternalJsonRequiresPositiveIntegerMinimumWindowsBuild(
+        string minimumWindowsBuild)
+    {
+        const string prefix = """
+            {
+              "appVersion": "0.1.0",
+              "contractVersion": 1,
+              "settingsSchemaVersion": 1,
+              "driverAbiVersion": 1,
+              "minimumDriverVersion": "0.1.0",
+              "recommendedDriverVersion": "0.1.0",
+              "driverPackageAvailable": false,
+              "channel": "internal"
+            """;
+        string json = minimumWindowsBuild == "{}"
+            ? prefix
+            : prefix[..^1] + ",\n" + minimumWindowsBuild[1..];
+
+        Assert.ThrowsExactly<InvalidDataException>(
+            () => CompatibilityManifest.ParseInternalJson(json));
+    }
+
+    [TestMethod]
+    public async Task HostGateFailureStopsBeforeDriverSecretAudioOrNetwork()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.OsError = new RuntimeError(
+            ErrorCategory.Configuration,
+            "unsupportedWindowsBuild",
+            new Dictionary<string, string>(),
+            RecoveryAction.ReportCompatibility);
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual("unsupportedWindowsBuild", error?.Code);
+        CollectionAssert.AreEqual(["os"], harness.Trace.ToArray());
+        Assert.AreEqual(0, harness.AudioStartCount);
+        Assert.AreEqual(0, harness.SessionCreateCount);
     }
 
     private static CompatibilityManifest CreateManifest(

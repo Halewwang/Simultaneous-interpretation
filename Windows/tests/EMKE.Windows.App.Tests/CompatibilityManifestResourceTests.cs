@@ -26,7 +26,7 @@ public sealed class CompatibilityManifestResourceTests
             manifest.RecommendedDriverVersion);
         Assert.IsFalse(manifest.DriverPackageAvailable);
         Assert.AreEqual("internal", manifest.Channel);
-        Assert.AreEqual(26200, manifest.MinimumWindowsBuild);
+        Assert.AreEqual(19045, manifest.MinimumWindowsBuild);
         Assert.AreEqual(4, manifest.RequiredEndpointRoleCount);
     }
 }
