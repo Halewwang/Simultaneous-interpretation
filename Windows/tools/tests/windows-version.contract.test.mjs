@@ -157,7 +157,7 @@ const invalidSchemaMutations = [
   {
     name: 'packageVersion not aligned with productVersion',
     mutate: ({ version }) => {
-      version.packageVersion = '0.2.0.0';
+      version.packageVersion = '0.3.0.0';
     },
   },
   {
