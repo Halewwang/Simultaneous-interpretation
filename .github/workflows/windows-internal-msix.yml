@@ -7,11 +7,11 @@ permissions:
   contents: read
 
 jobs:
-  regenerate-task-2-lockfiles:
+  prove-task-2-green:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Check out Task 2 lockfile tree
+      - name: Check out Task 2 final GREEN tree
         uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -21,43 +21,106 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Regenerate only retargeted lockfiles
+      - name: Prove final Task 2 managed compatibility gates
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $stagingRoot = Join-Path $env:RUNNER_TEMP 'task2-lockfile-regeneration'
-          New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
+          $PSNativeCommandUseErrorActionPreference = $false
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'task2-compat-final-green-evidence'
+          $resultsRoot = 'Windows/out/task2-compat-final-green-results'
+          New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $resultsRoot -Force | Out-Null
 
-          dotnet restore Windows/EMKE.Windows.slnx --force-evaluate
+          $restoreOutput = & dotnet restore Windows/EMKE.Windows.slnx --locked-mode 2>&1
+          $restoreExit = $LASTEXITCODE
+          $restoreText = $restoreOutput | Out-String
+          Set-Content -LiteralPath (Join-Path $evidenceRoot 'locked-restore.log') -Value $restoreText
+          $restoreText | Write-Host
+          if ($restoreExit -ne 0) {
+            throw 'Final GREEN locked restore failed.'
+          }
+
+          $commands = @(
+            @{
+              Name = 'application-compatibility';
+              Project = 'Windows/tests/EMKE.Application.Tests/EMKE.Application.Tests.csproj';
+              Filter = 'FullyQualifiedName~Compatibility';
+              ExpectedTotal = 30
+            },
+            @{
+              Name = 'windows-app-composition';
+              Project = 'Windows/tests/EMKE.Windows.App.Tests/EMKE.Windows.App.Tests.csproj';
+              Filter = 'FullyQualifiedName~CompatibilityManifestResourceTests|FullyQualifiedName~ProductionCompositionTests';
+              ExpectedTotal = 8
+            },
+            @{
+              Name = 'integration-host-probe';
+              Project = 'Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj';
+              Filter = 'FullyQualifiedName~WindowsHostCompatibilityProbeTests';
+              ExpectedTotal = 7
+            }
+          )
+
+          foreach ($command in $commands) {
+            $trxName = $command.Name + '.trx'
+            $output = & dotnet test $command.Project --configuration Release --filter $command.Filter --logger "trx;LogFileName=$trxName" --results-directory $resultsRoot 2>&1
+            $exit = $LASTEXITCODE
+            $text = $output | Out-String
+            Set-Content -LiteralPath (Join-Path $evidenceRoot ($command.Name + '.log')) -Value $text
+            $text | Write-Host
+            if ($exit -ne 0) {
+              throw "Final GREEN $($command.Name) failed."
+            }
+            $trxPath = Join-Path $resultsRoot $trxName
+            if (-not (Test-Path -LiteralPath $trxPath -PathType Leaf)) {
+              throw "Final GREEN $($command.Name) did not produce TRX evidence."
+            }
+            [xml]$trx = Get-Content -LiteralPath $trxPath -Raw
+            $counters = $trx.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -ne $command.ExpectedTotal -or
+              [int]$counters.executed -ne $command.ExpectedTotal -or
+              [int]$counters.passed -ne $command.ExpectedTotal -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "Final GREEN $($command.Name) did not pass its exact managed test contract."
+            }
+          }
+
+          $buildOutput = & dotnet build Windows/EMKE.Windows.slnx --configuration Release 2>&1
+          $buildExit = $LASTEXITCODE
+          $buildText = $buildOutput | Out-String
+          Set-Content -LiteralPath (Join-Path $evidenceRoot 'release-build.log') -Value $buildText
+          $buildText | Write-Host
+          if ($buildExit -ne 0) {
+            throw 'Final GREEN managed Release build failed.'
+          }
+
+          git diff --check
           if ($LASTEXITCODE -ne 0) {
-            throw 'Task 2 force-evaluate restore failed.'
+            throw 'Final GREEN git diff --check failed.'
           }
-
-          $changed = @(git diff --name-only -- 'Windows/**/packages.lock.json')
-          if ($changed.Count -eq 0) {
-            throw 'Task 2 retarget did not regenerate any lockfiles.'
-          }
-          foreach ($relativePath in $changed) {
-            $destination = Join-Path $stagingRoot $relativePath
-            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-            Copy-Item -LiteralPath $relativePath -Destination $destination -Force
-          }
-          $changed | Set-Content -LiteralPath (Join-Path $stagingRoot 'changed-lockfiles.txt')
-          git diff -- Windows/**/packages.lock.json | Set-Content -LiteralPath (Join-Path $stagingRoot 'lockfile.diff')
 
           @"
-          ## Task 2 lockfile regeneration
+          ## Task 2 final GREEN evidence
 
           - Source commit: $env:GITHUB_SHA
-          - Command: dotnet restore Windows/EMKE.Windows.slnx --force-evaluate
-          - Changed lockfiles: $($changed.Count)
+          - Locked restore passed.
+          - Application compatibility: 30 passed, 0 failed.
+          - Windows App composition/resource: 8 passed, 0 failed.
+          - Integration host probe: 7 passed, 0 failed.
+          - Managed Release build and git diff --check passed.
           "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload regenerated Task 2 lockfiles
+      - name: Upload final GREEN logs and TRX
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: task2-lockfile-regeneration-${{ github.sha }}
-          path: ${{ runner.temp }}/task2-lockfile-regeneration
+          name: task2-compat-final-green-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/task2-compat-final-green-evidence
+            Windows/out/task2-compat-final-green-results
           if-no-files-found: error
           retention-days: 14
