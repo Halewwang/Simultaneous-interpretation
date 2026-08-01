@@ -78,7 +78,7 @@ public sealed class MsixMetadataTests
             $"10.0.{minimumBuild}.0",
             ReadAttribute(target, "MinVersion"));
         Assert.AreEqual(
-            $"10.0.{minimumBuild}.0",
+            versionRoot.GetProperty("maximumVersionTested").GetString(),
             ReadAttribute(target, "MaxVersionTested"));
         Assert.AreEqual("EMKETranslation", ReadAttribute(application, "Id"));
         Assert.AreEqual(

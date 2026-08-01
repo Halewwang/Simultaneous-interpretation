@@ -546,10 +546,10 @@ if (
   assert.deepEqual(JSON.parse(result.stdout.trim()), {
     identityName: 'EMKE.Translation.Internal',
     publisher: 'CN=EMKE Internal Test',
-    version: '0.1.0.0',
+    version: '0.2.0.0',
     architecture: 'x64',
     targetName: 'Windows.Desktop',
-    minimumVersion: '10.0.26200.0',
+    minimumVersion: '10.0.19045.0',
     maximumTestedVersion: '10.0.26200.0',
     applicationId: 'EMKETranslation',
     executable: 'EMKE.Windows.App.exe',
