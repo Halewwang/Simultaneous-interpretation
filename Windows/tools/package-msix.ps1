@@ -23,7 +23,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:PackageBaseName = "EMKE-Translation-Windows-0.2.0-internal-x64"
 $script:ExpectedSubject = "CN=EMKE Internal Test"
 $script:AllowedStageExtensions = @(".dll", ".exe", ".json", ".png", ".xml")
 $script:ForbiddenStageExtensions = @(
@@ -578,11 +577,9 @@ $artifactRoot = Join-Path $windowsRoot "artifacts/msix"
 $stagingPath = $null
 $resolvedPfxPath = $null
 $temporaryStoreThumbprints = @()
-$packagePath = Join-Path $artifactRoot "$($script:PackageBaseName).msix"
-$certificatePath = Join-Path $artifactRoot "$($script:PackageBaseName).cer"
-$provenancePath = Join-Path (
-    $artifactRoot
-) "$($script:PackageBaseName).signing.json"
+$packagePath = $null
+$certificatePath = $null
+$provenancePath = $null
 $packageSucceeded = $false
 $deletePfxOnExit = $false
 $password = $null
@@ -630,6 +627,10 @@ try {
     ) {
         throw "Resolved metadata does not match the Internal MSIX contract."
     }
+    $packageBaseName = "EMKE-Translation-Windows-$($releaseMetadata.ProductVersion)-internal-$($releaseMetadata.Architecture)"
+    $packagePath = Join-Path $artifactRoot "$packageBaseName.msix"
+    $certificatePath = Join-Path $artifactRoot "$packageBaseName.cer"
+    $provenancePath = Join-Path $artifactRoot "$packageBaseName.signing.json"
 
     $appProject = Join-Path (
         $windowsRoot
