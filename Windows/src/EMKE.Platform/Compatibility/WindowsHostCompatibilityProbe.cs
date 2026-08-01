@@ -104,7 +104,7 @@ public sealed partial class WindowsHostCompatibilityProbe : IWindowsHostEvidence
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private unsafe struct OsVersionInfoEx
+    internal unsafe struct OsVersionInfoEx
     {
         public uint Size;
         public uint MajorVersion;
@@ -119,10 +119,10 @@ public sealed partial class WindowsHostCompatibilityProbe : IWindowsHostEvidence
         public byte Reserved;
     }
 
-    private static partial class NativeMethods
+    internal static partial class NativeMethods
     {
         [LibraryImport("ntdll.dll", EntryPoint = "RtlGetVersion")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-        private static partial int RtlGetVersion(ref OsVersionInfoEx version);
+        internal static partial int RtlGetVersion(ref OsVersionInfoEx version);
     }
 }
