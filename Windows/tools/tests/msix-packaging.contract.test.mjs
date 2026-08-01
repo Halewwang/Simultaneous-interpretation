@@ -579,6 +579,15 @@ test('package and verification scripts have valid PowerShell syntax', () => {
   }
 });
 
+test('package publish path derives the target framework from current build properties', async () => {
+  const source = await readFile(packageScriptPath, 'utf8');
+  assert.doesNotMatch(source, /windows10\.0\.26100\.0/);
+  assert.match(source, /function Resolve-PublishPath/);
+  assert.match(source, /Directory\.Build\.props/);
+  assert.match(source, /MinimumWindowsApiContract/);
+  assert.match(source, /TargetFramework/);
+});
+
 test('verification temporarily trusts and removes only the machine app signer', async () => {
   const source = await readFile(verifyScriptPath, 'utf8');
 
