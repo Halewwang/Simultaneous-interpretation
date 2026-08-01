@@ -7,11 +7,11 @@ permissions:
   contents: read
 
 jobs:
-  prove-task-2-green:
+  regenerate-task-2-lockfiles:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - name: Check out Task 2 GREEN tree
+      - name: Check out Task 2 lockfile tree
         uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -21,100 +21,43 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Prove targeted Task 2 managed compatibility gates
+      - name: Regenerate only retargeted lockfiles
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'task2-compat-green-evidence'
-          $resultsRoot = 'Windows/out/task2-compat-green-results'
-          New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
-          New-Item -ItemType Directory -Path $resultsRoot -Force | Out-Null
+          $stagingRoot = Join-Path $env:RUNNER_TEMP 'task2-lockfile-regeneration'
+          New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 
-          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
+          dotnet restore Windows/EMKE.Windows.slnx --force-evaluate
           if ($LASTEXITCODE -ne 0) {
-            throw 'GREEN locked restore failed.'
+            throw 'Task 2 force-evaluate restore failed.'
           }
 
-          $commands = @(
-            @{
-              Name = 'application-compatibility';
-              Project = 'Windows/tests/EMKE.Application.Tests/EMKE.Application.Tests.csproj';
-              Filter = 'FullyQualifiedName~Compatibility';
-              ExpectedTotal = 30
-            },
-            @{
-              Name = 'windows-app-composition';
-              Project = 'Windows/tests/EMKE.Windows.App.Tests/EMKE.Windows.App.Tests.csproj';
-              Filter = 'FullyQualifiedName~CompatibilityManifestResourceTests|FullyQualifiedName~ProductionCompositionTests';
-              ExpectedTotal = 8
-            },
-            @{
-              Name = 'integration-host-probe';
-              Project = 'Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj';
-              Filter = 'FullyQualifiedName~WindowsHostCompatibilityProbeTests';
-              ExpectedTotal = 7
-            }
-          )
-
-          foreach ($command in $commands) {
-            $trxName = $command.Name + '.trx'
-            $output = & dotnet test $command.Project --configuration Release --no-restore --filter $command.Filter --logger "trx;LogFileName=$trxName" --results-directory $resultsRoot 2>&1
-            $exit = $LASTEXITCODE
-            $text = $output | Out-String
-            Set-Content -LiteralPath (Join-Path $evidenceRoot ($command.Name + '.log')) -Value $text
-            $text | Write-Host
-            if ($exit -ne 0) {
-              throw "GREEN $($command.Name) failed."
-            }
-            $trxPath = Join-Path $resultsRoot $trxName
-            if (-not (Test-Path -LiteralPath $trxPath -PathType Leaf)) {
-              throw "GREEN $($command.Name) did not produce TRX evidence."
-            }
-            [xml]$trx = Get-Content -LiteralPath $trxPath -Raw
-            $counters = $trx.TestRun.ResultSummary.Counters
-            if (
-              [int]$counters.total -ne $command.ExpectedTotal -or
-              [int]$counters.executed -ne $command.ExpectedTotal -or
-              [int]$counters.passed -ne $command.ExpectedTotal -or
-              [int]$counters.failed -ne 0 -or
-              [int]$counters.notExecuted -ne 0
-            ) {
-              throw "GREEN $($command.Name) did not pass its exact managed test contract."
-            }
+          $changed = @(git diff --name-only -- 'Windows/**/packages.lock.json')
+          if ($changed.Count -eq 0) {
+            throw 'Task 2 retarget did not regenerate any lockfiles.'
           }
-
-          $buildOutput = & dotnet build Windows/EMKE.Windows.slnx --configuration Release --no-restore 2>&1
-          $buildExit = $LASTEXITCODE
-          $buildText = $buildOutput | Out-String
-          Set-Content -LiteralPath (Join-Path $evidenceRoot 'release-build.log') -Value $buildText
-          $buildText | Write-Host
-          if ($buildExit -ne 0) {
-            throw 'GREEN managed Release build failed.'
+          foreach ($relativePath in $changed) {
+            $destination = Join-Path $stagingRoot $relativePath
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+            Copy-Item -LiteralPath $relativePath -Destination $destination -Force
           }
-
-          git diff --check
-          if ($LASTEXITCODE -ne 0) {
-            throw 'GREEN git diff --check failed.'
-          }
+          $changed | Set-Content -LiteralPath (Join-Path $stagingRoot 'changed-lockfiles.txt')
+          git diff -- Windows/**/packages.lock.json | Set-Content -LiteralPath (Join-Path $stagingRoot 'lockfile.diff')
 
           @"
-          ## Task 2 GREEN evidence
+          ## Task 2 lockfile regeneration
 
           - Source commit: $env:GITHUB_SHA
-          - Application compatibility: 30 passed, 0 failed.
-          - Windows App composition/resource: 8 passed, 0 failed.
-          - Integration host probe: 7 passed, 0 failed.
-          - Managed Release build and git diff --check passed.
+          - Command: dotnet restore Windows/EMKE.Windows.slnx --force-evaluate
+          - Changed lockfiles: $($changed.Count)
           "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload GREEN logs and TRX
-        if: always()
+      - name: Upload regenerated Task 2 lockfiles
         uses: actions/upload-artifact@v4
         with:
-          name: task2-compat-green-evidence-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/task2-compat-green-evidence
-            Windows/out/task2-compat-green-results
+          name: task2-lockfile-regeneration-${{ github.sha }}
+          path: ${{ runner.temp }}/task2-lockfile-regeneration
           if-no-files-found: error
           retention-days: 14
