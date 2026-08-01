@@ -49,6 +49,21 @@ signing and hosted-preview jobs for that push. The product branch does not
 contain this harness. API rate limiting prevented immediate run-ID lookup; no
 hosted-install result is claimed until the resulting run is inspected.
 
+The temporary harness produced run `30706008991`, whose hosted-preview job
+`91386120107` reached the signed MSIX check and exposed a trust-order defect:
+it reported SHA-256
+`698291A59614CE9DB75197C9442ED43F50ACA54107B963617656C3048A1FCF0F`, signer
+`CN=EMKE Internal Test`, and thumbprint
+`33E9992B08919BA6522F8A16B95CC2AA5DA6BB98`, but its pre-trust Authenticode
+status was `UnknownError`. The workflow incorrectly required `Valid` before
+the helper had temporarily trusted the exact public certificate, so it stopped
+before installation. Commit `0c4eb23` moves the required `Valid` check into
+the helper after exact certificate bytes/subject/thumbprint validation and
+temporary TrustedPeople import; it verifies the post-trust signer subject and
+thumbprint before `Add-AppxPackage`, while preserving both cleanup paths.
+Evidence-only commit `26d7eae` carries that fix plus the temporary harness and
+has been pushed for a new protected run. Its result is still pending.
+
 ## Local and contract checks
 
 - `git diff --check` passed before committing `84ff725`.

@@ -43,6 +43,16 @@ or product branch remote state was changed.
   adds that branch to the push filter and permits the existing protected
   signing and hosted-preview jobs for that push. It is not on the product
   branch and must not be merged.
+- Hosted run `30706008991`, job `91386120107`, reached the signed package and
+  exposed the expected internal-certificate trust-order defect: the exact MSIX
+  SHA-256 was `698291A59614CE9DB75197C9442ED43F50ACA54107B963617656C3048A1FCF0F`,
+  signer `CN=EMKE Internal Test`, and thumbprint
+  `33E9992B08919BA6522F8A16B95CC2AA5DA6BB98`, but pre-trust Authenticode was
+  `UnknownError` and the workflow incorrectly demanded `Valid` before the
+  helper added the exact certificate. Product commit `0c4eb23` centralizes the
+  mandatory Valid/signer verification after exact temporary trust and before
+  `Add-AppxPackage`; evidence commit `26d7eae` has triggered its replacement
+  run. No post-trust/install/smoke result is claimed yet.
 
 Local `git diff --check` and the static workflow gate passed. PowerShell
 execution tests are not runnable on the macOS checkout (`pwsh` absent), so the
