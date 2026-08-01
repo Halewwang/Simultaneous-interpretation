@@ -115,7 +115,7 @@ jobs:
           }
 
   sign-package-bundle:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/windows-internal-msix' }}
+    if: ${{ false }}
     needs: build-test
     runs-on: windows-2025-vs2026
     timeout-minutes: 30
