@@ -58,7 +58,7 @@ jobs:
               Name = 'integration-host-probe';
               Project = 'Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj';
               Filter = 'FullyQualifiedName~WindowsHostCompatibilityProbeTests';
-              ExpectedTotal = 7
+              ExpectedTotal = 8
             }
           )
 
