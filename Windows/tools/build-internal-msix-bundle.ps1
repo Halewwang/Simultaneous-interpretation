@@ -44,7 +44,17 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$packageBaseName = 'EMKE-Translation-Windows-0.1.0-internal-x64'
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+$releaseMetadata = & (Join-Path $PSScriptRoot 'resolve-version.ps1') `
+    -VersionFile (Join-Path $repositoryRoot 'Windows/version.json')
+if (
+    $null -eq $releaseMetadata -or
+    $releaseMetadata.Channel -cne 'internal' -or
+    $releaseMetadata.PackageIdentity -cne $PackageIdentity
+) {
+    throw 'Internal bundle metadata resolution failed.'
+}
+$packageBaseName = "EMKE-Translation-Windows-$($releaseMetadata.ProductVersion)-internal-$($releaseMetadata.Architecture)"
 $expectedInputs = [ordered]@{
     "$packageBaseName.msix" = $PackagePath
     "$packageBaseName.cer" = $CertificatePath
