@@ -670,8 +670,14 @@ test('early package-input failure is not masked by null artifact cleanup', async
       { encoding: 'utf8', env: { ...process.env, EMKE_TEST_PASSWORD: 'fixture' } },
     );
     assert.notEqual(result.status, 0, 'missing PFX was accepted');
-    assert.match(`${result.stdout}\n${result.stderr}`, /PFX input validation failed/);
-    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /partial-artifact|AggregateException/);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /MSIX path validation failed/,
+    );
+    assert.doesNotMatch(
+      `${result.stdout}\n${result.stderr}`,
+      /partial-artifact|null path|AggregateException/,
+    );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
