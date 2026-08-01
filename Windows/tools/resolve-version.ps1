@@ -405,11 +405,9 @@ if ($compatibilityDriverAbiVersion -le 0) {
 }
 Assert-PackageVersion `
     -Value $minimumDriverVersion `
-    -Name 'minimumDriverVersion' `
     -ProductVersion '1.0.0'
 Assert-PackageVersion `
     -Value $recommendedDriverVersion `
-    -Name 'recommendedDriverVersion' `
     -ProductVersion '1.0.0'
 
 if (-not ($driverPackageAvailable -is [bool])) {
