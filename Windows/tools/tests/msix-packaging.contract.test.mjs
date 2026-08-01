@@ -593,6 +593,17 @@ test('package publish path derives the target framework from current build prope
   assert.match(source, /TargetFramework/);
 });
 
+test('package output names derive from resolved release metadata', async () => {
+  const source = await readFile(packageScriptPath, 'utf8');
+  assert.doesNotMatch(source, /\$script:PackageBaseName/);
+  assert.doesNotMatch(source, /EMKE-Translation-Windows-0\.2\.0-internal-x64/);
+  assert.match(source, /releaseMetadata\.ProductVersion/);
+  assert.match(source, /releaseMetadata\.Architecture/);
+  assert.match(source, /\$packageBaseName\.msix/);
+  assert.match(source, /\$packageBaseName\.cer/);
+  assert.match(source, /\$packageBaseName\.signing\.json/);
+});
+
 test('bundle package names derive from the resolved internal release metadata', async () => {
   const source = await readFile(bundleScriptPath, 'utf8');
   assert.doesNotMatch(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64/);
