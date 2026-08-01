@@ -112,6 +112,55 @@ public sealed class SettingsViewModelTests
     }
 
     [TestMethod]
+    public async Task RuntimeStartErrorIsVisibleLocalizedAndClearedBySuccess()
+    {
+        SettingsFixture fixture = new();
+        fixture.Runtime.Result = new RuntimeError(
+            ErrorCategory.Driver,
+            "translationRuntime.driverIncompatible",
+            new Dictionary<string, string>
+            {
+                ["statusLabel"] = "driverMissing",
+            },
+            RecoveryAction.InstallDriver);
+        fixture.ViewModel.ReplaceApiKeyDraft("start-key".AsSpan());
+        int clearRequests = 0;
+        fixture.ViewModel.ApiKeyClearRequested += (_, _) => clearRequests++;
+
+        await fixture.ViewModel.StartAsync(CancellationToken.None);
+
+        Assert.AreEqual(
+            SettingsOperationResult.StartFailed,
+            fixture.ViewModel.OperationResult);
+        Assert.AreEqual(
+            "The EMKE virtual audio driver is missing or incompatible.",
+            fixture.ViewModel.ErrorMessage);
+        Assert.AreEqual(
+            fixture.ViewModel.ErrorMessage,
+            fixture.ViewModel.ResultAutomationDescription);
+        Assert.IsFalse(
+            fixture.ViewModel.ErrorMessage!.Contains(
+                "driverMissing",
+                StringComparison.Ordinal));
+        Assert.IsFalse(fixture.ViewModel.HasApiKeyDraft);
+        Assert.AreEqual(1, clearRequests);
+        CollectionAssert.AreEqual(StartOperations, fixture.Operations);
+
+        fixture.ViewModel.InterfaceLanguage = AppInterfaceLanguage.ZhHans;
+        Assert.AreEqual(
+            "EMKE 虚拟音频驱动缺失或不兼容。",
+            fixture.ViewModel.ErrorMessage);
+
+        fixture.Runtime.Result = null;
+        await fixture.ViewModel.StartAsync(CancellationToken.None);
+
+        Assert.AreEqual(
+            SettingsOperationResult.StartRequested,
+            fixture.ViewModel.OperationResult);
+        Assert.IsNull(fixture.ViewModel.ErrorMessage);
+    }
+
+    [TestMethod]
     public async Task CommandFailureIsVisibleLocalizedAndClearedBySuccess()
     {
         SettingsFixture fixture = new();
@@ -504,6 +553,8 @@ public sealed class SettingsViewModelTests
     {
         public List<RuntimeCommand> Commands { get; } = [];
 
+        public RuntimeError? Result { get; set; }
+
         public Task<RuntimeError?> SubmitAsync(
             RuntimeCommand command,
             CancellationToken cancellationToken)
@@ -511,7 +562,7 @@ public sealed class SettingsViewModelTests
             cancellationToken.ThrowIfCancellationRequested();
             operations.Add("runtime.start");
             Commands.Add(command);
-            return Task.FromResult<RuntimeError?>(null);
+            return Task.FromResult(Result);
         }
     }
 

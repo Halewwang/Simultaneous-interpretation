@@ -63,6 +63,7 @@ internal sealed class SettingsViewModel :
     private AppInterfaceLanguage _interfaceLanguage;
     private bool _floatingStatusEnabled = true;
     private SettingsOperationResult _operationResult;
+    private LocalizedString? _operationMessageOverride;
     private int _disposed;
 
     public SettingsViewModel(
@@ -194,7 +195,9 @@ internal sealed class SettingsViewModel :
         SettingsOperationResult.ConnectionFailed =>
             Text(LocalizedString.SettingsConnectionFailedError),
         SettingsOperationResult.StartFailed =>
-            Text(LocalizedString.SettingsStartFailedError),
+            Text(
+                _operationMessageOverride
+                    ?? LocalizedString.SettingsStartFailedError),
         _ => throw new InvalidOperationException(
             "Undefined settings operation result."),
     };
@@ -402,10 +405,18 @@ internal sealed class SettingsViewModel :
     {
         SetOperationResult(SettingsOperationResult.None);
         await PersistAndClearAsync(cancellationToken).ConfigureAwait(true);
-        _ = await _runtime.SubmitAsync(
+        RuntimeError? error = await _runtime.SubmitAsync(
                 new RuntimeCommand.Start(),
                 cancellationToken)
             .ConfigureAwait(true);
+        if (error is not null)
+        {
+            SetOperationResult(
+                SettingsOperationResult.StartFailed,
+                RuntimeErrorMessageKey(error));
+            return;
+        }
+
         SetOperationResult(SettingsOperationResult.StartRequested);
     }
 
@@ -525,14 +536,56 @@ internal sealed class SettingsViewModel :
         SetOperationResult(SettingsOperationResult.StartFailed);
     }
 
-    private void SetOperationResult(SettingsOperationResult value)
+    private static LocalizedString RuntimeErrorMessageKey(RuntimeError error)
     {
-        if (_operationResult == value)
+        ArgumentNullException.ThrowIfNull(error);
+        return error.Code switch
+        {
+            "translationRuntime.settingsMissing" =>
+                LocalizedString.ErrorSettingsMissing,
+            "translationRuntime.secretMissing" =>
+                LocalizedString.ErrorSecretMissing,
+            "translationRuntime.driverIncompatible" =>
+                LocalizedString.ErrorDriverIncompatible,
+            "translationRuntime.defaultPhysicalDeviceMissing" =>
+                LocalizedString.ErrorDefaultDeviceMissing,
+            _ => error.Category switch
+            {
+                ErrorCategory.Configuration =>
+                    LocalizedString.ErrorConfiguration,
+                ErrorCategory.Permission => LocalizedString.ErrorPermission,
+                ErrorCategory.Driver => LocalizedString.ErrorDriver,
+                ErrorCategory.Device => LocalizedString.ErrorDevice,
+                ErrorCategory.Authentication =>
+                    LocalizedString.ErrorAuthentication,
+                ErrorCategory.EndpointModel =>
+                    LocalizedString.ErrorEndpointModel,
+                ErrorCategory.Protocol => LocalizedString.ErrorProtocol,
+                ErrorCategory.Network => LocalizedString.ErrorNetwork,
+                ErrorCategory.Backpressure =>
+                    LocalizedString.ErrorBackpressure,
+                ErrorCategory.CloseTimeout =>
+                    LocalizedString.ErrorCloseTimeout,
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(error),
+                    error.Category,
+                    "Undefined error category."),
+            },
+        };
+    }
+
+    private void SetOperationResult(
+        SettingsOperationResult value,
+        LocalizedString? messageOverride = null)
+    {
+        if (_operationResult == value
+            && _operationMessageOverride == messageOverride)
         {
             return;
         }
 
         _operationResult = value;
+        _operationMessageOverride = messageOverride;
         OnPropertyChanged(nameof(OperationResult));
         OnPropertyChanged(nameof(ResultMessage));
         OnPropertyChanged(nameof(ErrorMessage));
