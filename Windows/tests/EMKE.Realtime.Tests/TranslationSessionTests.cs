@@ -107,7 +107,11 @@ public sealed class TranslationSessionTests
                     await WaitUntilAsync(() => transport.SessionUpdateCount == 1, name);
                     Assert.AreEqual(
                         ParseLanguage(
-                            step.GetProperty("payload").GetProperty("target_language")),
+                            step.GetProperty("payload")
+                                .GetProperty("session")
+                                .GetProperty("audio")
+                                .GetProperty("output")
+                                .GetProperty("language")),
                         transport.LastUpdateLanguage,
                         name);
                     if (frameType == "binary")
@@ -156,7 +160,10 @@ public sealed class TranslationSessionTests
         {
             JsonElement update = socketCase.GetProperty("steps")[1]
                 .GetProperty("payload")
-                .GetProperty("target_language");
+                .GetProperty("session")
+                .GetProperty("audio")
+                .GetProperty("output")
+                .GetProperty("language");
             FakeTranslationTransport transport = new();
             TranslationSession session = CreateSession(transport, ParseLanguage(update));
             sessions.Add(session);
@@ -214,7 +221,7 @@ public sealed class TranslationSessionTests
     }
 
     [TestMethod]
-    public async Task ReceiveLoopMapsCaptionsDoneAndPooledAudioWithConsumerOwnership()
+    public async Task ReceiveLoopMapsBothCaptionsAndPooledAudioWithConsumerOwnership()
     {
         FakeTranslationTransport transport = new();
         TrackingArrayPool pool = new();
@@ -224,11 +231,11 @@ public sealed class TranslationSessionTests
         transport.Enqueue(Event("session.updated"));
         await connect;
 
-        transport.Enqueue(Event("input_audio_transcription.delta", delta: "hello"));
+        transport.Enqueue(Event("session.input_transcript.delta", delta: "hello"));
+        transport.Enqueue(Event("session.output_transcript.delta", delta: "你好"));
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: new byte[] { 1, 2, 3, 4 }));
-        transport.Enqueue(Event("translation_audio.done"));
 
         await using IAsyncEnumerator<TranslationSessionEvent> events =
             session.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
@@ -239,6 +246,12 @@ public sealed class TranslationSessionTests
         Assert.IsFalse(caption.IsFinal);
 
         Assert.IsTrue(await events.MoveNextAsync());
+        TranslationSessionEvent.TranslatedCaption translated =
+            (TranslationSessionEvent.TranslatedCaption)events.Current;
+        Assert.AreEqual("你好", translated.Text);
+        Assert.IsFalse(translated.IsFinal);
+
+        Assert.IsTrue(await events.MoveNextAsync());
         TranslationSessionEvent.AudioDelta audio =
             (TranslationSessionEvent.AudioDelta)events.Current;
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, audio.Pcm16.ToArray());
@@ -246,9 +259,6 @@ public sealed class TranslationSessionTests
         audio.Dispose();
         audio.Dispose();
         Assert.AreEqual(1, pool.ReturnCount);
-
-        Assert.IsTrue(await events.MoveNextAsync());
-        Assert.IsInstanceOfType<TranslationSessionEvent.Completed>(events.Current);
     }
 
     [TestMethod]
@@ -267,9 +277,9 @@ public sealed class TranslationSessionTests
         transport.Enqueue(Event("session.updated"));
         await connect;
 
-        transport.Enqueue(Event("input_audio_transcription.delta", delta: "fills-channel"));
+        transport.Enqueue(Event("session.input_transcript.delta", delta: "fills-channel"));
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: new byte[] { 1, 2 }));
         transport.Enqueue(Event("session.closed"));
         Task close = session.CloseAsync(CancellationToken.None);
@@ -308,7 +318,7 @@ public sealed class TranslationSessionTests
 
         session.CompleteEventChannelForTest();
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: new byte[] { 1, 2 }));
         await WaitUntilAsync(() => session.State == TranslationSessionState.Failed, "publish failure");
         await WaitUntilAsync(() => pool.ReturnCount == 1, "lease return");
@@ -380,7 +390,7 @@ public sealed class TranslationSessionTests
         await connect;
 
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: ReadOnlyMemory<byte>.Empty));
         await WaitUntilAsync(
             () => session.State == TranslationSessionState.Failed,
@@ -663,7 +673,7 @@ public sealed class TranslationSessionTests
         transport.Enqueue(Event("session.updated"));
         await connect;
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: new byte[] { 1, 2 }));
         await WaitUntilAsync(() => pool.RentCount == 1, "queued audio");
 
@@ -686,7 +696,7 @@ public sealed class TranslationSessionTests
         transport.Enqueue(Event("session.updated"));
         await connect;
         transport.Enqueue(Event(
-            "translation_audio.delta",
+            "session.output_audio.delta",
             pcm16: new byte[] { 1, 2 }));
         await WaitUntilAsync(() => pool.RentCount == 1, "queued audio");
 

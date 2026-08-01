@@ -30,7 +30,7 @@ public sealed class TranslationSocketTests
             StringComparison.Ordinal);
         StringAssert.Contains(
             adapter.Sends[1].Json,
-            "\"type\":\"input_audio_buffer.append\"",
+            "\"type\":\"session.input_audio_buffer.append\"",
             StringComparison.Ordinal);
         StringAssert.Contains(
             adapter.Sends[2].Json,
@@ -154,9 +154,11 @@ public sealed class TranslationSocketTests
     {
         FakeClientWebSocket adapter = new(
             Frame.Text(
-                """{"type":"error","code":"a-long-safe-code","message":"a-long-safe-message"}""",
+                """{"type":"error","error":{"code":"a-long-safe-code","message":"a-long-safe-message"}}""",
                 endOfMessage: true),
-            Frame.Text("""{"type":"session.created"}""", endOfMessage: true));
+            Frame.Text(
+                """{"type":"session.created","session":{"model":"gpt-realtime-translate"}}""",
+                endOfMessage: true));
         TranslationSocket socket = new(adapter, receiveLimit: 128);
 
         TranslationReceiveResult first = await socket.ReceiveEventAsync(CancellationToken.None);

@@ -499,7 +499,7 @@ public sealed class TranslationSession :
                 _handshake.TrySetResult();
                 return true;
 
-            case "input_audio_transcription.delta":
+            case "session.input_transcript.delta":
                 if (State is not (
                         TranslationSessionState.Connected
                         or TranslationSessionState.Closing)
@@ -514,13 +514,22 @@ public sealed class TranslationSession :
                         null,
                         isFinal: false)).ConfigureAwait(false);
 
-            case "input_audio_transcription.done":
-                return State is (
+            case "session.output_transcript.delta":
+                if (State is not (
                         TranslationSessionState.Connected
                         or TranslationSessionState.Closing)
-                    || FailUnexpectedEvent();
+                    || protocolEvent.Delta is null)
+                {
+                    return FailUnexpectedEvent();
+                }
 
-            case "translation_audio.delta":
+                return await PublishAsync(
+                    new TranslationSessionEvent.TranslatedCaption(
+                        protocolEvent.Delta,
+                        null,
+                        isFinal: false)).ConfigureAwait(false);
+
+            case "session.output_audio.delta":
                 if (State is not (
                     TranslationSessionState.Connected
                     or TranslationSessionState.Closing))
@@ -529,17 +538,6 @@ public sealed class TranslationSession :
                 }
 
                 return await PublishAudioAsync(protocolEvent.Pcm16).ConfigureAwait(false);
-
-            case "translation_audio.done":
-                if (State is not (
-                    TranslationSessionState.Connected
-                    or TranslationSessionState.Closing))
-                {
-                    return FailUnexpectedEvent();
-                }
-
-                return await PublishAsync(
-                    new TranslationSessionEvent.Completed()).ConfigureAwait(false);
 
             case "error":
                 Fail(Error(ErrorCategory.Protocol, "translationSession.remoteError"));

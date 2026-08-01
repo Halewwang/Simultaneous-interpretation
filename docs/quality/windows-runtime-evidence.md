@@ -129,7 +129,7 @@ CTest suite and production PCM fixture remain pending the hosted Windows gate.
 | Server error | Outbound becomes fail-closed while inbound remains Connected |
 
 Business-flow tests additionally observed one WebSocket Text message whose
-JSON `input_audio_buffer.append` carried a 9,600-byte PCM16 payload,
+JSON `session.input_audio_buffer.append` carried a 9,600-byte PCM16 payload,
 direction-specific translated-audio queues, and isolated inbound/outbound
 captions. The capture seam proves message type and decoded payload; it does
 not claim a physical WebSocket frame boundary.

@@ -229,10 +229,17 @@ public sealed class TranslationRuntimeIntegrationTests
 
         await server.SendAudioDeltaAsync(LanguageCode.Zh, inbound)
             .ConfigureAwait(false);
-        await server.SendAudioDoneAsync(LanguageCode.Zh)
-            .ConfigureAwait(false);
         await server.SendAudioDeltaAsync(LanguageCode.En, outbound)
             .ConfigureAwait(false);
+        byte[] voicedFrame = [0x00, 0x40];
+        audio.EmitCaptured(AudioDirection.Inbound, voicedFrame);
+        byte[] silentFrame = [0x00, 0x00];
+        for (int index = 0; index < 30; index++)
+        {
+            audio.EmitCaptured(AudioDirection.Inbound, silentFrame);
+            await Task.Delay(2).ConfigureAwait(false);
+        }
+
         await WaitUntilAsync(
             () => audio.InboundTranslations.Count == 1
                 && audio.OutboundTranslations.Count == 1)

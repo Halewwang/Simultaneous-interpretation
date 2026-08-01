@@ -216,7 +216,12 @@ internal static class RealtimeFixtureAdapter
                 step.GetProperty("eventType").GetString() == "session.update");
         LanguageCode target = updatePayload.ValueKind == JsonValueKind.Undefined
             ? LanguageCode.Zh
-            : ParseLanguage(updatePayload.GetProperty("payload").GetProperty("target_language"));
+            : ParseLanguage(
+                updatePayload.GetProperty("payload")
+                    .GetProperty("session")
+                    .GetProperty("audio")
+                    .GetProperty("output")
+                    .GetProperty("language"));
         WebSocketMessageType updateFrameType = updatePayload.ValueKind == JsonValueKind.Undefined
             ? WebSocketMessageType.Text
             : ParseFrameType(updatePayload.GetProperty("frameType"));
@@ -528,9 +533,11 @@ internal static class RealtimeFixtureAdapter
         transport.EnqueueEvent("session.updated");
         await connect;
 
-        transport.EnqueueEvent("translation_audio.done");
         transport.EnqueueEvent(
-            "translation_audio.delta",
+            "session.output_transcript.delta",
+            delta: "translated tail");
+        transport.EnqueueEvent(
+            "session.output_audio.delta",
             new byte[] { 1, 2 });
         transport.EnqueueEvent("session.closed");
         Task close = session.CloseAsync(CancellationToken.None);
@@ -538,7 +545,9 @@ internal static class RealtimeFixtureAdapter
         await using IAsyncEnumerator<TranslationSessionEvent> events =
             session.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
         Assert.IsTrue(await events.MoveNextAsync(), name);
-        Assert.IsInstanceOfType<TranslationSessionEvent.Completed>(events.Current);
+        TranslationSessionEvent.TranslatedCaption caption =
+            (TranslationSessionEvent.TranslatedCaption)events.Current;
+        Assert.AreEqual("translated tail", caption.Text, name);
         Assert.IsTrue(await events.MoveNextAsync(), name);
         TranslationSessionEvent.AudioDelta tail =
             (TranslationSessionEvent.AudioDelta)events.Current;
@@ -658,14 +667,23 @@ internal static class RealtimeFixtureAdapter
 
         public void EnqueueEvent(
             string type,
-            ReadOnlyMemory<byte> pcm16 = default)
+            ReadOnlyMemory<byte> pcm16 = default,
+            string? delta = null)
         {
-            string json = type == "translation_audio.delta"
+            string json = type == "session.output_audio.delta"
                 ? JsonSerializer.Serialize(new
                 {
                     type,
                     delta = Convert.ToBase64String(pcm16.Span),
                 })
+                : type is (
+                    "session.input_transcript.delta"
+                    or "session.output_transcript.delta")
+                    ? JsonSerializer.Serialize(new
+                    {
+                        type,
+                        delta = delta ?? string.Empty,
+                    })
                 : JsonSerializer.Serialize(new { type });
             _adapter.EnqueueText(json);
         }

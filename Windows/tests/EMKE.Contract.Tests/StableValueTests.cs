@@ -48,20 +48,26 @@ public sealed class StableValueTests
     {
         using JsonDocument schema = SharedFixtureTests.LoadSchema(
             "translation-events.schema.json");
-        string[] schemaValues = schema.RootElement.GetProperty("oneOf")
+        JsonElement sessionUpdate = schema.RootElement.GetProperty("oneOf")
             .EnumerateArray()
-            .Where(static branch =>
-                branch.GetProperty("properties").TryGetProperty(
-                    "target_language",
-                    out _))
-            .SelectMany(static branch =>
+            .Single(static branch =>
                 branch.GetProperty("properties")
-                    .GetProperty("target_language")
-                    .GetProperty("enum")
-                    .EnumerateArray())
+                    .GetProperty("type")
+                    .GetProperty("const")
+                    .GetString() == "session.update");
+        string[] schemaValues = sessionUpdate.GetProperty("properties")
+            .GetProperty("session")
+            .GetProperty("properties")
+            .GetProperty("audio")
+            .GetProperty("properties")
+            .GetProperty("output")
+            .GetProperty("properties")
+            .GetProperty("language")
+            .GetProperty("enum")
+            .EnumerateArray()
             .Select(static value => value.GetString()
                 ?? throw new InvalidDataException(
-                    "target_language enum values must be strings."))
+                    "session.audio.output.language enum values must be strings."))
             .ToArray();
 
         Assert.IsNotEmpty(schemaValues);

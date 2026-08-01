@@ -103,19 +103,10 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             .ConfigureAwait(false);
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            type = "translation_audio.delta",
+            type = "session.output_audio.delta",
             delta = Convert.ToBase64String(pcm16.Span),
         });
         await connection.SendTextAsync(payload).ConfigureAwait(false);
-    }
-
-    public async Task SendAudioDoneAsync(LanguageCode targetLanguage)
-    {
-        Connection connection = await WaitForConnectionAsync(targetLanguage)
-            .ConfigureAwait(false);
-        await connection.SendTextAsync(
-            """{"type":"translation_audio.done"}"""u8.ToArray())
-            .ConfigureAwait(false);
     }
 
     public async Task SendServerErrorAsync(LanguageCode targetLanguage)
@@ -124,7 +115,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             .ConfigureAwait(false);
         await connection.SendTextAsync(
             """
-            {"type":"error","code":"mock_server_error","message":"deterministic test failure"}
+            {"type":"error","error":{"code":"mock_server_error","message":"deterministic test failure"}}
             """u8.ToArray()).ConfigureAwait(false);
     }
 
@@ -207,7 +198,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             .ConfigureAwait(false);
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            type = "input_audio_transcription.delta",
+            type = "session.input_transcript.delta",
             delta = transcript,
         });
         await connection.SendTextAsync(payload).ConfigureAwait(false);
@@ -314,14 +305,14 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         if (Scenario == MockTranslationScenario.BinaryEvent)
         {
             await connection.SendBinaryAsync(
-                """{"type":"session.created"}"""u8.ToArray())
+                """{"type":"session.created","session":{"model":"gpt-realtime-translate"}}"""u8.ToArray())
                 .ConfigureAwait(false);
             return;
         }
 
         await SendServerEventAsync(
             connection,
-            """{"type":"session.created"}"""u8.ToArray()).ConfigureAwait(false);
+            """{"type":"session.created","session":{"model":"gpt-realtime-translate"}}"""u8.ToArray()).ConfigureAwait(false);
 
         string? update = await ReceiveTextAsync(socket, context.RequestAborted)
             .ConfigureAwait(false);
@@ -365,7 +356,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                     .GetString();
                 if (string.Equals(
                         type,
-                        "input_audio_buffer.append",
+                        "session.input_audio_buffer.append",
                         StringComparison.Ordinal))
                 {
                     byte[] pcm16 = Convert.FromBase64String(
@@ -417,11 +408,11 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                     {
                         await connection.SendTextAsync(
                             """
-                            {"type":"input_audio_transcription.delta","delta":"late-transcript"}
+                            {"type":"session.input_transcript.delta","delta":"late-transcript"}
                             """u8.ToArray()).ConfigureAwait(false);
                         await connection.SendTextAsync(
                             """
-                            {"type":"translation_audio.delta","delta":"AQACAA=="}
+                            {"type":"session.output_audio.delta","delta":"AQACAA=="}
                             """u8.ToArray()).ConfigureAwait(false);
                     }
 
@@ -490,7 +481,11 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 "The first client event must be session.update.");
         }
 
-        return root.GetProperty("target_language").GetString() switch
+        return root.GetProperty("session")
+            .GetProperty("audio")
+            .GetProperty("output")
+            .GetProperty("language")
+            .GetString() switch
         {
             "zh" => LanguageCode.Zh,
             "en" => LanguageCode.En,

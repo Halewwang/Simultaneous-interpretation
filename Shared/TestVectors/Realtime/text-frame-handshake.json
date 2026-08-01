@@ -9,7 +9,7 @@
       "expected": { "inboundSocketCount": 1, "outboundSocketCount": 0, "inboundChannelState": "connected", "inboundRoute": "translated" },
       "steps": [
         { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
-        { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "zh" }, "expectedState": "updating" },
+        { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "session": { "audio": { "output": { "language": "zh" } } } }, "expectedState": "updating" },
         { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
       ]
     },
@@ -19,7 +19,7 @@
       "expected": { "inboundSocketCount": 1, "outboundSocketCount": 0, "inboundChannelState": "failed", "inboundRoute": "originalFailOpen", "errorCategory": "protocol" },
       "steps": [
         { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
-        { "direction": "clientToServer", "frameType": "binary", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "zh" }, "expectedState": "protocolFailure" }
+        { "direction": "clientToServer", "frameType": "binary", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "session": { "audio": { "output": { "language": "zh" } } } }, "expectedState": "protocolFailure" }
       ]
     },
     {
@@ -47,7 +47,7 @@
           "socketId": "inbound",
           "steps": [
             { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
-            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "zh" }, "expectedState": "updating" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "session": { "audio": { "output": { "language": "zh" } } } }, "expectedState": "updating" },
             { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
           ]
         },
@@ -55,7 +55,7 @@
           "socketId": "outbound",
           "steps": [
             { "direction": "serverToClient", "frameType": "text", "eventType": "session.created", "payloadEncoding": "json", "payload": { "type": "session.created" }, "expectedState": "created" },
-            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "target_language": "en" }, "expectedState": "updating" },
+            { "direction": "clientToServer", "frameType": "text", "eventType": "session.update", "payloadEncoding": "json", "payload": { "type": "session.update", "session": { "audio": { "output": { "language": "en" } } } }, "expectedState": "updating" },
             { "direction": "serverToClient", "frameType": "text", "eventType": "session.updated", "payloadEncoding": "json", "payload": { "type": "session.updated" }, "expectedState": "connected" }
           ]
         }

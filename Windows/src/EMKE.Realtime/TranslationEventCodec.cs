@@ -68,14 +68,13 @@ public sealed record TranslationDecodeResult
 public static class TranslationEventCodec
 {
     private const string SessionUpdate = "session.update";
-    private const string AudioAppend = "input_audio_buffer.append";
+    private const string AudioAppend = "session.input_audio_buffer.append";
     private const string SessionClose = "session.close";
     private const string SessionCreated = "session.created";
     private const string SessionUpdated = "session.updated";
-    private const string TranslationAudioDelta = "translation_audio.delta";
-    private const string TranslationAudioDone = "translation_audio.done";
-    private const string TranscriptionDelta = "input_audio_transcription.delta";
-    private const string TranscriptionDone = "input_audio_transcription.done";
+    private const string OutputAudioDelta = "session.output_audio.delta";
+    private const string InputTranscriptDelta = "session.input_transcript.delta";
+    private const string OutputTranscriptDelta = "session.output_transcript.delta";
     private const string Error = "error";
     private const string SessionClosed = "session.closed";
 
@@ -87,10 +86,9 @@ public static class TranslationEventCodec
             SessionClose,
             SessionCreated,
             SessionUpdated,
-            TranslationAudioDelta,
-            TranslationAudioDone,
-            TranscriptionDelta,
-            TranscriptionDone,
+            OutputAudioDelta,
+            InputTranscriptDelta,
+            OutputTranscriptDelta,
             Error,
             SessionClosed,
         }.ToFrozenSet(StringComparer.Ordinal);
@@ -98,16 +96,24 @@ public static class TranslationEventCodec
     private static readonly FrozenDictionary<string, FrozenSet<string>> AllowedProperties =
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            [SessionUpdate] = ["type", "eventId", "target_language"],
+            [SessionUpdate] = ["type", "eventId", "session"],
             [AudioAppend] = ["type", "eventId", "audio"],
             [SessionClose] = ["type", "eventId"],
-            [SessionCreated] = ["type", "eventId"],
+            [SessionCreated] = ["type", "eventId", "session"],
             [SessionUpdated] = ["type", "eventId"],
-            [TranslationAudioDelta] = ["type", "eventId", "delta"],
-            [TranslationAudioDone] = ["type", "eventId"],
-            [TranscriptionDelta] = ["type", "eventId", "delta"],
-            [TranscriptionDone] = ["type", "eventId"],
-            [Error] = ["type", "eventId", "code", "message"],
+            [OutputAudioDelta] =
+            [
+                "type",
+                "eventId",
+                "delta",
+                "sample_rate",
+                "channels",
+                "format",
+                "elapsed_ms",
+            ],
+            [InputTranscriptDelta] = ["type", "eventId", "delta", "elapsed_ms"],
+            [OutputTranscriptDelta] = ["type", "eventId", "delta", "elapsed_ms"],
+            [Error] = ["type", "eventId", "error"],
             [SessionClosed] = ["type", "eventId"],
         }.ToFrozenDictionary(
             static pair => pair.Key,
@@ -121,7 +127,16 @@ public static class TranslationEventCodec
         ProtocolEnvelope envelope = new()
         {
             Type = SessionUpdate,
-            TargetLanguage = targetLanguage,
+            Session = new ProtocolSession
+            {
+                Audio = new ProtocolSessionAudio
+                {
+                    Output = new ProtocolOutputAudio
+                    {
+                        Language = targetLanguage,
+                    },
+                },
+            },
         };
         return JsonSerializer.SerializeToUtf8Bytes(
             envelope,
@@ -233,7 +248,7 @@ public static class TranslationEventCodec
         }
 
         byte[] pcm16 = [];
-        if (type is AudioAppend or TranslationAudioDelta)
+        if (type is AudioAppend or OutputAudioDelta)
         {
             string encoded = type == AudioAppend ? envelope.Audio! : envelope.Delta!;
             try
@@ -257,16 +272,29 @@ public static class TranslationEventCodec
             {
                 return Failure("translationEvent.invalidPcm16");
             }
+
+            if (type == OutputAudioDelta
+                && (envelope.SampleRate.GetValueOrDefault(24_000) != 24_000
+                    || envelope.Channels.GetValueOrDefault(1) != 1
+                    || !string.Equals(
+                        envelope.Format ?? "pcm16",
+                        "pcm16",
+                        StringComparison.Ordinal)))
+            {
+                return Failure("translationEvent.unsupportedAudioFormat");
+            }
         }
 
         TranslationProtocolEvent protocolEvent = new(
             type,
             envelope.EventId,
-            envelope.TargetLanguage,
+            envelope.Session?.Audio?.Output?.Language,
             pcm16,
-            type == TranscriptionDelta ? envelope.Delta : null,
-            envelope.Code,
-            envelope.Message);
+            type is InputTranscriptDelta or OutputTranscriptDelta
+                ? envelope.Delta
+                : null,
+            envelope.ServerError?.Code,
+            envelope.ServerError?.Message);
         return TranslationDecodeResult.Success(protocolEvent);
     }
 
@@ -274,19 +302,29 @@ public static class TranslationEventCodec
     {
         return type switch
         {
-            SessionUpdate => IsNonNullProperty(root, "target_language"),
+            SessionUpdate =>
+                IsObjectProperty(root, "session")
+                && root.GetProperty("session")
+                    .TryGetProperty("audio", out JsonElement audio)
+                && audio.ValueKind == JsonValueKind.Object
+                && audio.TryGetProperty("output", out JsonElement output)
+                && output.ValueKind == JsonValueKind.Object
+                && IsStringProperty(output, "language"),
             AudioAppend => IsStringProperty(root, "audio"),
-            TranslationAudioDelta or TranscriptionDelta =>
+            OutputAudioDelta or InputTranscriptDelta or OutputTranscriptDelta =>
                 IsStringProperty(root, "delta"),
-            Error => IsStringProperty(root, "code") && IsStringProperty(root, "message"),
+            Error =>
+                IsObjectProperty(root, "error")
+                && IsStringProperty(root.GetProperty("error"), "code")
+                && IsStringProperty(root.GetProperty("error"), "message"),
             _ => true,
         };
     }
 
-    private static bool IsNonNullProperty(JsonElement root, string name)
+    private static bool IsObjectProperty(JsonElement root, string name)
     {
         return root.TryGetProperty(name, out JsonElement property)
-            && property.ValueKind is not JsonValueKind.Null;
+            && property.ValueKind == JsonValueKind.Object;
     }
 
     private static bool IsStringProperty(JsonElement root, string name)
@@ -317,10 +355,10 @@ internal sealed class ProtocolEnvelope
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EventId { get; init; }
 
-    [JsonPropertyName("target_language")]
+    [JsonPropertyName("session")]
     [JsonPropertyOrder(2)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public LanguageCode? TargetLanguage { get; init; }
+    public ProtocolSession? Session { get; init; }
 
     [JsonPropertyName("audio")]
     [JsonPropertyOrder(3)]
@@ -332,14 +370,63 @@ internal sealed class ProtocolEnvelope
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Delta { get; init; }
 
-    [JsonPropertyName("code")]
+    [JsonPropertyName("sample_rate")]
     [JsonPropertyOrder(5)]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SampleRate { get; init; }
+
+    [JsonPropertyName("channels")]
+    [JsonPropertyOrder(6)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Channels { get; init; }
+
+    [JsonPropertyName("format")]
+    [JsonPropertyOrder(7)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Format { get; init; }
+
+    [JsonPropertyName("elapsed_ms")]
+    [JsonPropertyOrder(8)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ElapsedMilliseconds { get; init; }
+
+    [JsonPropertyName("error")]
+    [JsonPropertyOrder(9)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProtocolErrorPayload? ServerError { get; init; }
+}
+
+internal sealed class ProtocolSession
+{
+    [JsonPropertyName("audio")]
+    [JsonPropertyOrder(0)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProtocolSessionAudio? Audio { get; init; }
+
+    [JsonPropertyName("model")]
+    [JsonPropertyOrder(1)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Model { get; init; }
+}
+
+internal sealed class ProtocolSessionAudio
+{
+    [JsonPropertyName("output")]
+    public ProtocolOutputAudio? Output { get; init; }
+}
+
+internal sealed class ProtocolOutputAudio
+{
+    [JsonPropertyName("language")]
+    public LanguageCode? Language { get; init; }
+}
+
+internal sealed class ProtocolErrorPayload
+{
+    [JsonPropertyName("code")]
     public string? Code { get; init; }
 
     [JsonPropertyName("message")]
-    [JsonPropertyOrder(6)]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; init; }
 }
 

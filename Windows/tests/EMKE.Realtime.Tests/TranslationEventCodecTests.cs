@@ -12,10 +12,12 @@ public sealed class TranslationEventCodecTests
     public void EncodeClientEventsUsesCanonicalJson()
     {
         CollectionAssert.AreEqual(
-            Encoding.UTF8.GetBytes("""{"type":"session.update","target_language":"de"}"""),
+            Encoding.UTF8.GetBytes(
+                """{"type":"session.update","session":{"audio":{"output":{"language":"de"}}}}"""),
             TranslationEventCodec.EncodeSessionUpdate(LanguageCode.De));
         CollectionAssert.AreEqual(
-            Encoding.UTF8.GetBytes("""{"type":"input_audio_buffer.append","audio":"AQIDBA=="}"""),
+            Encoding.UTF8.GetBytes(
+                """{"type":"session.input_audio_buffer.append","audio":"AQIDBA=="}"""),
             TranslationEventCodec.EncodeAudioAppend([1, 2, 3, 4]));
         CollectionAssert.AreEqual(
             Encoding.UTF8.GetBytes("""{"type":"session.close"}"""),
@@ -27,16 +29,15 @@ public sealed class TranslationEventCodecTests
     {
         (string Json, string Type)[] cases =
         [
-            ("""{"type":"session.update","target_language":"zh"}""", "session.update"),
-            ("""{"type":"input_audio_buffer.append","audio":"AQIDBA=="}""", "input_audio_buffer.append"),
+            ("""{"type":"session.update","session":{"audio":{"output":{"language":"zh"}}}}""", "session.update"),
+            ("""{"type":"session.input_audio_buffer.append","audio":"AQIDBA=="}""", "session.input_audio_buffer.append"),
             ("""{"type":"session.close"}""", "session.close"),
-            ("""{"type":"session.created"}""", "session.created"),
+            ("""{"type":"session.created","session":{"model":"gpt-realtime-translate"}}""", "session.created"),
             ("""{"type":"session.updated","eventId":"evt-1"}""", "session.updated"),
-            ("""{"type":"translation_audio.delta","delta":"AQIDBA=="}""", "translation_audio.delta"),
-            ("""{"type":"translation_audio.done"}""", "translation_audio.done"),
-            ("""{"type":"input_audio_transcription.delta","delta":"hello"}""", "input_audio_transcription.delta"),
-            ("""{"type":"input_audio_transcription.done"}""", "input_audio_transcription.done"),
-            ("""{"type":"error","code":"bad_request","message":"invalid"}""", "error"),
+            ("""{"type":"session.output_audio.delta","delta":"AQIDBA==","sample_rate":24000,"channels":1,"format":"pcm16","elapsed_ms":400}""", "session.output_audio.delta"),
+            ("""{"type":"session.input_transcript.delta","delta":"hello","elapsed_ms":600}""", "session.input_transcript.delta"),
+            ("""{"type":"session.output_transcript.delta","delta":"你好"}""", "session.output_transcript.delta"),
+            ("""{"type":"error","error":{"code":"bad_request","message":"invalid"}}""", "error"),
             ("""{"type":"session.closed"}""", "session.closed"),
         ];
 
@@ -54,15 +55,18 @@ public sealed class TranslationEventCodecTests
     public void DecodeMaterializesTypedPayloads()
     {
         TranslationDecodeResult audio = Decode(
-            """{"eventId":"evt-a","type":"translation_audio.delta","delta":"AQIDBA=="}""");
-        TranslationDecodeResult caption = Decode(
-            """{"type":"input_audio_transcription.delta","delta":"hello"}""");
+            """{"eventId":"evt-a","type":"session.output_audio.delta","delta":"AQIDBA=="}""");
+        TranslationDecodeResult sourceCaption = Decode(
+            """{"type":"session.input_transcript.delta","delta":"hello"}""");
+        TranslationDecodeResult translatedCaption = Decode(
+            """{"type":"session.output_transcript.delta","delta":"你好"}""");
         TranslationDecodeResult error = Decode(
-            """{"type":"error","code":"bad_request","message":"invalid"}""");
+            """{"type":"error","error":{"code":"bad_request","message":"invalid"}}""");
 
         Assert.AreEqual("evt-a", audio.Event!.EventId);
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4 }, audio.Event.Pcm16.ToArray());
-        Assert.AreEqual("hello", caption.Event!.Delta);
+        Assert.AreEqual("hello", sourceCaption.Event!.Delta);
+        Assert.AreEqual("你好", translatedCaption.Event!.Delta);
         Assert.AreEqual("bad_request", error.Event!.Code);
         Assert.AreEqual("invalid", error.Event.Message);
     }
@@ -70,29 +74,30 @@ public sealed class TranslationEventCodecTests
     [TestMethod]
     [DataRow("""{"type":"unknown"}""", "translationEvent.unknownType")]
     [DataRow("""{"eventId":"missing-type"}""", "translationEvent.missingPayload")]
-    [DataRow("""{"type":"translation_audio.delta"}""", "translationEvent.missingPayload")]
-    [DataRow("""{"type":"input_audio_transcription.delta"}""", "translationEvent.missingPayload")]
-    [DataRow("""{"type":"error","code":"bad_request"}""", "translationEvent.missingPayload")]
+    [DataRow("""{"type":"session.output_audio.delta"}""", "translationEvent.missingPayload")]
+    [DataRow("""{"type":"session.input_transcript.delta"}""", "translationEvent.missingPayload")]
+    [DataRow("""{"type":"session.output_transcript.delta"}""", "translationEvent.missingPayload")]
+    [DataRow("""{"type":"error","error":{"code":"bad_request"}}""", "translationEvent.missingPayload")]
     [DataRow("""{"type":"session.update"}""", "translationEvent.missingPayload")]
-    [DataRow("""{"type":"input_audio_buffer.append"}""", "translationEvent.missingPayload")]
+    [DataRow("""{"type":"session.input_audio_buffer.append"}""", "translationEvent.missingPayload")]
     public void DecodeRejectsUnknownTypesAndMissingRequiredPayloads(string json, string expectedCode)
     {
         AssertDecodeFailure(json, expectedCode);
     }
 
     [TestMethod]
-    [DataRow("""{"type":"translation_audio.delta","delta":"%%%"}""")]
-    [DataRow("""{"type":"translation_audio.delta","delta":"AQI=\n"}""")]
-    [DataRow("""{"type":"translation_audio.delta","delta":"AR=="}""")]
-    [DataRow("""{"type":"input_audio_buffer.append","audio":"AQ="}""")]
+    [DataRow("""{"type":"session.output_audio.delta","delta":"%%%"}""")]
+    [DataRow("""{"type":"session.output_audio.delta","delta":"AQI=\n"}""")]
+    [DataRow("""{"type":"session.output_audio.delta","delta":"AR=="}""")]
+    [DataRow("""{"type":"session.input_audio_buffer.append","audio":"AQ="}""")]
     public void DecodeRejectsInvalidBase64(string json)
     {
         AssertDecodeFailure(json, "translationEvent.invalidBase64");
     }
 
     [TestMethod]
-    [DataRow("""{"type":"translation_audio.delta","delta":"AQID"}""")]
-    [DataRow("""{"type":"input_audio_buffer.append","audio":"AQID"}""")]
+    [DataRow("""{"type":"session.output_audio.delta","delta":"AQID"}""")]
+    [DataRow("""{"type":"session.input_audio_buffer.append","audio":"AQID"}""")]
     public void DecodeRejectsOddPcm16ByteCounts(string json)
     {
         AssertDecodeFailure(json, "translationEvent.invalidPcm16");
@@ -101,7 +106,7 @@ public sealed class TranslationEventCodecTests
     [TestMethod]
     [DataRow("""{"type":"session.created","extra":true}""")]
     [DataRow("""{"type":"session.created","delta":"not-allowed"}""")]
-    [DataRow("""{"type":"session.update","target_language":"zh","audio":"AQI="}""")]
+    [DataRow("""{"type":"session.update","session":{"audio":{"output":{"language":"zh"}}},"audio":"AQI="}""")]
     public void DecodeRejectsPropertiesOutsideTheSelectedSchemaBranch(string json)
     {
         AssertDecodeFailure(json, "translationEvent.additionalProperty");
@@ -113,7 +118,7 @@ public sealed class TranslationEventCodecTests
     [DataRow("[]")]
     [DataRow("""{"type":1}""")]
     [DataRow("""{"type":"session.created","eventId":null}""")]
-    [DataRow("""{"type":"session.update","target_language":"fr"}""")]
+    [DataRow("""{"type":"session.update","session":{"audio":{"output":{"language":"fr"}}}}""")]
     public void DecodeRejectsMalformedOrInvalidJson(string json)
     {
         AssertDecodeFailure(json, "translationEvent.invalidJson");
@@ -122,10 +127,23 @@ public sealed class TranslationEventCodecTests
     [TestMethod]
     public void EventTypeRegistryIsClosedAndUnique()
     {
-        Assert.HasCount(11, TranslationEventCodec.EventTypes);
+        Assert.HasCount(10, TranslationEventCodec.EventTypes);
         Assert.HasCount(
             TranslationEventCodec.EventTypes.Count,
             TranslationEventCodec.EventTypes.Distinct(StringComparer.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("input_audio_buffer.append")]
+    [DataRow("translation_audio.delta")]
+    [DataRow("translation_audio.done")]
+    [DataRow("input_audio_transcription.delta")]
+    [DataRow("input_audio_transcription.done")]
+    public void DecodeRejectsLegacyPreV024EventNames(string type)
+    {
+        AssertDecodeFailure(
+            $$"""{"type":"{{type}}","delta":"AQI=","audio":"AQI="}""",
+            "translationEvent.unknownType");
     }
 
     private static TranslationDecodeResult Decode(string json)
