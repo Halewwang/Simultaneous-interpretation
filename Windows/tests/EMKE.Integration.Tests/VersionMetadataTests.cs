@@ -26,15 +26,15 @@ public sealed partial class VersionMetadataTests
         JsonElement root = RequireObjectRoot(version, "Windows version metadata");
 
         string productVersion = ReadRequiredString(root, "productVersion");
-        Assert.AreEqual("0.1.0", productVersion);
+        Assert.AreEqual("0.2.0", productVersion);
         AssertCanonicalThreePartVersion(productVersion, "productVersion");
 
         string packageVersion = ReadRequiredString(root, "packageVersion");
-        Assert.AreEqual("0.1.0.0", packageVersion);
+        Assert.AreEqual("0.2.0.0", packageVersion);
         AssertPackageVersion(packageVersion, productVersion);
 
         string expectedTag = ReadRequiredString(root, "expectedTag");
-        Assert.AreEqual("windows-v0.1.0", expectedTag);
+        Assert.AreEqual("windows-v0.2.0", expectedTag);
         Assert.IsTrue(
             string.Equals(expectedTag, $"windows-v{productVersion}", StringComparison.Ordinal));
         Assert.IsFalse(
@@ -43,7 +43,9 @@ public sealed partial class VersionMetadataTests
         Assert.AreEqual(1, ReadRequiredInt32(root, "contractVersion"));
         Assert.AreEqual(1, ReadRequiredInt32(root, "settingsSchemaVersion"));
         Assert.AreEqual(1, ReadRequiredInt32(root, "driverAbiVersion"));
-        Assert.AreEqual(26200, ReadRequiredInt32(root, "minimumWindowsBuild"));
+        Assert.AreEqual(19045, ReadRequiredInt32(root, "minimumWindowsBuild"));
+        Assert.AreEqual("10.0.19041.0", ReadRequiredString(root, "minimumWindowsApiContract"));
+        Assert.AreEqual("10.0.26200.0", ReadRequiredString(root, "maximumVersionTested"));
         Assert.AreEqual("x64", ReadRequiredString(root, "architecture"));
         Assert.AreEqual("internal", ReadRequiredString(root, "channel"));
     }
@@ -112,10 +114,10 @@ public sealed partial class VersionMetadataTests
             ReadRequiredString(versionRoot, "channel"),
             ReadRequiredString(compatibilityRoot, "channel"));
         Assert.AreEqual(
-            "0.1.0",
+            "1.0.0.2",
             ReadRequiredString(compatibilityRoot, "minimumDriverVersion"));
         Assert.AreEqual(
-            "0.1.0",
+            "1.0.0.2",
             ReadRequiredString(compatibilityRoot, "recommendedDriverVersion"));
 
         JsonElement driverPackageAvailable = RequireProperty(
@@ -174,7 +176,7 @@ public sealed partial class VersionMetadataTests
         string windowsRoot = FindWindowsRoot();
         ProcessResult accepted = await RunResolverAsync(
             windowsRoot,
-            "windows-v0.1.0").ConfigureAwait(false);
+            "windows-v0.2.0").ConfigureAwait(false);
 
         Assert.AreEqual(
             0,
@@ -186,7 +188,7 @@ public sealed partial class VersionMetadataTests
 
         ProcessResult rejected = await RunResolverAsync(
             windowsRoot,
-            "v0.1.0").ConfigureAwait(false);
+            "v0.2.0").ConfigureAwait(false);
 
         Assert.AreNotEqual(
             0,
@@ -203,10 +205,10 @@ public sealed partial class VersionMetadataTests
             normalizedError.Contains("received", StringComparison.OrdinalIgnoreCase),
             "Resolver rejection must explain the received tag.");
         Assert.IsTrue(
-            normalizedError.Contains("windows-v0.1.0", StringComparison.Ordinal),
+            normalizedError.Contains("windows-v0.2.0", StringComparison.Ordinal),
             "Resolver rejection must identify the canonical Windows tag.");
         Assert.IsTrue(
-            normalizedError.Contains("v0.1.0", StringComparison.Ordinal),
+            normalizedError.Contains("v0.2.0", StringComparison.Ordinal),
             "Resolver rejection must identify the received macOS tag.");
         Assert.IsFalse(
             EmbeddedCredentialMaterialRegex().IsMatch(rejected.CombinedOutput),

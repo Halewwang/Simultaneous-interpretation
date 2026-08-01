@@ -133,9 +133,9 @@ const invalidSchemaMutations = [
   {
     name: 'two-segment productVersion',
     mutate: ({ version, compatibility }) => {
-      version.productVersion = '0.1';
-      version.expectedTag = 'windows-v0.1';
-      compatibility.appVersion = '0.1';
+      version.productVersion = '0.2';
+      version.expectedTag = 'windows-v0.2';
+      compatibility.appVersion = '0.2';
     },
   },
   {
@@ -145,13 +145,13 @@ const invalidSchemaMutations = [
   {
     name: 'three-segment packageVersion',
     mutate: ({ version }) => {
-      version.packageVersion = '0.1.0';
+      version.packageVersion = '0.2.0';
     },
   },
   {
     name: 'packageVersion component above 65535',
     mutate: ({ version }) => {
-      version.packageVersion = '0.1.0.65536';
+      version.packageVersion = '0.2.0.65536';
     },
   },
   {
@@ -234,19 +234,45 @@ const invalidSchemaMutations = [
   {
     name: 'string minimumWindowsBuild',
     mutate: ({ version }) => {
-      version.minimumWindowsBuild = '26200';
+      version.minimumWindowsBuild = '19045';
     },
   },
   {
     name: 'fractional minimumWindowsBuild',
     mutate: ({ version }) => {
-      version.minimumWindowsBuild = 26200.5;
+      version.minimumWindowsBuild = 19045.5;
     },
   },
   {
-    name: 'minimumWindowsBuild below 26200',
+    name: 'minimumWindowsBuild below Windows 10 floor',
     mutate: ({ version }) => {
-      version.minimumWindowsBuild = 26199;
+      version.minimumWindowsBuild = 19044;
+    },
+  },
+  {
+    name: 'minimumWindowsBuild above Windows 10 floor',
+    mutate: ({ version }) => {
+      version.minimumWindowsBuild = 19046;
+    },
+  },
+  {
+    name: 'missing minimumWindowsApiContract',
+    mutate: ({ version }) => delete version.minimumWindowsApiContract,
+  },
+  {
+    name: 'incorrect minimumWindowsApiContract',
+    mutate: ({ version }) => {
+      version.minimumWindowsApiContract = '10.0.19045.0';
+    },
+  },
+  {
+    name: 'missing maximumVersionTested',
+    mutate: ({ version }) => delete version.maximumVersionTested,
+  },
+  {
+    name: 'incorrect maximumVersionTested',
+    mutate: ({ version }) => {
+      version.maximumVersionTested = '10.0.26100.0';
     },
   },
   {
@@ -368,9 +394,21 @@ const invalidSchemaMutations = [
     },
   },
   {
+    name: 'incorrect minimumDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.minimumDriverVersion = '1.0.0.3';
+    },
+  },
+  {
     name: 'blank recommendedDriverVersion',
     mutate: ({ compatibility }) => {
       compatibility.recommendedDriverVersion = ' ';
+    },
+  },
+  {
+    name: 'incorrect recommendedDriverVersion',
+    mutate: ({ compatibility }) => {
+      compatibility.recommendedDriverVersion = '1.0.0.3';
     },
   },
   {
@@ -471,13 +509,15 @@ test('Windows Internal metadata keeps the version and compatibility contract', a
   ]);
 
   assert.deepEqual(version, {
-    productVersion: '0.1.0',
-    packageVersion: '0.1.0.0',
-    expectedTag: 'windows-v0.1.0',
+    productVersion: '0.2.0',
+    packageVersion: '0.2.0.0',
+    expectedTag: 'windows-v0.2.0',
     contractVersion: 1,
     settingsSchemaVersion: 1,
     driverAbiVersion: 1,
-    minimumWindowsBuild: 26200,
+    minimumWindowsBuild: 19045,
+    minimumWindowsApiContract: '10.0.19041.0',
+    maximumVersionTested: '10.0.26200.0',
     architecture: 'x64',
     channel: 'internal',
   });
@@ -512,12 +552,12 @@ test('Windows Internal metadata keeps the version and compatibility contract', a
   assert.equal(channels.channels.internal.driverFeedPath, null);
 
   assert.deepEqual(compatibility, {
-    appVersion: '0.1.0',
+    appVersion: '0.2.0',
     contractVersion: 1,
     settingsSchemaVersion: 1,
     driverAbiVersion: 1,
-    minimumDriverVersion: '0.1.0',
-    recommendedDriverVersion: '0.1.0',
+    minimumDriverVersion: '1.0.0.2',
+    recommendedDriverVersion: '1.0.0.2',
     driverPackageAvailable: false,
     channel: 'internal',
   });
@@ -531,31 +571,33 @@ test(
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.deepEqual(JSON.parse(result.stdout), {
-      ProductVersion: '0.1.0',
-      PackageVersion: '0.1.0.0',
-      ExpectedTag: 'windows-v0.1.0',
+      ProductVersion: '0.2.0',
+      PackageVersion: '0.2.0.0',
+      ExpectedTag: 'windows-v0.2.0',
       PackageIdentity: 'EMKE.Translation.Internal',
       Publisher: 'CN=EMKE Internal Test',
       Channel: 'internal',
       Architecture: 'x64',
-      MinimumWindowsBuild: 26200,
+      MinimumWindowsBuild: 19045,
+      MinimumWindowsApiContract: '10.0.19041.0',
+      MaximumVersionTested: '10.0.26200.0',
       CredentialTarget: 'EMKE.Translation.Internal.ApiKey',
       AppInstallerPath: 'windows/internal/EMKE.Translation.Internal.appinstaller',
       DriverFeedPath: null,
     });
 
-    const windowsTagResult = runResolver(versionFile, 'windows-v0.1.0');
+    const windowsTagResult = runResolver(versionFile, 'windows-v0.2.0');
     assert.equal(
       windowsTagResult.status,
       0,
       windowsTagResult.stderr || windowsTagResult.stdout,
     );
 
-    const macTagResult = runResolver(versionFile, 'v0.1.0');
+    const macTagResult = runResolver(versionFile, 'v0.2.0');
     assert.notEqual(macTagResult.status, 0);
     assert.match(
       `${macTagResult.stdout}\n${macTagResult.stderr}`,
-      /Expected tag 'windows-v0\.1\.0', received 'v0\.1\.0'/,
+      /Expected tag 'windows-v0\.2\.0', received 'v0\.2\.0'/,
     );
   },
 );
