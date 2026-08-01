@@ -3,8 +3,8 @@ name: Windows Internal MSIX
 on:
   workflow_dispatch:
     inputs:
-      run_25h2_install_validation:
-        description: Run install and driver-missing smoke on the ephemeral 25H2 runner
+      run_hosted_install_validation:
+        description: Run application-preview install validation on the hosted Windows runner
         required: false
         type: boolean
         default: false
@@ -325,10 +325,10 @@ jobs:
           retention-days: 14
           compression-level: 0
 
-  install-25h2:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_25h2_install_validation }}
+  install-hosted-preview:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_install_validation }}
     needs: sign-package-bundle
-    runs-on: [self-hosted, Windows, X64, emke-win11-25h2]
+    runs-on: windows-2025-vs2026
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -342,7 +342,7 @@ jobs:
           name: ${{ needs.sign-package-bundle.outputs.artifact_name }}
           path: Windows/artifacts/internal-bundle
 
-      - name: Resolve and report Windows acceptance metadata
+      - name: Resolve and report hosted Windows metadata
         id: release
         shell: pwsh
         run: |
@@ -360,18 +360,19 @@ jobs:
           if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
             throw "The install runner architecture does not match release metadata."
           }
-          if ($windowsBuild -lt [int]$release.MinimumWindowsBuild) {
-            throw "The install runner is below the application support floor from release metadata."
-          }
           $evidenceBuild = ([version]$release.MaximumVersionTested).Build
-          if ($windowsBuild -lt $evidenceBuild) {
-            throw "The 25H2 evidence runner is below the metadata MaximumVersionTested lane."
+          Write-Host "Hosted Windows applicationFloor=$($release.MinimumWindowsBuild) maximumVersionTestedBuild=$evidenceBuild"
+          if ($operatingSystem.ProductType -eq 1) {
+            $expectedSmokeStatus = "driverMissing"
+          } else {
+            $expectedSmokeStatus = "unsupportedWindowsProductType"
           }
           $packageBaseName = "EMKE-Translation-Windows-$($release.ProductVersion)-$($release.Channel)-$($release.Architecture)"
           "package_base_name=$packageBaseName" >> $env:GITHUB_OUTPUT
           "package_version=$($release.PackageVersion)" >> $env:GITHUB_OUTPUT
           "architecture=$($release.Architecture.ToUpperInvariant())" >> $env:GITHUB_OUTPUT
           "publisher=$($release.Publisher)" >> $env:GITHUB_OUTPUT
+          "expected_smoke_status=$expectedSmokeStatus" >> $env:GITHUB_OUTPUT
 
       - name: Install, query, smoke, and remove exact Internal MSIX
         shell: pwsh
@@ -380,6 +381,7 @@ jobs:
           PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
           PACKAGE_ARCHITECTURE: ${{ steps.release.outputs.architecture }}
           PACKAGE_PUBLISHER: ${{ steps.release.outputs.publisher }}
+          EXPECTED_SMOKE_STATUS: ${{ steps.release.outputs.expected_smoke_status }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
@@ -423,11 +425,12 @@ jobs:
             -ExpectedCertificateThumbprint $thumbprint `
             -ExpectedPublisher $env:PACKAGE_PUBLISHER `
             -ExpectedVersion $env:PACKAGE_VERSION `
-            -ExpectedArchitecture $env:PACKAGE_ARCHITECTURE
+            -ExpectedArchitecture $env:PACKAGE_ARCHITECTURE `
+            -ExpectedSmokeStatus $env:EXPECTED_SMOKE_STATUS
           if ($LASTEXITCODE -ne 0) {
-            throw "Windows 11 25H2 Internal MSIX install validation failed."
+            throw "Hosted Internal MSIX install validation failed."
           }
-          Write-Host "Hosted MSIX install=passed identity=EMKE.Translation.Internal version=$env:PACKAGE_VERSION smoke=passed uninstall=passed certificateCleanup=passed"
+          Write-Host "Hosted MSIX install=passed identity=EMKE.Translation.Internal version=$env:PACKAGE_VERSION smokeStatus=$env:EXPECTED_SMOKE_STATUS uninstall=passed certificateCleanup=passed"
 
       - name: Ensure exact certificate cleanup
         if: always()

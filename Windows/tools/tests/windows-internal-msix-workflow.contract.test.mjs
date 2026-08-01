@@ -60,7 +60,7 @@ function workflowJob(source, name) {
   return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
 }
 
-function validateSmokeRecord(json) {
+function validateSmokeRecord(json, expectedStatus = 'driverMissing') {
   const command = `
 $tokens = $null
 $errors = $null
@@ -84,7 +84,7 @@ if ($null -eq $function) {
   throw 'Smoke record validator function is unavailable.'
 }
 Invoke-Expression $function.Extent.Text
-Assert-DriverMissingSmokeRecord -Json $env:EMKE_SMOKE_JSON
+Assert-DriverMissingSmokeRecord -Json $env:EMKE_SMOKE_JSON -ExpectedStatus $env:EMKE_SMOKE_STATUS
 `;
   return spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', command], {
     encoding: 'utf8',
@@ -92,6 +92,7 @@ Assert-DriverMissingSmokeRecord -Json $env:EMKE_SMOKE_JSON
       ...process.env,
       EMKE_HOSTED_INSTALL_SCRIPT: hostedInstallPath,
       EMKE_SMOKE_JSON: json,
+      EMKE_SMOKE_STATUS: expectedStatus,
     },
   });
 }
@@ -205,7 +206,7 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(
     workflow,
-    /run_25h2_install_validation:[^]*?type:\s*boolean[^]*?default:\s*false/,
+    /run_hosted_install_validation:[^]*?type:\s*boolean[^]*?default:\s*false/,
   );
   assert.match(workflow, /runs-on:\s*windows-2025-vs2026/);
   assert.match(workflow, /actions\/setup-dotnet@v4/);
@@ -316,17 +317,17 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
     /-CertificateThumbprint\s+`\s*\n\s*"\$\{\{\s*steps\.package\.outputs\.certificate_thumbprint\s*\}\}"/,
   );
 
-  const installJob = workflowJob(workflow, 'install-25h2');
+  const installJob = workflowJob(workflow, 'install-hosted-preview');
   assert.match(
     installJob,
-    /if:[^\n]*workflow_dispatch[^\n]*run_25h2_install_validation/,
+    /if:[^\n]*workflow_dispatch[^\n]*run_hosted_install_validation/,
   );
-  assert.match(
-    installJob,
-    /runs-on:\s*\[\s*self-hosted,\s*Windows,\s*X64,\s*emke-win11-25h2\s*\]/,
-  );
+  assert.match(installJob, /runs-on:\s*windows-2025-vs2026/);
+  assert.doesNotMatch(installJob, /self-hosted|emke-win11-25h2/);
   assert.match(installJob, /actions\/download-artifact@v4/);
   assert.match(installJob, /test-hosted-msix-install\.ps1/);
+  assert.match(installJob, /Get-CimInstance\s+-ClassName\s+Win32_OperatingSystem/);
+  assert.match(installJob, /ExpectedSmokeStatus/);
   assert.match(
     installJob,
     /needs\.sign-package-bundle\.outputs\.certificate_thumbprint/,
@@ -401,6 +402,9 @@ test('hosted install validator targets only the exact package and certificate', 
   assert.match(source, /driverMissing/);
   assert.match(source, /networkOpenCount/);
   assert.match(source, /audioStartCount/);
+  assert.match(source, /ExpectedSmokeStatus/);
+  assert.match(source, /unsupportedWindowsProductType/);
+  assert.doesNotMatch(source, /ValidateSet\('0\.1\.0\.0'\)/);
   assert.match(source, /-ne\s+0/);
   assert.doesNotMatch(
     source,
@@ -451,6 +455,19 @@ test('hosted smoke requires four explicitly typed fields', () => {
       `smoke validator accepted ${JSON.stringify(record)}`,
     );
   }
+});
+
+test('hosted smoke accepts the explicit Windows Server compatibility result', () => {
+  const serverRecord = validateSmokeRecord(
+    JSON.stringify({
+      status: 'unsupportedWindowsProductType',
+      translationStartAllowed: false,
+      networkOpenCount: 0,
+      audioStartCount: 0,
+    }),
+    'unsupportedWindowsProductType',
+  );
+  assert.equal(serverRecord.status, 0, serverRecord.stderr);
 });
 
 test('bundle and hosted install reject reparse ancestors', async (t) => {

@@ -18,11 +18,15 @@ param(
     [ValidateSet('CN=EMKE Internal Test')]
     [string]$ExpectedPublisher = 'CN=EMKE Internal Test',
 
-    [ValidateSet('0.1.0.0')]
-    [string]$ExpectedVersion = '0.1.0.0',
+    [Parameter(Mandatory)]
+    [ValidatePattern('^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$')]
+    [string]$ExpectedVersion,
 
     [ValidateSet('X64')]
     [string]$ExpectedArchitecture = 'X64',
+
+    [ValidateSet('driverMissing', 'unsupportedWindowsProductType')]
+    [string]$ExpectedSmokeStatus = 'driverMissing',
 
     [ValidateSet('EMKE.Windows.App.exe')]
     [string]$SmokeExecutableRelativePath = 'EMKE.Windows.App.exe'
@@ -117,7 +121,11 @@ function Get-ExactInstalledPackage {
 function Assert-DriverMissingSmokeRecord {
     param(
         [Parameter(Mandatory)]
-        [string]$Json
+        [string]$Json,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('driverMissing', 'unsupportedWindowsProductType')]
+        [string]$ExpectedStatus
     )
 
     try {
@@ -142,7 +150,7 @@ function Assert-DriverMissingSmokeRecord {
     }
     if (
         $smoke.status -isnot [string] -or
-        $smoke.status -cne 'driverMissing' -or
+        $smoke.status -cne $ExpectedStatus -or
         $smoke.translationStartAllowed -isnot [bool] -or
         $smoke.translationStartAllowed -ne $false -or
         $smoke.networkOpenCount -isnot [long] -or
@@ -160,7 +168,11 @@ function Assert-DriverMissingSmokeRecord {
 function Invoke-DriverMissingSmoke {
     param(
         [Parameter(Mandatory)]
-        [string]$ExecutablePath
+        [string]$ExecutablePath,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('driverMissing', 'unsupportedWindowsProductType')]
+        [string]$ExpectedStatus
     )
 
     if (-not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
@@ -201,7 +213,9 @@ function Invoke-DriverMissingSmoke {
         if ($lines.Count -ne 1) {
             throw 'Driver-missing smoke must emit exactly one JSON record.'
         }
-        Assert-DriverMissingSmokeRecord -Json $lines[0]
+        Assert-DriverMissingSmokeRecord `
+            -Json $lines[0] `
+            -ExpectedStatus $ExpectedStatus
     } finally {
         $process.Dispose()
     }
@@ -269,10 +283,12 @@ try {
     $smokePath = Join-Path `
         $installedPackage.InstallLocation `
         $SmokeExecutableRelativePath
-    Invoke-DriverMissingSmoke -ExecutablePath $smokePath
+    Invoke-DriverMissingSmoke `
+        -ExecutablePath $smokePath `
+        -ExpectedStatus $ExpectedSmokeStatus
     Write-Output (
         'Hosted MSIX install check: identity=passed; ' +
-        'driverMissing=passed; networkOpenCount=0; audioStartCount=0'
+        "smokeStatus=$ExpectedSmokeStatus; networkOpenCount=0; audioStartCount=0"
     )
 } finally {
     try {
