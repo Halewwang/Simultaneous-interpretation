@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-01
 
-**Status:** Approved in conversation; pending written-spec review
+**Status:** Approved
 
 **macOS behavior baseline:** `origin/main` `v0.2.4` / `3d81733`
 
