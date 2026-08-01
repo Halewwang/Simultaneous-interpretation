@@ -57,7 +57,7 @@ func regionalLanguageTagsAggregateIntoPrimaryTagConfidence() {
 }
 
 @Test
-func scriptVariantsContributeToOnePrimaryLanguageDecision() {
+func chineseScriptVariantsContributeToOneGateDecision() {
     let hypotheses = LanguageHypotheses([
         "zh-Hans": 0.411,
         "zh-Hant": 0.565,

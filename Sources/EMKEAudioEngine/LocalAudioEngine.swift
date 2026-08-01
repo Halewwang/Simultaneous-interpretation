@@ -229,12 +229,6 @@ public actor LocalAudioEngine {
         inbound: InboundOutputMode,
         outbound: OutboundOutputMode
     ) {
-        if inboundMode != inbound {
-            inboundDecoder = NetworkPCMDecoder()
-        }
-        if outboundMode != outbound {
-            outboundDecoder = NetworkPCMDecoder()
-        }
         inboundMode = inbound
         outboundMode = outbound
     }
@@ -253,8 +247,8 @@ public actor LocalAudioEngine {
         guard state == .running else {
             throw AudioEngineFailure.notRunning
         }
-        guard inboundMode == .translated, let endpoints else { return }
         let samples = try inboundDecoder.append24kMonoPCM16(pcm16)
+        guard inboundMode == .translated, let endpoints else { return }
         write(
             samples,
             to: endpoints.physicalOutput,
@@ -270,8 +264,8 @@ public actor LocalAudioEngine {
         guard state == .running else {
             throw AudioEngineFailure.notRunning
         }
-        guard outboundMode == .translated, let endpoints else { return }
         let samples = try outboundDecoder.append24kMonoPCM16(pcm16)
+        guard outboundMode == .translated, let endpoints else { return }
         write(
             samples,
             to: endpoints.virtualMicrophoneOutput,

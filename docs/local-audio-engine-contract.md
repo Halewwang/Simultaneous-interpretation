@@ -15,6 +15,11 @@ The app resolves devices by UID every time it starts. It never changes the macOS
 
 Both EMKE virtual UIDs must exist before the menu-bar model reports ready. Virtual devices are excluded from the physical input/output pickers to prevent a feedback route.
 
+The current AUHAL path does not provide acoustic echo cancellation. A physical
+speaker and physical microphone in the same room can therefore feed inbound
+playback back into the outbound translation session. Use headphones for full
+duplex meetings until an independently verified echo-cancellation path exists.
+
 ## Audio Formats
 
 - The device-facing AUHAL input uses the selected device's native sample rate and at most two native channels. A mono input is duplicated into stereo in the preallocated callback scratch buffer after `AudioUnitRender` succeeds.

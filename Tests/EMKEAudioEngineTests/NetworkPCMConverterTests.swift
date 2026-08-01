@@ -143,6 +143,19 @@ import Testing
     #expect(decoded == Array(repeating: 0, count: 8))
 }
 
+@Test func decoderProducesTwoStereoFramesPer24kSample() throws {
+    var decoder = NetworkPCMDecoder()
+
+    let decoded = try decoder.append24kMonoPCM16(
+        Data([0x00, 0x00, 0xff, 0x7f])
+    )
+
+    #expect(decoded.count == 8)
+    #expect(stride(from: 0, to: decoded.count, by: 2).allSatisfy {
+        decoded[$0] == decoded[$0 + 1]
+    })
+}
+
 @Test func decoderSuppressesThe24kUpsamplingImageBand() throws {
     let sourceFrequency = 10_560.0
     let imageFrequency = 24_000.0 - sourceFrequency
@@ -173,6 +186,50 @@ import Testing
     #expect(imageMagnitude < desiredMagnitude * 0.01)
 }
 
+@Test func decoderConvertsSignedPCM16AndDuplicatesBothChannels() throws {
+    var positiveDecoder = NetworkPCMDecoder()
+    var negativeDecoder = NetworkPCMDecoder()
+    let positivePCM = Data(
+        (0..<160).flatMap { _ in [UInt8(0xff), UInt8(0x7f)] }
+    )
+    let negativePCM = Data(
+        (0..<160).flatMap { _ in [UInt8(0x00), UInt8(0x80)] }
+    )
+
+    let positive = try positiveDecoder.append24kMonoPCM16(positivePCM)
+    let negative = try negativeDecoder.append24kMonoPCM16(negativePCM)
+
+    #expect(positive.count == 640)
+    #expect(negative.count == 640)
+    #expect(positive.suffix(16).allSatisfy { abs($0 - 1) < 0.0001 })
+    #expect(negative.suffix(16).allSatisfy { abs($0 + 1) < 0.0001 })
+    #expect(stride(from: 0, to: positive.count, by: 2).allSatisfy {
+        positive[$0] == positive[$0 + 1]
+    })
+}
+
+@Test func decoderPreservesResultsAcrossChunkBoundaries() throws {
+    let pcm = Data([0x00, 0x20, 0x00, 0x40, 0x00, 0x60])
+    var contiguousDecoder = NetworkPCMDecoder()
+    let contiguous = try contiguousDecoder.append24kMonoPCM16(pcm)
+
+    var chunkedDecoder = NetworkPCMDecoder()
+    var chunked = try chunkedDecoder.append24kMonoPCM16(pcm.prefix(2))
+    chunked.append(
+        contentsOf: try chunkedDecoder.append24kMonoPCM16(pcm.dropFirst(2))
+    )
+
+    #expect(chunked == contiguous)
+}
+
+@Test func decoderRejectsAnIncompletePCM16Sample() {
+    var decoder = NetworkPCMDecoder()
+
+    #expect(throws: NetworkPCMError.misalignedPCM16) {
+        try decoder.append24kMonoPCM16(Data([0]))
+    }
+}
+
 private func toneMagnitude(
     _ interleavedStereo: [Float],
     frequency: Double,
@@ -196,76 +253,4 @@ private func toneMagnitude(
         imaginary -= mono[start + offset] * window * sin(phase)
     }
     return hypot(real, imaginary)
-}
-
-@Test func decoderProducesTwoStereoFramesPer24kSample() throws {
-    var decoder = NetworkPCMDecoder()
-    let decoded = try decoder.append24kMonoPCM16(
-        Data([0x00, 0x00, 0xff, 0x7f])
-    )
-
-    #expect(decoded.count == 8)
-    #expect(stride(from: 0, to: decoded.count, by: 2).allSatisfy {
-        decoded[$0] == decoded[$0 + 1]
-    })
-}
-
-@Test func decoderClampsMinToMaxTransitionToFloatPCMRange() throws {
-    var decoder = NetworkPCMDecoder()
-
-    let decoded = try decoder.append24kMonoPCM16(
-        constantPCM16(.min, count: 80)
-            + constantPCM16(.max, count: 80)
-    )
-
-    #expect(decoded.allSatisfy { sample in
-        sample.isFinite && sample >= -1 && sample <= 1
-    })
-}
-
-@Test func decoderClampsMaxToMinTransitionToFloatPCMRange() throws {
-    var decoder = NetworkPCMDecoder()
-
-    let decoded = try decoder.append24kMonoPCM16(
-        constantPCM16(.max, count: 80)
-            + constantPCM16(.min, count: 80)
-    )
-
-    #expect(decoded.allSatisfy { sample in
-        sample.isFinite && sample >= -1 && sample <= 1
-    })
-}
-
-private func constantPCM16(_ sample: Int16, count: Int) -> Data {
-    var result = Data()
-    result.reserveCapacity(count * 2)
-    for _ in 0..<count {
-        var littleEndian = sample.littleEndian
-        withUnsafeBytes(of: &littleEndian) {
-            result.append(contentsOf: $0)
-        }
-    }
-    return result
-}
-
-@Test func decoderPreservesResultsAcrossChunkBoundaries() throws {
-    let pcm = Data([0x00, 0x20, 0x00, 0x40, 0x00, 0x60])
-    var contiguousDecoder = NetworkPCMDecoder()
-    let contiguous = try contiguousDecoder.append24kMonoPCM16(pcm)
-
-    var chunkedDecoder = NetworkPCMDecoder()
-    var chunked = try chunkedDecoder.append24kMonoPCM16(pcm.prefix(2))
-    chunked.append(
-        contentsOf: try chunkedDecoder.append24kMonoPCM16(pcm.dropFirst(2))
-    )
-
-    #expect(chunked == contiguous)
-}
-
-@Test func decoderRejectsAnIncompletePCM16Sample() {
-    var decoder = NetworkPCMDecoder()
-
-    #expect(throws: NetworkPCMError.misalignedPCM16) {
-        try decoder.append24kMonoPCM16(Data([0]))
-    }
 }

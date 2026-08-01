@@ -3,6 +3,25 @@ import Testing
 @testable import EMKECoordinator
 
 @Test
+func fortyMillisecondBatcherEmitsExactFrames() throws {
+    var batcher = PCMFrameBatcher(frameDurationMilliseconds: 40)
+
+    #expect(batcher.frameByteCount == 1_920)
+    let frames = try batcher.append(Data(repeating: 7, count: 3_840))
+    #expect(frames.map(\.count) == [1_920, 1_920])
+}
+
+@Test
+func productionConfigurationKeepsProviderSafeTwoHundredMilliseconds() {
+    #expect(
+        AudioStabilityConfiguration.production.inputFrameDurationMilliseconds == 200
+    )
+    #expect(
+        AudioStabilityConfiguration.providerProbe40ms.inputFrameDurationMilliseconds == 40
+    )
+}
+
+@Test
 func emitsOnlyExactTwoHundredMillisecondFrames() throws {
     var batcher = PCMFrameBatcher()
 

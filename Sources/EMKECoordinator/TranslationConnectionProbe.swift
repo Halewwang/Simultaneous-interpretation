@@ -64,19 +64,28 @@ public struct TranslationConnectionProbeConfiguration: Sendable {
     public let inboundTargetLanguage: SupportedLanguage
     public let outboundTargetLanguage: SupportedLanguage
     public let inputTranscriptionModel: String
+    public let speechChunkByteCount: Int?
 
     public init(
         apiConfiguration: APIConfiguration,
         apiKey: String,
         inboundTargetLanguage: SupportedLanguage,
         outboundTargetLanguage: SupportedLanguage,
-        inputTranscriptionModel: String = "gpt-realtime-whisper"
+        inputTranscriptionModel: String = "gpt-realtime-whisper",
+        speechChunkByteCount: Int? = nil
     ) {
+        if let speechChunkByteCount {
+            precondition(
+                speechChunkByteCount > 0
+                    && speechChunkByteCount.isMultiple(of: 2)
+            )
+        }
         self.apiConfiguration = apiConfiguration
         self.apiKey = apiKey
         self.inboundTargetLanguage = inboundTargetLanguage
         self.outboundTargetLanguage = outboundTargetLanguage
         self.inputTranscriptionModel = inputTranscriptionModel
+        self.speechChunkByteCount = speechChunkByteCount
     }
 }
 
@@ -148,7 +157,22 @@ public struct TranslationConnectionProbe: Sendable {
 
         if let speechSample {
             do {
-                try await inbound.appendAudio(speechSample)
+                if let chunkByteCount =
+                    configuration.speechChunkByteCount {
+                    var offset = 0
+                    while offset < speechSample.count {
+                        let end = min(
+                            offset + chunkByteCount,
+                            speechSample.count
+                        )
+                        try await inbound.appendAudio(
+                            speechSample.subdata(in: offset..<end)
+                        )
+                        offset = end
+                    }
+                } else {
+                    try await inbound.appendAudio(speechSample)
+                }
             } catch {
                 report.sourceTranscript = .failed(
                     .sourceTranscriptionUnavailable

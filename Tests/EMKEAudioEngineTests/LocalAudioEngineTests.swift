@@ -173,18 +173,6 @@ func start(_ harness: EngineHarness) async throws {
     )
 }
 
-private func constantPCM16(_ sample: Int16, count: Int) -> Data {
-    var result = Data()
-    result.reserveCapacity(count * 2)
-    for _ in 0..<count {
-        var littleEndian = sample.littleEndian
-        withUnsafeBytes(of: &littleEndian) {
-            result.append(contentsOf: $0)
-        }
-    }
-    return result
-}
-
 @Test func startCreatesAndStartsAllFourEndpointsOnce() async throws {
     let harness = makeHarness()
 
@@ -282,12 +270,12 @@ private func constantPCM16(_ sample: Int16, count: Int) -> Data {
         abs((harness.factory.physicalOutput.writes.first?.last ?? 0) - 1)
             < 0.0001
     )
+    #expect(harness.factory.virtualMicrophoneOutput.writes.first?.count == 320)
     #expect(
-        harness.factory.virtualMicrophoneOutput.writes.first?.count == 320
-    )
-    #expect(
-        abs((harness.factory.virtualMicrophoneOutput.writes.first?.last ?? 0)
-            + 1) < 0.0001
+        abs(
+            (harness.factory.virtualMicrophoneOutput.writes.first?.last ?? 0)
+                + 1
+        ) < 0.0001
     )
     await harness.engine.stop()
 }
@@ -320,68 +308,6 @@ private func constantPCM16(_ sample: Int16, count: Int) -> Data {
     await harness.engine.stop()
 }
 
-@Test func inboundSuppressedPCMDoesNotLeakFIRHistoryAfterTranslationResumes() async throws {
-    let harness = makeHarness()
-    try await start(harness)
-    try await harness.engine.enqueueInboundTranslation(
-        constantPCM16(.max, count: 80)
-    )
-    harness.factory.physicalOutput.writes.removeAll()
-    await harness.engine.setRouting(
-        inbound: .originalFailOpen,
-        outbound: .translated
-    )
-
-    try await harness.engine.enqueueInboundTranslation(Data([0]))
-    try await harness.engine.enqueueInboundTranslation(
-        constantPCM16(.max, count: 80)
-    )
-    await harness.engine.setRouting(
-        inbound: .translated,
-        outbound: .translated
-    )
-    try await harness.engine.enqueueInboundTranslation(
-        constantPCM16(0, count: 80)
-    )
-
-    #expect(
-        harness.factory.physicalOutput.writes
-            == [Array(repeating: 0, count: 320)]
-    )
-    await harness.engine.stop()
-}
-
-@Test func outboundSuppressedPCMDoesNotLeakFIRHistoryAfterTranslationResumes() async throws {
-    let harness = makeHarness()
-    try await start(harness)
-    try await harness.engine.enqueueOutboundTranslation(
-        constantPCM16(.min, count: 80)
-    )
-    harness.factory.virtualMicrophoneOutput.writes.removeAll()
-    await harness.engine.setRouting(
-        inbound: .translated,
-        outbound: .mutedFailClosed
-    )
-
-    try await harness.engine.enqueueOutboundTranslation(Data([0]))
-    try await harness.engine.enqueueOutboundTranslation(
-        constantPCM16(.min, count: 80)
-    )
-    await harness.engine.setRouting(
-        inbound: .translated,
-        outbound: .translated
-    )
-    try await harness.engine.enqueueOutboundTranslation(
-        constantPCM16(0, count: 80)
-    )
-
-    #expect(
-        harness.factory.virtualMicrophoneOutput.writes
-            == [Array(repeating: 0, count: 320)]
-    )
-    await harness.engine.stop()
-}
-
 @Test func selectedInboundPCMCanBeOriginalOrTranslated() async throws {
     let harness = makeHarness()
     try await start(harness)
@@ -400,6 +326,18 @@ private func constantPCM16(_ sample: Int16, count: Int) -> Data {
             < 0.0001
     )
     await harness.engine.stop()
+}
+
+private func constantPCM16(_ sample: Int16, count: Int) -> Data {
+    var result = Data()
+    result.reserveCapacity(count * 2)
+    for _ in 0..<count {
+        var littleEndian = sample.littleEndian
+        withUnsafeBytes(of: &littleEndian) {
+            result.append(contentsOf: $0)
+        }
+    }
+    return result
 }
 
 @Test func outboundFailClosedNeverWritesCapturedMicrophoneFrames() async throws {

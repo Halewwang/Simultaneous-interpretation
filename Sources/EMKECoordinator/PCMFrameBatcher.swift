@@ -5,11 +5,16 @@ public enum PCMFrameBatcherError: Error, Equatable, Sendable {
 }
 
 public struct PCMFrameBatcher: Sendable {
-    public static let frameByteCount = 9_600
+    public let frameByteCount: Int
 
     private var buffer = Data()
 
-    public init() {}
+    public init(frameDurationMilliseconds: Int = 200) {
+        precondition(frameDurationMilliseconds > 0)
+        let bytesTimesMilliseconds = 24_000 * 2 * frameDurationMilliseconds
+        precondition(bytesTimesMilliseconds.isMultiple(of: 1_000))
+        frameByteCount = bytesTimesMilliseconds / 1_000
+    }
 
     public var bufferedByteCount: Int {
         buffer.count
@@ -22,9 +27,9 @@ public struct PCMFrameBatcher: Sendable {
 
         buffer.append(pcm16)
         var frames: [Data] = []
-        while buffer.count >= Self.frameByteCount {
-            frames.append(Data(buffer.prefix(Self.frameByteCount)))
-            buffer.removeFirst(Self.frameByteCount)
+        while buffer.count >= frameByteCount {
+            frames.append(Data(buffer.prefix(frameByteCount)))
+            buffer.removeFirst(frameByteCount)
         }
         return frames
     }

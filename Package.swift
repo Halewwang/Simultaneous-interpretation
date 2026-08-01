@@ -26,13 +26,6 @@ let package = Package(
         .target(name: "EMKECore"),
         .target(name: "EMKERealtime", dependencies: ["EMKECore"]),
         .target(name: "EMKERouting", dependencies: ["EMKECore"]),
-        .target(
-            name: "EMKELanguageBaseline",
-            dependencies: [
-                "EMKECore",
-                "EMKERouting",
-            ]
-        ),
         .target(name: "EMKESecurity"),
         .target(
             name: "EMKEAudioBridge",
@@ -74,11 +67,6 @@ let package = Package(
             ],
             resources: [.process("Resources")]
         ),
-        .executableTarget(
-            name: "EMKELanguageBaselineTool",
-            dependencies: ["EMKELanguageBaseline"],
-            path: "Tools/EMKELanguageBaselineTool"
-        ),
         .testTarget(
             name: "EMKECoreTests",
             dependencies: [
@@ -98,7 +86,6 @@ let package = Package(
             name: "EMKERoutingTests",
             dependencies: [
                 "EMKECore",
-                "EMKELanguageBaseline",
                 "EMKERouting",
                 .product(name: "Testing", package: "swift-testing"),
             ]
@@ -132,12 +119,6 @@ let package = Package(
             name: "EMKECoordinatorTests",
             dependencies: [
                 "EMKECoordinator",
-                .product(name: "Testing", package: "swift-testing"),
-            ]
-        ),
-        .testTarget(
-            name: "EMKEContractTests",
-            dependencies: [
                 .product(name: "Testing", package: "swift-testing"),
             ]
         ),
