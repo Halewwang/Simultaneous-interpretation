@@ -31,6 +31,7 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
           $evidenceRoot = Join-Path $env:RUNNER_TEMP 'task1-compat-red-evidence'
           New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
 
