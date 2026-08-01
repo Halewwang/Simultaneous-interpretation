@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using EMKE.Windows.App.Localization;
 
@@ -141,23 +140,10 @@ public sealed class LocalizationTests
             observed);
     }
 
-    private static Dictionary<string, string> ReadResource(
-        string fileName,
-        [CallerFilePath] string sourceFile = "")
+    private static Dictionary<string, string> ReadResource(string fileName)
     {
-        string projectDirectory =
-            Path.GetDirectoryName(sourceFile)
-            ?? throw new InvalidOperationException(
-                "The test source path is unavailable.");
-        string path = Path.GetFullPath(
-            Path.Combine(
-                projectDirectory,
-                "..",
-                "..",
-                "src",
-                "EMKE.Windows.App",
-                "Localization",
-                fileName));
+        string path = TestSourceLocator.Find(
+            Path.Combine("Localization", fileName));
         XDocument document = XDocument.Load(path);
 
         return document

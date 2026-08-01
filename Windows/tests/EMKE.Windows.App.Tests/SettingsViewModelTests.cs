@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Security;
 using System.Xml.Linq;
 using EMKE.Core;
@@ -405,22 +404,8 @@ public sealed class SettingsViewModelTests
         Array.Clear(source);
     }
 
-    private static string SettingsXamlPath(
-        [CallerFilePath] string sourceFile = "")
-    {
-        string testDirectory = Path.GetDirectoryName(sourceFile)
-            ?? throw new InvalidOperationException(
-                "The test source path is unavailable.");
-        return Path.GetFullPath(
-            Path.Combine(
-                testDirectory,
-                "..",
-                "..",
-                "src",
-                "EMKE.Windows.App",
-                "Settings",
-                "SettingsWindow.xaml"));
-    }
+    private static string SettingsXamlPath() =>
+        TestSourceLocator.Find(Path.Combine("Settings", "SettingsWindow.xaml"));
 
     private sealed class SettingsFixture
     {

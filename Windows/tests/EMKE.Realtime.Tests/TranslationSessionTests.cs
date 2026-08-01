@@ -434,6 +434,9 @@ public sealed class TranslationSessionTests
         Assert.AreEqual("translationSession.closeTimeout", session.LastError.Code);
         Assert.AreEqual(TranslationSessionState.Failed, session.State);
         Assert.AreEqual(1, transport.DisposeCount);
+        await WaitUntilAsync(
+            () => transport.ActiveReceiveCount == 0,
+            "receive shutdown");
         Assert.AreEqual(0, transport.ActiveReceiveCount);
         Assert.IsFalse(transport.DisposedWhileReceiveActive);
     }

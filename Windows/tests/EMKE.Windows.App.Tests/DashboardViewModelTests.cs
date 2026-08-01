@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using EMKE.Core;
 using EMKE.Windows.App.Commands;
@@ -226,22 +225,8 @@ public sealed class DashboardViewModelTests
             fixture.ViewModel.OutboundSafetyMessage);
     }
 
-    private static string DashboardXamlPath(
-        [CallerFilePath] string sourceFile = "")
-    {
-        string testDirectory = Path.GetDirectoryName(sourceFile)
-            ?? throw new InvalidOperationException(
-                "The test source path is unavailable.");
-        return Path.GetFullPath(
-            Path.Combine(
-                testDirectory,
-                "..",
-                "..",
-                "src",
-                "EMKE.Windows.App",
-                "Dashboard",
-                "DashboardWindow.xaml"));
-    }
+    private static string DashboardXamlPath() =>
+        TestSourceLocator.Find(Path.Combine("Dashboard", "DashboardWindow.xaml"));
 
     private static AppSnapshot Snapshot(
         RuntimeState state,

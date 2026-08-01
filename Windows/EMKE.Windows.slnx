@@ -14,6 +14,7 @@
     <Project Path="tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj" />
     <Project Path="tests/EMKE.Realtime.Tests/EMKE.Realtime.Tests.csproj" />
     <Project Path="tests/EMKE.Routing.Tests/EMKE.Routing.Tests.csproj" />
+    <Project Path="tests/EMKE.SafeHandle.FinalizerProbe/EMKE.SafeHandle.FinalizerProbe.csproj" />
     <Project Path="tests/EMKE.Windows.App.Tests/EMKE.Windows.App.Tests.csproj" />
   </Folder>
 </Solution>
