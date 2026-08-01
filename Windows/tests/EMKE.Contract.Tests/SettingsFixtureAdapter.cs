@@ -55,7 +55,7 @@ internal static class SettingsFixtureAdapter
                     recommendedDriverVersion: recommendedVersion,
                     driverPackageAvailable: true,
                     channel: "contract",
-                    minimumWindowsBuild: 0,
+                    minimumWindowsBuild: 19045,
                     requiredEndpointRoleCount: 2),
                 ContractWindowsHostCompatibilitySource.Instance,
                 diagnostics);
