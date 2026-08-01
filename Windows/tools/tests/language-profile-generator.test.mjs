@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
@@ -16,13 +16,14 @@ const fakeFetch = resolve(
   testDirectory,
   "fixtures/language-profile-fake-fetch.mjs",
 );
+const fakeFetchUrl = pathToFileURL(fakeFetch).href;
 
 function runWithFakeFetch(mode, extraArguments = []) {
   return spawnSync(
     process.execPath,
     [
       "--import",
-      fakeFetch,
+      fakeFetchUrl,
       generator,
       "--max-source-bytes",
       "4",

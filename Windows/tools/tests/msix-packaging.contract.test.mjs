@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -665,7 +666,7 @@ test('verified signer output writes package-bound provenance and the pinned CI t
     assert.match(provenance.packageSha256, /^[0-9A-F]{64}$/);
     assert.match(provenance.certificateSha256, /^[0-9A-F]{64}$/);
     assert.equal(
-      await readFile(githubOutputPath, 'utf8'),
+      (await readFile(githubOutputPath, 'utf8')).replaceAll('\r\n', '\n'),
       `certificate_thumbprint=${thumbprint}\n`,
     );
   } finally {
@@ -757,7 +758,10 @@ test('PFX cleanup is limited to a validated temporary input outside the reposito
       0,
       `temporary PFX was rejected:\n${accepted.stdout}\n${accepted.stderr}`,
     );
-    assert.equal(accepted.stdout.trim(), acceptedPath);
+    assert.equal(
+      await realpath(accepted.stdout.trim()),
+      await realpath(acceptedPath),
+    );
 
     for (const rejectedPath of [repositoryPath, outsidePath]) {
       const rejected = resolveEphemeralPfx({

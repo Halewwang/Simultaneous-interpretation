@@ -45,10 +45,11 @@ const handoffNames = [
 ];
 
 function workflowJob(source, name) {
+  const normalizedSource = source.replaceAll('\r\n', '\n');
   const marker = `\n  ${name}:\n`;
-  const start = source.indexOf(marker);
+  const start = normalizedSource.indexOf(marker);
   assert.notEqual(start, -1, `workflow job ${name} must exist`);
-  const remainder = source.slice(start + marker.length);
+  const remainder = normalizedSource.slice(start + marker.length);
   const nextJob = remainder.search(/\n  [a-zA-Z0-9_-]+:\n/);
   return nextJob === -1 ? remainder : remainder.slice(0, nextJob);
 }
@@ -219,6 +220,10 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   );
 
   const buildJob = workflowJob(workflow, 'build-test');
+  assert.match(
+    workflowJob(workflow.replaceAll('\n', '\r\n'), 'build-test'),
+    /runs-on:\s*windows-2025-vs2026/,
+  );
   assert.doesNotMatch(buildJob, /secrets\.|WINDOWS_INTERNAL_SIGNING_PFX/);
   assert.doesNotMatch(
     buildJob,
