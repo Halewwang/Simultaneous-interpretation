@@ -35,7 +35,7 @@ const hostedInstallPath = path.join(
   'test-hosted-msix-install.ps1',
 );
 
-const packageBaseName = 'EMKE-Translation-Windows-0.2.0-internal-x64';
+const packageBaseName = 'EMKE-Translation-Windows-0.1.0-internal-x64';
 const handoffNames = [
   `${packageBaseName}.msix`,
   `${packageBaseName}.cer`,
