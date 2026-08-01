@@ -15,13 +15,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:ExpectedPackageName =
-    "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-$script:ExpectedCertificateName =
-    "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
-$script:ExpectedIdentity = "EMKE.Translation.Internal"
 $script:ExpectedPublisher = "CN=EMKE Internal Test"
-$script:ExpectedVersion = "0.1.0.0"
 $script:ForbiddenExtensionPattern =
     "(?i)\.(?:cat|inf|key|p12|pdb|pem|pfx|sys)$"
 $script:ForbiddenNamePattern =
@@ -184,7 +178,8 @@ function Assert-ExactCompatibility {
         "minimumDriverVersion",
         "recommendedDriverVersion",
         "driverPackageAvailable",
-        "channel"
+        "channel",
+        "minimumWindowsBuild"
     )
     $actualNames = @($actual.PSObject.Properties.Name | Sort-Object)
     $sortedExpectedNames = @($expectedNames | Sort-Object)
@@ -431,6 +426,22 @@ function Assert-ExtractedPackage {
         }
     }
 
+    $repositoryRoot = [IO.Path]::GetFullPath(
+        (Join-Path $PSScriptRoot "../..")
+    )
+    $releaseMetadata = & (
+        Join-Path $PSScriptRoot "resolve-version.ps1"
+    ) -VersionFile (Join-Path $repositoryRoot "Windows/version.json")
+    if (
+        $null -eq $releaseMetadata -or
+        $releaseMetadata.Publisher -cne $script:ExpectedPublisher -or
+        $releaseMetadata.Channel -cne "internal"
+    ) {
+        throw "Windows package metadata resolution failed."
+    }
+    $minimumVersion = "10.0.$([int]$releaseMetadata.MinimumWindowsBuild).0"
+    $maximumVersionTested = [string]$releaseMetadata.MaximumVersionTested
+
     [xml]$manifest = Get-Content -LiteralPath (
         Join-Path $resolvedPath "AppxManifest.xml"
     ) -Raw
@@ -475,7 +486,7 @@ function Assert-ExtractedPackage {
             $identity,
             "Name",
             "",
-            $script:ExpectedIdentity
+            [string]$releaseMetadata.PackageIdentity
         )
         Publisher = @(
             $identity,
@@ -487,16 +498,21 @@ function Assert-ExtractedPackage {
             $identity,
             "Version",
             "",
-            $script:ExpectedVersion
+            [string]$releaseMetadata.PackageVersion
         )
-        Architecture = @($identity, "ProcessorArchitecture", "", "x64")
+        Architecture = @(
+            $identity,
+            "ProcessorArchitecture",
+            "",
+            [string]$releaseMetadata.Architecture
+        )
         TargetName = @($target, "Name", "", "Windows.Desktop")
-        MinimumVersion = @($target, "MinVersion", "", "10.0.26200.0")
+        MinimumVersion = @($target, "MinVersion", "", $minimumVersion)
         MaximumVersion = @(
             $target,
             "MaxVersionTested",
             "",
-            "10.0.26200.0"
+            $maximumVersionTested
         )
         ApplicationId = @($application, "Id", "", "EMKETranslation")
         Executable = @(
@@ -530,9 +546,6 @@ function Assert-ExtractedPackage {
         }
     }
 
-    $repositoryRoot = [IO.Path]::GetFullPath(
-        (Join-Path $PSScriptRoot "../..")
-    )
     Assert-ExactCompatibility `
         -Path (Join-Path $resolvedPath "compatibility.json") `
         -ExpectedPath (
@@ -540,6 +553,15 @@ function Assert-ExtractedPackage {
                 $repositoryRoot
             ) "Windows/packaging/compatibility.internal.json"
         )
+    $embeddedCompatibility = Get-Content `
+        -LiteralPath (Join-Path $resolvedPath "compatibility.json") `
+        -Raw | ConvertFrom-Json -ErrorAction Stop
+    if (
+        [int]$embeddedCompatibility.minimumWindowsBuild -ne
+            [int]$releaseMetadata.MinimumWindowsBuild
+    ) {
+        throw "Embedded compatibility minimumWindowsBuild differs from release metadata."
+    }
 
     foreach ($binaryName in @(
         "EMKE.Windows.App.exe",
@@ -595,11 +617,26 @@ if (
 ) {
     $Package = Join-Path (Get-Location) $Package
 }
+$repositoryRoot = [IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot "../..")
+)
+$releaseMetadata = & (Join-Path $PSScriptRoot "resolve-version.ps1") `
+    -VersionFile (Join-Path $repositoryRoot "Windows/version.json")
+if (
+    $null -eq $releaseMetadata -or
+    $releaseMetadata.Publisher -cne $script:ExpectedPublisher -or
+    $releaseMetadata.Channel -cne "internal"
+) {
+    throw "Windows package metadata resolution failed."
+}
+$packageBaseName = "EMKE-Translation-Windows-$($releaseMetadata.ProductVersion)-internal-$($releaseMetadata.Architecture)"
+$expectedPackageName = "$packageBaseName.msix"
+$expectedCertificateName = "$packageBaseName.cer"
 $resolvedPackage = Assert-NoReparsePathChain -Path $Package
 if (
     -not (Test-Path -LiteralPath $resolvedPackage -PathType Leaf) -or
     [IO.Path]::GetFileName($resolvedPackage) -cne
-        $script:ExpectedPackageName
+        $expectedPackageName
 ) {
     throw "Exact Internal MSIX input validation failed."
 }
@@ -607,14 +644,14 @@ if (
 $packageDirectory = [IO.Path]::GetDirectoryName($resolvedPackage)
 $certificatePath = Join-Path (
     $packageDirectory
-) $script:ExpectedCertificateName
+) $expectedCertificateName
 $certificatePath = Assert-NoReparsePathChain -Path $certificatePath
 if (-not (Test-Path -LiteralPath $certificatePath -PathType Leaf)) {
     throw "Sibling Internal public certificate is unavailable."
 }
 $provenancePath = Join-Path (
     $packageDirectory
-) "EMKE-Translation-Windows-0.1.0-internal-x64.signing.json"
+) "$packageBaseName.signing.json"
 $provenancePath = Assert-NoReparsePathChain -Path $provenancePath
 if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
     throw "Verified signer provenance is unavailable."

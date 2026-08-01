@@ -546,10 +546,10 @@ if (
   assert.deepEqual(JSON.parse(result.stdout.trim()), {
     identityName: 'EMKE.Translation.Internal',
     publisher: 'CN=EMKE Internal Test',
-    version: '0.1.0.0',
+    version: '0.2.0.0',
     architecture: 'x64',
     targetName: 'Windows.Desktop',
-    minimumVersion: '10.0.26200.0',
+    minimumVersion: '10.0.19045.0',
     maximumTestedVersion: '10.0.26200.0',
     applicationId: 'EMKETranslation',
     executable: 'EMKE.Windows.App.exe',
@@ -1001,21 +1001,40 @@ test('signed verification allows only the generated code-integrity catalog', asy
   }
 });
 
-test('portable extracted-package verification rejects manifest drift', async () => {
-  await requireVerifyScript();
-  const fixtureRoot = await mkdtemp(
-    path.join(tmpdir(), 'emke-msix-extracted-manifest-'),
-  );
+for (const [label, from, to] of [
+  ['MinVersion 19044', 'MinVersion="10.0.19045.0"', 'MinVersion="10.0.19044.0"'],
+  ['MinVersion 26200', 'MinVersion="10.0.19045.0"', 'MinVersion="10.0.26200.0"'],
+  ['MaxVersionTested 26100', 'MaxVersionTested="10.0.26200.0"', 'MaxVersionTested="10.0.26100.0"'],
+  ['Architecture neutral', 'ProcessorArchitecture="x64"', 'ProcessorArchitecture="neutral"'],
+  ['Architecture arm64', 'ProcessorArchitecture="x64"', 'ProcessorArchitecture="arm64"'],
+  ['Architecture x86', 'ProcessorArchitecture="x64"', 'ProcessorArchitecture="x86"'],
+  ['Version 0.1.0.0', 'Version="0.2.0.0"', 'Version="0.1.0.0"'],
+  ['Publisher mismatch', 'Publisher="CN=EMKE Internal Test"', 'Publisher="CN=EMKE Internal Tampered"'],
+]) {
+  test(`portable extracted-package verification rejects ${label}`, async () => {
+    const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'emke-msix-tamper-'));
+    try {
+      await createValidExtractedPackage(fixtureRoot);
+      const fixtureManifest = path.join(fixtureRoot, 'AppxManifest.xml');
+      const source = await readFile(fixtureManifest, 'utf8');
+      await writeFile(fixtureManifest, source.replace(from, to));
+      const result = validateExtracted(fixtureRoot);
+      assert.notEqual(result.status, 0, `${label} tamper was accepted`);
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test('portable extracted-package verification rejects embedded compatibility minimum 26200', async () => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'emke-msix-compat-minimum-'));
   try {
     await createValidExtractedPackage(fixtureRoot);
-    const fixtureManifest = path.join(fixtureRoot, 'AppxManifest.xml');
-    const source = await readFile(fixtureManifest, 'utf8');
-    await writeFile(
-      fixtureManifest,
-      source.replace('10.0.26200.0', '10.0.26100.0'),
-    );
-    const result = validateExtracted(fixtureRoot);
-    assert.notEqual(result.status, 0, 'manifest drift was accepted');
+    const compatibilityPath = path.join(fixtureRoot, 'compatibility.json');
+    const compatibility = JSON.parse(await readFile(compatibilityPath, 'utf8'));
+    compatibility.minimumWindowsBuild = 26200;
+    await writeFile(compatibilityPath, `${JSON.stringify(compatibility)}\n`);
+    assert.notEqual(validateExtracted(fixtureRoot).status, 0, 'embedded 26200 minimum was accepted');
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

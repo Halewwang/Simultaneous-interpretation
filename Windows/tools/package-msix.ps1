@@ -23,7 +23,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:PackageBaseName = "EMKE-Translation-Windows-0.1.0-internal-x64"
+$script:PackageBaseName = "EMKE-Translation-Windows-0.2.0-internal-x64"
 $script:ExpectedSubject = "CN=EMKE Internal Test"
 $script:AllowedStageExtensions = @(".dll", ".exe", ".json", ".png", ".xml")
 $script:ForbiddenStageExtensions = @(
@@ -446,11 +446,12 @@ function Write-ValidatedManifest {
         "ProcessorArchitecture",
         [string]$ReleaseMetadata.Architecture
     )
-    $windowsVersion =
+    $minimumVersion =
         "10.0.$([int]$ReleaseMetadata.MinimumWindowsBuild).0"
+    $maximumVersionTested = [string]$ReleaseMetadata.MaximumVersionTested
     $target.SetAttribute("Name", "Windows.Desktop")
-    $target.SetAttribute("MinVersion", $windowsVersion)
-    $target.SetAttribute("MaxVersionTested", $windowsVersion)
+    $target.SetAttribute("MinVersion", $minimumVersion)
+    $target.SetAttribute("MaxVersionTested", $maximumVersionTested)
     $application.SetAttribute("Id", "EMKETranslation")
     $application.SetAttribute("Executable", "EMKE.Windows.App.exe")
     $application.SetAttribute(
@@ -596,12 +597,7 @@ try {
         throw "Windows package metadata resolution failed."
     }
     if (
-        $releaseMetadata.PackageIdentity -cne
-            "EMKE.Translation.Internal" -or
         $releaseMetadata.Publisher -cne $script:ExpectedSubject -or
-        $releaseMetadata.PackageVersion -cne "0.1.0.0" -or
-        $releaseMetadata.Architecture -cne "x64" -or
-        [int]$releaseMetadata.MinimumWindowsBuild -ne 26200 -or
         $releaseMetadata.Channel -cne "internal"
     ) {
         throw "Resolved metadata does not match the Internal MSIX contract."
