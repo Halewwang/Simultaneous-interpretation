@@ -632,11 +632,11 @@ try {
     }
     $trustedThumbprint = $provenanceThumbprint
     $trustedPath =
-        "Cert:\CurrentUser\TrustedPeople\$trustedThumbprint"
+        "Cert:\CurrentUser\Root\$trustedThumbprint"
     if (-not (Test-Path -LiteralPath $trustedPath)) {
         $imported = Import-Certificate `
             -FilePath $certificatePath `
-            -CertStoreLocation "Cert:\CurrentUser\TrustedPeople"
+            -CertStoreLocation "Cert:\CurrentUser\Root"
         if (
             $null -eq $imported -or
             $imported.Thumbprint.ToUpperInvariant() -cne $trustedThumbprint
@@ -718,10 +718,10 @@ try {
         -not [string]::IsNullOrEmpty($trustedThumbprint)
     ) {
         $cleanupTrustedPath =
-            "Cert:\CurrentUser\TrustedPeople\$trustedThumbprint"
+            "Cert:\CurrentUser\Root\$trustedThumbprint"
         $cleanupActions.Add(
             [pscustomobject]@{
-                Name = "CurrentUserTrustedPeople:$trustedThumbprint"
+                Name = "CurrentUserRoot:$trustedThumbprint"
                 Action = {
                     if (Test-Path -LiteralPath $cleanupTrustedPath) {
                         Remove-Item `

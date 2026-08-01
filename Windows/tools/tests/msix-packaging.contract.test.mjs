@@ -579,6 +579,19 @@ test('package and verification scripts have valid PowerShell syntax', () => {
   }
 });
 
+test('verification temporarily trusts and removes only the self-signed root', async () => {
+  const source = await readFile(verifyScriptPath, 'utf8');
+
+  assert.match(
+    source,
+    /-CertStoreLocation\s+"Cert:\\CurrentUser\\Root"/,
+  );
+  assert.match(source, /Cert:\\CurrentUser\\Root\\\$trustedThumbprint/);
+  assert.match(source, /\$addedTrust\s*=\s*\$true/);
+  assert.match(source, /if\s*\([^]*\$addedTrust[^]*Remove-Item/);
+  assert.doesNotMatch(source, /CurrentUser\\TrustedPeople/);
+});
+
 test('production package mode requires external PFX and password-environment inputs', async () => {
   await requirePackageScript();
   const result = spawnSync(
