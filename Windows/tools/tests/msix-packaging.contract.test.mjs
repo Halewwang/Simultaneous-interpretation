@@ -970,6 +970,37 @@ test('portable extracted-package verification accepts the exact metadata and x64
   }
 });
 
+test('signed verification allows only the generated code-integrity catalog', async () => {
+  const source = await readFile(verifyScriptPath, 'utf8');
+
+  assert.match(
+    source,
+    /\$RequirePackageInfrastructure\s+-and\s+\$relative\s+-ceq\s+"AppxMetadata\/CodeIntegrity\.cat"/,
+  );
+  assert.match(
+    source,
+    /if\s*\(\$RequirePackageInfrastructure\)\s*\{[^]*"AppxMetadata\/CodeIntegrity\.cat"[^]*Join-Path\s+\$resolvedPath\s+\$infrastructurePath/,
+  );
+
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), 'emke-msix-extracted-code-integrity-'),
+  );
+  try {
+    await createValidExtractedPackage(fixtureRoot);
+    const metadata = path.join(fixtureRoot, 'AppxMetadata');
+    await mkdir(metadata);
+    await writeFile(path.join(metadata, 'CodeIntegrity.cat'), 'fixture catalog');
+    const result = validateExtracted(fixtureRoot);
+    assert.notEqual(
+      result.status,
+      0,
+      'portable verification accepted a catalog without signed infrastructure mode',
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test('portable extracted-package verification rejects manifest drift', async () => {
   await requireVerifyScript();
   const fixtureRoot = await mkdtemp(

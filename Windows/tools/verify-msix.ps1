@@ -348,8 +348,14 @@ function Assert-ExtractedPackage {
             $resolvedPath,
             $file.FullName
         ).Replace("\", "/")
+        $isCodeIntegrityCatalog =
+            $RequirePackageInfrastructure -and
+            $relative -ceq "AppxMetadata/CodeIntegrity.cat"
         if (
-            $relative -match $script:ForbiddenExtensionPattern -or
+            (
+                $relative -match $script:ForbiddenExtensionPattern -and
+                -not $isCodeIntegrityCatalog
+            ) -or
             $relative -match $script:ForbiddenNamePattern
         ) {
             throw "Forbidden file in extracted MSIX: $relative"
@@ -383,6 +389,10 @@ function Assert-ExtractedPackage {
                 $relative -ceq "AppxSignature.p7x"
                 break
             }
+            ".cat" {
+                $isCodeIntegrityCatalog
+                break
+            }
             default { $false }
         }
         if (-not $allowed) {
@@ -404,12 +414,21 @@ function Assert-ExtractedPackage {
             throw "Extracted MSIX is missing $requiredName."
         }
     }
-    if ($RequirePackageInfrastructure -and -not (
-        Test-Path `
-            -LiteralPath (Join-Path $resolvedPath "AppxSignature.p7x") `
-            -PathType Leaf
-    )) {
-        throw "Extracted MSIX signature resource is unavailable."
+    if ($RequirePackageInfrastructure) {
+        foreach ($infrastructurePath in @(
+            "AppxSignature.p7x",
+            "AppxMetadata/CodeIntegrity.cat"
+        )) {
+            if (-not (
+                Test-Path `
+                    -LiteralPath (
+                        Join-Path $resolvedPath $infrastructurePath
+                    ) `
+                    -PathType Leaf
+            )) {
+                throw "Extracted MSIX signature resource is unavailable."
+            }
+        }
     }
 
     [xml]$manifest = Get-Content -LiteralPath (
