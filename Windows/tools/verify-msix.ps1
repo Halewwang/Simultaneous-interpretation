@@ -634,16 +634,27 @@ try {
     $trustedPath =
         "Cert:\CurrentUser\Root\$trustedThumbprint"
     if (-not (Test-Path -LiteralPath $trustedPath)) {
-        $imported = Import-Certificate `
-            -FilePath $certificatePath `
-            -CertStoreLocation "Cert:\CurrentUser\Root"
+        $rootStore =
+            [Security.Cryptography.X509Certificates.X509Store]::new(
+                [Security.Cryptography.X509Certificates.StoreName]::Root,
+                [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+            )
+        try {
+            $rootStore.Open(
+                [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+            )
+            $rootStore.Add($publicCertificate)
+            $addedTrust = $true
+        } finally {
+            $rootStore.Dispose()
+        }
+        $imported = Get-Item -LiteralPath $trustedPath
         if (
             $null -eq $imported -or
             $imported.Thumbprint.ToUpperInvariant() -cne $trustedThumbprint
         ) {
             throw "Temporary package-verification trust import failed."
         }
-        $addedTrust = $true
     }
 
     & $sdkTools.SignTool verify /pa /all /v $resolvedPackage

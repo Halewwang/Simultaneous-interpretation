@@ -582,10 +582,12 @@ test('package and verification scripts have valid PowerShell syntax', () => {
 test('verification temporarily trusts and removes only the self-signed root', async () => {
   const source = await readFile(verifyScriptPath, 'utf8');
 
-  assert.match(
-    source,
-    /-CertStoreLocation\s+"Cert:\\CurrentUser\\Root"/,
-  );
+  assert.match(source, /X509Store\]::new\(/);
+  assert.match(source, /StoreName\]::Root/);
+  assert.match(source, /StoreLocation\]::CurrentUser/);
+  assert.match(source, /OpenFlags\]::ReadWrite/);
+  assert.match(source, /\.Add\(\$publicCertificate\)/);
+  assert.doesNotMatch(source, /Import-Certificate/);
   assert.match(source, /Cert:\\CurrentUser\\Root\\\$trustedThumbprint/);
   assert.match(source, /\$addedTrust\s*=\s*\$true/);
   assert.match(source, /if\s*\([^]*\$addedTrust[^]*Remove-Item/);
