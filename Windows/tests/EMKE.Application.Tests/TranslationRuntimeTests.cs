@@ -1166,6 +1166,29 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task StopMapsSessionCloseTimeoutToTheStableRuntimeTimeout()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        RuntimeError sessionTimeout = Error(
+            ErrorCategory.CloseTimeout,
+            "translationSession.closeTimeout");
+        harness.InboundSession.CloseException = new RuntimeOperationException(sessionTimeout);
+        harness.OutboundSession.CloseException = new RuntimeOperationException(sessionTimeout);
+
+        RuntimeError? error = await runtime.StopAsync()
+            .WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.CloseTimeout, error?.Category);
+        Assert.AreEqual("translationRuntime.localCloseTimeout", error?.Code);
+        Assert.AreEqual(RuntimeState.Stopped, runtime.CurrentSnapshot.RuntimeState);
+        Assert.AreEqual(1, harness.AudioStopCount);
+        Assert.AreEqual(1, harness.InboundSession.DisposeCount);
+        Assert.AreEqual(1, harness.OutboundSession.DisposeCount);
+    }
+
+    [TestMethod]
     public async Task CapturedPcmOwnersReleaseAfterSend()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
