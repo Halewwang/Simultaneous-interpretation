@@ -519,16 +519,15 @@ public sealed class TranslationRuntimeIntegrationTests
             await MockTranslationServer.StartAsync().ConfigureAwait(false);
         TestAudioEngine audio = new();
         await using TranslationRuntime runtime = CreateRuntime(server, audio);
-        SnapshotWatcher snapshots = new(runtime.CurrentSnapshot);
-        using IDisposable subscription = runtime.Snapshots.Subscribe(snapshots);
 
         Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
-        Task<AppSnapshot> fenced = snapshots.WaitForAsync(
-            static snapshot => snapshot.OutboundRoute == OutboundRoute.MutedFailClosed
-                && snapshot.Error?.Code == "translationSocket.receiveFailed");
         await server.DisconnectAsync(LanguageCode.En).ConfigureAwait(false);
-        AppSnapshot observed = await fenced.WaitAsync(TimeSpan.FromSeconds(5))
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.OutboundRoute == OutboundRoute.MutedFailClosed
+                && runtime.CurrentSnapshot.Error?.Code
+                    == "translationSocket.receiveFailed")
             .ConfigureAwait(false);
+        AppSnapshot observed = runtime.CurrentSnapshot;
 
         Assert.AreEqual(ErrorCategory.Network, observed.Error?.Category);
         Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
