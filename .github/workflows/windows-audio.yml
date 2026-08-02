@@ -283,6 +283,11 @@ jobs:
             throw "Driver executable package-boundary tests failed."
           }
 
+          node --test Windows/tools/tests/driver-submission.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission contract tests failed."
+          }
+
           pwsh -NoProfile -File Windows/driver/tests/catalog-reference-set.test.ps1
           if ($LASTEXITCODE -ne 0) {
             throw "Catalog reference-set tests failed."
