@@ -14,6 +14,7 @@
 #include <utility>
 
 #if defined(_WIN32)
+#include <propkeydef.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <propvarutil.h>
