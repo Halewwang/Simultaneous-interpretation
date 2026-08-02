@@ -158,7 +158,9 @@ public sealed class FailureSafetyTests
                         StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException(
-                        "CloseTimeout did not produce the stable runtime error.");
+                        "CloseTimeout did not produce the stable runtime error: "
+                        + $"category={closeError?.Category.ToString() ?? "none"} "
+                        + $"code={closeError?.Code ?? "none"}.");
                 }
 
                 break;
