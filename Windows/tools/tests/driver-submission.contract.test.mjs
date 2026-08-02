@@ -40,6 +40,9 @@ test("submission creator exposes immutable package and validation entry points",
   assert.match(source, /verify-driver-package\.ps1/);
   assert.match(source, /driver-submission\.json/);
   assert.match(source, /1980-01-01/);
+  assert.match(source, /function Assert-ExactSourcePackageInventory/);
+  assert.match(source, /Assert-ExactSourcePackageInventory\s*`/);
+  assert.doesNotMatch(source, /-CaseInsensitiveNames/);
   assert.doesNotMatch(source, /certutil|signtool|\.pfx|private.?key/i);
 });
 
