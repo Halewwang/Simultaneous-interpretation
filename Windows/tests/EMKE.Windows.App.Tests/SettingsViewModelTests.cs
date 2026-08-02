@@ -117,10 +117,7 @@ public sealed class SettingsViewModelTests
         fixture.Runtime.Result = new RuntimeError(
             ErrorCategory.Driver,
             "translationRuntime.driverIncompatible",
-            new Dictionary<string, string>
-            {
-                ["statusLabel"] = "driverMissing",
-            },
+            new Dictionary<string, string>(),
             RecoveryAction.InstallDriver);
         fixture.ViewModel.ReplaceApiKeyDraft("start-key".AsSpan());
         int clearRequests = 0;

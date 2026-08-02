@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -43,6 +44,17 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
             "token",
         };
 
+    private static readonly HashSet<string> EndpointRoles =
+        new(StringComparer.Ordinal)
+        {
+            "physicalInput",
+            "physicalOutput",
+            "meetingSpeakerRender",
+            "appSpeakerCapture",
+            "appMicrophoneRender",
+            "meetingMicrophoneCapture",
+        };
+
     private static readonly Regex ApiKeyPattern =
         new(
             @"sk-[A-Za-z0-9_-]{16,}",
@@ -75,9 +87,12 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
                 throw new ArgumentException("Parameter keys must not be empty.", nameof(parameters));
             }
 
-            if (ReservedParameterKeys.Contains(key))
+            if (ReservedParameterKeys.Contains(key)
+                || !IsStructuredDiagnosticParameter(key, value))
             {
-                throw new ArgumentException("Reserved secret parameter keys are not allowed.", nameof(parameters));
+                throw new ArgumentException(
+                    "Only structured diagnostic parameters are allowed.",
+                    nameof(parameters));
             }
 
             if (value is null)
@@ -97,6 +112,24 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
         Code = code;
         Parameters = new ReadOnlyDictionary<string, string>(copy);
         RecoveryAction = recoveryAction;
+    }
+
+    private static bool IsStructuredDiagnosticParameter(
+        string key,
+        string value)
+    {
+        return key switch
+        {
+            "build" or "retryCount" or "duration" =>
+                ulong.TryParse(
+                    value,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out _),
+            "driverVersion" => Version.TryParse(value, out _),
+            "endpointRole" => EndpointRoles.Contains(value),
+            _ => false,
+        };
     }
 
     [JsonPropertyName("category")]
