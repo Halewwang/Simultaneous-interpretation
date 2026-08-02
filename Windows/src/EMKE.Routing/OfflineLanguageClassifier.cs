@@ -219,21 +219,16 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
     private static LanguageModel ParseModel(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        JsonDocument raw;
         try
         {
-            raw = JsonDocument.Parse(stream);
+            using JsonDocument raw = JsonDocument.Parse(stream);
+            return ParseModelDocument(raw);
         }
         catch (JsonException exception)
         {
             throw new InvalidDataException(
                 "The embedded language profile is invalid.",
                 exception);
-        }
-
-        using (raw)
-        {
-            return ParseModelDocument(raw);
         }
     }
 
