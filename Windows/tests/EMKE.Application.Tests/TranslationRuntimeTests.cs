@@ -1136,7 +1136,7 @@ public sealed class TranslationRuntimeTests
 
         _ = await runtime.StartAsync().ConfigureAwait(false);
 
-        CollectionAssert.AreEquivalent(["code"], log.Fields.Keys.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "code" }, log.Fields.Keys.ToArray());
         Assert.AreEqual("test.audioStart", log.Fields["code"]);
     }
 
