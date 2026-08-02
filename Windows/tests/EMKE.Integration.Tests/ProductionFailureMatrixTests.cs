@@ -252,28 +252,16 @@ public sealed class ProductionFailureMatrixTests
         MockTranslationServer server,
         TestAudioEngine audio)
     {
-        await WaitUntilAsync(
-            () => server.ActiveConnectionCount == 0
-                && audio.ActivePollCount == 0).ConfigureAwait(false);
+        await Task.WhenAll(
+            server.WaitForConnectionClosedAsync(LanguageCode.Zh),
+            server.WaitForConnectionClosedAsync(LanguageCode.En),
+            audio.PollQuiesced).WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
         Assert.AreEqual(0, server.ActiveConnectionCount);
         Assert.AreEqual(0, audio.ActivePollCount);
         Assert.AreEqual(0, audio.PendingEventCount);
         Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
         Assert.AreEqual(0, audio.ActivePcmLeaseCount);
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> predicate)
-    {
-        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(5);
-        while (!predicate())
-        {
-            if (DateTimeOffset.UtcNow >= deadline)
-            {
-                Assert.Fail("Timed out waiting for released runtime ownership.");
-            }
-
-            await Task.Delay(10).ConfigureAwait(false);
-        }
     }
 
     private sealed class SafetyAudit

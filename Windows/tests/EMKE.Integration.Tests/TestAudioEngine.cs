@@ -40,6 +40,8 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     private int _pendingEventCount;
     private int _pendingOutboundTranslationCount;
     private int _activePollCount;
+    private readonly object _pollSync = new();
+    private TaskCompletionSource _pollQuiesced = CompletedSignal();
     private readonly TaskCompletionSource _failClosedOrStopped =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _virtualMicrophoneTranslated =
@@ -69,6 +71,17 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         Volatile.Read(ref _pendingOutboundTranslationCount);
 
     public int ActivePollCount => Volatile.Read(ref _activePollCount);
+
+    public Task PollQuiesced
+    {
+        get
+        {
+            lock (_pollSync)
+            {
+                return _pollQuiesced.Task;
+            }
+        }
+    }
 
     public byte[] VirtualMicrophoneOutput =>
         _virtualMicrophone.SelectMany(static chunk => chunk).ToArray();
@@ -178,7 +191,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     public async ValueTask<AudioEngineEvent?> PollEventAsync(
         CancellationToken cancellationToken)
     {
-        Interlocked.Increment(ref _activePollCount);
+        BeginPoll();
         try
         {
             AudioEngineEvent audio = await _events.Reader.ReadAsync(cancellationToken)
@@ -188,7 +201,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         }
         finally
         {
-            Interlocked.Decrement(ref _activePollCount);
+            EndPoll();
         }
     }
 
@@ -271,5 +284,36 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
                 _onDisposed();
             }
         }
+    }
+
+    private void BeginPoll()
+    {
+        lock (_pollSync)
+        {
+            if (Interlocked.Increment(ref _activePollCount) == 1)
+            {
+                _pollQuiesced = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+    }
+
+    private void EndPoll()
+    {
+        lock (_pollSync)
+        {
+            if (Interlocked.Decrement(ref _activePollCount) == 0)
+            {
+                _pollQuiesced.TrySetResult();
+            }
+        }
+    }
+
+    private static TaskCompletionSource CompletedSignal()
+    {
+        TaskCompletionSource completed = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        completed.TrySetResult();
+        return completed;
     }
 }

@@ -45,6 +45,8 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         _connectionWaiters = new();
     private readonly ConcurrentDictionary<LanguageCode, DisconnectWaiter>
         _disconnectWaiters = new();
+    private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource>
+        _connectionClosedWaiters = new();
     private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioMessage>>
         _clientAudio = new();
     private readonly ConcurrentDictionary<LanguageCode, ConcurrentQueue<string>>
@@ -78,6 +80,18 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         Volatile.Read(ref _totalConnectionCount);
 
     public int ActiveConnectionCount => _connections.Count;
+
+    public Task WaitForConnectionClosedAsync(LanguageCode targetLanguage)
+    {
+        if (_connectionClosedWaiters.TryGetValue(
+                targetLanguage,
+                out TaskCompletionSource? closed))
+        {
+            return closed.Task;
+        }
+
+        return Task.CompletedTask;
+    }
 
     public int ClientAudioBackpressureCount =>
         Volatile.Read(ref _clientAudioBackpressureCount);
@@ -136,6 +150,27 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             """
             {"type":"error","error":{"code":"mock_server_error","message":"deterministic test failure"}}
             """u8.ToArray()).ConfigureAwait(false);
+    }
+
+    public async Task SendRawTextAsync(
+        LanguageCode targetLanguage,
+        ReadOnlyMemory<byte> payload)
+    {
+        if (payload.IsEmpty)
+        {
+            throw new ArgumentException("Raw text payload cannot be empty.", nameof(payload));
+        }
+
+        Connection connection = await WaitForConnectionAsync(targetLanguage)
+            .ConfigureAwait(false);
+        await connection.SendTextAsync(payload).ConfigureAwait(false);
+    }
+
+    public async Task CloseOutputAsync(LanguageCode targetLanguage)
+    {
+        Connection connection = await WaitForConnectionAsync(targetLanguage)
+            .ConfigureAwait(false);
+        await connection.CloseOutputAsync().ConfigureAwait(false);
     }
 
     public async Task DisconnectAsync(LanguageCode targetLanguage)
@@ -396,6 +431,12 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         }
 
         Interlocked.Increment(ref _totalConnectionCount);
+        _connectionClosedWaiters.AddOrUpdate(
+            targetLanguage,
+            static _ => new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously),
+            static (_, _) => new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously));
         _connectionWaiters.GetOrAdd(
                 targetLanguage,
                 static _ => new TaskCompletionSource<Connection>(
@@ -412,6 +453,11 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 new KeyValuePair<LanguageCode, Connection>(
                     targetLanguage,
                     connection));
+            _connectionClosedWaiters.GetOrAdd(
+                targetLanguage,
+                static _ => new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously))
+                .TrySetResult();
             return;
         }
 
@@ -519,6 +565,11 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 new KeyValuePair<LanguageCode, Connection>(
                     targetLanguage,
                     connection));
+            _connectionClosedWaiters.GetOrAdd(
+                targetLanguage,
+                static _ => new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously))
+                .TrySetResult();
             if (_disconnectWaiters.TryGetValue(
                     targetLanguage,
                     out DisconnectWaiter? waiter)
@@ -690,6 +741,22 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                     payload,
                     WebSocketMessageType.Binary,
                     endOfMessage: true,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                _ = _sendGate.Writer.TryWrite(0);
+            }
+        }
+
+        public async Task CloseOutputAsync()
+        {
+            _ = await _sendGate.Reader.ReadAsync().ConfigureAwait(false);
+            try
+            {
+                await _socket.CloseOutputAsync(
+                    WebSocketCloseStatus.NormalClosure,
+                    "mock-close",
                     CancellationToken.None).ConfigureAwait(false);
             }
             finally
