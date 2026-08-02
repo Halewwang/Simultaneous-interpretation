@@ -19,9 +19,9 @@ public sealed class FailureSafetyTests
             new InvalidOperationException(hostile));
 
         Assert.IsFalse(summary.Contains(hostile, StringComparison.Ordinal));
-        StringAssert.Contains(summary, "seed=7");
-        StringAssert.Contains(summary, "injection=ServerError");
-        StringAssert.Contains(summary, nameof(InvalidOperationException));
+        StringAssert.Contains(summary, "seed=7", StringComparison.Ordinal);
+        StringAssert.Contains(summary, "injection=ServerError", StringComparison.Ordinal);
+        StringAssert.Contains(summary, nameof(InvalidOperationException), StringComparison.Ordinal);
     }
     [TestMethod]
     public async Task OneHundredDeterministicSeedsKeepVirtualMicrophoneZero()
