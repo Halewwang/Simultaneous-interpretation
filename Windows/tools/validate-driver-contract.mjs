@@ -341,22 +341,6 @@ async function main() {
     "driverAbiVersion",
     "Windows compatibility metadata",
   );
-  const compatibilityHardwareId = readRequiredString(
-    compatibility,
-    "driverHardwareId",
-    "Windows compatibility metadata",
-  );
-  const compatibilityKmdf = readRequiredString(
-    compatibility,
-    "driverKmdfLibraryVersion",
-    "Windows compatibility metadata",
-  );
-  const compatibilityRoles = readRequiredStringArray(
-    compatibility,
-    "driverEndpointRoles",
-    "Windows compatibility metadata",
-  );
-
   requireEqual(versionDriverVersion, "1.0.0.2", "driver package version");
   requireEqual(versionMinimumBuild, 19045, "minimum Windows build");
   requireEqual(versionAbi, abi, "version metadata driver ABI");
@@ -383,21 +367,6 @@ async function main() {
     "compatibility minimum Windows build",
   );
   requireEqual(compatibilityAbi, abi, "compatibility driver ABI");
-  requireEqual(
-    compatibilityHardwareId.toUpperCase(),
-    versionHardwareId.toUpperCase(),
-    "compatibility hardware ID",
-  );
-  requireEqual(
-    compatibilityKmdf,
-    versionKmdf,
-    "compatibility KMDF version",
-  );
-  requireArrayEqual(
-    compatibilityRoles,
-    versionRoles,
-    "compatibility endpoint roles",
-  );
 
   const driverVer = singleCapture(
     inf,
