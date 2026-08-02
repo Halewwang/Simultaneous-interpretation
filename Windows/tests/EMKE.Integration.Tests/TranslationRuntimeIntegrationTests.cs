@@ -473,6 +473,32 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
+    public async Task MalformedProductionBinaryHandshakeStopsRuntimeAndDrainsAudioOwnership()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync(MockTranslationScenario.BinaryEvent)
+                .ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+
+        RuntimeError? failure = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.Protocol, failure?.Category);
+        Assert.AreEqual("binaryTranslationEvent", failure?.Code);
+        Assert.AreEqual(RecoveryAction.Retry, failure?.RecoveryAction);
+        Assert.IsEmpty(failure!.Parameters);
+        Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreEqual(1, audio.StartCount);
+        Assert.AreEqual(1, audio.StopCount);
+        Assert.AreEqual(0, audio.ActivePollCount);
+        Assert.AreEqual(0, audio.PendingEventCount);
+        Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
+        Assert.AreEqual(0, audio.ActivePcmLeaseCount);
+    }
+
+    [TestMethod]
     public async Task MockServerBinaryEventIsRejectedAsProtocolFailure()
     {
         await using MockTranslationServer server =
