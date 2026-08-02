@@ -70,6 +70,23 @@ function Invoke-Case {
     }
 }
 
+function New-TestReleaseMetadata {
+    return [pscustomobject]@{
+        MinimumWindowsBuild = 19045
+        Architecture = "x64"
+        DriverPackageVersion = "1.0.0.2"
+        DriverAbiVersion = 1
+        DriverHardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        DriverModelSection = "EMKE.NTamd64.10.0...19045"
+        DriverEndpointRoles = @(
+            "emke.meeting-speaker.render",
+            "emke.app-speaker.capture",
+            "emke.app-microphone.render",
+            "emke.meeting-microphone.capture"
+        )
+    }
+}
+
 function Assert-PrivateFailure {
     param(
         [Parameter(Mandatory)]
@@ -124,13 +141,13 @@ function Get-BehaviorInfText {
 Signature="$Windows NT$"
 Class=MEDIA
 Provider=%ProviderName%
-DriverVer=07/26/2026,1.0.0.1
+DriverVer=08/01/2026,1.0.0.2
 CatalogFile=EMKE.VirtualAudio.cat
 
 [Manufacturer]
-%ManufacturerName%=EMKE,NTamd64.10.0...26200
+%ManufacturerName%=EMKE,NTamd64.10.0...19045
 
-[EMKE.NTamd64.10.0...26200]
+[EMKE.NTamd64.10.0...19045]
 %DeviceDescription%=EMKE_Install,ROOT\EMKEVIRTUALAUDIO
 
 [EMKE_Install.NT]
@@ -296,13 +313,15 @@ function Remove-BehaviorFixture {
 }
 
 function Set-SafeCollectorSeams {
-    $script:testHostBuild = 26200
+    $script:testHostBuild = 19045
     $script:testHostArchitecture = "x64"
+    $script:testHostProductType = 1
     $script:testRepositoryHead = "c" * 40
     Set-TestFunction -Name Get-CollectorHostInfo -Body {
         [pscustomobject]@{
             OsBuild = $script:testHostBuild
             Architecture = $script:testHostArchitecture
+            ProductType = $script:testHostProductType
         }
     }
     Set-TestFunction -Name Get-CollectorRepositoryHead -Body {
@@ -346,6 +365,7 @@ function Invoke-FixtureCollection {
         SaltPath = $Fixture.Salt
         OutputPath = $Fixture.Output
         ConfirmCollect = $Confirm
+        ReleaseMetadata = (New-TestReleaseMetadata)
     }
     if ($IncludeRecording) {
         $parameters.RecordingBundlePath = $Fixture.Recording
@@ -426,15 +446,19 @@ Invoke-Case -Name "confirmation and host gates run before input reads" -Action {
     }
 
     foreach ($hostCase in @(
-        @{ Build = 26199; Architecture = "x64"; Pattern = "host" },
-        @{ Build = 26200; Architecture = "arm64"; Pattern = "host" }
+        @{ Build = 19044; Architecture = "x64"; ProductType = 1 },
+        @{ Build = 19045; Architecture = "x86"; ProductType = 1 },
+        @{ Build = 19045; Architecture = "ARM64"; ProductType = 1 },
+        @{ Build = 19045; Architecture = "x64"; ProductType = 2 },
+        @{ Build = 19045; Architecture = "x64"; ProductType = 3 }
     )) {
         Import-CollectorFunctions
         Set-SafeCollectorSeams
         $script:testHostBuild = $hostCase.Build
         $script:testHostArchitecture = $hostCase.Architecture
+        $script:testHostProductType = $hostCase.ProductType
         Assert-PrivateFailure `
-            -Pattern $hostCase.Pattern `
+            -Pattern "host" `
             -Forbidden @("C:\private") `
             -Action {
             Invoke-FixtureCollection -Fixture $synthetic
@@ -527,18 +551,20 @@ Invoke-Case -Name "orchestration uses one package evidence transaction" -Action 
             param(
                 [string]$Directory,
                 [string]$ExpectedPackageSha256,
-                [int]$WindowsBuild
+                [psobject]$ReleaseMetadata,
+                [psobject]$HostInfo
             )
             $script:behaviorPackageTransactionCalls += 1
             if ($ExpectedPackageSha256 -cne
                 $script:behaviorPackageDigest -or
-                $WindowsBuild -ne 26200) {
+                $HostInfo.OsBuild -ne 19045 -or
+                $ReleaseMetadata.DriverPackageVersion -cne "1.0.0.2") {
                 throw "transaction inputs diverged"
             }
             return [pscustomobject]@{
                 PackageSha256 = $script:behaviorPackageDigest
                 DriverMetadata = [pscustomobject]@{
-                    Version = "1.0.0.1"
+                    Version = "1.0.0.2"
                     Abi = 1
                 }
                 CatalogMetadata = [pscustomobject]@{

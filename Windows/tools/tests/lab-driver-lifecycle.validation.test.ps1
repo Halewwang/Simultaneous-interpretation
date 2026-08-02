@@ -8,7 +8,7 @@ $toolsDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $installScript = Join-Path $toolsDirectory "install-test-driver.ps1"
 $uninstallScript = Join-Path $toolsDirectory "uninstall-test-driver.ps1"
 $script:TargetHardwareId = "ROOT\EMKEVIRTUALAUDIO"
-$script:MinimumWindowsBuild = 26200
+$script:MinimumWindowsBuild = 19045
 $script:failures = [Collections.Generic.List[string]]::new()
 
 function Import-LifecycleFunctions {
@@ -145,6 +145,25 @@ function Invoke-Case {
     } catch {
         $script:failures.Add("$Name`: $($_.Exception.Message)")
         Write-Host "FAIL: $Name"
+    }
+}
+
+function New-TestReleaseMetadata {
+    return [pscustomobject]@{
+        MinimumWindowsBuild = 19045
+        Architecture = "x64"
+        DriverPackageVersion = "1.0.0.2"
+        DriverAbiVersion = 1
+        DriverHardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        DriverModelSection = "EMKE.NTamd64.10.0...19045"
+    }
+}
+
+function New-TestHostInfo {
+    return [pscustomobject]@{
+        Build = 19045
+        Architecture = "x64"
+        ProductType = 1
     }
 }
 
@@ -286,10 +305,10 @@ function Set-InstallOrchestratorExternalBoundaries {
     }
     Set-TestFunction -Name Get-DriverInfMetadata -Body {
         [pscustomobject]@{
-            DriverVer = "07/26/2026,1.0.0.1"
-            DriverVersion = "1.0.0.1"
+            DriverVer = "08/01/2026,1.0.0.2"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
-            ModelSection = "EMKE.NTamd64.10.0...26200"
+            ModelSection = "EMKE.NTamd64.10.0...19045"
             InstallSection = "EMKE_Install"
             HardwareId = "ROOT\EMKEVIRTUALAUDIO"
         }
@@ -303,7 +322,7 @@ function Set-InstallOrchestratorExternalBoundaries {
         )
         [pscustomobject]@{
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
             PackageSha256 = "A" * 64
         }
@@ -883,7 +902,7 @@ Invoke-Case -Name "install orchestrator uses only protected staged copies" -Acti
         $script:identityChecks += 1
         if ($Devnode.PNPDeviceID -cne
             "ROOT\EMKEVIRTUALAUDIO\0000" -or
-            $InfMetadata.DriverVersion -cne "1.0.0.1" -or
+            $InfMetadata.DriverVersion -cne "1.0.0.2" -or
             $TrustedPackage.Inf.FullName -cne
             $stagedPackage.Inf.FullName -or
             $ExpectedPackageSha256 -cne ("A" * 64)) {
@@ -891,7 +910,7 @@ Invoke-Case -Name "install orchestrator uses only protected staged copies" -Acti
         }
         [pscustomobject]@{
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
             PackageSha256 = "A" * 64
         }
@@ -1147,11 +1166,15 @@ Invoke-Case `
 
 Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Action {
     Import-LifecycleFunctions -Path $installScript
-    if (-not (Get-Command Get-DriverInfMetadata).Parameters.ContainsKey(
-        "WindowsBuild"
-    )) {
-        throw "INF metadata parser does not select Models for a Windows build."
+    foreach ($parameter in @("ReleaseMetadata", "HostInfo")) {
+        if (-not (Get-Command Get-DriverInfMetadata).Parameters.ContainsKey(
+            $parameter
+        )) {
+            throw "INF metadata parser does not consume $parameter."
+        }
     }
+    $release = New-TestReleaseMetadata
+    $hostInfo = New-TestHostInfo
     $windowsDirectory = [IO.Path]::GetFullPath(
         (Join-Path $toolsDirectory "..")
     )
@@ -1162,10 +1185,11 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
         "EMKE.VirtualAudio.inf"
     $actual = Get-DriverInfMetadata `
         -Inf ([IO.FileInfo]::new($sourceInf)) `
-        -WindowsBuild 26200
+        -ReleaseMetadata $release `
+        -HostInfo $hostInfo
     if ($actual.ProviderName -cne "EMKE" -or
-        $actual.DriverVersion -cne "1.0.0.1" -or
-        $actual.ModelSection -cne "EMKE.NTamd64.10.0...26200" -or
+        $actual.DriverVersion -cne "1.0.0.2" -or
+        $actual.ModelSection -cne "EMKE.NTamd64.10.0...19045" -or
         $actual.InstallSection -cne "EMKE_Install" -or
         $actual.HardwareId -cne "ROOT\EMKEVIRTUALAUDIO") {
         throw "Actual INF effective Models metadata was parsed incorrectly."
@@ -1205,6 +1229,28 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
                         "ROOT\EMKEVIRTUALAUDIO"
                     )
                 )
+            },
+            [pscustomobject]@{
+                Name = "extra-manufacturer-path"
+                Text = $original.Replace(
+                    "%ManufacturerName%=EMKE,NTamd64.10.0...19045",
+                    (
+                        "%ManufacturerName%=EMKE,NTamd64.10.0...19045`n" +
+                        "%ManufacturerName%=EMKE,NTamd64"
+                    )
+                )
+            },
+            [pscustomobject]@{
+                Name = "wrong-driver-version"
+                Text = $original.Replace("1.0.0.2", "1.0.0.1")
+            },
+            [pscustomobject]@{
+                Name = "lower-model-floor"
+                Text = $original.Replace("19045", "19044")
+            },
+            [pscustomobject]@{
+                Name = "wrong-model-architecture"
+                Text = $original.Replace("NTamd64", "NTarm64")
             }
         )
         foreach ($case in $cases) {
@@ -1219,7 +1265,8 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
                 -Action {
                 Get-DriverInfMetadata `
                     -Inf (Get-Item -LiteralPath $path) `
-                    -WindowsBuild 26200
+                    -ReleaseMetadata $release `
+                    -HostInfo $hostInfo
             }
         }
     } finally {
@@ -1310,7 +1357,7 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
     $trustedPackage = New-InstallPackageRecord
     $trustedDigest = "A" * 64
     $metadata = [pscustomobject]@{
-        DriverVersion = "1.0.0.1"
+        DriverVersion = "1.0.0.2"
         ProviderName = "EMKE"
     }
     $script:signedDriverRows = @(
@@ -1323,7 +1370,7 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
         [pscustomobject]@{
             DeviceID = $devnode.PNPDeviceID
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
         }
     )
@@ -1360,7 +1407,7 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
         ,([object[]]@([pscustomobject]@{
             DeviceID = $devnode.PNPDeviceID
             InfName = "emke.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
         }))
         ,([object[]]@([pscustomobject]@{
@@ -1372,7 +1419,7 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
         ,([object[]]@([pscustomobject]@{
             DeviceID = $devnode.PNPDeviceID
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "Other"
         }))
     )
@@ -1392,7 +1439,7 @@ Invoke-Case -Name "installed package identity matches exact devnode" -Action {
     $script:signedDriverRows = @([pscustomobject]@{
         DeviceID = $devnode.PNPDeviceID
         InfName = "oem42.inf"
-        DriverVersion = "1.0.0.1"
+        DriverVersion = "1.0.0.2"
         ProviderName = "EMKE"
     })
     Set-TestFunction -Name Get-DriverPackageSha256 -Body {
@@ -1456,7 +1503,7 @@ Invoke-Case `
                 [pscustomobject]@{
                     DeviceID = "ROOT\EMKEVIRTUALAUDIO\0000"
                     InfName = "oem42.inf"
-                    DriverVersion = "1.0.0.1"
+                    DriverVersion = "1.0.0.2"
                     ProviderName = "EMKE"
                 }
             }
@@ -1466,7 +1513,7 @@ Invoke-Case `
                 Assert-InstalledDriverPackageIdentity `
                     -Devnode $devnode `
                     -InfMetadata ([pscustomobject]@{
-                        DriverVersion = "1.0.0.1"
+                        DriverVersion = "1.0.0.2"
                         ProviderName = "EMKE"
                     }) `
                     -TrustedPackage $inputs.Package `
@@ -1739,7 +1786,7 @@ Invoke-Case `
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
                 -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.1"
+                    DriverVersion = "1.0.0.2"
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
@@ -1785,7 +1832,7 @@ Invoke-Case `
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
                 -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.1"
+                    DriverVersion = "1.0.0.2"
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
@@ -1830,7 +1877,7 @@ Invoke-Case `
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
                 -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.1"
+                    DriverVersion = "1.0.0.2"
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
@@ -1886,7 +1933,7 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
         [void]$script:stateSequence.Add("identity")
         [pscustomobject]@{
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
             PackageSha256 = "A" * 64
         }
@@ -1899,7 +1946,7 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
             FullName = "C:\Protected\EMKE.VirtualAudio.inf"
         }) `
         -InfMetadata ([pscustomobject]@{
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
         }) `
         -TrustedPackage (New-InstallPackageRecord) `
@@ -1935,7 +1982,7 @@ Invoke-Case -Name "preexisting target blocks root creation" -Action {
                 FullName = "C:\Protected\EMKE.VirtualAudio.inf"
             }) `
             -InfMetadata ([pscustomobject]@{
-                DriverVersion = "1.0.0.1"
+                DriverVersion = "1.0.0.2"
                 ProviderName = "EMKE"
             }) `
             -TrustedPackage (New-InstallPackageRecord) `
@@ -1979,7 +2026,7 @@ Invoke-Case -Name "bind failure reports partial state and exact cleanup" -Action
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
                 -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.1"
+                    DriverVersion = "1.0.0.2"
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
@@ -2205,16 +2252,16 @@ Invoke-Case -Name "published INF zero and multiple matches" -Action {
 Invoke-Case -Name "uninstall unsupported OS build" -Action {
     Import-LifecycleFunctions -Path $uninstallScript
     Set-TestFunction -Name Assert-SupportedWindowsHost -Body {}
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 26199 }
+    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19044 }
     Set-TestFunction -Name Test-IsAdministrator -Body { $true }
     Set-TestFunction -Name Get-TargetDevnodes -Body {
-        throw "Target query must not run below build 26200."
+        throw "Target query must not run below build 19045."
     }
     $script:processCalls = 0
     Set-TestFunction -Name Invoke-CapturedProcess -Body {
         $script:processCalls += 1
     }
-    Assert-Throws -Pattern "26200" -Action {
+    Assert-Throws -Pattern "19045" -Action {
         Invoke-UninstallTestDriver -ConfirmUninstall
     }
     if ($script:processCalls -ne 0) {
@@ -2225,7 +2272,7 @@ Invoke-Case -Name "uninstall unsupported OS build" -Action {
 Invoke-Case -Name "uninstall non-administrator" -Action {
     Import-LifecycleFunctions -Path $uninstallScript
     Set-TestFunction -Name Assert-SupportedWindowsHost -Body {}
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 26200 }
+    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19045 }
     Set-TestFunction -Name Test-IsAdministrator -Body { $false }
     Set-TestFunction -Name Get-TargetDevnodes -Body {
         throw "Target query must not run without elevation."
@@ -2594,7 +2641,7 @@ Invoke-Case -Name "process timeout permits only read-only inventory" -Action {
                 FullName = "C:\Protected\EMKE.VirtualAudio.inf"
             }) `
             -InfMetadata ([pscustomobject]@{
-                DriverVersion = "1.0.0.1"
+                DriverVersion = "1.0.0.2"
                 ProviderName = "EMKE"
             }) `
             -TrustedPackage (New-InstallPackageRecord) `

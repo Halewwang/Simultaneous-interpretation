@@ -9,6 +9,7 @@ const toolsDirectory = path.resolve(testDirectory, "..");
 const repositoryRoot = path.resolve(testDirectory, "..", "..", "..");
 const installPath = path.join(toolsDirectory, "install-test-driver.ps1");
 const uninstallPath = path.join(toolsDirectory, "uninstall-test-driver.ps1");
+const toolchainPath = path.join(toolsDirectory, "verify-toolchain.ps1");
 const workflowPath = path.join(
   repositoryRoot,
   ".github",
@@ -42,7 +43,18 @@ function assertCommonSafetyContract(source, operation) {
   assert.match(source, /\$ErrorActionPreference\s*=\s*["']Stop["']/);
   assert.match(source, /\$PSVersionTable\.PSVersion\.Major\s+-ne\s+7/);
   assert.match(source, /\$IsWindows/);
-  assert.match(source, /26200/);
+  assert.match(source, /resolve-version\.ps1/);
+  assert.match(source, /MinimumWindowsBuild/);
+  assert.match(source, /DriverPackageVersion/);
+  assert.match(source, /DriverAbiVersion/);
+  assert.match(source, /DriverHardwareId/);
+  assert.match(source, /Architecture/);
+  assert.match(source, /ProductType/);
+  assert.doesNotMatch(source, /\b26200\b|\b1\.0\.0\.1\b/);
+  assert.doesNotMatch(
+    source,
+    /\$script:(?:MinimumWindowsBuild|TargetHardwareId)\b/,
+  );
   assert.match(source, /WindowsIdentity/);
   assert.match(source, /WindowsPrincipal/);
   assert.match(source, /pnputil\.exe/);
@@ -75,6 +87,9 @@ function assertCommonSafetyContract(source, operation) {
     /\bsigntool(?:\.exe)?\b/i,
     /\bbcdedit(?:\.exe)?\b/i,
     /\btestsigning\b/i,
+    /\bDisable-ComputerRestore\b/i,
+    /\b(?:Secure\s*Boot|SecureBoot)\b[^\n]*(?:disable|off)/i,
+    /\bMemory\s+Integrity\b[^\n]*(?:disable|off)/i,
     /\bDeviceInterfacePath\b/i,
     /\bIMMDevice\b/i,
     /\bendpoint[_ ]?id\b/i,
@@ -87,6 +102,15 @@ function assertCommonSafetyContract(source, operation) {
     );
   }
 }
+
+test("toolchain resolves one trusted workstation x64 release boundary", async () => {
+  const source = await readRequired(toolchainPath);
+  assert.match(source, /resolve-version\.ps1/);
+  assert.match(source, /MinimumWindowsBuild/);
+  assert.match(source, /Architecture/);
+  assert.match(source, /ProductType/);
+  assert.doesNotMatch(source, /\b26200\b|\b1\.0\.0\.1\b/);
+});
 
 test("install lifecycle input is line-ending stable and fail-closed", async () => {
   assert.equal(
@@ -299,6 +323,8 @@ test("Windows behavior suite declares mutation-free lifecycle safety cases", asy
     "package digest mismatch",
     "invalid or unsigned catalog",
     "unsupported OS build",
+    "Windows 10 workstation x64 floor matrix",
+    "non-workstation and non-x64 hosts",
     "non-administrator",
     "space and metacharacter INF path",
     "one exact install command",
@@ -378,6 +404,15 @@ test("PowerShell integration suite exercises safe real process and invocation se
 
 test("Windows CI runs all lifecycle suites as independent non-mutating gates", async () => {
   const source = await readRequired(workflowPath);
+  for (const pattern of [
+    /\bbcdedit(?:\.exe)?\b/i,
+    /\btestsigning\b/i,
+    /\bDisable-ComputerRestore\b/i,
+    /\b(?:Secure\s*Boot|SecureBoot)\b[^\n]*(?:disable|off)/i,
+    /\bMemory\s+Integrity\b[^\n]*(?:disable|off)/i,
+  ]) {
+    assert.doesNotMatch(source, pattern);
+  }
   const gates = [
     {
       command:

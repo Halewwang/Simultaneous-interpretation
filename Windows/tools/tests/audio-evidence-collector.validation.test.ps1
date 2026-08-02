@@ -70,6 +70,31 @@ function Invoke-Case {
     }
 }
 
+function New-TestReleaseMetadata {
+    return [pscustomobject]@{
+        MinimumWindowsBuild = 19045
+        Architecture = "x64"
+        DriverPackageVersion = "1.0.0.2"
+        DriverAbiVersion = 1
+        DriverHardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        DriverModelSection = "EMKE.NTamd64.10.0...19045"
+        DriverEndpointRoles = @(
+            "emke.meeting-speaker.render",
+            "emke.app-speaker.capture",
+            "emke.app-microphone.render",
+            "emke.meeting-microphone.capture"
+        )
+    }
+}
+
+function New-TestHostInfo {
+    return [pscustomobject]@{
+        OsBuild = 19045
+        Architecture = "x64"
+        ProductType = 1
+    }
+}
+
 function Assert-PrivateFailure {
     param(
         [Parameter(Mandatory)]
@@ -134,13 +159,13 @@ function Get-ValidInfText {
 Signature="$Windows NT$"
 Class=MEDIA
 Provider=%ProviderName%
-DriverVer=07/26/2026,1.0.0.1
+DriverVer=08/01/2026,1.0.0.2
 CatalogFile=EMKE.VirtualAudio.cat
 
 [Manufacturer]
-%ManufacturerName%=EMKE,NTamd64.10.0...26200
+%ManufacturerName%=EMKE,NTamd64.10.0...19045
 
-[EMKE.NTamd64.10.0...26200]
+[EMKE.NTamd64.10.0...19045]
 %DeviceDescription%=EMKE_Install,ROOT\EMKEVIRTUALAUDIO
 
 [EMKE_Install.NT]
@@ -428,8 +453,9 @@ Invoke-Case -Name "flat package digest and INF metadata are exact" -Action {
         }
         $metadata = Get-CollectorInfMetadata `
             -Text ([IO.File]::ReadAllText($package.Inf.FullName)) `
-            -WindowsBuild 26200
-        if ($metadata.Version -cne "1.0.0.1" -or
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
+        if ($metadata.Version -cne "1.0.0.2" -or
             $metadata.Provider -cne "EMKE" -or
             $metadata.HardwareId -cne "ROOT\EMKEVIRTUALAUDIO" -or
             $metadata.Abi -ne 1) {
@@ -452,7 +478,8 @@ Invoke-Case -Name "flat package digest and INF metadata are exact" -Action {
         Assert-PrivateFailure -Pattern "collector INF" -Action {
             Get-CollectorInfMetadata `
                 -Text ([IO.File]::ReadAllText($package.Inf.FullName)) `
-                -WindowsBuild 26200
+                -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
         }
     } finally {
         if (Test-Path -LiteralPath $root) {
@@ -467,13 +494,14 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
     $valid = $valid.Replace("`r", "`n").Replace("`n", "`r`n")
     $metadata = Get-CollectorInfMetadata `
         -Text $valid `
-        -WindowsBuild 26200
-    if ($metadata.Version -cne "1.0.0.1" -or
+        -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
+    if ($metadata.Version -cne "1.0.0.2" -or
         $metadata.Provider -cne "EMKE" -or
         $metadata.HardwareId -cne "ROOT\EMKEVIRTUALAUDIO" -or
         $metadata.Abi -ne 1 -or
         $metadata.ModelSection -cne
-        "EMKE.NTamd64.10.0...26200" -or
+        "EMKE.NTamd64.10.0...19045" -or
         $metadata.InstallSection -cne "EMKE_Install.NT") {
         throw "Valid active INF chain metadata was not exact."
     }
@@ -488,8 +516,9 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
         "EMKE.VirtualAudio.inf"
     $realMetadata = Get-CollectorInfMetadata `
         -Text ([IO.File]::ReadAllText($sourceInf)) `
-        -WindowsBuild 26200
-    if ($realMetadata.Version -cne "1.0.0.1" -or
+        -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
+    if ($realMetadata.Version -cne "1.0.0.2" -or
         $realMetadata.Abi -ne 1) {
         throw "Real INF did not traverse the frozen active chain."
     }
@@ -566,12 +595,26 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
             Text = $valid.Replace("NTamd64", "NTarm64")
         },
         @{
+            Name = "wrong driver version"
+            Text = $valid.Replace("1.0.0.2", "1.0.0.1")
+        },
+        @{
+            Name = "extra Manufacturer path"
+            Text = $valid.Replace(
+                "%ManufacturerName%=EMKE,NTamd64.10.0...19045",
+                (
+                    "%ManufacturerName%=EMKE,NTamd64.10.0...19045`r`n" +
+                    "%ManufacturerName%=EMKE,NTamd64"
+                )
+            )
+        },
+        @{
             Name = "old minimum build"
-            Text = $valid.Replace("26200", "26199")
+            Text = $valid.Replace("19045", "19044")
         },
         @{
             Name = "inactive future build"
-            Text = $valid.Replace("26200", "26201")
+            Text = $valid.Replace("19045", "19046")
         },
         @{
             Name = "wrong Version provider"
@@ -606,7 +649,8 @@ Invoke-Case -Name "INF parser follows only the active x64 AddReg chain" -Action 
             -Action {
             Get-CollectorInfMetadata `
                 -Text $case.Text `
-                -WindowsBuild 26200
+                -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
         }
     }
 }
@@ -669,9 +713,10 @@ Invoke-Case -Name "package bytes bind and Windows mutation is denied" -Action {
         $evidence = Get-CollectorPackageEvidence `
             -Directory $packagePath `
             -ExpectedPackageSha256 $expected `
-            -WindowsBuild 26200
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
         if ($evidence.PackageSha256 -cne $expected -or
-            $evidence.DriverMetadata.Version -cne "1.0.0.1" -or
+            $evidence.DriverMetadata.Version -cne "1.0.0.2" -or
             $evidence.CatalogMetadata.Status -cne "Valid" -or
             $script:transactionSignatureCalls -ne 1 -or
             $script:transactionWriteAttempts -ne 3 -or
@@ -715,7 +760,8 @@ Invoke-Case -Name "package bytes bind and Windows mutation is denied" -Action {
             Get-CollectorPackageEvidence `
                 -Directory $packagePath `
                 -ExpectedPackageSha256 ("f" * 64) `
-                -WindowsBuild 26200
+                -ReleaseMetadata (New-TestReleaseMetadata) `
+            -HostInfo (New-TestHostInfo)
         }
         if ($script:transactionSignatureCalls -ne 0) {
             throw "Digest mismatch reached catalog signature validation."
@@ -1035,7 +1081,7 @@ Invoke-Case -Name "salt and endpoint role hashes are exact and private" -Action 
 Invoke-Case -Name "acceptance output order and proof boundaries are deterministic" -Action {
     $salt = [byte[]](0..31)
     $driver = [pscustomobject]@{
-        Version = "1.0.0.1"
+        Version = "1.0.0.2"
         Abi = 1
     }
     $catalog = [pscustomobject]@{
@@ -1059,7 +1105,7 @@ Invoke-Case -Name "acceptance output order and proof boundaries are deterministi
         $record = New-AudioEvidenceRecord `
             -SourceCommit ("c" * 40) `
             -CollectedAtUtc "2026-07-27T02:00:00.000Z" `
-            -OsBuild 26200 `
+            -OsBuild 19045 `
             -Architecture "x64" `
             -DriverMetadata $driver `
             -PackageSha256 ("A" * 64) `
