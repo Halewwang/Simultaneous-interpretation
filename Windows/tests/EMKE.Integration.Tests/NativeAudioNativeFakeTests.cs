@@ -52,7 +52,7 @@ public sealed class NativeAudioNativeFakeTests
 
         AudioDeviceSnapshot snapshot = await catalog.GetSnapshotAsync(CancellationToken.None);
 
-        Assert.AreEqual(6, snapshot.Devices.Count);
+        Assert.HasCount(6, snapshot.Devices);
         Assert.AreEqual(
             "Fake microphone",
             snapshot.Devices.Single(device => device.Id == "fake-physical-input").Label);
