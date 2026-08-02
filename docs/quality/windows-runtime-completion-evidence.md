@@ -81,6 +81,7 @@ Local source guards on the evidence commit passed:
 | Reconnect exhaustion | `b7aa49a`; PR #16 closed unmerged | `8420b03` |
 | Five 100-iteration contracts | `c26ed25`; PRs #17 and #18 closed unmerged | `4b6fe4f`, `8235a4b`, `f94f2a4`, `c78477c`, `da8866f`, `1297c45`, `106143a` |
 | Runtime log and hostile diagnostic codes | Runtime behavior RED run `30739089347` / job `91473119672`; hostile-code RED run `30739275302` / job `91473638707`; PR #19 closed unmerged | `8a1e542`, `b5afc38`, `135c762`, `3cc5cfd`; Runtime run `30739715270` / job `91474809921`; MSIX `30739715253` / job `91474821740` |
+| Matrix audit and cross-layer assertions | Fixture-only RED Runtime `30740047560` / job `91475720709` | `a85e792`, `1e59a27`, `3463c9c`; Runtime `30740206479` / job `91476128799`; MSIX `30740206477` / job `91476128864`; PR #20 closed unmerged |
 
 Runtime run `30739715270` passed all managed suites (Core 62, Contract 18,
 Application 100, Realtime 109, Routing 53, Windows App 148, Integration 106
@@ -98,9 +99,9 @@ workflow assertion: `NativeAudioNativeFake` now reports eight tests while its
 workflow expects exactly seven. Task 5 did not change the native test set or
 that workflow guard, so the mismatch is recorded but not changed here.
 
-The final matrix-audit evidence PR records the strengthened cross-layer
-assertions and this report; it is closed unmerged after its Windows checks are
-captured. The local product branch is never pushed.
+The final matrix-audit evidence PR #20 recorded the strengthened cross-layer
+assertions and this report, and was closed unmerged after its Windows checks
+were captured. The local product branch is never pushed.
 
 ## Hosted boundary
 
