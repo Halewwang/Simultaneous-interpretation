@@ -60,6 +60,24 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
+    public void SetupBaseWithAReparseAncestorIsRejectedBeforeCreatingTheRoot()
+    {
+        using TemporaryDirectory temporary = new();
+        string outside = Path.Combine(temporary.Path, "outside");
+        _ = Directory.CreateDirectory(outside);
+        string linkedBase = Path.Combine(temporary.Path, "setup-owned-base");
+        Directory.CreateSymbolicLink(linkedBase, outside);
+
+        SetupExtractionException exception = Assert.ThrowsExactly<
+            SetupExtractionException>(() => SetupExtractionDirectory.Create(
+                Path.Combine(linkedBase, "nested"),
+                new Version(0, 2, 0, 0)));
+
+        Assert.AreEqual("reparsePointDetected", exception.FailureCode);
+        Assert.IsFalse(Directory.Exists(Path.Combine(outside, "nested")));
+    }
+
+    [TestMethod]
     public void ReparsePointAtAnyOutputPathComponentIsRejected()
     {
         using TemporaryDirectory temporary = new();
@@ -105,7 +123,7 @@ public sealed class SetupExtractionDirectoryTests
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
 
-        SetupExtractionResult result = extraction.CopyVerified(
+        using SetupExtractionResult result = extraction.CopyVerified(
             "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
@@ -115,6 +133,29 @@ public sealed class SetupExtractionDirectoryTests
             extraction.RootPath + Path.DirectorySeparatorChar,
             StringComparison.Ordinal));
         Assert.IsTrue((File.GetAttributes(result.OutputPath) & FileAttributes.ReadOnly) != 0);
+    }
+
+    [TestMethod]
+    public void VerifiedOutputRejectsWriteAndDeleteSharingUntilVerificationLeaseIsReleased()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        using SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.ThrowsExactly<IOException>(() =>
+        {
+            using FileStream ignored = new(
+                result.OutputPath,
+                FileMode.Open,
+                FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete);
+        });
+        Assert.ThrowsExactly<IOException>(() => File.Delete(result.OutputPath));
     }
 
     private static SetupPayload ExpectedPayload() => new(
