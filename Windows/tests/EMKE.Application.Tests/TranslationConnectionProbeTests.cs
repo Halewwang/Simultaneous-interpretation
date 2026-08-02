@@ -238,7 +238,7 @@ public sealed class TranslationConnectionProbeTests
     public async Task ProbePropagatesCallerCancellation()
     {
         using CancellationTokenSource cancellation = new();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         TranslationConnectionProbe probe = new(
             new ThrowingSessionFactory(new InvalidOperationException()));
 
