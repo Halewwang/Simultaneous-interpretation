@@ -234,11 +234,6 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
   const desiredInf = sourceText
     .replace("DriverVer=07/26/2026,1.0.0.1", "DriverVer=08/01/2026,1.0.0.2")
     .replaceAll("NTamd64.10.0...26200", "NTamd64.10.0...19045")
-    .replace(
-      "%DeviceDescription%=EMKE_Install,ROOT\\EMKEVIRTUALAUDIO",
-      "%EMKE.VirtualAudio.DeviceDesc%=EMKE.VirtualAudio,ROOT\\EMKEVIRTUALAUDIO",
-    )
-    .replaceAll("EMKE_Install.NT", "EMKE.VirtualAudio.NT")
     .replace("KmdfLibraryVersion=$KMDFVERSION$", "KmdfLibraryVersion=1.31");
   const desiredProject = projectText
     .replace("<EMKETargetOS>Windows11</EMKETargetOS>", "<EMKETargetOS>Windows10</EMKETargetOS>")

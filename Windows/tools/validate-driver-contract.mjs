@@ -434,7 +434,7 @@ async function main() {
   );
   const modelHardwareId = singleCapture(
     inf,
-    /^%EMKE\.VirtualAudio\.DeviceDesc%=EMKE\.VirtualAudio,(ROOT\\[^\r\n]+?)\s*$/gmi,
+    /^%DeviceDescription%=EMKE_Install,(ROOT\\[^\r\n]+?)\s*$/gmi,
     "INF root hardware model",
   );
   requireEqual(
