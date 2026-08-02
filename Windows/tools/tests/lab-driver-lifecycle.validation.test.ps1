@@ -167,6 +167,18 @@ function New-TestHostInfo {
     }
 }
 
+function New-TestInfMetadata {
+    return [pscustomobject]@{
+        DriverVer = "08/01/2026,1.0.0.2"
+        DriverVersion = "1.0.0.2"
+        ProviderName = "EMKE"
+        ModelSection = "EMKE.NTamd64.10.0...19045"
+        InstallSection = "EMKE_Install"
+        HardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        Abi = 1
+    }
+}
+
 function New-Devnode {
     param(
         [string[]]$HardwareID = @("ROOT\EMKEVIRTUALAUDIO"),
@@ -1208,6 +1220,7 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
         $cases = @(
             [pscustomobject]@{
                 Name = "inactive-model"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = (
                     $original +
                     "`n[EMKE.NTamd64]`n" +
@@ -1216,6 +1229,7 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
             },
             [pscustomobject]@{
                 Name = "extra-compatible-id"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = $original.Replace(
                     "EMKE_Install,ROOT\EMKEVIRTUALAUDIO",
                     "EMKE_Install,ROOT\EMKEVIRTUALAUDIO,ROOT\EVIL"
@@ -1223,6 +1237,7 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
             },
             [pscustomobject]@{
                 Name = "duplicate-active-model"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = $original.Replace(
                     (
                         "%DeviceDescription%=EMKE_Install," +
@@ -1238,6 +1253,7 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
             },
             [pscustomobject]@{
                 Name = "extra-manufacturer-path"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = $original.Replace(
                     "%ManufacturerName%=EMKE,NTamd64.10.0...19045",
                     (
@@ -1248,14 +1264,17 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
             },
             [pscustomobject]@{
                 Name = "wrong-driver-version"
+                ExpectedPattern = "DriverVer|version"
                 Text = $original.Replace("1.0.0.2", "1.0.0.1")
             },
             [pscustomobject]@{
                 Name = "lower-model-floor"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = $original.Replace("19045", "19044")
             },
             [pscustomobject]@{
                 Name = "wrong-model-architecture"
+                ExpectedPattern = "Models|model|hardware|compatible|section"
                 Text = $original.Replace("NTamd64", "NTarm64")
             }
         )
@@ -1267,7 +1286,7 @@ Invoke-Case -Name "actual INF Models parser rejects inactive-section bait" -Acti
                 [Text.UTF8Encoding]::new($false)
             )
             Assert-Throws `
-                -Pattern "Models|model|hardware|compatible|section" `
+                -Pattern $case.ExpectedPattern `
                 -Action {
                 Get-DriverInfMetadata `
                     -Inf (Get-Item -LiteralPath $path) `
@@ -1795,10 +1814,7 @@ Invoke-Case `
                 -StagedInf ([pscustomobject]@{
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
-                -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.2"
-                    ProviderName = "EMKE"
-                }) `
+                -InfMetadata (New-TestInfMetadata) `
                 -TrustedPackage (New-InstallPackageRecord) `
                 -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
@@ -1842,10 +1858,7 @@ Invoke-Case `
                 -StagedInf ([pscustomobject]@{
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
-                -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.2"
-                    ProviderName = "EMKE"
-                }) `
+                -InfMetadata (New-TestInfMetadata) `
                 -TrustedPackage (New-InstallPackageRecord) `
                 -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
@@ -1888,10 +1901,7 @@ Invoke-Case `
                 -StagedInf ([pscustomobject]@{
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
-                -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.2"
-                    ProviderName = "EMKE"
-                }) `
+                -InfMetadata (New-TestInfMetadata) `
                 -TrustedPackage (New-InstallPackageRecord) `
                 -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
@@ -1958,10 +1968,7 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
         -StagedInf ([pscustomobject]@{
             FullName = "C:\Protected\EMKE.VirtualAudio.inf"
         }) `
-        -InfMetadata ([pscustomobject]@{
-            DriverVersion = "1.0.0.2"
-            ProviderName = "EMKE"
-        }) `
+        -InfMetadata (New-TestInfMetadata) `
         -TrustedPackage (New-InstallPackageRecord) `
         -ReleaseMetadata (New-TestReleaseMetadata) `
         -ExpectedPackageSha256 ("A" * 64)
@@ -1995,10 +2002,7 @@ Invoke-Case -Name "preexisting target blocks root creation" -Action {
             -StagedInf ([pscustomobject]@{
                 FullName = "C:\Protected\EMKE.VirtualAudio.inf"
             }) `
-            -InfMetadata ([pscustomobject]@{
-                DriverVersion = "1.0.0.2"
-                ProviderName = "EMKE"
-            }) `
+            -InfMetadata (New-TestInfMetadata) `
             -TrustedPackage (New-InstallPackageRecord) `
             -ReleaseMetadata (New-TestReleaseMetadata) `
             -ExpectedPackageSha256 ("A" * 64)
@@ -2040,10 +2044,7 @@ Invoke-Case -Name "bind failure reports partial state and exact cleanup" -Action
                 -StagedInf ([pscustomobject]@{
                     FullName = "C:\Protected\EMKE.VirtualAudio.inf"
                 }) `
-                -InfMetadata ([pscustomobject]@{
-                    DriverVersion = "1.0.0.2"
-                    ProviderName = "EMKE"
-                }) `
+                -InfMetadata (New-TestInfMetadata) `
                 -TrustedPackage (New-InstallPackageRecord) `
                 -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
@@ -2682,10 +2683,7 @@ Invoke-Case -Name "process timeout permits only read-only inventory" -Action {
             -StagedInf ([pscustomobject]@{
                 FullName = "C:\Protected\EMKE.VirtualAudio.inf"
             }) `
-            -InfMetadata ([pscustomobject]@{
-                DriverVersion = "1.0.0.2"
-                ProviderName = "EMKE"
-            }) `
+            -InfMetadata (New-TestInfMetadata) `
             -TrustedPackage (New-InstallPackageRecord) `
             -ReleaseMetadata (New-TestReleaseMetadata) `
             -ExpectedPackageSha256 ("A" * 64)
