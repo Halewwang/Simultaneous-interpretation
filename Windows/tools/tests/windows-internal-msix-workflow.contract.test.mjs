@@ -42,6 +42,13 @@ const hostedInstallPath = path.join(
   'tools',
   'test-hosted-msix-install.ps1',
 );
+const lifecycleBehaviorPath = path.join(
+  repositoryRoot,
+  'Windows',
+  'tools',
+  'tests',
+  'internal-msix-lifecycle.behavior.test.ps1',
+);
 const installLifecyclePath = path.join(
   repositoryRoot,
   'Windows',
@@ -231,6 +238,7 @@ function workflowRunBlocks(source) {
 test('workflow gates the Windows build, exact install smoke, cleanup, and upload', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   const runtimeWorkflow = await readFile(runtimeWorkflowPath, 'utf8');
+  const lifecycleBehavior = await readFile(lifecycleBehaviorPath, 'utf8');
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(
@@ -241,6 +249,11 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   assert.match(workflow, /actions\/setup-dotnet@v4/);
   assert.match(workflow, /dotnet-version:\s*10\.0\.x/);
   assert.match(workflow, /validate-shared-contracts\.mjs/);
+  assert.match(
+    workflow,
+    /pwsh[^\r\n]*internal-msix-lifecycle\.behavior\.test\.ps1/,
+    'the portable gate must execute lifecycle behavior against rendered scripts',
+  );
   assert.match(workflow, /dotnet restore Windows\/EMKE\.Windows\.slnx --locked-mode/);
   assert.match(workflow, /dotnet build Windows\/EMKE\.Windows\.slnx[^]*--no-restore/);
   assert.match(workflow, /dotnet test Windows\/EMKE\.Windows\.slnx[^]*--no-build/);
@@ -275,6 +288,9 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
     /EMKE-Translation-Windows-0\.1\.0-internal-x64/,
     'the MSIX workflow must not retain stale package or artifact names',
   );
+  assert.match(lifecycleBehavior, /build-internal-msix-bundle\.ps1/);
+  assert.match(lifecycleBehavior, /resolve-version\.ps1/);
+  assert.doesNotMatch(lifecycleBehavior, /0\.1\.0(?:\.0)?/);
   assert.doesNotMatch(
     workflow,
     /\b26200\b/,
