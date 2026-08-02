@@ -1034,7 +1034,12 @@ public sealed class TranslationRuntimeTests
             RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
 
             Assert.AreEqual(ErrorCategory.Driver, error?.Category);
+            Assert.AreEqual("translationRuntime.driverIncompatible", error?.Code);
+            Assert.AreEqual(RecoveryAction.InstallDriver, error?.RecoveryAction);
+            Assert.HasCount(0, error!.Parameters);
             Assert.AreEqual(0, missingDriver.SessionCreateCount);
+            Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+            Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
             CollectionAssert.AreEqual(
                 new[] { "os", "settings", "driver" },
                 missingDriver.Trace.ToArray());
@@ -1047,7 +1052,12 @@ public sealed class TranslationRuntimeTests
             RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
 
             Assert.AreEqual(ErrorCategory.Device, error?.Category);
+            Assert.AreEqual("translationRuntime.defaultPhysicalDeviceMissing", error?.Code);
+            Assert.AreEqual(RecoveryAction.SelectDevice, error?.RecoveryAction);
+            Assert.HasCount(0, error!.Parameters);
             Assert.AreEqual(0, missingEndpoints.SessionCreateCount);
+            Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+            Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
             CollectionAssert.AreEqual(
                 new[] { "os", "settings", "driver", "devices" },
                 missingEndpoints.Trace.ToArray());
@@ -1067,10 +1077,14 @@ public sealed class TranslationRuntimeTests
 
         Assert.AreEqual(ErrorCategory.Authentication, error?.Category);
         Assert.AreEqual("translationSessionFactory.apiKeyMissing", error?.Code);
+        Assert.AreEqual(RecoveryAction.UpdateApiKey, error?.RecoveryAction);
+        Assert.HasCount(0, error!.Parameters);
         CollectionAssert.AreEqual(
             new[] { "os", "settings", "driver", "devices", "session.inbound.create" },
             harness.Trace.ToArray());
         Assert.AreEqual(0, harness.AudioStartCount);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
     }
 
     [TestMethod]
