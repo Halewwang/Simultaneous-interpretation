@@ -37,7 +37,7 @@ All Task 5 validation branches were evidence-only and closed without merge:
 | #18 | Stabilized matrix completion | Closed unmerged |
 | #19 | Runtime logs, hostile codes, failure aggregation | Closed unmerged |
 | #20 | Cross-layer mapping and final report | Closed unmerged |
-| #21 | Review follow-up: QueueFull, provider HTTP status, PCM probes, ownership | Draft evidence branch; close unmerged after final hosted gate |
+| #21 | Review follow-up: QueueFull, provider HTTP status, PCM probes, ownership | Closed unmerged after Runtime `30742018521` / job `91480993354` and MSIX `30742018519` / job `91480993337` evidence |
 
 The product branch `codex/windows-internal-msix` remains local only. The sole
 pre-existing dirty file, `progress.md`, is intentionally neither altered nor
@@ -69,6 +69,15 @@ repository requires Swift tools 6.2. Windows Audio Foundation `30740206460`
 also remains red because an unrelated workflow guard expects exactly seven
 `NativeAudioNativeFake` tests while the native suite reports eight. Neither is
 changed by Task 5.
+
+Review follow-up evidence extends the accepted managed boundary: Runtime
+`30742018521` / job `91480993354` passed Core 62, Contract 18, Application
+101, Realtime 113, Routing 53, Windows App 148, and Integration 113 with one
+platform skip. Its only failure is the pre-existing owned-native PCM fixture
+executable path mismatch. Internal MSIX `30742018519` / job `91480993337`
+succeeded. The Audio Foundation run `30742018517` confirms native CTest 18/18,
+the new 19-test managed seam, and native-fake 8/8; it still ends on the
+independent native-fake 8-vs-7 guard.
 
 ## Acceptance boundary
 

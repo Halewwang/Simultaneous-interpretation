@@ -95,7 +95,7 @@ Local source guards on the evidence commit passed:
 | Five 100-iteration contracts | `c26ed25`; PRs #17 and #18 closed unmerged | `4b6fe4f`, `8235a4b`, `f94f2a4`, `c78477c`, `da8866f`, `1297c45`, `106143a` |
 | Runtime log and hostile diagnostic codes | Runtime behavior RED run `30739089347` / job `91473119672`; hostile-code RED run `30739275302` / job `91473638707`; PR #19 closed unmerged | `8a1e542`, `b5afc38`, `135c762`, `3cc5cfd`; Runtime run `30739715270` / job `91474809921`; MSIX `30739715253` / job `91474821740` |
 | Matrix audit and cross-layer assertions | Fixture-only RED Runtime `30740047560` / job `91475720709` | `a85e792`, `1e59a27`, `3463c9c`; Runtime `30740206479` / job `91476128799`; MSIX `30740206477` / job `91476128864`; PR #20 closed unmerged |
-| Task 5 review follow-up: native queue-full classification, HTTP status classification, PCM probes, and shutdown ownership | Runtime RED `30740762833` / job `91477659510` (`QueueFull` was deliberately still protocol before the mapping) | Evidence commits `0c4ebc8`, `ea64c86`, `f469004`, `b540a88`, `67644ec`, `d54ce3e`; final hosted IDs are recorded after the evidence-only PR #21 gate completes. |
+| Task 5 review follow-up: native queue-full classification, HTTP status classification, PCM probes, and shutdown ownership | Runtime RED `30740762833` / job `91477659510` (`QueueFull` was deliberately still protocol before the mapping); follow-up compile RED `30741877547` / job `91480630331` scoped the new waiters correctly | Evidence commits `0c4ebc8`, `ea64c86`, `f469004`, `b540a88`, `67644ec`, `d54ce3e`, `7324f49`, `d98843e`, `aa87f94`, `f25b07b`; Runtime `30742018521` / job `91480993354` passed every managed suite, MSIX `30742018519` / job `91480993337` succeeded; PR #21 is closed unmerged after capture. |
 
 Runtime run `30739715270` passed all managed suites (Core 62, Contract 18,
 Application 100, Realtime 109, Routing 53, Windows App 148, Integration 106
@@ -117,6 +117,17 @@ does not alter the unrelated native-fake guard.
 The final matrix-audit evidence PR #20 recorded the strengthened cross-layer
 assertions and this report, and was closed unmerged after its Windows checks
 were captured. The local product branch is never pushed.
+
+The review-follow-up Runtime `30742018521` / job `91480993354` passed Core 62,
+Contract 18, Application 101, Realtime 113, Routing 53, Windows App 148, and
+Integration 113 with one platform skip. Its only terminal failure is the
+pre-existing owned-native PCM fixture executable path mismatch. The matching
+Internal MSIX `30742018519` / job `91480993337` succeeded. Shared Contract
+`30742018516` completed its Windows/file gates but remains overall red on the
+hosted macOS Swift 6.1 versus repository Swift tools 6.2 mismatch. Windows
+Audio Foundation `30742018517` passed native CTest 18/18, the new 19-test
+managed seam, and native-fake 8/8, then failed only its independent native-fake
+8-versus-7 exact-count guard.
 
 ## Hosted boundary
 
