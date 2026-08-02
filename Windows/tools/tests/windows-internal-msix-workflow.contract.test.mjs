@@ -324,6 +324,11 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
   );
   assert.match(installJob, /runs-on:\s*windows-2025-vs2026/);
   assert.doesNotMatch(installJob, /self-hosted|emke-win11-25h2/);
+  assert.doesNotMatch(
+    installJob,
+    /25H2\s+runner/i,
+    'hosted preview validation must not imply a 25H2 runner',
+  );
   assert.match(installJob, /actions\/download-artifact@v4/);
   assert.match(installJob, /test-hosted-msix-install\.ps1/);
   assert.match(installJob, /Get-CimInstance\s+-ClassName\s+Win32_OperatingSystem/);

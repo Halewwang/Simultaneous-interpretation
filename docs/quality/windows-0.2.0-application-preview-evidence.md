@@ -94,11 +94,12 @@ completed the permanent build/sign path for evidence source
 ## Local and contract checks
 
 - `git diff --check` passed before committing `84ff725`.
-- The workflow/metadata gate in
+- Only the static, non-PowerShell assertions in
   `Windows/tools/tests/windows-internal-msix-workflow.contract.test.mjs` passed
-  locally. PowerShell-executed portions cannot run on this macOS checkout
-  because `pwsh` is unavailable; their authoritative proof is the Windows CI
-  build job above.
+  locally. The complete contract suite exited nonzero on this macOS checkout
+  because `pwsh` is unavailable, so no full local contract-suite pass is
+  claimed. PowerShell parsing and execution paths use the Windows CI build job
+  above as their execution evidence.
 - The permanent workflows now resolve
   `Windows/tools/resolve-version.ps1` rather than independently carrying
   `26200`, `0.1.0`, package-name, or architecture floors.

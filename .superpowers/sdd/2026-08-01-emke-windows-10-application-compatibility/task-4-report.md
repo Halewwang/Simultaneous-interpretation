@@ -76,6 +76,18 @@ Local `git diff --check` and the static workflow gate passed. PowerShell
 execution tests are not runnable on the macOS checkout (`pwsh` absent), so the
 remote Windows gate is the relevant execution proof.
 
+## Review fix round 1
+
+- Corrected the evidence document: only static, non-PowerShell assertions pass
+  locally; the full Node contract suite exits nonzero on macOS without `pwsh`.
+- Added a static workflow-contract assertion preventing the hosted-preview job
+  from describing its runner as 25H2, and changed the remaining exception text
+  to `hosted preview runner`. The job continues to print actual OS/build and
+  product type.
+- Verification: the new static assertion passes locally; PowerShell-dependent
+  tests remain intentionally unproven locally and rely on the completed
+  Windows CI evidence above.
+
 ## Self-review and acceptance boundary
 
 The hosted job is deliberately named preview rather than 25H2 acceptance and

@@ -396,7 +396,7 @@ jobs:
             "Cert:\LocalMachine\TrustedPeople\$thumbprint"
           )
           if ($existingCertificate) {
-            throw "The ephemeral 25H2 runner already trusts the Internal certificate."
+            throw "The hosted preview runner already trusts the Internal certificate."
           }
           $packagePath = Join-Path `
             $artifactRoot `
