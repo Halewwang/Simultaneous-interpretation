@@ -87,9 +87,7 @@ function Assert-RealDirectory {
         [string]$Path,
 
         [Parameter(Mandatory)]
-        [string]$Description,
-
-        [switch]$CaseInsensitiveNames
+        [string]$Description
     )
 
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -154,13 +152,33 @@ function Assert-ExactFlatInventory {
         throw "$Description must contain the exact immutable inventory."
     }
     foreach ($expectedName in $ExpectedNames) {
-        [object[]]$matches = if ($CaseInsensitiveNames) {
-            @($files | Where-Object { $_.Name -ieq $expectedName })
-        } else {
-            @($files | Where-Object { $_.Name -ceq $expectedName })
-        }
-        if ($matches.Count -ne 1) {
+        if (@($files | Where-Object {
+            $_.Name -ceq $expectedName
+        }).Count -ne 1) {
             throw "$Description must contain the exact immutable inventory."
+        }
+    }
+}
+
+function Assert-ExactSourcePackageInventory {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Directory
+    )
+
+    $directories = @(Get-ChildItem -LiteralPath $Directory -Directory -Force)
+    if ($directories.Count -ne 0) {
+        throw "Verified driver package must be flat; nested directories are forbidden."
+    }
+    $files = @(Get-ChildItem -LiteralPath $Directory -File -Force)
+    if ($files.Count -ne $script:PackageFileNames.Count) {
+        throw "Verified driver package must contain the exact immutable inventory."
+    }
+    foreach ($expectedName in $script:PackageFileNames) {
+        if (@($files | Where-Object {
+            $_.Name -ieq $expectedName
+        }).Count -ne 1) {
+            throw "Verified driver package must contain the exact immutable inventory."
         }
     }
 }
@@ -354,11 +372,8 @@ function New-DriverSubmission {
     if ($LASTEXITCODE -ne 0) {
         throw "Verified driver package gate failed with exit code $LASTEXITCODE."
     }
-    Assert-ExactFlatInventory `
-        -Directory $resolvedInput `
-        -ExpectedNames $script:PackageFileNames `
-        -Description "Verified driver package" `
-        -CaseInsensitiveNames
+    Assert-ExactSourcePackageInventory `
+        -Directory $resolvedInput
 
     $sourceHashes = [ordered]@{}
     foreach ($name in $script:PackageFileNames) {
