@@ -152,14 +152,52 @@ function readInfString(inf, name) {
 }
 
 function readXmlValue(project, name) {
+  const activeProject = project.replace(/<!--[\s\S]*?-->/g, "");
+  if (activeProject.includes("<!--") || activeProject.includes("-->")) {
+    throw new Error("Driver project contains a malformed XML comment.");
+  }
   return singleCapture(
-    project,
+    activeProject,
     new RegExp(
       `<${escapeRegExp(name)}>\\s*([^<]+?)\\s*</${escapeRegExp(name)}>`,
       "gi",
     ),
     `driver project ${name}`,
   );
+}
+
+function parseActiveInfSections(inf) {
+  const sections = new Map();
+  let currentSection = null;
+  for (const rawLine of inf.split(/\r?\n/)) {
+    const line = rawLine.split(";", 1)[0].trim();
+    if (line === "") {
+      continue;
+    }
+    const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+    if (sectionMatch !== null) {
+      const name = sectionMatch[1].trim();
+      const key = name.toUpperCase();
+      if (sections.has(key)) {
+        throw new Error(`INF section [${name}] occurs more than once.`);
+      }
+      currentSection = { name, lines: [] };
+      sections.set(key, currentSection);
+      continue;
+    }
+    if (currentSection !== null) {
+      currentSection.lines.push(line);
+    }
+  }
+  return sections;
+}
+
+function readInfSection(sections, name) {
+  const section = sections.get(name.toUpperCase());
+  if (section === undefined) {
+    throw new Error(`INF is missing active section [${name}].`);
+  }
+  return section;
 }
 
 function readRequiredString(object, name, description) {
@@ -272,6 +310,62 @@ async function main() {
     throw new Error("INF must declare exactly four unique endpoint roles.");
   }
 
+  const infSections = parseActiveInfSections(inf);
+  const bindingDefinitions = [
+    ["EMKE.I.WaveMeetingSpeaker.AddReg", "RoleMeetingSpeakerRender"],
+    ["EMKE.I.WaveAppSpeakerCapture.AddReg", "RoleAppSpeakerCapture"],
+    ["EMKE.I.WaveAppMicrophoneRender.AddReg", "RoleAppMicrophoneRender"],
+    ["EMKE.I.WaveMeetingMicrophone.AddReg", "RoleMeetingMicrophoneCapture"],
+  ];
+  const allBindingLines = [...infSections.values()].flatMap((section) =>
+    section.lines
+      .filter(
+        (line) =>
+          /^HKR\s*,/i.test(line) &&
+          /%PKEY_EMKE_EndpointRole%/i.test(line),
+      )
+      .map((line) => ({ section: section.name, line })),
+  );
+  if (allBindingLines.length !== bindingDefinitions.length) {
+    throw new Error(
+      "INF must contain exactly four active endpoint-role binding lines; " +
+        `found ${allBindingLines.length}.`,
+    );
+  }
+  const bindingPattern =
+    /^HKR\s*,\s*EP\\0\s*,\s*%PKEY_EMKE_EndpointRole%\s*,\s*0x00000000\s*,\s*%(Role[A-Za-z0-9]+)%$/;
+  const boundRoles = [];
+  for (const [sectionName, expectedRole] of bindingDefinitions) {
+    const sectionBindings = readInfSection(infSections, sectionName).lines.filter(
+      (line) =>
+        /^HKR\s*,/i.test(line) &&
+        /%PKEY_EMKE_EndpointRole%/i.test(line),
+    );
+    if (sectionBindings.length !== 1) {
+      throw new Error(
+        `INF section [${sectionName}] must contain exactly one active ` +
+          `endpoint-role binding; found ${sectionBindings.length}.`,
+      );
+    }
+    const bindingMatch = sectionBindings[0].match(bindingPattern);
+    if (bindingMatch === null) {
+      throw new Error(
+        `INF section [${sectionName}] has a malformed endpoint-role binding.`,
+      );
+    }
+    requireEqual(
+      bindingMatch[1],
+      expectedRole,
+      `INF section [${sectionName}] endpoint role`,
+    );
+    boundRoles.push(bindingMatch[1]);
+  }
+  requireArrayEqual(
+    boundRoles,
+    roleDefinitions.map(([infName]) => infName),
+    "INF active endpoint-role bindings",
+  );
+
   const expectedPropertyKey =
     `${formatGuidFromNumericAuthority(header)},` +
     `${readUnsignedMacro(header, "EMKE_ENDPOINT_ROLE_PROPERTY_PID")}`;
@@ -379,33 +473,58 @@ async function main() {
     "INF DriverVer",
   );
 
-  const manufacturerBuild = Number.parseInt(
-    singleCapture(
-      inf,
-      /^%ManufacturerName%=EMKE,NTamd64\.10\.0\.\.\.([0-9]+)\s*$/gmi,
-      "INF manufacturer model decoration",
-    ),
-    10,
+  const manufacturer = readInfSection(infSections, "Manufacturer");
+  if (manufacturer.lines.length !== 1) {
+    throw new Error(
+      "INF [Manufacturer] must contain exactly one active Models mapping; " +
+        `found ${manufacturer.lines.length}.`,
+    );
+  }
+  const manufacturerMatch = manufacturer.lines[0].match(
+    /^%ManufacturerName%\s*=\s*EMKE\s*,\s*NTamd64\.10\.0\.\.\.([0-9]+)$/,
   );
+  if (manufacturerMatch === null) {
+    throw new Error(
+      "INF [Manufacturer] has an unauthorized Models decoration.",
+    );
+  }
+  const manufacturerBuild = Number.parseInt(manufacturerMatch[1], 10);
   requireEqual(
     manufacturerBuild,
     versionMinimumBuild,
     "INF minimum Windows model build",
   );
-  const modelSectionPattern = new RegExp(
-    `^\\[EMKE\\.NTamd64\\.10\\.0\\.\\.\\.${versionMinimumBuild}\\]\\s*$`,
-    "gmi",
+  const expectedModelSection =
+    `EMKE.NTamd64.10.0...${versionMinimumBuild}`;
+  const activeModelSections = [...infSections.values()].filter((section) =>
+    /^EMKE\.NT/i.test(section.name),
   );
-  singleCapture(
-    inf.replace(modelSectionPattern, (match) => `${match}\n__MODEL_SECTION__=1`),
-    /^__MODEL_SECTION__=(1)$/gmi,
-    "INF minimum Windows model section",
+  if (
+    activeModelSections.length !== 1 ||
+    activeModelSections[0].name !== expectedModelSection
+  ) {
+    throw new Error(
+      "INF must contain exactly the authorized active Models section " +
+        `[${expectedModelSection}] and no undecorated, lower-floor, or extra ` +
+        "Models paths.",
+    );
+  }
+  const modelSection = readInfSection(infSections, expectedModelSection);
+  if (modelSection.lines.length !== 1) {
+    throw new Error(
+      `INF [${expectedModelSection}] must contain exactly one active model ` +
+        `entry; found ${modelSection.lines.length}.`,
+    );
+  }
+  const modelMatch = modelSection.lines[0].match(
+    /^%DeviceDescription%\s*=\s*EMKE_Install\s*,\s*(ROOT\\[^\s,]+)$/,
   );
-  const modelHardwareId = singleCapture(
-    inf,
-    /^%DeviceDescription%=EMKE_Install,(ROOT\\[^\r\n]+?)\s*$/gmi,
-    "INF root hardware model",
-  );
+  if (modelMatch === null) {
+    throw new Error(
+      `INF [${expectedModelSection}] contains an unauthorized model entry.`,
+    );
+  }
+  const modelHardwareId = modelMatch[1];
   requireEqual(
     modelHardwareId.toUpperCase(),
     versionHardwareId.toUpperCase(),
