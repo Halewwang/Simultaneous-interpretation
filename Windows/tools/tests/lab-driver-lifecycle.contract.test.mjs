@@ -394,6 +394,31 @@ test("Windows behavior suite declares mutation-free lifecycle safety cases", asy
   assert.doesNotMatch(source, /every (?:destructive )?gate/i);
 });
 
+test("hosted summary reuses one trusted toolchain result", async () => {
+  const source = await readRequired(workflowPath);
+  const hostedStep = source.match(
+    /- name: Validate shared contract and build native audio scaffold(?<body>[^]*?)\n  driver-build-proof:/,
+  );
+  assert.ok(hostedStep, "hosted toolchain proof step is missing");
+  const body = hostedStep.groups.body;
+  assert.equal(
+    [...body.matchAll(/verify-toolchain\.ps1/g)].length,
+    1,
+    "hosted proof must invoke the trusted toolchain resolver exactly once",
+  );
+  assert.match(body, /\$toolchainOutput\s*=\s*@\(pwsh[^\n]*verify-toolchain\.ps1\)/);
+  assert.match(body, /\$toolchain\s*=\s*[^\n]*ConvertFrom-Json/);
+  assert.match(body, /\$windowsBuild\s*=\s*\[int\]\$toolchain\.windowsBuild/);
+  assert.match(body, /\$productType\s*=\s*\[int\]\$toolchain\.productType/);
+  assert.match(
+    body,
+    /\$targetOsEligible\s*=\s*\[bool\]\$toolchain\.targetOsEligible/,
+  );
+  assert.match(body, /Product type:\s*\$productType/);
+  assert.doesNotMatch(body, /resolve-version\.ps1/);
+  assert.doesNotMatch(body, /\$windowsBuild\s+-ge\s+/);
+});
+
 test("PowerShell integration suite exercises safe real process and invocation seams", async () => {
   const source = await readRequired(integrationTestPath);
   const requiredCases = [
