@@ -11,6 +11,7 @@ using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Presentation;
 using EMKE.Windows.App.State;
 using EMKE.Windows.App.Tray;
+using System.Reflection;
 
 namespace EMKE.Windows.App.Tests;
 
@@ -208,6 +209,30 @@ public sealed class ProductionCompositionTests
         Assert.IsFalse(source.Contains(
             "composition is not available",
             StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task ProductionCoreSessionFactoryUsesTheOwnedSecretStore()
+    {
+        AppCoreAdapterBundle bundle =
+            await ProductionCoreAdapters.CreateAsync(CancellationToken.None);
+        try
+        {
+            TranslationSessionFactory factory =
+                Assert.IsInstanceOfType<TranslationSessionFactory>(
+                    bundle.RuntimeDependencies.SessionFactory);
+            PropertyInfo? secretStore = typeof(TranslationSessionFactory)
+                .GetProperty(
+                    "SecretStore",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.IsNotNull(secretStore);
+
+            Assert.AreSame(bundle.SecretStore, secretStore.GetValue(factory));
+        }
+        finally
+        {
+            await bundle.DisposeAsync();
+        }
     }
 
     [TestMethod]
