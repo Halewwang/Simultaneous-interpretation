@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Net;
 using System.Security.Cryptography;
 using EMKE.Core;
 
@@ -56,6 +57,8 @@ public sealed record TranslationReceiveResult
 
 internal interface IClientWebSocket : IDisposable
 {
+    HttpStatusCode? HttpStatusCode => null;
+
     void SetRequestHeader(string name, string value);
 
     Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken);
@@ -178,7 +181,7 @@ public sealed class TranslationSocket : ITranslationTransport
                 or ArgumentException
                 or InvalidOperationException)
         {
-            return NetworkError("translationSocket.connectFailed");
+            return ConnectError(_adapter.HttpStatusCode);
         }
     }
 
@@ -390,6 +393,26 @@ public sealed class TranslationSocket : ITranslationTransport
         return Error(ErrorCategory.Network, code);
     }
 
+    private static RuntimeError ConnectError(HttpStatusCode? statusCode)
+    {
+        return statusCode switch
+        {
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                new RuntimeError(
+                    ErrorCategory.Authentication,
+                    "translationSocket.authenticationRejected",
+                    new Dictionary<string, string>(),
+                    RecoveryAction.UpdateApiKey),
+            HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity =>
+                new RuntimeError(
+                    ErrorCategory.EndpointModel,
+                    "translationSocket.endpointModelRejected",
+                    new Dictionary<string, string>(),
+                    RecoveryAction.EditSettings),
+            _ => NetworkError("translationSocket.connectFailed"),
+        };
+    }
+
     private static RuntimeError Error(ErrorCategory category, string code)
     {
         return new RuntimeError(
@@ -404,6 +427,13 @@ public sealed class TranslationSocket : ITranslationTransport
 internal sealed class ClientWebSocketAdapter : IClientWebSocket
 {
     private readonly ClientWebSocket _socket = new();
+
+    public ClientWebSocketAdapter()
+    {
+        _socket.Options.CollectHttpResponseDetails = true;
+    }
+
+    public HttpStatusCode? HttpStatusCode => _socket.HttpStatusCode;
 
     public void SetRequestHeader(string name, string value)
     {
