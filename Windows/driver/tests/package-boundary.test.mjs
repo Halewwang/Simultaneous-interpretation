@@ -231,22 +231,8 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
   const root = await mkdtemp(path.join(os.tmpdir(), "emke-package-contract-"));
   const sourceText = await readFile(sourceInf, "utf8");
   const projectText = await readFile(sourceProject, "utf8");
-  const desiredInf = sourceText
-    .replace("DriverVer=07/26/2026,1.0.0.1", "DriverVer=08/01/2026,1.0.0.2")
-    .replaceAll("NTamd64.10.0...26200", "NTamd64.10.0...19045")
-    .replace("KmdfLibraryVersion=$KMDFVERSION$", "KmdfLibraryVersion=1.31");
-  const desiredProject = projectText
-    .replace("<EMKETargetOS>Windows11</EMKETargetOS>", "<EMKETargetOS>Windows10</EMKETargetOS>")
-    .replace(
-      "<KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>",
-      "<KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>\n    <KMDF_VERSION_MINOR>31</KMDF_VERSION_MINOR>",
-    )
-    .replace("<DateStamp>07/26/2026</DateStamp>", "<DateStamp>08/01/2026</DateStamp>")
-    .replace("<TimeStamp>1.0.0.1</TimeStamp>", "<TimeStamp>1.0.0.2</TimeStamp>")
-    .replace(
-      "<TimeStamp>1.0.0.2</TimeStamp>",
-      "<TimeStamp>1.0.0.2</TimeStamp>\n      <KmdfVersionNumber>1.31</KmdfVersionNumber>",
-    );
+  const desiredInf = sourceText;
+  const desiredProject = projectText;
   const version = {
     driverPackageVersion: "1.0.0.2",
     minimumWindowsBuild: 19045,
@@ -272,6 +258,7 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
   await writeFile(project, desiredProject, "utf8");
   await writeFile(versionPath, JSON.stringify(version), "utf8");
   await writeFile(compatibilityPath, JSON.stringify(compatibility), "utf8");
+  const falsePositives = [];
 
   const mutations = [
     {
@@ -294,6 +281,39 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
       inf: desiredInf.replace("KmdfLibraryVersion=1.31", "KmdfLibraryVersion=1.33"),
       error: /KMDF|1\.31/i,
     },
+    {
+      name: "missing endpoint role binding",
+      inf: desiredInf.replace(
+        "HKR,EP\\0,%PKEY_EMKE_EndpointRole%,0x00000000,%RoleMeetingSpeakerRender%",
+        "",
+      ),
+      error: /endpoint|binding|role/i,
+    },
+    {
+      name: "duplicate endpoint role binding",
+      inf: desiredInf.replace(
+        "HKR,EP\\0,%PKEY_EMKE_EndpointRole%,0x00000000,%RoleMeetingSpeakerRender%",
+        "HKR,EP\\0,%PKEY_EMKE_EndpointRole%,0x00000000,%RoleMeetingSpeakerRender%\n" +
+          "HKR,EP\\0,%PKEY_EMKE_EndpointRole%,0x00000000,%RoleMeetingSpeakerRender%",
+      ),
+      error: /endpoint|binding|role/i,
+    },
+    {
+      name: "extra undecorated Models path",
+      inf: desiredInf
+        .replace(
+          "%ManufacturerName%=EMKE,NTamd64.10.0...19045",
+          "%ManufacturerName%=EMKE,NTamd64.10.0...19045\n" +
+            "%LegacyManufacturerName%=EMKE,NTamd64",
+        )
+        .replace(
+          "[EMKE.CopyFiles]",
+          "[EMKE.NTamd64]\n" +
+            "%LegacyDeviceDescription%=EMKE_Install,ROOT\\EMKEVIRTUALAUDIO\n\n" +
+            "[EMKE.CopyFiles]",
+        ),
+      error: /manufacturer|model|decoration/i,
+    },
   ];
 
   for (const mutation of mutations) {
@@ -306,9 +326,57 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
       "--version", versionPath,
       "--compatibility", compatibilityPath,
     ]);
-    assert.notEqual(result.status, 0, `${mutation.name} must be rejected`);
+    if (result.status === 0) {
+      falsePositives.push(mutation.name);
+      continue;
+    }
     assert.match(result.stderr, mutation.error);
   }
+
+  const projectMutations = [
+    {
+      name: "commented-only KMDF stamp input",
+      project: desiredProject.replace(
+        "<KmdfVersionNumber>1.31</KmdfVersionNumber>",
+        "<!-- <KmdfVersionNumber>1.31</KmdfVersionNumber> -->",
+      ),
+    },
+    {
+      name: "duplicate KMDF stamp input",
+      project: desiredProject.replace(
+        "<KmdfVersionNumber>1.31</KmdfVersionNumber>",
+        "<KmdfVersionNumber>1.31</KmdfVersionNumber>\n" +
+          "      <KmdfVersionNumber>1.31</KmdfVersionNumber>",
+      ),
+    },
+    {
+      name: "conflicting KMDF stamp input",
+      project: desiredProject.replace(
+        "<KmdfVersionNumber>1.31</KmdfVersionNumber>",
+        "<KmdfVersionNumber>1.31</KmdfVersionNumber>\n" +
+          "      <KmdfVersionNumber>1.33</KmdfVersionNumber>",
+      ),
+    },
+  ];
+
+  const desiredInfPath = path.join(root, "desired.inf");
+  await writeFile(desiredInfPath, desiredInf, "utf8");
+  for (const mutation of projectMutations) {
+    await writeFile(project, mutation.project, "utf8");
+    const result = runNode(contractValidator, [
+      "--header", sharedHeader,
+      "--inf", desiredInfPath,
+      "--project", project,
+      "--version", versionPath,
+      "--compatibility", compatibilityPath,
+    ]);
+    if (result.status === 0) {
+      falsePositives.push(mutation.name);
+      continue;
+    }
+    assert.match(result.stderr, /KMDF|KmdfVersionNumber|project/i);
+  }
+  await writeFile(project, desiredProject, "utf8");
 
   const metadataMutations = [
     {
@@ -334,8 +402,6 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
     },
   ];
 
-  const desiredInfPath = path.join(root, "desired.inf");
-  await writeFile(desiredInfPath, desiredInf, "utf8");
   for (const mutation of metadataMutations) {
     await writeFile(versionPath, JSON.stringify(mutation.version), "utf8");
     await writeFile(
@@ -350,9 +416,17 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
       "--version", versionPath,
       "--compatibility", compatibilityPath,
     ]);
-    assert.notEqual(result.status, 0, `${mutation.name} must be rejected`);
+    if (result.status === 0) {
+      falsePositives.push(mutation.name);
+      continue;
+    }
     assert.match(result.stderr, mutation.error);
   }
+  assert.deepEqual(
+    falsePositives,
+    [],
+    `validator accepted invalid release mutations: ${falsePositives.join(", ")}`,
+  );
 });
 
 test("driver build validates the resolved staged INF before Inf2Cat", async () => {
