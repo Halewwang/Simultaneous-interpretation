@@ -111,7 +111,7 @@ public sealed class WindowsAudioDeviceCatalogTests
         Assert.AreEqual(AudioEngineStatus.DeviceMissing, exception.Status);
 
         using CancellationTokenSource cancellation = new();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(
             () => catalog.GetSnapshotAsync(cancellation.Token));
         Assert.AreEqual(1, native.CountCallCount);
