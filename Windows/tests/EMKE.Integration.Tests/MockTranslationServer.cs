@@ -659,7 +659,8 @@ internal sealed class MockTranslationServer : IAsyncDisposable
 
         public void Dispose()
         {
-            _sendGate.Dispose();
+            // A client can close as the last server send completes. Keep the
+            // managed gate alive so that sender's finally block can release it.
         }
 
         public void Abort()
