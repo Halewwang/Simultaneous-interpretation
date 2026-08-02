@@ -487,7 +487,7 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
-    public async Task MalformedProductionBinaryHandshakeStopsRuntimeAndDrainsAudioOwnership()
+    public async Task BinaryProductionHandshakeStopsRuntimeAndDrainsAudioOwnership()
     {
         await using MockTranslationServer server =
             await MockTranslationServer.StartAsync(MockTranslationScenario.BinaryEvent)
@@ -513,7 +513,7 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
-    public async Task ProductionServerCloseFencesOutboundAndReleasesRuntimeOwnership()
+    public async Task ProductionAbortFencesOutboundAndReleasesRuntimeOwnership()
     {
         await using MockTranslationServer server =
             await MockTranslationServer.StartAsync().ConfigureAwait(false);
@@ -544,6 +544,57 @@ public sealed class TranslationRuntimeIntegrationTests
         Assert.AreEqual(0, audio.ActivePcmLeaseCount);
         Assert.AreEqual(1, audio.StartCount);
         Assert.AreEqual(1, audio.StopCount);
+    }
+
+    [TestMethod]
+    public async Task ProductionCloseFrameFencesOutboundWithUnexpectedSocketClose()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        await server.CloseOutputAsync(LanguageCode.En).ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.OutboundRoute == OutboundRoute.MutedFailClosed
+                && runtime.CurrentSnapshot.Error?.Code
+                    == "translationSession.unexpectedSocketClose")
+            .ConfigureAwait(false);
+        AppSnapshot observed = runtime.CurrentSnapshot;
+
+        Assert.AreEqual(ErrorCategory.Network, observed.Error?.Category);
+        Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
+        Assert.IsEmpty(observed.Error!.Parameters);
+        Assert.AreEqual(InboundRoute.Translated, observed.InboundRoute);
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+        await AssertReleasedAsync(server, audio).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task ProductionRawMalformedTextFencesOutboundAndDrainsOwnership()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        await server.SendRawTextAsync(
+            LanguageCode.En,
+            """{"type": """u8.ToArray()).ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.OutboundRoute == OutboundRoute.MutedFailClosed
+                && runtime.CurrentSnapshot.Error?.Code == "translationEvent.invalidJson")
+            .ConfigureAwait(false);
+        AppSnapshot observed = runtime.CurrentSnapshot;
+
+        Assert.AreEqual(ErrorCategory.Protocol, observed.Error?.Category);
+        Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
+        Assert.IsEmpty(observed.Error!.Parameters);
+        Assert.AreEqual(InboundRoute.Translated, observed.InboundRoute);
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+        await AssertReleasedAsync(server, audio).ConfigureAwait(false);
     }
 
     [TestMethod]
