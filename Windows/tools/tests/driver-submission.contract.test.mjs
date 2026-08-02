@@ -50,6 +50,10 @@ test("submission creator exposes immutable package and validation entry points",
     realFileGuard.groups.body,
     /\[IO\.FileAttributes\]::ReparsePoint/,
   );
+  assert.match(source, /function Assert-JsonString/);
+  assert.match(source, /function Assert-JsonInteger/);
+  assert.doesNotMatch(source, /\[int\]\$manifest\./);
+  assert.doesNotMatch(source, /\[string\]\$manifest\./);
   assert.match(source, /function Assert-ExactSourcePackageInventory/);
   assert.match(source, /Assert-ExactSourcePackageInventory\s*`/);
   assert.doesNotMatch(source, /-CaseInsensitiveNames/);

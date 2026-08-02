@@ -102,6 +102,34 @@ function Assert-CreateRejected {
     }
 }
 
+function Assert-ManifestMutationRejected {
+    param(
+        [Parameter(Mandatory)]
+        [string]$InputDirectory,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$Search,
+
+        [Parameter(Mandatory)]
+        [string]$Replacement
+    )
+
+    $created = Invoke-Create -InputDirectory $InputDirectory -Name $Name
+    $manifestPath = Join-Path $created.Output "driver-submission.json"
+    $before = Get-Content -LiteralPath $manifestPath -Raw
+    $after = $before.Replace($Search, $Replacement)
+    if ($after -ceq $before) {
+        throw "Manifest mutation '$Name' did not modify the fixture."
+    }
+    [IO.File]::WriteAllText($manifestPath, $after)
+    Assert-Throws -Pattern "type|integer|string|array|metadata|manifest" -Action {
+        & $creator -ValidateOnly -OutputDirectory $created.Output
+    }
+}
+
 try {
     if (-not (Test-Path -LiteralPath $creator -PathType Leaf)) {
         throw "Submission creator is missing: $creator"
@@ -164,6 +192,22 @@ try {
             throw "Submission manifest contains a non-canonical SHA-256 hash."
         }
     }
+
+    Assert-ManifestMutationRejected `
+        -InputDirectory $resolvedPackage `
+        -Name "string-driver-abi" `
+        -Search '"driverAbiVersion": 1' `
+        -Replacement '"driverAbiVersion": "1"'
+    Assert-ManifestMutationRejected `
+        -InputDirectory $resolvedPackage `
+        -Name "string-minimum-build" `
+        -Search '"minimumWindowsBuild": 19045' `
+        -Replacement '"minimumWindowsBuild": "19045"'
+    Assert-ManifestMutationRejected `
+        -InputDirectory $resolvedPackage `
+        -Name "numeric-kmdf" `
+        -Search '"kmdfLibraryVersion": "1.31"' `
+        -Replacement '"kmdfLibraryVersion": 1.31'
 
     $referentDirectory = Join-Path $temporaryRoot "link-referents"
     New-Item -ItemType Directory -Path $referentDirectory | Out-Null
