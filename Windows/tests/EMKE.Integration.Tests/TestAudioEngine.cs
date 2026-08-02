@@ -30,9 +30,15 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     private readonly ConcurrentQueue<byte[]> _inboundTranslations = new();
     private readonly ConcurrentQueue<byte[]> _outboundTranslations = new();
     private readonly ConcurrentQueue<byte[]> _virtualMicrophone = new();
+    private readonly ConcurrentQueue<byte[]> _meetingSpeaker = new();
     private long _sequence;
+    private int _inboundRoute = (int)InboundRoute.Stopped;
     private int _outboundRoute = (int)OutboundRoute.Stopped;
+    private int _startCount;
+    private int _stopCount;
     private readonly TaskCompletionSource _failClosedOrStopped =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _virtualMicrophoneTranslated =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IReadOnlyList<byte[]> InboundTranslations =>
@@ -44,10 +50,22 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     public OutboundRoute CurrentOutboundRoute =>
         (OutboundRoute)Volatile.Read(ref _outboundRoute);
 
+    public InboundRoute CurrentInboundRoute =>
+        (InboundRoute)Volatile.Read(ref _inboundRoute);
+
+    public int StartCount => Volatile.Read(ref _startCount);
+
+    public int StopCount => Volatile.Read(ref _stopCount);
+
     public byte[] VirtualMicrophoneOutput =>
         _virtualMicrophone.SelectMany(static chunk => chunk).ToArray();
 
+    public byte[] MeetingSpeakerOutput =>
+        _meetingSpeaker.SelectMany(static chunk => chunk).ToArray();
+
     public Task FailClosedOrStopped => _failClosedOrStopped.Task;
+
+    public Task VirtualMicrophoneTranslated => _virtualMicrophoneTranslated.Task;
 
     public void EmitCaptured(
         AudioDirection direction,
@@ -87,6 +105,20 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         _virtualMicrophone.Clear();
     }
 
+    public void ClearMeetingSpeaker()
+    {
+        _meetingSpeaker.Clear();
+    }
+
+    public void RenderMeetingSpeaker(ReadOnlyMemory<byte> originalPcm16)
+    {
+        byte[] rendered = CurrentInboundRoute is InboundRoute.OriginalFailOpen
+            or InboundRoute.OriginalBypass
+            ? originalPcm16.ToArray()
+            : new byte[originalPcm16.Length];
+        _meetingSpeaker.Enqueue(rendered);
+    }
+
     public void RenderVirtualMicrophone(ReadOnlyMemory<byte> physicalPcm16)
     {
         byte[] rendered = CurrentOutboundRoute == OutboundRoute.OriginalBypass
@@ -99,11 +131,14 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         AudioEngineConfiguration configuration,
         CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _startCount);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _stopCount);
+        Volatile.Write(ref _inboundRoute, (int)InboundRoute.Stopped);
         Volatile.Write(ref _outboundRoute, (int)OutboundRoute.Stopped);
         _failClosedOrStopped.TrySetResult();
         return Task.CompletedTask;
@@ -142,6 +177,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         if (CurrentOutboundRoute == OutboundRoute.Translated)
         {
             _virtualMicrophone.Enqueue(copy);
+            _virtualMicrophoneTranslated.TrySetResult();
         }
 
         return ValueTask.CompletedTask;
@@ -151,6 +187,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         InboundRoute route,
         CancellationToken cancellationToken)
     {
+        Volatile.Write(ref _inboundRoute, (int)route);
         return ValueTask.CompletedTask;
     }
 

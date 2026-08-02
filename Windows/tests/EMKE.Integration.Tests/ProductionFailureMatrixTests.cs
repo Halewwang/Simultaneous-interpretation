@@ -41,7 +41,13 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
             Assert.AreEqual(OutboundRoute.Translated, observed.OutboundRoute);
             AssertSafe(observed.Error);
+            byte[] original = [1, 2, 3, 4];
+            audio.ClearMeetingSpeaker();
+            audio.RenderMeetingSpeaker(original);
+            CollectionAssert.AreEqual(original, audio.MeetingSpeakerOutput);
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+            Assert.AreEqual(1, audio.StartCount);
+            Assert.AreEqual(1, audio.StopCount);
             audit.RecordInboundFailOpen();
         }
 
@@ -74,7 +80,13 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
             Assert.AreEqual(InboundRoute.Translated, observed.InboundRoute);
             AssertSafe(observed.Error);
+            byte[] original = [5, 6, 7, 8];
+            audio.ClearVirtualMicrophone();
+            audio.RenderVirtualMicrophone(original);
+            Assert.IsTrue(audio.VirtualMicrophoneOutput.All(static sample => sample == 0));
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+            Assert.AreEqual(1, audio.StartCount);
+            Assert.AreEqual(1, audio.StopCount);
             audit.RecordOutboundFailClosed();
         }
 
@@ -114,7 +126,13 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual("translationSession.remoteError", observed.Error?.Code);
             Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
             AssertSafe(observed.Error);
+            byte[] original = [9, 10, 11, 12];
+            audio.ClearVirtualMicrophone();
+            audio.RenderVirtualMicrophone(original);
+            CollectionAssert.AreEqual(original, audio.VirtualMicrophoneOutput);
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+            Assert.AreEqual(1, audio.StartCount);
+            Assert.AreEqual(1, audio.StopCount);
             audit.RecordExplicitBypass();
         }
 
@@ -156,6 +174,10 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual("translationSocket.receiveFailed", disconnected.Error?.Code);
             Assert.AreEqual(RecoveryAction.Retry, disconnected.Error?.RecoveryAction);
             AssertSafe(disconnected.Error);
+            byte[] whileReconnecting = [17, 18, 19, 20];
+            audio.ClearVirtualMicrophone();
+            audio.RenderVirtualMicrophone(whileReconnecting);
+            Assert.IsTrue(audio.VirtualMicrophoneOutput.All(static sample => sample == 0));
             retryDelay.Release();
             AppSnapshot resumed = await recovered.WaitAsync(TimeSpan.FromSeconds(5))
                 .ConfigureAwait(false);
@@ -163,7 +185,15 @@ public sealed class ProductionFailureMatrixTests
             Assert.IsNull(resumed.Error);
             Assert.AreEqual(3, server.TotalConnectionCount);
             Assert.AreEqual(InboundRoute.Translated, resumed.InboundRoute);
+            byte[] translated = [13, 14, 15, 16];
+            audio.ClearVirtualMicrophone();
+            await server.SendAudioDeltaAsync(LanguageCode.En, translated).ConfigureAwait(false);
+            await audio.VirtualMicrophoneTranslated
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            CollectionAssert.AreEqual(translated, audio.VirtualMicrophoneOutput);
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+            Assert.AreEqual(1, audio.StartCount);
+            Assert.AreEqual(1, audio.StopCount);
             audit.RecordReconnectAfterHandshake();
         }
 
@@ -197,6 +227,8 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual(RuntimeState.Stopped, runtime.CurrentSnapshot.RuntimeState);
             Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
             Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
+            Assert.AreEqual(1, audio.StartCount);
+            Assert.AreEqual(1, audio.StopCount);
             audit.RecordShutdown();
         }
 
