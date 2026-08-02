@@ -328,7 +328,7 @@ jobs:
             throw "Audio evidence collector behavior tests failed."
           }
 
-      - name: Build unsigned driver submission
+      - name: Build unsigned driver package
         id: driver-submission
         shell: pwsh
         run: |
