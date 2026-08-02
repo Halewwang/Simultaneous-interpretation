@@ -160,6 +160,99 @@ public sealed class SetupExtractionDirectoryTests
         Assert.ThrowsExactly<IOException>(() => File.Delete(result.OutputPath));
     }
 
+    [TestMethod]
+    public void DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles()
+    {
+        using TemporaryDirectory temporary = new();
+        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        string rootPath = extraction.RootPath;
+
+        Assert.IsTrue(result.Succeeded);
+
+        extraction.Dispose();
+
+        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsFalse(Directory.Exists(rootPath));
+        Assert.IsTrue(extraction.CleanupState.Completed);
+        Assert.IsFalse(extraction.CleanupState.ResidualRetained);
+        Assert.IsNull(extraction.CleanupState.FailureCode);
+    }
+
+    [TestMethod]
+    public void DisposeLeavesUnexpectedChildAndReportsStructuredRecoveryState()
+    {
+        using TemporaryDirectory temporary = new();
+        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        string unexpectedPath = Path.Combine(extraction.RootPath, "unexpected.bin");
+        File.WriteAllText(unexpectedPath, "do not delete");
+
+        extraction.Dispose();
+
+        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsTrue(File.Exists(unexpectedPath));
+        Assert.IsTrue(Directory.Exists(extraction.RootPath));
+        Assert.IsFalse(extraction.CleanupState.Completed);
+        Assert.IsTrue(extraction.CleanupState.ResidualRetained);
+        Assert.AreEqual(
+            "unexpectedExtractionEntriesRetained",
+            extraction.CleanupState.FailureCode);
+    }
+
+    [TestMethod]
+    public void HeldPayloadHandleRejectsReplacementAndCleanupNeverDeletesReplacementSource()
+    {
+        using TemporaryDirectory temporary = new();
+        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        string replacementPath = Path.Combine(temporary.Path, "replacement.bin");
+        File.WriteAllText(replacementPath, "replacement");
+
+        Assert.ThrowsExactly<IOException>(() =>
+            File.Move(replacementPath, result.OutputPath, overwrite: true));
+
+        extraction.Dispose();
+
+        Assert.AreEqual("replacement", File.ReadAllText(replacementPath));
+        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsTrue(extraction.CleanupState.Completed);
+    }
+
+    [TestMethod]
+    public void HeldRootHandleRejectsReplacementAndCleanupNeverDeletesReplacementRoot()
+    {
+        using TemporaryDirectory temporary = new();
+        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        string movedRootPath = extraction.RootPath + "-moved";
+        string replacementRootPath = Path.Combine(temporary.Path, "replacement-root");
+        _ = Directory.CreateDirectory(replacementRootPath);
+        string markerPath = Path.Combine(replacementRootPath, "marker.txt");
+        File.WriteAllText(markerPath, "replacement");
+
+        Assert.ThrowsExactly<IOException>(() =>
+            Directory.Move(extraction.RootPath, movedRootPath));
+
+        extraction.Dispose();
+
+        Assert.AreEqual("replacement", File.ReadAllText(markerPath));
+        Assert.IsFalse(Directory.Exists(extraction.RootPath));
+        Assert.IsTrue(extraction.CleanupState.Completed);
+    }
+
     private static SetupPayload ExpectedPayload() => new(
         "payload", "payload.bin", 7,
         "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426955f9b852d5a935e5",
