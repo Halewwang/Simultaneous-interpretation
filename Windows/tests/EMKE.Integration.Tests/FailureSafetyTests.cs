@@ -33,7 +33,7 @@ public sealed class FailureSafetyTests
             {
                 failures.Add(
                     $"seed={seed} injection={injection} failed: "
-                    + $"{exception.GetType().Name}: {exception.Message}");
+                    + exception.GetType().Name);
             }
         }
 

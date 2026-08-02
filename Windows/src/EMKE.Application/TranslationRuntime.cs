@@ -2371,7 +2371,6 @@ public sealed class TranslationRuntime :
                 "translationRuntime.failure",
                 new Dictionary<string, string>
                 {
-                    ["category"] = error.Category.ToString(),
                     ["code"] = error.Code,
                 });
         }
