@@ -42,6 +42,8 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     private readonly ConcurrentDictionary<LanguageCode, Connection> _connections = new();
     private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource<Connection>>
         _connectionWaiters = new();
+    private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource>
+        _disconnectWaiters = new();
     private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioMessage>>
         _clientAudio = new();
     private readonly ConcurrentDictionary<LanguageCode, ConcurrentQueue<string>>
@@ -137,13 +139,24 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     {
         Connection connection = await WaitForConnectionAsync(targetLanguage)
             .ConfigureAwait(false);
+        TaskCompletionSource disconnected = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_disconnectWaiters.TryAdd(targetLanguage, disconnected))
+        {
+            throw new InvalidOperationException(
+                $"A disconnect is already pending for {targetLanguage}.");
+        }
+
         connection.Abort();
-        await WaitUntilAsync(
-            () => !_connections.TryGetValue(
-                    targetLanguage,
-                    out Connection? active)
-                || !ReferenceEquals(active, connection))
-            .ConfigureAwait(false);
+        try
+        {
+            await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _disconnectWaiters.TryRemove(targetLanguage, out _);
+        }
     }
 
     public static async Task<MockTranslationServer> StartAsync(
@@ -477,6 +490,12 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 new KeyValuePair<LanguageCode, Connection>(
                     targetLanguage,
                     connection));
+            if (_disconnectWaiters.TryRemove(
+                    targetLanguage,
+                    out TaskCompletionSource? disconnected))
+            {
+                disconnected.TrySetResult();
+            }
         }
     }
 
