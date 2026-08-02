@@ -73,6 +73,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Windows portable contract tests failed."
           }
+          pwsh -NoProfile -File Windows/tools/tests/internal-msix-lifecycle.behavior.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Internal MSIX lifecycle behavior tests failed."
+          }
           dotnet restore Windows/EMKE.Windows.slnx --locked-mode
           if ($LASTEXITCODE -ne 0) {
             throw "Windows locked restore failed."

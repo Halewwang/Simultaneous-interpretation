@@ -7,12 +7,39 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = [IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot ".." ".." "..")
 )
-$installScript = Join-Path `
+$installTemplate = Join-Path `
     $repositoryRoot `
     "Windows/packaging/App/Install-EMKE-Translation-Internal.ps1"
-$uninstallScript = Join-Path `
+$uninstallTemplate = Join-Path `
     $repositoryRoot `
     "Windows/packaging/App/Uninstall-EMKE-Translation-Internal.ps1"
+$bundleBuilder = Join-Path `
+    $repositoryRoot `
+    "Windows/tools/build-internal-msix-bundle.ps1"
+$versionResolver = Join-Path `
+    $repositoryRoot `
+    "Windows/tools/resolve-version.ps1"
+$releaseMetadata = & $versionResolver
+if (
+    $null -eq $releaseMetadata -or
+    $releaseMetadata.Channel -cne "internal" -or
+    $releaseMetadata.PackageIdentity -cne "EMKE.Translation.Internal"
+) {
+    throw "Lifecycle behavior release metadata resolution failed."
+}
+$script:releasePackageVersion = [string]$releaseMetadata.PackageVersion
+$script:releaseArchitecture = [string]$releaseMetadata.Architecture
+$script:releasePackageBaseName =
+    "EMKE-Translation-Windows-$($releaseMetadata.ProductVersion)-" +
+    "internal-$($script:releaseArchitecture)"
+$script:releaseMsixFileName = "$($script:releasePackageBaseName).msix"
+$script:releaseCertificateFileName =
+    "$($script:releasePackageBaseName).cer"
+$script:releasePackageFullName =
+    "EMKE.Translation.Internal_$($script:releasePackageVersion)_" +
+    "$($script:releaseArchitecture)__test"
+$installScript = $null
+$uninstallScript = $null
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ("emke-internal-msix-lifecycle-" + [guid]::NewGuid().ToString("N"))
@@ -231,13 +258,11 @@ function Reset-InstallFunctions {
     Import-LifecycleFunctions -Path $installScript
     $script:PackageName = "EMKE.Translation.Internal"
     $script:ExpectedPublisher = "CN=EMKE Internal Test"
-    $script:ExpectedVersion = "0.1.0.0"
-    $script:ExpectedArchitecture = "x64"
+    $script:ExpectedVersion = $script:releasePackageVersion
+    $script:ExpectedArchitecture = $script:releaseArchitecture
     $script:ExpectedCertificateSubject = "CN=EMKE Internal Test"
-    $script:PackageFileName =
-        "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-    $script:CertificateFileName =
-        "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+    $script:PackageFileName = $script:releaseMsixFileName
+    $script:CertificateFileName = $script:releaseCertificateFileName
     $script:InstallScriptFileName =
         "Install-EMKE-Translation-Internal.ps1"
     $script:UninstallScriptFileName =
@@ -248,13 +273,11 @@ function Reset-UninstallFunctions {
     Import-LifecycleFunctions -Path $uninstallScript
     $script:PackageName = "EMKE.Translation.Internal"
     $script:ExpectedPublisher = "CN=EMKE Internal Test"
-    $script:ExpectedVersion = "0.1.0.0"
-    $script:ExpectedArchitecture = "x64"
+    $script:ExpectedVersion = $script:releasePackageVersion
+    $script:ExpectedArchitecture = $script:releaseArchitecture
     $script:ExpectedCertificateSubject = "CN=EMKE Internal Test"
-    $script:PackageFileName =
-        "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
-    $script:CertificateFileName =
-        "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+    $script:PackageFileName = $script:releaseMsixFileName
+    $script:CertificateFileName = $script:releaseCertificateFileName
     $script:InstallScriptFileName =
         "Install-EMKE-Translation-Internal.ps1"
     $script:UninstallScriptFileName =
@@ -347,9 +370,9 @@ function Set-SafeInstallOrchestratorDefaults {
         [pscustomobject]@{
             Name = "EMKE.Translation.Internal"
             Publisher = "CN=EMKE Internal Test"
-            Version = "0.1.0.0"
-            Architecture = "x64"
-            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+            Version = $script:releasePackageVersion
+            Architecture = $script:releaseArchitecture
+            PackageFullName = $script:releasePackageFullName
         }
     }
     Set-TestFunction -Name Assert-InstalledInternalPackage -Body {
@@ -357,9 +380,9 @@ function Set-SafeInstallOrchestratorDefaults {
         [pscustomobject]@{
             Name = "EMKE.Translation.Internal"
             Publisher = "CN=EMKE Internal Test"
-            Version = "0.1.0.0"
-            Architecture = "x64"
-            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+            Version = $script:releasePackageVersion
+            Architecture = $script:releaseArchitecture
+            PackageFullName = $script:releasePackageFullName
         }
     }
     Set-TestFunction -Name Write-CertificateInstallRecord -Body {
@@ -469,9 +492,9 @@ function Set-SafeUninstallOrchestratorDefaults {
         [pscustomobject]@{
             Name = "EMKE.Translation.Internal"
             Publisher = "CN=EMKE Internal Test"
-            Version = "0.1.0.0"
-            Architecture = "x64"
-            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+            Version = $script:releasePackageVersion
+            Architecture = $script:releaseArchitecture
+            PackageFullName = $script:releasePackageFullName
         }
     }
     Set-TestFunction -Name Get-OptionalInstalledInternalPackage -Body {
@@ -479,9 +502,9 @@ function Set-SafeUninstallOrchestratorDefaults {
         [pscustomobject]@{
             Name = "EMKE.Translation.Internal"
             Publisher = "CN=EMKE Internal Test"
-            Version = "0.1.0.0"
-            Architecture = "x64"
-            PackageFullName = "EMKE.Translation.Internal_0.1.0.0_x64__test"
+            Version = $script:releasePackageVersion
+            Architecture = $script:releaseArchitecture
+            PackageFullName = $script:releasePackageFullName
         }
     }
     Set-TestFunction -Name Invoke-RemoveExactAppxPackage -Body {
@@ -507,16 +530,83 @@ function Set-SafeUninstallOrchestratorDefaults {
 [IO.Directory]::CreateDirectory($testRoot) | Out-Null
 
 try {
+    $renderInput = Join-Path $testRoot "render-input"
+    $renderOutput = Join-Path $testRoot "render-output"
+    [IO.Directory]::CreateDirectory($renderInput) | Out-Null
+    $renderPackage = Join-Path `
+        $renderInput `
+        $script:releaseMsixFileName
+    $renderCertificate = Join-Path `
+        $renderInput `
+        $script:releaseCertificateFileName
+    [IO.File]::WriteAllBytes($renderPackage, [byte[]](7, 11, 13, 17))
+    New-TestCertificate -Path $renderCertificate
+    $renderCertificateObject =
+        [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $renderCertificate
+        )
+    try {
+        $renderThumbprint =
+            $renderCertificateObject.Thumbprint.ToUpperInvariant()
+    } finally {
+        $renderCertificateObject.Dispose()
+    }
+    & $bundleBuilder `
+        -PackagePath $renderPackage `
+        -CertificatePath $renderCertificate `
+        -InstallScriptPath $installTemplate `
+        -UninstallScriptPath $uninstallTemplate `
+        -AllowedOutputRoot $testRoot `
+        -OutputDirectory $renderOutput `
+        -SourceCommit ("A" * 40) `
+        -WorkflowRunId "123456789" `
+        -PackageIdentity "EMKE.Translation.Internal" `
+        -CertificateThumbprint $renderThumbprint | Out-Null
+    $installScript = Join-Path `
+        $renderOutput `
+        "Install-EMKE-Translation-Internal.ps1"
+    $uninstallScript = Join-Path `
+        $renderOutput `
+        "Uninstall-EMKE-Translation-Internal.ps1"
+
+    Invoke-Case "bundle renders current lifecycle metadata before behavior tests" {
+        foreach ($path in @($installScript, $uninstallScript)) {
+            $source = [IO.File]::ReadAllText($path)
+            Assert-True `
+                ($source.Contains(
+                    "ExpectedVersion = `"$($script:releasePackageVersion)`""
+                )) `
+                "Rendered lifecycle version differs."
+            Assert-True `
+                ($source.Contains(
+                    "ExpectedArchitecture = `"$($script:releaseArchitecture)`""
+                )) `
+                "Rendered lifecycle architecture differs."
+            Assert-True `
+                ($source.Contains($script:releaseMsixFileName)) `
+                "Rendered lifecycle package name differs."
+            Assert-True `
+                ($source.Contains($script:releaseCertificateFileName)) `
+                "Rendered lifecycle certificate name differs."
+            Assert-True `
+                (-not [regex]::IsMatch(
+                    $source,
+                    "__EMKE_[A-Za-z0-9_]+__"
+                )) `
+                "Rendered lifecycle contains an unresolved placeholder."
+        }
+    }
+
     Invoke-Case "absolute local inputs and SHA256SUMS verify before mutation" {
         Reset-InstallFunctions
         $bundle = Join-Path $testRoot "bundle"
         [IO.Directory]::CreateDirectory($bundle) | Out-Null
         $package = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            $script:releaseMsixFileName
         $certificate = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            $script:releaseCertificateFileName
         $checksums = Join-Path $bundle "SHA256SUMS.txt"
         [IO.File]::WriteAllBytes($package, [byte[]](1, 2, 3, 4))
         New-TestCertificate -Path $certificate
@@ -669,10 +759,10 @@ try {
         [IO.Directory]::CreateDirectory($bundle) | Out-Null
         $package = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            $script:releaseMsixFileName
         $certificate = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            $script:releaseCertificateFileName
         $install = Join-Path `
             $bundle `
             "Install-EMKE-Translation-Internal.ps1"
@@ -733,10 +823,10 @@ try {
         [IO.Directory]::CreateDirectory($bundle) | Out-Null
         $package = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+            $script:releaseMsixFileName
         $certificate = Join-Path `
             $bundle `
-            "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+            $script:releaseCertificateFileName
         $install = Join-Path `
             $bundle `
             "Install-EMKE-Translation-Internal.ps1"
@@ -1092,10 +1182,9 @@ try {
                 [pscustomobject]@{
                     Name = "EMKE.Translation.Internal"
                     Publisher = "CN=EMKE Internal Test"
-                    Version = "0.1.0.0"
-                    Architecture = "x64"
-                    PackageFullName =
-                        "EMKE.Translation.Internal_0.1.0.0_x64__test"
+                    Version = $script:releasePackageVersion
+                    Architecture = $script:releaseArchitecture
+                    PackageFullName = $script:releasePackageFullName
                 }
             }
             if ($failureStage -ceq "Add") {
@@ -1109,8 +1198,8 @@ try {
                         [pscustomobject]@{
                             Name = "EMKE.Translation.Internal"
                             Publisher = "CN=Other"
-                            Version = "0.1.0.0"
-                            Architecture = "x64"
+                            Version = $script:releasePackageVersion
+                            Architecture = $script:releaseArchitecture
                             PackageFullName =
                                 "EMKE.Translation.Internal_bad__test"
                         }
@@ -1177,8 +1266,8 @@ try {
             [pscustomobject]@{
                 Name = "EMKE.Translation.Internal"
                 Publisher = "CN=Other"
-                Version = "0.1.0.0"
-                Architecture = "x64"
+                Version = $script:releasePackageVersion
+                Architecture = $script:releaseArchitecture
                 PackageFullName = "EMKE.Translation.Internal_bad__test"
             }
         }
@@ -1266,10 +1355,9 @@ try {
             @([pscustomobject]@{
                 Name = $Name
                 Publisher = "CN=EMKE Internal Test"
-                Version = [version]"0.1.0.0"
-                Architecture = "X64"
-                PackageFullName =
-                    "EMKE.Translation.Internal_0.1.0.0_x64__test"
+                Version = [version]$script:releasePackageVersion
+                Architecture = $script:releaseArchitecture.ToUpperInvariant()
+                PackageFullName = $script:releasePackageFullName
             })
         }
         $package = Assert-InstalledInternalPackage
@@ -1283,10 +1371,9 @@ try {
             @([pscustomobject]@{
                 Name = $Name
                 Publisher = "CN=Other"
-                Version = [version]"0.1.0.0"
-                Architecture = "X64"
-                PackageFullName =
-                    "EMKE.Translation.Internal_0.1.0.0_x64__test"
+                Version = [version]$script:releasePackageVersion
+                Architecture = $script:releaseArchitecture.ToUpperInvariant()
+                PackageFullName = $script:releasePackageFullName
             })
         }
         Assert-Throws `
@@ -1363,7 +1450,7 @@ try {
             ($script:uninstallEvents -join "|") `
             (
                 "parent|query-package|" +
-                "remove-appx:EMKE.Translation.Internal_0.1.0.0_x64__test|" +
+                "remove-appx:$($script:releasePackageFullName)|" +
                 "verify-absent"
             ) `
             "Default uninstall crossed the certificate boundary."
@@ -1403,7 +1490,7 @@ try {
             ($script:uninstallEvents -join "|") `
             (
                 "parent|inventory|certificate|read-record|query-package|" +
-                "remove-appx:EMKE.Translation.Internal_0.1.0.0_x64__test|" +
+                "remove-appx:$($script:releasePackageFullName)|" +
                 "verify-absent|inventory-unchanged|" +
                 "elevate-remove|remove-record"
             ) `
@@ -1501,10 +1588,9 @@ try {
             @([pscustomobject]@{
                 Name = "EMKE.Translation.Internal"
                 Publisher = "CN=EMKE Internal Test"
-                Version = [version]"0.1.0.0"
-                Architecture = "X64"
-                PackageFullName =
-                    "EMKE.Translation.Internal_0.1.0.0_x64__test"
+                Version = [version]$script:releasePackageVersion
+                Architecture = $script:releaseArchitecture.ToUpperInvariant()
+                PackageFullName = $script:releasePackageFullName
             })
         }
         $package = Get-ExactInstalledInternalPackage
@@ -1516,7 +1602,7 @@ try {
             -PackageFullName $package.PackageFullName
         Assert-Equal `
             ($script:removeCalls -join "|") `
-            "EMKE.Translation.Internal_0.1.0.0_x64__test" `
+            $script:releasePackageFullName `
             "Remove-AppxPackage target differs."
 
         Set-TestFunction -Name Get-AppxPackage -Body {
