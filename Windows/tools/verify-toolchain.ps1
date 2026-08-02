@@ -4,6 +4,61 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Test-TargetOsEligible {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
+        [Parameter(Mandatory)]
+        [int]$WindowsBuild,
+
+        [Parameter(Mandatory)]
+        [string]$HostArchitecture,
+
+        [Parameter(Mandatory)]
+        [int]$ProductType
+    )
+
+    return (
+        $ReleaseMetadata.Architecture -ceq "x64" -and
+        $HostArchitecture -ieq "x64" -and
+        $ProductType -eq 1 -and
+        $WindowsBuild -ge [int]$ReleaseMetadata.MinimumWindowsBuild
+    )
+}
+
+function Assert-TargetOsRequirement {
+    param(
+        [switch]$RequireTargetOs,
+
+        [Parameter(Mandatory)]
+        [bool]$TargetOsEligible,
+
+        [Parameter(Mandatory)]
+        [int]$ProductType,
+
+        [Parameter(Mandatory)]
+        [int]$WindowsBuild,
+
+        [Parameter(Mandatory)]
+        [int]$MinimumWindowsBuild
+    )
+
+    if (-not $RequireTargetOs) {
+        return
+    }
+    if ($ProductType -ne 1) {
+        throw "Only Windows workstation hosts are supported."
+    }
+    if (-not $TargetOsEligible) {
+        throw (
+            "Windows build $WindowsBuild is below required build " +
+            "$MinimumWindowsBuild"
+        )
+    }
+}
+
 $resolver = Join-Path $PSScriptRoot "resolve-version.ps1"
 $resolved = @(& $resolver)
 if ($resolved.Count -ne 1) {
@@ -29,16 +84,17 @@ if ($release.Architecture -cne "x64" -or
     $hostArchitecture -ine "x64") {
     throw "Only an x64 release on an x64 host is supported."
 }
-if ($productType -ne 1) {
-    throw "Only Windows workstation hosts are supported."
-}
-$targetOsEligible = $build -ge [int]$release.MinimumWindowsBuild
-if ($RequireTargetOs -and -not $targetOsEligible) {
-    throw (
-        "Windows build $build is below required build " +
-        "$($release.MinimumWindowsBuild)"
-    )
-}
+$targetOsEligible = Test-TargetOsEligible `
+    -ReleaseMetadata $release `
+    -WindowsBuild $build `
+    -HostArchitecture $hostArchitecture `
+    -ProductType $productType
+Assert-TargetOsRequirement `
+    -RequireTargetOs:$RequireTargetOs `
+    -TargetOsEligible $targetOsEligible `
+    -ProductType $productType `
+    -WindowsBuild $build `
+    -MinimumWindowsBuild $release.MinimumWindowsBuild
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }

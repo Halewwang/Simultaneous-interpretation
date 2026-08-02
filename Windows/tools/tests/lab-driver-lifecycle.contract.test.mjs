@@ -109,6 +109,16 @@ test("toolchain resolves one trusted workstation x64 release boundary", async ()
   assert.match(source, /MinimumWindowsBuild/);
   assert.match(source, /Architecture/);
   assert.match(source, /ProductType/);
+  assert.match(source, /function\s+Test-TargetOsEligible/);
+  assert.match(source, /function\s+Assert-TargetOsRequirement/);
+  assert.match(
+    source,
+    /if\s*\(\s*-not\s+\$RequireTargetOs\s*\)\s*{[^]*?return[^]*?ProductType\s+-ne\s+1/,
+  );
+  assert.match(
+    source,
+    /targetOsEligible\s*=\s*Test-TargetOsEligible[^]*ProductType\s+\$productType/,
+  );
   assert.doesNotMatch(source, /\b26200\b|\b1\.0\.0\.1\b/);
 });
 
