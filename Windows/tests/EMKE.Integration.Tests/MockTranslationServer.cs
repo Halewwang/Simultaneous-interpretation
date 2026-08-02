@@ -266,10 +266,6 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     {
         await _application.StopAsync().ConfigureAwait(false);
         await _application.DisposeAsync().ConfigureAwait(false);
-        foreach (Connection connection in _connections.Values)
-        {
-            connection.Dispose();
-        }
     }
 
     private Task<Connection> WaitForConnectionAsync(LanguageCode targetLanguage)
@@ -367,7 +363,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
 
         using WebSocket socket = await context.WebSockets.AcceptWebSocketAsync()
             .ConfigureAwait(false);
-        using Connection connection = new(socket, context.Abort);
+        Connection connection = new(socket, context.Abort);
         if (Scenario == MockTranslationScenario.BinaryEvent)
         {
             await connection.SendBinaryAsync(
@@ -614,18 +610,25 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         }
     }
 
-    private sealed class Connection(
-        WebSocket socket,
-        Action abortConnection) : IDisposable
+    private sealed class Connection
     {
-        private readonly SemaphoreSlim _sendGate = new(1, 1);
+        private readonly WebSocket _socket;
+        private readonly Action _abortConnection;
+        private readonly Channel<byte> _sendGate = Channel.CreateBounded<byte>(1);
+
+        public Connection(WebSocket socket, Action abortConnection)
+        {
+            _socket = socket;
+            _abortConnection = abortConnection;
+            _ = _sendGate.Writer.TryWrite(0);
+        }
 
         public async Task SendTextAsync(ReadOnlyMemory<byte> payload)
         {
-            await _sendGate.WaitAsync().ConfigureAwait(false);
+            _ = await _sendGate.Reader.ReadAsync().ConfigureAwait(false);
             try
             {
-                await socket.SendAsync(
+                await _socket.SendAsync(
                     payload,
                     WebSocketMessageType.Text,
                     endOfMessage: true,
@@ -633,7 +636,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             }
             finally
             {
-                _sendGate.Release();
+                _ = _sendGate.Writer.TryWrite(0);
             }
         }
 
@@ -641,15 +644,15 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             ReadOnlyMemory<byte> payload)
         {
             int split = Math.Max(1, payload.Length / 2);
-            await _sendGate.WaitAsync().ConfigureAwait(false);
+            _ = await _sendGate.Reader.ReadAsync().ConfigureAwait(false);
             try
             {
-                await socket.SendAsync(
+                await _socket.SendAsync(
                     payload[..split],
                     WebSocketMessageType.Text,
                     endOfMessage: false,
                     CancellationToken.None).ConfigureAwait(false);
-                await socket.SendAsync(
+                await _socket.SendAsync(
                     payload[split..],
                     WebSocketMessageType.Text,
                     endOfMessage: true,
@@ -657,16 +660,16 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             }
             finally
             {
-                _sendGate.Release();
+                _ = _sendGate.Writer.TryWrite(0);
             }
         }
 
         public async Task SendBinaryAsync(ReadOnlyMemory<byte> payload)
         {
-            await _sendGate.WaitAsync().ConfigureAwait(false);
+            _ = await _sendGate.Reader.ReadAsync().ConfigureAwait(false);
             try
             {
-                await socket.SendAsync(
+                await _socket.SendAsync(
                     payload,
                     WebSocketMessageType.Binary,
                     endOfMessage: true,
@@ -674,19 +677,13 @@ internal sealed class MockTranslationServer : IAsyncDisposable
             }
             finally
             {
-                _sendGate.Release();
+                _ = _sendGate.Writer.TryWrite(0);
             }
-        }
-
-        public void Dispose()
-        {
-            // A client can close as the last server send completes. Keep the
-            // managed gate alive so that sender's finally block can release it.
         }
 
         public void Abort()
         {
-            abortConnection();
+            _abortConnection();
         }
     }
 
