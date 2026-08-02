@@ -190,6 +190,20 @@ public sealed class TranslationSocketTests
     }
 
     [TestMethod]
+    public void AuthorizationConfigurationRejectsEmptyAndLineBreakSecretsBeforeAdapterInjection()
+    {
+        FakeClientWebSocket adapter = new();
+        TranslationSocket socket = new(adapter, receiveLimit: 128);
+
+        Assert.ThrowsExactly<ArgumentException>(
+            () => socket.ConfigureAuthorizationHeader(ReadOnlySpan<char>.Empty));
+        Assert.ThrowsExactly<ArgumentException>(
+            () => socket.ConfigureAuthorizationHeader("line\r\nbreak"));
+
+        Assert.AreEqual(0, adapter.HeaderSetCount);
+    }
+
+    [TestMethod]
     public async Task SendAndReceiveCancellationReturnStableErrors()
     {
         FakeClientWebSocket sendAdapter = new()
@@ -269,6 +283,13 @@ public sealed class TranslationSocketTests
         internal Memory<byte> ReceiveBuffer { get; private set; }
 
         internal int LastCompletedMessageBytes { get; private set; }
+
+        internal int HeaderSetCount { get; private set; }
+
+        public void SetRequestHeader(string name, string value)
+        {
+            HeaderSetCount++;
+        }
 
         public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
