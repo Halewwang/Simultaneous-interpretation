@@ -42,7 +42,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     private readonly ConcurrentDictionary<LanguageCode, Connection> _connections = new();
     private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource<Connection>>
         _connectionWaiters = new();
-    private readonly ConcurrentDictionary<LanguageCode, TaskCompletionSource>
+    private readonly ConcurrentDictionary<LanguageCode, DisconnectWaiter>
         _disconnectWaiters = new();
     private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioMessage>>
         _clientAudio = new();
@@ -137,25 +137,41 @@ internal sealed class MockTranslationServer : IAsyncDisposable
 
     public async Task DisconnectAsync(LanguageCode targetLanguage)
     {
-        Connection connection = await WaitForConnectionAsync(targetLanguage)
-            .ConfigureAwait(false);
-        TaskCompletionSource disconnected = new(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_disconnectWaiters.TryAdd(targetLanguage, disconnected))
+        while (true)
         {
-            throw new InvalidOperationException(
-                $"A disconnect is already pending for {targetLanguage}.");
-        }
-
-        connection.Abort();
-        try
-        {
-            await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(5))
+            Connection connection = await WaitForConnectionAsync(targetLanguage)
                 .ConfigureAwait(false);
-        }
-        finally
-        {
-            _disconnectWaiters.TryRemove(targetLanguage, out _);
+            DisconnectWaiter waiter = new(connection);
+            if (!_disconnectWaiters.TryAdd(targetLanguage, waiter))
+            {
+                throw new InvalidOperationException(
+                    $"A disconnect is already pending for {targetLanguage}.");
+            }
+
+            if (!_connections.TryGetValue(targetLanguage, out Connection? active)
+                || !ReferenceEquals(active, connection))
+            {
+                _disconnectWaiters.TryRemove(
+                    new KeyValuePair<LanguageCode, DisconnectWaiter>(
+                        targetLanguage,
+                        waiter));
+                continue;
+            }
+
+            connection.Abort();
+            try
+            {
+                await waiter.Completion.Task.WaitAsync(TimeSpan.FromSeconds(5))
+                    .ConfigureAwait(false);
+                return;
+            }
+            finally
+            {
+                _disconnectWaiters.TryRemove(
+                    new KeyValuePair<LanguageCode, DisconnectWaiter>(
+                        targetLanguage,
+                        waiter));
+            }
         }
     }
 
@@ -490,11 +506,16 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 new KeyValuePair<LanguageCode, Connection>(
                     targetLanguage,
                     connection));
-            if (_disconnectWaiters.TryRemove(
+            if (_disconnectWaiters.TryGetValue(
                     targetLanguage,
-                    out TaskCompletionSource? disconnected))
+                    out DisconnectWaiter? waiter)
+                && ReferenceEquals(waiter.Connection, connection)
+                && _disconnectWaiters.TryRemove(
+                    new KeyValuePair<LanguageCode, DisconnectWaiter>(
+                        targetLanguage,
+                        waiter)))
             {
-                disconnected.TrySetResult();
+                waiter.Completion.TrySetResult();
             }
         }
     }
@@ -667,6 +688,14 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         {
             abortConnection();
         }
+    }
+
+    private sealed class DisconnectWaiter(Connection connection)
+    {
+        public Connection Connection { get; } = connection;
+
+        public TaskCompletionSource Completion { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
 
