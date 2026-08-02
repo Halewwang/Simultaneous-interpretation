@@ -143,7 +143,7 @@ public sealed class AppSnapshotTests
         RuntimeError error = new(
             ErrorCategory.Network,
             "network.unavailable",
-            new Dictionary<string, string> { ["retry"] = "available" },
+            new Dictionary<string, string>(),
             RecoveryAction.Retry);
 
         AppSnapshot next = source.Next(

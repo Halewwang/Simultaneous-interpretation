@@ -382,10 +382,7 @@ public sealed class AppPresentationMapperTests
         RuntimeError error = new(
             category,
             "future.stableCode",
-            new Dictionary<string, string>
-            {
-                ["detail"] = "not-for-display",
-            },
+            new Dictionary<string, string>(),
             RecoveryAction.Retry);
         AppPresentation presentation = Mapper.Map(
             Snapshot(RuntimeState.Failed, error: error),
