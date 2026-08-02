@@ -62,11 +62,20 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
 {
     private const int ErrorAlreadyExists = 183;
     private const int MaximumCreateAttempts = 8;
+    private readonly List<SetupExtractionResult> _verificationLeases = [];
+    private readonly string _rootIdentityPath;
+    private readonly FileStream _rootIdentityLease;
     private bool _disposed;
 
     private SetupExtractionDirectory(string rootPath)
     {
         RootPath = rootPath;
+        _rootIdentityPath = Path.Combine(rootPath, ".emke-setup-root.lock");
+        _rootIdentityLease = new FileStream(
+            _rootIdentityPath,
+            FileMode.CreateNew,
+            FileAccess.ReadWrite,
+            FileShare.Read);
     }
 
     public string RootPath { get; }
@@ -92,6 +101,21 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
         }
 
         throw new SetupExtractionException("extractionRootAlreadyExists");
+    }
+
+    public static SetupExtractionDirectory CreateForCurrentUser(
+        Version productVersion)
+    {
+        string localApplicationData = Environment.GetFolderPath(
+            Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localApplicationData))
+        {
+            throw new SetupExtractionException("setupOwnedBaseUnavailable");
+        }
+
+        return Create(
+            Path.Combine(localApplicationData, "EMKE", "Translation", "Setup"),
+            productVersion);
     }
 
     // This deterministic entrypoint is intentionally internal and only visible to
@@ -156,9 +180,10 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
 
             string hash;
             long length;
+            FileStream lease;
             try
             {
-                (length, hash) = CopyAndHash(source, outputPath);
+                (length, hash, lease) = CopyAndHash(source, outputPath, expectedPayload.Length);
             }
             catch (IOException) when (File.Exists(outputPath))
             {
@@ -167,17 +192,18 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
 
             if (length != expectedPayload.Length)
             {
+                lease.Dispose();
                 DeleteCreatedOutput(outputPath);
                 return SetupExtractionResult.Rejected("tamperedPayloadLength");
             }
             if (!string.Equals(hash, expectedPayload.Sha256, StringComparison.Ordinal))
             {
+                lease.Dispose();
                 DeleteCreatedOutput(outputPath);
                 return SetupExtractionResult.Rejected("tamperedPayloadHash");
             }
 
             File.SetAttributes(outputPath, FileAttributes.ReadOnly);
-            FileStream lease = OpenVerificationLease(outputPath);
             if (!IsFinalResolvedPathContainedByRoot(lease, RootPath))
             {
                 lease.Dispose();
@@ -185,21 +211,47 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
                 return SetupExtractionResult.Rejected("unsafeOutputPath");
             }
 
-            return SetupExtractionResult.Success(outputPath, lease);
+            SetupExtractionResult result = SetupExtractionResult.Success(outputPath, lease);
+            _verificationLeases.Add(result);
+            return result;
         }
         catch (SetupExtractionException exception)
         {
+            DeleteCreatedOutput(outputPath);
             return SetupExtractionResult.Rejected(exception.FailureCode);
         }
         catch (IOException)
         {
+            DeleteCreatedOutput(outputPath);
             return SetupExtractionResult.Rejected("payloadWriteFailed");
         }
     }
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
+        foreach (SetupExtractionResult lease in _verificationLeases.AsEnumerable().Reverse())
+        {
+            lease.Dispose();
+            DeleteCreatedOutput(lease.OutputPath);
+        }
+
+        _rootIdentityLease.Dispose();
+        DeleteCreatedOutput(_rootIdentityPath);
+        try
+        {
+            EnsureNoReparsePointAtAnyExistingComponent(RootPath);
+            Directory.Delete(RootPath, recursive: false);
+        }
+        catch (IOException)
+        {
+            // A non-empty or externally changed root is deliberately left intact.
+        }
     }
 
     private static string EnsureSafeBase(string setupOwnedBase)
@@ -235,39 +287,45 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
         return error == ErrorAlreadyExists ? false : throw new IOException();
     }
 
-    private static (long length, string hash) CopyAndHash(
+    private static (long length, string hash, FileStream lease) CopyAndHash(
         Stream source,
-        string outputPath)
+        string outputPath,
+        long maximumLength)
     {
-        using FileStream destination = new(
+        FileStream destination = new(
             outputPath,
             FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
+            FileAccess.ReadWrite,
+            FileShare.Read,
             bufferSize: 81920,
             FileOptions.SequentialScan);
-        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        byte[] buffer = new byte[81920];
-        long length = 0;
-        int read;
-        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+        try
         {
-            destination.Write(buffer, 0, read);
-            hash.AppendData(buffer, 0, read);
-            length = checked(length + read);
+            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[81920];
+            long length = 0;
+            int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (read > maximumLength - length)
+                {
+                    throw new SetupExtractionException("tamperedPayloadLength");
+                }
+
+                destination.Write(buffer, 0, read);
+                hash.AppendData(buffer, 0, read);
+                length += read;
+            }
+
+            destination.Flush(flushToDisk: true);
+            return (length, Convert.ToHexStringLower(hash.GetHashAndReset()), destination);
         }
-
-        destination.Flush(flushToDisk: true);
-        return (length, Convert.ToHexStringLower(hash.GetHashAndReset()));
+        catch
+        {
+            destination.Dispose();
+            throw;
+        }
     }
-
-    private static FileStream OpenVerificationLease(string path) => new(
-        path,
-        FileMode.Open,
-        FileAccess.Read,
-        FileShare.Read,
-        bufferSize: 1,
-        FileOptions.SequentialScan);
 
     private static void EnsureNoReparsePointAtAnyExistingComponent(string fullPath)
     {
@@ -366,8 +424,15 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
             return;
         }
 
-        File.SetAttributes(outputPath, FileAttributes.Normal);
-        File.Delete(outputPath);
+        try
+        {
+            File.SetAttributes(outputPath, FileAttributes.Normal);
+            File.Delete(outputPath);
+        }
+        catch (IOException)
+        {
+            // Cleanup is best-effort and never expands to a parent directory.
+        }
     }
 
     private void ThrowIfDisposed()
@@ -375,12 +440,19 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [LibraryImport(
+        "kernel32.dll",
+        EntryPoint = "CreateDirectoryW",
+        SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CreateDirectory(string path, nint securityAttributes);
 
-    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport(
+        "kernel32.dll",
+        EntryPoint = "GetFinalPathNameByHandleW",
+        SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static partial uint GetFinalPathNameByHandle(
         SafeFileHandle file,

@@ -32,7 +32,7 @@ public sealed class SetupPreflightTests
     public void Build19045X64WorkstationIsAdmittedBeforeAnyMachineChange()
     {
         SetupPreflight preflight = new(new StaticHostProbe(
-            new SetupHostInfo(19045, Architecture.X64, IsServer: false)));
+            new SetupHostInfo(19045, Architecture.X64, isServer: false)));
 
         SetupPreflightDecision decision = preflight.Evaluate(Manifest());
 

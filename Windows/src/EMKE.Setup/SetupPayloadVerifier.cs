@@ -1,56 +1,84 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
+using System.Xml.Linq;
 using EMKE.Platform.Driver;
 
 namespace EMKE.Setup;
 
-internal sealed record SetupEmbeddedPayload(
-    string LogicalName,
-    Func<Stream> OpenRead,
-    long DeclaredLength)
+internal sealed class SetupEmbeddedPayload
 {
-    public SetupEmbeddedPayload
+    public SetupEmbeddedPayload(
+        string logicalName,
+        Func<Stream> openRead,
+        long declaredLength)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(LogicalName);
-        ArgumentNullException.ThrowIfNull(OpenRead);
-        ArgumentOutOfRangeException.ThrowIfNegative(DeclaredLength);
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalName);
+        ArgumentNullException.ThrowIfNull(openRead);
+        ArgumentOutOfRangeException.ThrowIfNegative(declaredLength);
+        LogicalName = logicalName;
+        OpenRead = openRead;
+        DeclaredLength = declaredLength;
     }
+
+    public string LogicalName { get; }
+
+    public Func<Stream> OpenRead { get; }
+
+    public long DeclaredLength { get; }
 }
 
-internal sealed record VerifiedSetupPayload(
-    SetupPayload ManifestPayload,
-    long Length,
-    string Sha256,
-    string? Path = null)
+internal sealed class VerifiedSetupPayload
 {
-    public VerifiedSetupPayload
+    public VerifiedSetupPayload(
+        SetupPayload manifestPayload,
+        long length,
+        string sha256,
+        string? path = null)
     {
-        ArgumentNullException.ThrowIfNull(ManifestPayload);
-        ArgumentOutOfRangeException.ThrowIfNegative(Length);
-        ArgumentException.ThrowIfNullOrWhiteSpace(Sha256);
+        ArgumentNullException.ThrowIfNull(manifestPayload);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
+        ManifestPayload = manifestPayload;
+        Length = length;
+        Sha256 = sha256;
+        Path = path;
     }
+
+    public SetupPayload ManifestPayload { get; }
+
+    public long Length { get; }
+
+    public string Sha256 { get; }
+
+    public string? Path { get; }
 }
 
-internal sealed record SetupPayloadSignatureEvidence(
-    bool Trusted,
-    string? FailureCode)
+internal sealed class SetupPayloadSignatureEvidence
 {
-    public SetupPayloadSignatureEvidence
+    public SetupPayloadSignatureEvidence(bool trusted, string? failureCode)
     {
-        if (Trusted && FailureCode is not null)
+        if (trusted && failureCode is not null)
         {
             throw new ArgumentException(
                 "Trusted signature evidence cannot carry a failure code.",
-                nameof(FailureCode));
+                nameof(failureCode));
         }
-        if (!Trusted && string.IsNullOrWhiteSpace(FailureCode))
+        if (!trusted && string.IsNullOrWhiteSpace(failureCode))
         {
             throw new ArgumentException(
                 "Rejected signature evidence requires a failure code.",
-                nameof(FailureCode));
+                nameof(failureCode));
         }
+
+        Trusted = trusted;
+        FailureCode = failureCode;
     }
+
+    public bool Trusted { get; }
+
+    public string? FailureCode { get; }
 
     public static SetupPayloadSignatureEvidence Trusted { get; } = new(true, null);
 
@@ -73,15 +101,90 @@ internal interface ISetupPayloadSignatureVerifier
         IReadOnlyList<VerifiedSetupPayload> payloads);
 }
 
-internal sealed record SetupPayloadVerificationResult(
-    bool IsValid,
-    string? FailureCode,
-    string DisplayDetail)
+internal sealed class SetupMsixSignatureEvidence
 {
+    public SetupMsixSignatureEvidence(
+        bool signatureValid,
+        string? signerSha256,
+        string? identityPublisher)
+    {
+        SignatureValid = signatureValid;
+        SignerSha256 = signerSha256;
+        IdentityPublisher = identityPublisher;
+    }
+
+    public bool SignatureValid { get; }
+
+    public string? SignerSha256 { get; }
+
+    public string? IdentityPublisher { get; }
+}
+
+internal sealed class SetupCertificateEvidence
+{
+    public SetupCertificateEvidence(
+        string? subject,
+        bool validityValid,
+        string? sha256Thumbprint)
+    {
+        Subject = subject;
+        ValidityValid = validityValid;
+        Sha256Thumbprint = sha256Thumbprint;
+    }
+
+    public string? Subject { get; }
+
+    public bool ValidityValid { get; }
+
+    public string? Sha256Thumbprint { get; }
+}
+
+internal sealed class SetupDriverCatalogEvidence
+{
+    public SetupDriverCatalogEvidence(bool trusted)
+    {
+        Trusted = trusted;
+    }
+
+    public bool Trusted { get; }
+}
+
+internal interface ISetupSignatureProbe
+{
+    SetupMsixSignatureEvidence VerifyMsix(string msixPath);
+
+    SetupCertificateEvidence ReadCertificate(string certificatePath);
+
+    SetupDriverCatalogEvidence VerifyDriverCatalog(
+        string catalogPath,
+        string infPath,
+        string sysPath);
+}
+
+internal sealed class SetupPayloadVerificationResult : IDisposable
+{
+    private readonly IDisposable? _attemptLifetime;
+
+    private SetupPayloadVerificationResult(
+        bool isValid,
+        string? failureCode,
+        string displayDetail,
+        IDisposable? attemptLifetime = null)
+    {
+        IsValid = isValid;
+        FailureCode = failureCode;
+        DisplayDetail = displayDetail;
+        _attemptLifetime = attemptLifetime;
+    }
+
+    public bool IsValid { get; }
+
+    public string? FailureCode { get; }
+
+    public string DisplayDetail { get; }
+
     public static SetupPayloadVerificationResult Valid { get; } = new(
-        true,
-        null,
-        "Setup payload verification succeeded.");
+        true, null, "Setup payload verification succeeded.");
 
     public static SetupPayloadVerificationResult Rejected(string failureCode)
     {
@@ -91,21 +194,62 @@ internal sealed record SetupPayloadVerificationResult(
             failureCode,
             "Setup payload verification failed.");
     }
+
+    internal static SetupPayloadVerificationResult VerifiedAttempt(
+        SetupPayloadVerificationAttempt attempt) => new(
+            true,
+            null,
+            "Setup payload verification succeeded.",
+            attempt);
+
+    public void Dispose()
+    {
+        _attemptLifetime?.Dispose();
+    }
+}
+
+internal sealed class SetupPayloadVerificationAttempt : IDisposable
+{
+    private readonly SetupExtractionDirectory _extractionDirectory;
+
+    public SetupPayloadVerificationAttempt(SetupExtractionDirectory extractionDirectory)
+    {
+        _extractionDirectory = extractionDirectory
+            ?? throw new ArgumentNullException(nameof(extractionDirectory));
+    }
+
+    public void Dispose()
+    {
+        _extractionDirectory.Dispose();
+    }
 }
 
 internal sealed class SetupPayloadVerifier
 {
     private readonly ISetupPayloadSignatureVerifier _signatureVerifier;
+    private readonly Func<Version, SetupExtractionDirectory>
+        _createExtractionDirectory;
 
     public SetupPayloadVerifier()
-        : this(WindowsSetupPayloadSignatureVerifier.Instance)
+        : this(
+            WindowsSetupPayloadSignatureVerifier.Instance,
+            SetupExtractionDirectory.CreateForCurrentUser)
     {
     }
 
     public SetupPayloadVerifier(ISetupPayloadSignatureVerifier signatureVerifier)
+        : this(signatureVerifier, SetupExtractionDirectory.CreateForCurrentUser)
+    {
+    }
+
+    internal SetupPayloadVerifier(
+        ISetupPayloadSignatureVerifier signatureVerifier,
+        Func<Version, SetupExtractionDirectory> createExtractionDirectory)
     {
         _signatureVerifier = signatureVerifier
             ?? throw new ArgumentNullException(nameof(signatureVerifier));
+        _createExtractionDirectory = createExtractionDirectory
+            ?? throw new ArgumentNullException(nameof(createExtractionDirectory));
     }
 
     public SetupPayloadVerificationResult Verify(
@@ -175,6 +319,84 @@ internal sealed class SetupPayloadVerifier
             : SetupPayloadVerificationResult.Rejected(signature.FailureCode!);
     }
 
+#pragma warning disable CA1031 // Payload and signature faults must fail closed and clean up.
+    public SetupPayloadVerificationResult VerifyAndExtract(
+        SetupManifest manifest,
+        IReadOnlyList<SetupEmbeddedPayload> embeddedPayloads)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(embeddedPayloads);
+
+        if (embeddedPayloads.Count != manifest.Payloads.Count
+            || embeddedPayloads.Any(static payload => payload is null)
+            || embeddedPayloads.Select(static payload => payload.LogicalName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() != embeddedPayloads.Count)
+        {
+            return SetupPayloadVerificationResult.Rejected(
+                "embeddedPayloadInventoryMismatch");
+        }
+
+        SetupExtractionDirectory extraction =
+            _createExtractionDirectory(manifest.ProductVersion);
+        SetupPayloadVerificationAttempt attempt = new(extraction);
+        try
+        {
+            List<VerifiedSetupPayload> verified = [];
+            foreach (SetupPayload expected in manifest.Payloads)
+            {
+                SetupEmbeddedPayload? embedded = embeddedPayloads.SingleOrDefault(
+                    payload => string.Equals(
+                        payload.LogicalName,
+                        expected.LogicalName,
+                        StringComparison.OrdinalIgnoreCase));
+                if (embedded is null || embedded.DeclaredLength != expected.Length)
+                {
+                    return RejectAndDispose(attempt, "tamperedPayloadLength");
+                }
+
+                using Stream source = embedded.OpenRead();
+                SetupExtractionResult extracted = extraction.CopyVerified(
+                    expected.FileName,
+                    source,
+                    expected);
+                if (!extracted.Succeeded)
+                {
+                    return RejectAndDispose(attempt, extracted.FailureCode!);
+                }
+
+                verified.Add(new VerifiedSetupPayload(
+                    expected,
+                    expected.Length,
+                    expected.Sha256,
+                    extracted.OutputPath));
+            }
+
+            SetupPayloadSignatureEvidence signature = _signatureVerifier.Verify(
+                manifest,
+                verified.AsReadOnly());
+            if (!signature.Trusted)
+            {
+                return RejectAndDispose(attempt, signature.FailureCode!);
+            }
+
+            return SetupPayloadVerificationResult.VerifiedAttempt(attempt);
+        }
+        catch (Exception)
+        {
+            return RejectAndDispose(attempt, "embeddedPayloadUnreadable");
+        }
+    }
+
+    private static SetupPayloadVerificationResult RejectAndDispose(
+        SetupPayloadVerificationAttempt attempt,
+        string failureCode)
+    {
+        attempt.Dispose();
+        return SetupPayloadVerificationResult.Rejected(failureCode);
+    }
+#pragma warning restore CA1031
+
 #pragma warning disable CA1031 // Corrupt or unavailable embedded streams fail closed.
     private static (long length, string hash)? ReadAndHash(Func<Stream> openRead)
     {
@@ -209,10 +431,14 @@ internal sealed class SetupPayloadVerifier
 internal sealed class WindowsSetupPayloadSignatureVerifier
     : ISetupPayloadSignatureVerifier
 {
-    public static WindowsSetupPayloadSignatureVerifier Instance { get; } = new();
+    private readonly ISetupSignatureProbe _probe;
 
-    private WindowsSetupPayloadSignatureVerifier()
+    public static WindowsSetupPayloadSignatureVerifier Instance { get; } = new(
+        WindowsSetupSignatureProbe.Instance);
+
+    internal WindowsSetupPayloadSignatureVerifier(ISetupSignatureProbe probe)
     {
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
     }
 
     public SetupPayloadSignatureEvidence Verify(
@@ -233,22 +459,41 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
             return SetupPayloadSignatureEvidence.Rejected("signatureEvidenceUnavailable");
         }
 
-        if (!WindowsAuthenticodeVerifier.IsTrusted(msix.Path))
+        SetupMsixSignatureEvidence msixEvidence = _probe.VerifyMsix(msix.Path);
+        if (!msixEvidence.SignatureValid)
         {
             return SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid");
         }
-        SetupPayloadSignatureEvidence? certificateEvidence =
-            VerifyCertificate(certificate, manifest);
-        if (certificateEvidence is not null)
+        SetupCertificateEvidence certificateEvidence = _probe.ReadCertificate(
+            certificate.Path);
+        SetupPayloadSignatureEvidence? certificateFailure = VerifyCertificate(
+            certificateEvidence,
+            certificate.ManifestPayload,
+            manifest);
+        if (certificateFailure is not null)
         {
-            return certificateEvidence;
+            return certificateFailure;
+        }
+        if (!string.Equals(
+                msixEvidence.SignerSha256,
+                certificateEvidence.Sha256Thumbprint,
+                StringComparison.Ordinal))
+        {
+            return SetupPayloadSignatureEvidence.Rejected("msixSignerMismatch");
+        }
+        if (!string.Equals(
+                msixEvidence.IdentityPublisher,
+                manifest.Publisher,
+                StringComparison.Ordinal))
+        {
+            return SetupPayloadSignatureEvidence.Rejected("msixPublisherMismatch");
         }
 
-        WindowsCatalogEvidence driverEvidence = WindowsCatalogTrustVerifier.Instance.Verify(
+        SetupDriverCatalogEvidence driverEvidence = _probe.VerifyDriverCatalog(
             catalog.Path,
             inf.Path,
             sys.Path);
-        return driverEvidence.ChainValid
+        return driverEvidence.Trusted
             ? SetupPayloadSignatureEvidence.Trusted
             : SetupPayloadSignatureEvidence.Rejected("driverCatalogKernelTrustInvalid");
     }
@@ -260,47 +505,105 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
 
 #pragma warning disable CA1031 // Invalid certificate input must fail closed.
     private static SetupPayloadSignatureEvidence? VerifyCertificate(
-        VerifiedSetupPayload certificatePayload,
+        SetupCertificateEvidence certificate,
+        SetupPayload certificatePayload,
         SetupManifest manifest)
     {
+        if (!string.Equals(
+                certificate.Subject,
+                manifest.Publisher,
+                StringComparison.Ordinal))
+        {
+            return SetupPayloadSignatureEvidence.Rejected(
+                "certificateSubjectMismatch");
+        }
+        if (!certificate.ValidityValid)
+        {
+            return SetupPayloadSignatureEvidence.Rejected(
+                "certificateValidityInvalid");
+        }
+        return string.Equals(
+                certificate.Sha256Thumbprint,
+                certificatePayload.Sha256,
+                StringComparison.Ordinal)
+            ? null
+            : SetupPayloadSignatureEvidence.Rejected(
+                "certificateThumbprintMismatch");
+    }
+#pragma warning restore CA1031
+}
+
+internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
+{
+    public static WindowsSetupSignatureProbe Instance { get; } = new();
+
+    private WindowsSetupSignatureProbe()
+    {
+    }
+
+#pragma warning disable CA1031 // Malformed signed containers and certificates fail closed.
+    public SetupMsixSignatureEvidence VerifyMsix(string msixPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(msixPath);
         try
         {
-            using X509Certificate2 certificate = X509CertificateLoader
-                .LoadCertificateFromFile(certificatePayload.Path!);
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            if (!string.Equals(
-                    certificate.Subject,
-                    manifest.Publisher,
-                    StringComparison.Ordinal))
-            {
-                return SetupPayloadSignatureEvidence.Rejected(
-                    "certificateSubjectMismatch");
-            }
-            if (certificate.NotBefore > now || certificate.NotAfter < now)
-            {
-                return SetupPayloadSignatureEvidence.Rejected(
-                    "certificateValidityInvalid");
-            }
-
-            string certificateThumbprint = Convert.ToHexStringLower(
-                certificate.GetCertHash(HashAlgorithmName.SHA256));
-            SetupPayload expected = manifest.Payloads.Single(
-                payload => payload.Kind == SetupPayloadKind.Certificate);
-            return string.Equals(
-                    certificateThumbprint,
-                    expected.Sha256,
-                    StringComparison.Ordinal)
-                ? null
-                : SetupPayloadSignatureEvidence.Rejected(
-                    "certificateThumbprintMismatch");
+            string signerSha256 = WindowsAuthenticodeVerifier.ReadSignerSha256(msixPath);
+            string publisher = ReadMsixPublisher(msixPath);
+            return new SetupMsixSignatureEvidence(
+                WindowsAuthenticodeVerifier.IsSignatureIntact(msixPath),
+                signerSha256,
+                publisher);
         }
         catch (Exception)
         {
-            return SetupPayloadSignatureEvidence.Rejected(
-                "certificateHashMismatch");
+            return new SetupMsixSignatureEvidence(false, null, null);
         }
     }
+
+    public SetupCertificateEvidence ReadCertificate(string certificatePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
+        try
+        {
+            using X509Certificate2 certificate = X509CertificateLoader
+                .LoadCertificateFromFile(certificatePath);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            return new SetupCertificateEvidence(
+                certificate.Subject,
+                certificate.NotBefore <= now && certificate.NotAfter >= now,
+                Convert.ToHexStringLower(
+                    certificate.GetCertHash(HashAlgorithmName.SHA256)));
+        }
+        catch (Exception)
+        {
+            return new SetupCertificateEvidence(null, false, null);
+        }
+    }
+
+    public SetupDriverCatalogEvidence VerifyDriverCatalog(
+        string catalogPath,
+        string infPath,
+        string sysPath)
+    {
+        WindowsCatalogEvidence evidence = WindowsCatalogTrustVerifier.Instance.Verify(
+            catalogPath,
+            infPath,
+            sysPath);
+        return new SetupDriverCatalogEvidence(evidence.ChainValid);
+    }
 #pragma warning restore CA1031
+
+    private static string ReadMsixPublisher(string msixPath)
+    {
+        using FileStream file = File.OpenRead(msixPath);
+        using ZipArchive archive = new(file, ZipArchiveMode.Read, leaveOpen: false);
+        ZipArchiveEntry entry = archive.GetEntry("AppxManifest.xml")
+            ?? throw new InvalidDataException("MSIX identity manifest is missing.");
+        using Stream manifestStream = entry.Open();
+        XDocument document = XDocument.Load(manifestStream, LoadOptions.None);
+        return document.Root?.Attribute("Publisher")?.Value
+            ?? throw new InvalidDataException("MSIX publisher is missing.");
+    }
 }
 
 internal static class WindowsAuthenticodeVerifier
@@ -313,8 +616,8 @@ internal static class WindowsAuthenticodeVerifier
     private static readonly Guid GenericVerifyV2 = new(
         "00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
 
-#pragma warning disable CA1416 // This is reached only by the Windows Setup executable.
-    public static bool IsTrusted(string filePath)
+#pragma warning disable CA1031, CA1416 // This is reached only by the Windows Setup executable.
+    public static bool IsSignatureIntact(string filePath)
     {
         if (!OperatingSystem.IsWindows() || !File.Exists(filePath))
         {
@@ -323,14 +626,26 @@ internal static class WindowsAuthenticodeVerifier
 
         try
         {
-            return VerifyFileTrust(Path.GetFullPath(filePath)) == TrustSuccess;
+            int result = VerifyFileTrust(Path.GetFullPath(filePath));
+            return result == TrustSuccess || result == unchecked((int)0x800B0109);
         }
         catch (Exception)
         {
             return false;
         }
     }
-#pragma warning restore CA1416
+#pragma warning restore CA1031, CA1416
+
+#pragma warning disable SYSLIB0057 // Signed-file extraction has no loader replacement.
+    public static string ReadSignerSha256(string filePath)
+    {
+        using X509Certificate signer = X509Certificate.CreateFromSignedFile(filePath);
+        using X509Certificate2 signerCertificate = X509CertificateLoader
+            .LoadCertificate(signer.GetRawCertData());
+        return Convert.ToHexStringLower(
+            signerCertificate.GetCertHash(HashAlgorithmName.SHA256));
+    }
+#pragma warning restore SYSLIB0057
 
     private static int VerifyFileTrust(string fullPath)
     {

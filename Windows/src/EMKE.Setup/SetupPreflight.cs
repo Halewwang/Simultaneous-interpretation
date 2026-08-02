@@ -3,25 +3,30 @@ using EMKE.Setup.Platform;
 
 namespace EMKE.Setup;
 
-internal sealed record SetupPreflightDecision(
-    bool Allowed,
-    string? FailureCode)
+internal sealed class SetupPreflightDecision
 {
-    public SetupPreflightDecision
+    public SetupPreflightDecision(bool allowed, string? failureCode)
     {
-        if (Allowed && FailureCode is not null)
+        if (allowed && failureCode is not null)
         {
             throw new ArgumentException(
                 "An allowed preflight decision cannot have a failure code.",
-                nameof(FailureCode));
+                nameof(failureCode));
         }
-        if (!Allowed && string.IsNullOrWhiteSpace(FailureCode))
+        if (!allowed && string.IsNullOrWhiteSpace(failureCode))
         {
             throw new ArgumentException(
                 "A rejected preflight decision requires a failure code.",
-                nameof(FailureCode));
+                nameof(failureCode));
         }
+
+        Allowed = allowed;
+        FailureCode = failureCode;
     }
+
+    public bool Allowed { get; }
+
+    public string? FailureCode { get; }
 
     public static SetupPreflightDecision Admitted { get; } = new(true, null);
 
@@ -32,6 +37,11 @@ internal sealed record SetupPreflightDecision(
 internal sealed class SetupPreflight
 {
     private readonly ISetupHostProbe _hostProbe;
+
+    public SetupPreflight()
+        : this(WindowsSetupHostProbe.Instance)
+    {
+    }
 
     public SetupPreflight(ISetupHostProbe hostProbe)
     {

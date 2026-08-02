@@ -83,11 +83,13 @@ public sealed class SetupExtractionDirectoryTests
         using TemporaryDirectory temporary = new();
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
-        string linkedDirectory = Path.Combine(extraction.RootPath, "linked");
-        Directory.CreateSymbolicLink(linkedDirectory, temporary.Path);
+        string outsideFile = Path.Combine(temporary.Path, "outside.bin");
+        File.WriteAllText(outsideFile, "outside");
+        string linkedOutput = Path.Combine(extraction.RootPath, "payload.bin");
+        File.CreateSymbolicLink(linkedOutput, outsideFile);
 
         SetupExtractionResult result = extraction.CopyVerified(
-            Path.Combine("linked", "payload.bin"),
+            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
