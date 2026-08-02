@@ -87,6 +87,17 @@ Application 100, Realtime 109, Routing 53, Windows App 148, Integration 106
 with one platform skip). Its only failure was the pre-existing owned-native PCM
 fixture executable path mismatch. Internal MSIX run `30739715253` passed.
 
+The matrix-audit branch first exposed a test-fixture mismatch in Runtime run
+`30740047560` / job `91475720709`: the fake authentication error had been
+constructed with `retry`, whereas the production factory returns
+`updateApiKey`. The fixture was corrected before final GREEN evidence; this is
+not a production behavior regression.
+
+Windows Audio Foundation run `30740047567` also has an independent stale
+workflow assertion: `NativeAudioNativeFake` now reports eight tests while its
+workflow expects exactly seven. Task 5 did not change the native test set or
+that workflow guard, so the mismatch is recorded but not changed here.
+
 The final matrix-audit evidence PR records the strengthened cross-layer
 assertions and this report; it is closed unmerged after its Windows checks are
 captured. The local product branch is never pushed.

@@ -1065,12 +1065,14 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
-    public async Task FactoryAuthenticationFailureUsesTheStableRuntimeCategory()
+    public async Task FactoryAuthenticationFailurePreservesTheStableRuntimeAction()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
-        harness.Factory.CreateError = Error(
+        harness.Factory.CreateError = new RuntimeError(
             ErrorCategory.Authentication,
-            "translationSessionFactory.apiKeyMissing");
+            "translationSessionFactory.apiKeyMissing",
+            new Dictionary<string, string>(),
+            RecoveryAction.UpdateApiKey);
         await using TranslationRuntime runtime = harness.CreateRuntime();
 
         RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
