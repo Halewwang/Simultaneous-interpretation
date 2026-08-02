@@ -1,4 +1,6 @@
 using EMKE.Core;
+using EMKE.Realtime;
+using System.IO;
 
 namespace EMKE.Application;
 
@@ -223,7 +225,9 @@ public sealed class TranslationConnectionProbe : ITranslationConnectionProbe
     {
         return exception switch
         {
+            TranslationSessionException session => session.Error.Code,
             RuntimeOperationException operation => operation.Error.Code,
+            IOException => "translationProbe.networkFailed",
             _ => "translationProbe.connectionFailed",
         };
     }
