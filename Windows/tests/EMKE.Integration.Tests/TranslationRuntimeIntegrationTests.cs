@@ -447,6 +447,11 @@ public sealed class TranslationRuntimeIntegrationTests
         ErrorCategory.EndpointModel,
         "translationSocket.endpointModelRejected",
         RecoveryAction.EditSettings)]
+    [DataRow(
+        MockTranslationScenario.LegacyAlias,
+        ErrorCategory.Protocol,
+        "translationEvent.unknownType",
+        RecoveryAction.Retry)]
     public async Task RejectedProductionHandshakeStopsRuntimeWithStableSafeRoute(
         MockTranslationScenario scenario,
         ErrorCategory expectedCategory,
@@ -505,6 +510,41 @@ public sealed class TranslationRuntimeIntegrationTests
         Assert.AreEqual(0, audio.PendingEventCount);
         Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
         Assert.AreEqual(0, audio.ActivePcmLeaseCount);
+    }
+
+    [TestMethod]
+    public async Task ProductionServerCloseFencesOutboundAndReleasesRuntimeOwnership()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+        SnapshotWatcher snapshots = new(runtime.CurrentSnapshot);
+        using IDisposable subscription = runtime.Snapshots.Subscribe(snapshots);
+
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        Task<AppSnapshot> fenced = snapshots.WaitForAsync(
+            static snapshot => snapshot.OutboundRoute == OutboundRoute.MutedFailClosed
+                && snapshot.Error?.Code == "translationSocket.receiveFailed");
+        await server.DisconnectAsync(LanguageCode.En).ConfigureAwait(false);
+        AppSnapshot observed = await fenced.WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.Network, observed.Error?.Category);
+        Assert.AreEqual(RecoveryAction.Retry, observed.Error?.RecoveryAction);
+        Assert.IsEmpty(observed.Error!.Parameters);
+        Assert.AreEqual(InboundRoute.Translated, observed.InboundRoute);
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+        await WaitUntilAsync(
+            () => server.ActiveConnectionCount == 0
+                && audio.ActivePollCount == 0).ConfigureAwait(false);
+        Assert.AreEqual(0, server.ActiveConnectionCount);
+        Assert.AreEqual(0, audio.ActivePollCount);
+        Assert.AreEqual(0, audio.PendingEventCount);
+        Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
+        Assert.AreEqual(0, audio.ActivePcmLeaseCount);
+        Assert.AreEqual(1, audio.StartCount);
+        Assert.AreEqual(1, audio.StopCount);
     }
 
     [TestMethod]

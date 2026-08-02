@@ -48,7 +48,7 @@ public sealed class ProductionFailureMatrixTests
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
             Assert.AreEqual(1, audio.StartCount);
             Assert.AreEqual(1, audio.StopCount);
-            AssertReleased(server, audio);
+            await AssertReleasedAsync(server, audio).ConfigureAwait(false);
             audit.RecordInboundFailOpen();
         }
 
@@ -88,7 +88,7 @@ public sealed class ProductionFailureMatrixTests
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
             Assert.AreEqual(1, audio.StartCount);
             Assert.AreEqual(1, audio.StopCount);
-            AssertReleased(server, audio);
+            await AssertReleasedAsync(server, audio).ConfigureAwait(false);
             audit.RecordOutboundFailClosed();
         }
 
@@ -135,7 +135,7 @@ public sealed class ProductionFailureMatrixTests
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
             Assert.AreEqual(1, audio.StartCount);
             Assert.AreEqual(1, audio.StopCount);
-            AssertReleased(server, audio);
+            await AssertReleasedAsync(server, audio).ConfigureAwait(false);
             audit.RecordExplicitBypass();
         }
 
@@ -197,7 +197,7 @@ public sealed class ProductionFailureMatrixTests
             Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
             Assert.AreEqual(1, audio.StartCount);
             Assert.AreEqual(1, audio.StopCount);
-            AssertReleased(server, audio);
+            await AssertReleasedAsync(server, audio).ConfigureAwait(false);
             audit.RecordReconnectAfterHandshake();
         }
 
@@ -233,7 +233,7 @@ public sealed class ProductionFailureMatrixTests
             Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
             Assert.AreEqual(1, audio.StartCount);
             Assert.AreEqual(1, audio.StopCount);
-            AssertReleased(server, audio);
+            await AssertReleasedAsync(server, audio).ConfigureAwait(false);
             audit.RecordShutdown();
         }
 
@@ -248,10 +248,13 @@ public sealed class ProductionFailureMatrixTests
         Assert.IsFalse(error.Code.Contains("Bearer", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void AssertReleased(
+    private static async Task AssertReleasedAsync(
         MockTranslationServer server,
         TestAudioEngine audio)
     {
+        await WaitUntilAsync(
+            () => server.ActiveConnectionCount == 0
+                && audio.ActivePollCount == 0).ConfigureAwait(false);
         Assert.AreEqual(0, server.ActiveConnectionCount);
         Assert.AreEqual(0, audio.ActivePollCount);
         Assert.AreEqual(0, audio.PendingEventCount);
