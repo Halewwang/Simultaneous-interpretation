@@ -920,6 +920,7 @@ Invoke-Case -Name "install orchestrator uses only protected staged copies" -Acti
         -ExpectedPackageSha256 ("A" * 64) `
         -SmokePath "C:\Untrusted Downloads\Smoke.exe" `
         -ExpectedSmokeSha256 ("E" * 64) `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
         -ConfirmInstall *>&1)
     if ($script:installInf -cne $stagedPackage.Inf.FullName -or
         $script:smokePath -cne $stagedSmoke.FullName) {
@@ -962,6 +963,7 @@ Invoke-Case -Name "install success cleans protected staging exactly once" -Actio
         -ExpectedPackageSha256 ("A" * 64) `
         -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
         -ExpectedSmokeSha256 ("E" * 64) `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
         -ConfirmInstall
 
     if ($script:cleanupCalls.Count -ne 1 -or
@@ -995,6 +997,7 @@ Invoke-Case -Name "ordinary install failure cleans staging and preserves cause" 
             -ExpectedPackageSha256 ("A" * 64) `
             -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
             -ExpectedSmokeSha256 ("E" * 64) `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
             -ConfirmInstall
     } catch {
         $caught = $_
@@ -1036,6 +1039,7 @@ Invoke-Case `
                 -ExpectedPackageSha256 ("A" * 64) `
                 -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
                 -ExpectedSmokeSha256 ("E" * 64) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ConfirmInstall
         } catch {
             $caught = $_
@@ -1083,6 +1087,7 @@ Invoke-Case -Name "successful install reports retained staging on cleanup failur
             -ExpectedPackageSha256 ("A" * 64) `
             -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
             -ExpectedSmokeSha256 ("E" * 64) `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
             -ConfirmInstall
     } catch {
         $caught = $_
@@ -1130,6 +1135,7 @@ Invoke-Case `
                 -ExpectedPackageSha256 ("A" * 64) `
                 -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
                 -ExpectedSmokeSha256 ("E" * 64) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ConfirmInstall
         } catch {
             $caught = $_
@@ -1316,25 +1322,29 @@ Invoke-Case -Name "catalog certificate digest is exactly SHA256" -Action {
 
 Invoke-Case -Name "install devnode validation" -Action {
     Assert-Throws -Pattern "exactly one" -Action {
-        Assert-InstalledDevnodeHealthy -Devnodes ([object[]]@())
+        Assert-InstalledDevnodeHealthy `
+            -Devnodes ([object[]]@()) `
+            -HardwareId $script:TargetHardwareId
     }
     Assert-Throws -Pattern "exactly one" -Action {
         Assert-InstalledDevnodeHealthy -Devnodes @(
             (New-Devnode),
             (New-Devnode -DeviceID "ROOT\EMKEVIRTUALAUDIO\0001")
-        )
+        ) -HardwareId $script:TargetHardwareId
     }
     Assert-Throws -Pattern "not present" -Action {
         Assert-InstalledDevnodeHealthy -Devnodes @(
             (New-Devnode -Present $false)
-        )
+        ) -HardwareId $script:TargetHardwareId
     }
     Assert-Throws -Pattern "ConfigManagerErrorCode=7" -Action {
         Assert-InstalledDevnodeHealthy -Devnodes @(
             (New-Devnode -ErrorCode 7)
-        )
+        ) -HardwareId $script:TargetHardwareId
     }
-    Assert-InstalledDevnodeHealthy -Devnodes @((New-Devnode))
+    Assert-InstalledDevnodeHealthy `
+        -Devnodes @((New-Devnode)) `
+        -HardwareId $script:TargetHardwareId
     foreach ($invalidCode in @($null, "not-an-integer")) {
         Assert-Throws `
             -Pattern "ConfigManagerErrorCode must be an integer" `
@@ -1346,7 +1356,7 @@ Invoke-Case -Name "install devnode validation" -Action {
                     Present = $true
                     ConfigManagerErrorCode = $invalidCode
                 }
-            )
+            ) -HardwareId $script:TargetHardwareId
         }
     }
 }
@@ -1790,6 +1800,7 @@ Invoke-Case `
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
         }
         if ($script:mutationCalls -ne 0 -or
@@ -1836,6 +1847,7 @@ Invoke-Case `
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
         }
         if ($script:externalMutationCalls -ne 0 -or
@@ -1881,6 +1893,7 @@ Invoke-Case `
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
         } catch {
             $caught = $_
@@ -1950,6 +1963,7 @@ Invoke-Case -Name "root create bind package identity state machine" -Action {
             ProviderName = "EMKE"
         }) `
         -TrustedPackage (New-InstallPackageRecord) `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
         -ExpectedPackageSha256 ("A" * 64)
     $expected = @(
         "preflight-empty",
@@ -1986,6 +2000,7 @@ Invoke-Case -Name "preexisting target blocks root creation" -Action {
                 ProviderName = "EMKE"
             }) `
             -TrustedPackage (New-InstallPackageRecord) `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
             -ExpectedPackageSha256 ("A" * 64)
     }
     if ($script:createCalls -ne 0) {
@@ -2030,6 +2045,7 @@ Invoke-Case -Name "bind failure reports partial state and exact cleanup" -Action
                     ProviderName = "EMKE"
                 }) `
                 -TrustedPackage (New-InstallPackageRecord) `
+                -ReleaseMetadata (New-TestReleaseMetadata) `
                 -ExpectedPackageSha256 ("A" * 64)
         }
         if ($cleanupIds.Count -ne 1 -or
@@ -2056,6 +2072,7 @@ Invoke-Case -Name "digest mismatch reports observed digest" -Action {
             -ExpectedPackageSha256 ("D" * 64) `
             -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
             -ExpectedSmokeSha256 ("E" * 64) `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
             -ConfirmInstall *>&1 |
             ForEach-Object { [void]$output.Add([string]$_) }
     } catch {
@@ -2171,6 +2188,7 @@ Invoke-Case -Name "install orchestrator exact process boundary" -Action {
         -ExpectedPackageSha256 ("A" * 64) `
         -SmokePath "C:\Smoke\EMKE.AudioSmoke.exe" `
         -ExpectedSmokeSha256 ("E" * 64) `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
         -ConfirmInstall
     if ($script:processCalls.Count -ne 1) {
         throw "Install orchestrator did not reach exactly one process boundary."
@@ -2212,7 +2230,7 @@ Invoke-Case -Name "published INF exact CIM mapping" -Action {
     Assert-Throws -Pattern "exact target hardware ID" -Action {
         Assert-CurrentTargetDevnode -Devnodes @(
             (New-Devnode -HardwareID @("ROOT\OTHER"))
-        )
+        ) -HardwareId $script:TargetHardwareId
     }
 }
 
@@ -2252,7 +2270,13 @@ Invoke-Case -Name "published INF zero and multiple matches" -Action {
 Invoke-Case -Name "uninstall unsupported OS build" -Action {
     Import-LifecycleFunctions -Path $uninstallScript
     Set-TestFunction -Name Assert-SupportedWindowsHost -Body {}
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19044 }
+    Set-TestFunction -Name Get-WindowsHostInfo -Body {
+        [pscustomobject]@{
+            Build = 19044
+            Architecture = "x64"
+            ProductType = 1
+        }
+    }
     Set-TestFunction -Name Test-IsAdministrator -Body { $true }
     Set-TestFunction -Name Get-TargetDevnodes -Body {
         throw "Target query must not run below build 19045."
@@ -2262,7 +2286,9 @@ Invoke-Case -Name "uninstall unsupported OS build" -Action {
         $script:processCalls += 1
     }
     Assert-Throws -Pattern "19045" -Action {
-        Invoke-UninstallTestDriver -ConfirmUninstall
+        Invoke-UninstallTestDriver `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -ConfirmUninstall
     }
     if ($script:processCalls -ne 0) {
         throw "Unsupported OS reached process boundary."
@@ -2272,7 +2298,13 @@ Invoke-Case -Name "uninstall unsupported OS build" -Action {
 Invoke-Case -Name "uninstall non-administrator" -Action {
     Import-LifecycleFunctions -Path $uninstallScript
     Set-TestFunction -Name Assert-SupportedWindowsHost -Body {}
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19045 }
+    Set-TestFunction -Name Get-WindowsHostInfo -Body {
+        [pscustomobject]@{
+            Build = 19045
+            Architecture = "x64"
+            ProductType = 1
+        }
+    }
     Set-TestFunction -Name Test-IsAdministrator -Body { $false }
     Set-TestFunction -Name Get-TargetDevnodes -Body {
         throw "Target query must not run without elevation."
@@ -2282,7 +2314,9 @@ Invoke-Case -Name "uninstall non-administrator" -Action {
         $script:processCalls += 1
     }
     Assert-Throws -Pattern "administrator|elevat" -Action {
-        Invoke-UninstallTestDriver -ConfirmUninstall
+        Invoke-UninstallTestDriver `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -ConfirmUninstall
     }
     if ($script:processCalls -ne 0) {
         throw "Non-administrator path reached process boundary."
@@ -2315,7 +2349,9 @@ Invoke-Case -Name "post-uninstall devnode still present" -Action {
         [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
     }
     Assert-Throws -Pattern "still present" -Action {
-        Invoke-UninstallTestDriver -ConfirmUninstall
+        Invoke-UninstallTestDriver `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -ConfirmUninstall
     }
     $expected = @(
         "/remove-device",
@@ -2357,7 +2393,9 @@ Invoke-Case -Name "shared published INF blocks every deletion" -Action {
         throw "Shared-reference preflight reached a process boundary."
     }
     Assert-Throws -Pattern "shared|other|reference" -Action {
-        Invoke-UninstallTestDriver -ConfirmUninstall
+        Invoke-UninstallTestDriver `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -ConfirmUninstall
     }
     if ($script:processCalls -ne 0) {
         throw "Shared published INF reached remove-device or delete-driver."
@@ -2396,7 +2434,9 @@ Invoke-Case -Name "uninstall orchestrator exact process boundary" -Action {
         })
         [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
     }
-    Invoke-UninstallTestDriver -ConfirmUninstall
+    Invoke-UninstallTestDriver `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
+        -ConfirmUninstall
     if ($script:processCalls.Count -ne 2) {
         throw "Uninstall orchestrator did not reach exactly two process boundaries."
     }
@@ -2560,6 +2600,7 @@ Invoke-Case `
         $script:expectedInstanceId = $expectedInstanceId
         $found = Wait-TargetDevnode `
             -ExpectedInstanceId $expectedInstanceId `
+            -HardwareId $script:TargetHardwareId `
             -MaxAttempts 3 `
             -DelayMilliseconds 1
         if ($found.PNPDeviceID -cne $expectedInstanceId -or
@@ -2579,6 +2620,7 @@ Invoke-Case `
         }
         Wait-TargetDevnodeAbsent `
             -ExpectedInstanceId $expectedInstanceId `
+            -HardwareId $script:TargetHardwareId `
             -MaxAttempts 3 `
             -DelayMilliseconds 1
         if ($script:devnodePollCalls -ne 2) {
@@ -2645,6 +2687,7 @@ Invoke-Case -Name "process timeout permits only read-only inventory" -Action {
                 ProviderName = "EMKE"
             }) `
             -TrustedPackage (New-InstallPackageRecord) `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
             -ExpectedPackageSha256 ("A" * 64)
     } catch {
         $caught = $_
