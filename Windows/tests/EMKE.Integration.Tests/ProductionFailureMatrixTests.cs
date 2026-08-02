@@ -207,7 +207,7 @@ public sealed class ProductionFailureMatrixTests
     {
         Assert.IsNotNull(error);
         Assert.IsEmpty(error.Parameters);
-        Assert.IsFalse(error.Code.Contains("?", StringComparison.Ordinal));
+        Assert.IsFalse(error.Code.Contains('?', StringComparison.Ordinal));
         Assert.IsFalse(error.Code.Contains("Bearer", StringComparison.OrdinalIgnoreCase));
     }
 
