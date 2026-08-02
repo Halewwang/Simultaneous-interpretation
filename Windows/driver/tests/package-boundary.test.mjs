@@ -317,6 +317,53 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
     assert.notEqual(result.status, 0, `${mutation.name} must be rejected`);
     assert.match(result.stderr, mutation.error);
   }
+
+  const metadataMutations = [
+    {
+      name: "version package version",
+      version: { ...version, driverPackageVersion: "1.0.0.3" },
+      compatibility,
+      error: /version|DriverVer/i,
+    },
+    {
+      name: "compatibility hardware ID",
+      version,
+      compatibility: {
+        ...compatibility,
+        driverHardwareId: "ROOT\\WRONGDEVICE",
+      },
+      error: /hardware|ROOT/i,
+    },
+    {
+      name: "version endpoint roles",
+      version: {
+        ...version,
+        driverEndpointRoles: version.driverEndpointRoles.slice(0, 3),
+      },
+      compatibility,
+      error: /endpoint|role/i,
+    },
+  ];
+
+  const desiredInfPath = path.join(root, "desired.inf");
+  await writeFile(desiredInfPath, desiredInf, "utf8");
+  for (const mutation of metadataMutations) {
+    await writeFile(versionPath, JSON.stringify(mutation.version), "utf8");
+    await writeFile(
+      compatibilityPath,
+      JSON.stringify(mutation.compatibility),
+      "utf8",
+    );
+    const result = runNode(contractValidator, [
+      "--header", sharedHeader,
+      "--inf", desiredInfPath,
+      "--project", project,
+      "--version", versionPath,
+      "--compatibility", compatibilityPath,
+    ]);
+    assert.notEqual(result.status, 0, `${mutation.name} must be rejected`);
+    assert.match(result.stderr, mutation.error);
+  }
 });
 
 test("driver build validates the resolved staged INF before Inf2Cat", async () => {

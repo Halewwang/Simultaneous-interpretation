@@ -13,7 +13,8 @@
     <Configuration>Release</Configuration>
     <Platform>x64</Platform>
     <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
-    <EMKETargetOS>Windows11</EMKETargetOS>
+    <KMDF_VERSION_MINOR>31</KMDF_VERSION_MINOR>
+    <EMKETargetOS>Windows10</EMKETargetOS>
     <WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode>true</RestoreLockedMode>
@@ -25,7 +26,7 @@
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
     <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
     <!-- WDK 10.0.28000 uses Windows10 as its target-family token for Windows 10 and Windows 11. -->
-    <!-- The EMKE Windows 11 floor is enforced by EMKETargetOS and the INF 10.0...26200 model decoration. -->
+    <!-- The EMKE workstation floor is enforced by EMKETargetOS and the INF 10.0...19045 model decoration. -->
     <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
@@ -64,9 +65,10 @@
   <ItemGroup>
     <Inf Include="EMKE.VirtualAudio.inf">
       <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
-      <DateStamp>07/26/2026</DateStamp>
+      <DateStamp>08/01/2026</DateStamp>
       <SpecifyDriverVerDirectiveVersion>true</SpecifyDriverVerDirectiveVersion>
-      <TimeStamp>1.0.0.1</TimeStamp>
+      <TimeStamp>1.0.0.2</TimeStamp>
+      <KmdfVersionNumber>1.31</KmdfVersionNumber>
     </Inf>
     <FilesToPackage Include="$(TargetPath)" Condition="'$(ConfigurationType)'=='Driver' or '$(ConfigurationType)'=='DynamicLibrary'" />
     <ResourceCompile Include="src\SimpleAudioSample.rc" />

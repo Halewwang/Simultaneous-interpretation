@@ -119,12 +119,17 @@ if (-not (Test-Path -LiteralPath $projectPath -PathType Leaf)) {
 $contractValidator = Join-Path $PSScriptRoot "validate-driver-contract.mjs"
 $sharedContract = Join-Path $repositoryRoot "Windows" "shared" "emke_endpoint_contract.h"
 $sourceInf = Join-Path $projectDirectory "EMKE.VirtualAudio.inf"
+$versionMetadata = Join-Path $repositoryRoot "Windows" "version.json"
+$compatibilityMetadata = Join-Path $repositoryRoot "Windows" "packaging" "compatibility.internal.json"
 Invoke-Checked `
     -Executable "node" `
     -Arguments @(
         $contractValidator,
         "--header", $sharedContract,
-        "--inf", $sourceInf
+        "--inf", $sourceInf,
+        "--project", $projectPath,
+        "--version", $versionMetadata,
+        "--compatibility", $compatibilityMetadata
     ) `
     -FailureMessage "Driver INF diverges from the shared native contract"
 
@@ -289,6 +294,18 @@ Invoke-Checked `
         "--artifact-directory", $artifactDirectory
     ) `
     -FailureMessage "Safe staging of the exact WDK-stamped INF and SYS failed"
+
+Invoke-Checked `
+    -Executable "node" `
+    -Arguments @(
+        $contractValidator,
+        "--header", $sharedContract,
+        "--inf", (Join-Path $artifactDirectory "EMKE.VirtualAudio.inf"),
+        "--project", $projectPath,
+        "--version", $versionMetadata,
+        "--compatibility", $compatibilityMetadata
+    ) `
+    -FailureMessage "Resolved staged INF diverges from the driver release contract"
 
 Invoke-Checked `
     -Executable $inf2Cat `

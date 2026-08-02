@@ -3,7 +3,7 @@ Signature="$Windows NT$"
 Class=MEDIA
 ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider=%ProviderName%
-DriverVer=07/26/2026,1.0.0.1
+DriverVer=08/01/2026,1.0.0.2
 CatalogFile=EMKE.VirtualAudio.cat
 PnpLockDown=1
 
@@ -17,15 +17,15 @@ EMKE.VirtualAudio.sys=1
 EMKE.CopyFiles=13
 
 [Manufacturer]
-%ManufacturerName%=EMKE,NTamd64.10.0...26200
+%ManufacturerName%=EMKE,NTamd64.10.0...19045
 
-[EMKE.NTamd64.10.0...26200]
-%DeviceDescription%=EMKE_Install,ROOT\EMKEVIRTUALAUDIO
+[EMKE.NTamd64.10.0...19045]
+%EMKE.VirtualAudio.DeviceDesc%=EMKE.VirtualAudio,ROOT\EMKEVIRTUALAUDIO
 
 [EMKE.CopyFiles]
 EMKE.VirtualAudio.sys
 
-[EMKE_Install.NT]
+[EMKE.VirtualAudio.NT]
 Include=ks.inf,wdmaudio.inf
 Needs=KS.Registration,WDMAUDIO.Registration
 CopyFiles=EMKE.CopyFiles
@@ -42,7 +42,7 @@ HKR,Drivers\mixer\wdmaud.drv,Driver,,wdmaud.drv
 HKR,Drivers\wave\wdmaud.drv,Description,,%DeviceDescription%
 HKR,Drivers\mixer\wdmaud.drv,Description,,%DeviceDescription%
 
-[EMKE_Install.NT.Interfaces]
+[EMKE.VirtualAudio.NT.Interfaces]
 ; Meeting render -> EMKE application capture.
 AddInterface=%KSCATEGORY_AUDIO%,%KSNAME_WaveMeetingSpeaker%,EMKE.I.WaveMeetingSpeaker
 AddInterface=%KSCATEGORY_RENDER%,%KSNAME_WaveMeetingSpeaker%,EMKE.I.WaveMeetingSpeaker
@@ -67,7 +67,7 @@ AddInterface=%KSCATEGORY_REALTIME%,%KSNAME_WaveMeetingMicrophone%,EMKE.I.WaveMee
 AddInterface=%KSCATEGORY_AUDIO%,%KSNAME_TopologyMeetingMicrophone%,EMKE.I.TopologyMeetingMicrophone
 AddInterface=%KSCATEGORY_TOPOLOGY%,%KSNAME_TopologyMeetingMicrophone%,EMKE.I.TopologyMeetingMicrophone
 
-[EMKE_Install.NT.Services]
+[EMKE.VirtualAudio.NT.Services]
 AddService=EMKEVirtualAudio,0x00000002,EMKE_Service
 
 [EMKE_Service]
@@ -77,7 +77,7 @@ StartType=3
 ErrorControl=1
 ServiceBinary=%13%\EMKE.VirtualAudio.sys
 
-[EMKE_Install.NT.HW]
+[EMKE.VirtualAudio.NT.HW]
 AddReg=EMKE.Hardware.AddReg
 
 [EMKE.Hardware.AddReg]
@@ -85,11 +85,11 @@ AddReg=EMKE.Hardware.AddReg
 HKR,,DeviceType,0x00010001,0x0000001D
 HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GRGWGX;;;BA)(A;;GRGWGX;;;WD)(A;;GRGWGX;;;RC)"
 
-[EMKE_Install.NT.Wdf]
+[EMKE.VirtualAudio.NT.Wdf]
 KmdfService=EMKEVirtualAudio,EMKE_Wdf
 
 [EMKE_Wdf]
-KmdfLibraryVersion=$KMDFVERSION$
+KmdfLibraryVersion=1.31
 
 [EMKE.I.WaveMeetingSpeaker]
 AddReg=EMKE.I.WaveMeetingSpeaker.AddReg
@@ -163,6 +163,7 @@ HKR,,FriendlyName,,%TopologyMeetingMicrophone%
 ProviderName="EMKE"
 ManufacturerName="EMKE"
 DeviceDescription="EMKE Virtual Audio Bridge"
+EMKE.VirtualAudio.DeviceDesc="EMKE Virtual Audio Bridge"
 ServiceDescription="EMKE Virtual Audio Bridge Driver"
 DiskName="EMKE Virtual Audio Driver Disk"
 
