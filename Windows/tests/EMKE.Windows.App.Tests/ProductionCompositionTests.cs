@@ -182,6 +182,15 @@ public sealed class ProductionCompositionTests
                 bundle.RuntimeDependencies.LanguageClassifier);
             Assert.IsInstanceOfType<NativeAudioEngine>(
                 bundle.RuntimeDependencies.AudioEngine);
+            Assert.IsInstanceOfType<WindowsDriverManager>(
+                bundle.RuntimeDependencies.DriverManager);
+            Assert.IsInstanceOfType<WindowsSettingsStore>(
+                bundle.RuntimeDependencies.SettingsStore);
+            Assert.IsInstanceOfType<CredentialManagerSecretStore>(
+                bundle.SecretStore);
+            Assert.AreSame(
+                bundle.RuntimeDependencies.SettingsStore,
+                bundle.ProductSettings);
         }
         finally
         {
@@ -233,6 +242,26 @@ public sealed class ProductionCompositionTests
         {
             await bundle.DisposeAsync();
         }
+    }
+
+    [TestMethod]
+    public void ProductionDiagnosticsProbeUsesTheRuntimeSessionFactory()
+    {
+        ITranslationSessionFactory runtimeFactory =
+            new UnreachableSessionFactory();
+        MethodInfo? createProbe = typeof(ProductionUiAdapters).GetMethod(
+            "CreateTranslationConnectionProbe",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.IsNotNull(createProbe);
+
+        TranslationConnectionProbe probe =
+            Assert.IsInstanceOfType<TranslationConnectionProbe>(
+                createProbe.Invoke(null, [runtimeFactory]));
+        FieldInfo? sessionFactory = typeof(TranslationConnectionProbe)
+            .GetField("_sessionFactory", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.IsNotNull(sessionFactory);
+
+        Assert.AreSame(runtimeFactory, sessionFactory.GetValue(probe));
     }
 
     [TestMethod]
