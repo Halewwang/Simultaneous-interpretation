@@ -222,7 +222,9 @@ public sealed class WindowsDriverManagerTests
             InfPath,
             DriverBinaryPath);
 
-        Assert.AreEqual("CN=EMKE Internal Test", evidence.Signer);
+        Assert.AreEqual(
+            RecordingCatalogTrustNativeApi.MicrosoftSignerSubject,
+            evidence.Signer);
         Assert.IsTrue(evidence.ChainValid);
         Assert.AreEqual(CatalogPath, native.SignerCatalogPath);
         Assert.AreEqual(CatalogPath, native.SignatureCatalogPath);
@@ -484,12 +486,15 @@ public sealed class WindowsDriverManagerTests
     private sealed class RecordingCatalogTrustNativeApi
         : IWindowsCatalogTrustNativeApi
     {
+        public const string MicrosoftSignerSubject =
+            "CN=Microsoft Windows Hardware Compatibility Publisher, " +
+            "O=Microsoft Corporation, C=US";
         private const int TrustSuccess = 0;
         private const int TrustFailure = unchecked((int)0x800B0100);
         private const int WinTrustError = unchecked((int)0x80092003);
 
         public WindowsCatalogSignerEvidence Signer { get; init; } =
-            new("CN=EMKE Internal Test", LocalChainValid: true);
+            new(MicrosoftSignerSubject, LocalChainValid: true);
 
         public int SignatureStatus { get; init; } = TrustSuccess;
 
@@ -515,13 +520,13 @@ public sealed class WindowsDriverManagerTests
                 "wrongSigner" => new()
                 {
                     Signer = new(
-                        "CN=Other Publisher",
+                        "CN=EMKE Internal Test",
                         LocalChainValid: true),
                 },
                 "localChainInvalid" => new()
                 {
                     Signer = new(
-                        "CN=EMKE Internal Test",
+                        MicrosoftSignerSubject,
                         LocalChainValid: false),
                 },
                 "tamperedCatalog" => new()

@@ -569,16 +569,24 @@ try {
     }
 
     $script:TrustEvidence = New-TrustedEvidence
+    $canonicalCatalogHash = (Get-FileHash `
+        -LiteralPath (Join-Path $validPackage "EMKE.VirtualAudio.cat") `
+        -Algorithm SHA256).Hash
     $changedCatalog = Copy-CanonicalPackage -Name "changed-catalog"
-    [IO.File]::AppendAllText(
+    [IO.File]::WriteAllBytes(
         (Join-Path $changedCatalog "EMKE.VirtualAudio.cat"),
-        "changed"
+        [byte[]]@(0)
     )
     Assert-ImportRejected `
         -Manifest $manifest `
         -ReturnedPackage $changedCatalog `
         -Name "changed-catalog" `
         -Pattern "catalog|member|reference|open"
+    if ((Get-FileHash `
+            -LiteralPath (Join-Path $validPackage "EMKE.VirtualAudio.cat") `
+            -Algorithm SHA256).Hash -cne $canonicalCatalogHash) {
+        throw "Changed-catalog rejection mutated the canonical source package."
+    }
 
     Write-Host (
         "Microsoft-signed driver import validation passed: canonical bytes; " +

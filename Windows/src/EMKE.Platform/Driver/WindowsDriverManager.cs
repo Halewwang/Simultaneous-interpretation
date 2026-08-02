@@ -196,6 +196,13 @@ internal sealed record WindowsCatalogSignerEvidence(
     string? Subject,
     bool LocalChainValid);
 
+internal sealed record WindowsCatalogRevocationConfiguration(
+    X509RevocationMode ChainRevocationMode,
+    X509RevocationFlag ChainRevocationFlag,
+    uint WinTrustRevocationChecks,
+    uint WinTrustProviderFlags,
+    bool CertificateDownloadsEnabled);
+
 internal interface IWindowsCatalogTrustNativeApi
 {
     WindowsCatalogSignerEvidence ReadCatalogSigner(string catalogPath);
@@ -207,20 +214,126 @@ internal interface IWindowsCatalogTrustNativeApi
         string memberPath);
 }
 
+public sealed record DriverCatalogTrustDecision(
+    bool Allowed,
+    string Reason);
+
+public interface IDriverCatalogTrustPolicy
+{
+    DriverCatalogTrustDecision Evaluate(
+        string signerSubject,
+        bool kernelPolicyValid,
+        bool catalogMembersValid);
+}
+
+public sealed class MicrosoftDriverCatalogTrustPolicy
+    : IDriverCatalogTrustPolicy
+{
+    private const string MicrosoftPublisherCommonName =
+        "Microsoft Windows Hardware Compatibility Publisher";
+    private const string MicrosoftOrganization = "Microsoft Corporation";
+
+    public static MicrosoftDriverCatalogTrustPolicy Instance { get; } = new();
+
+    private MicrosoftDriverCatalogTrustPolicy()
+    {
+    }
+
+    public DriverCatalogTrustDecision Evaluate(
+        string signerSubject,
+        bool kernelPolicyValid,
+        bool catalogMembersValid)
+    {
+        ArgumentNullException.ThrowIfNull(signerSubject);
+        if (!kernelPolicyValid)
+        {
+            return new DriverCatalogTrustDecision(
+                Allowed: false,
+                Reason: "kernelPolicyInvalid");
+        }
+
+        if (!catalogMembersValid)
+        {
+            return new DriverCatalogTrustDecision(
+                Allowed: false,
+                Reason: "catalogMembersInvalid");
+        }
+
+        bool microsoftPublisher = HasSubjectComponent(
+                signerSubject,
+                "CN",
+                MicrosoftPublisherCommonName)
+            && HasSubjectComponent(
+                signerSubject,
+                "O",
+                MicrosoftOrganization);
+        return microsoftPublisher
+            ? new DriverCatalogTrustDecision(
+                Allowed: true,
+                Reason: "microsoftKernelCatalogTrusted")
+            : new DriverCatalogTrustDecision(
+                Allowed: false,
+                Reason: "catalogSignerNotMicrosoft");
+    }
+
+    private static bool HasSubjectComponent(
+        string subject,
+        string expectedName,
+        string expectedValue)
+    {
+        foreach (string component in subject.Split(','))
+        {
+            int separator = component.IndexOf(
+                '=',
+                StringComparison.Ordinal);
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            if (string.Equals(
+                    component[..separator].Trim(),
+                    expectedName,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(
+                    component[(separator + 1)..].Trim(),
+                    expectedValue,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 internal sealed class WindowsCatalogTrustVerifier
 {
-    private const string ExpectedSigner = "CN=EMKE Internal Test";
     private const int TrustSuccess = 0;
     private readonly IWindowsCatalogTrustNativeApi _native;
+    private readonly IDriverCatalogTrustPolicy _trustPolicy;
 
     public static WindowsCatalogTrustVerifier Instance { get; } = new(
-        WindowsCatalogTrustNativeApi.Instance);
+        WindowsCatalogTrustNativeApi.Instance,
+        MicrosoftDriverCatalogTrustPolicy.Instance);
 
     internal WindowsCatalogTrustVerifier(
         IWindowsCatalogTrustNativeApi native)
+        : this(native, MicrosoftDriverCatalogTrustPolicy.Instance)
+    {
+    }
+
+    internal WindowsCatalogTrustVerifier(
+        IWindowsCatalogTrustNativeApi native,
+        IDriverCatalogTrustPolicy trustPolicy)
     {
         _native = native ?? throw new ArgumentNullException(nameof(native));
+        _trustPolicy = trustPolicy
+            ?? throw new ArgumentNullException(nameof(trustPolicy));
     }
+
+    internal IDriverCatalogTrustPolicy TrustPolicy => _trustPolicy;
 
 #pragma warning disable CA1031 // Incomplete trust evidence must fail closed.
     public WindowsCatalogEvidence Verify(
@@ -233,28 +346,22 @@ internal sealed class WindowsCatalogTrustVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(driverBinaryPath);
         try
         {
-            if (_native.VerifyCatalogSignature(catalogPath)
-                != TrustSuccess)
-            {
-                return Untrusted();
-            }
-
             WindowsCatalogSignerEvidence signer =
                 _native.ReadCatalogSigner(catalogPath);
-            if (!string.Equals(
-                    signer.Subject,
-                    ExpectedSigner,
-                    StringComparison.Ordinal)
-                || !signer.LocalChainValid)
-            {
-                return Untrusted();
-            }
-
-            if (_native.VerifyCatalogMember(catalogPath, infPath)
-                    != TrustSuccess
-                || _native.VerifyCatalogMember(
+            bool kernelPolicyValid =
+                _native.VerifyCatalogSignature(catalogPath) == TrustSuccess
+                && signer.LocalChainValid;
+            bool catalogMembersValid =
+                _native.VerifyCatalogMember(catalogPath, infPath)
+                    == TrustSuccess
+                && _native.VerifyCatalogMember(
                     catalogPath,
-                    driverBinaryPath) != TrustSuccess)
+                    driverBinaryPath) == TrustSuccess;
+            DriverCatalogTrustDecision decision = _trustPolicy.Evaluate(
+                signer.Subject ?? string.Empty,
+                kernelPolicyValid,
+                catalogMembersValid);
+            if (!decision.Allowed)
             {
                 return Untrusted();
             }
@@ -733,12 +840,11 @@ internal sealed class WindowsCatalogTrustNativeApi
     : IWindowsCatalogTrustNativeApi
 {
     private const uint WtdUiNone = 2;
-    private const uint WtdRevokeNone = 0;
+    private const uint WtdRevokeWholeChain = 1;
     private const uint WtdChoiceFile = 1;
     private const uint WtdChoiceCatalog = 2;
     private const uint WtdStateActionIgnore = 0;
-    private const uint WtdRevocationCheckNone = 0x00000010;
-    private const uint WtdCacheOnlyUrlRetrieval = 0x00001000;
+    private const uint WtdRevocationCheckChain = 0x00000040;
     private static readonly nint InvalidHandleValue = new(-1);
     private static readonly Guid GenericVerifyV2 = new(
         "00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
@@ -746,6 +852,14 @@ internal sealed class WindowsCatalogTrustNativeApi
         "F750E6C3-38EE-11D1-85E5-00C04FC295EE");
 
     public static WindowsCatalogTrustNativeApi Instance { get; } = new();
+
+    internal static WindowsCatalogRevocationConfiguration
+        RevocationConfiguration { get; } = new(
+            X509RevocationMode.Online,
+            X509RevocationFlag.EntireChain,
+            WtdRevokeWholeChain,
+            WtdRevocationCheckChain,
+            CertificateDownloadsEnabled: true);
 
     private WindowsCatalogTrustNativeApi()
     {
@@ -765,10 +879,15 @@ internal sealed class WindowsCatalogTrustNativeApi
         using X509Certificate2 signerCertificate =
             X509CertificateLoader.LoadCertificate(signer.GetRawCertData());
         using X509Chain chain = new();
-        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        chain.ChainPolicy.RevocationMode =
+            RevocationConfiguration.ChainRevocationMode;
+        chain.ChainPolicy.RevocationFlag =
+            RevocationConfiguration.ChainRevocationFlag;
         chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
         chain.ChainPolicy.VerificationTime = DateTime.Now;
-        chain.ChainPolicy.DisableCertificateDownloads = true;
+        chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(30);
+        chain.ChainPolicy.DisableCertificateDownloads =
+            !RevocationConfiguration.CertificateDownloadsEnabled;
         return new WindowsCatalogSignerEvidence(
             signerCertificate.Subject,
             chain.Build(signerCertificate));
@@ -792,7 +911,7 @@ internal sealed class WindowsCatalogTrustNativeApi
                 CreateTrustData(
                     WtdChoiceFile,
                     (nint)(&fileInfo));
-            Guid action = GenericVerifyV2;
+            Guid action = DriverActionVerify;
             return WindowsCatalogNativeMethods.WinVerifyTrust(
                 InvalidHandleValue,
                 ref action,
@@ -919,12 +1038,13 @@ internal sealed class WindowsCatalogTrustNativeApi
                 (uint)Marshal.SizeOf<
                     WindowsCatalogNativeMethods.WinTrustData>()),
             UiChoice = WtdUiNone,
-            RevocationChecks = WtdRevokeNone,
+            RevocationChecks =
+                RevocationConfiguration.WinTrustRevocationChecks,
             UnionChoice = unionChoice,
             UnionInfo = unionInfo,
             StateAction = WtdStateActionIgnore,
             ProviderFlags =
-                WtdRevocationCheckNone | WtdCacheOnlyUrlRetrieval,
+                RevocationConfiguration.WinTrustProviderFlags,
         };
     }
 
