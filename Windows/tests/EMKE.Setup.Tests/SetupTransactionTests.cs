@@ -2,6 +2,8 @@ using EMKE.Setup;
 
 namespace EMKE.Setup.Tests;
 
+#pragma warning disable CA1515 // MSTest requires discoverable public test classes.
+
 [TestClass]
 public sealed class SetupTransactionTests
 {
@@ -38,7 +40,7 @@ public sealed class SetupTransactionTests
             driverDevicePreExisting: true,
             userPackagePreExisting: true);
 
-        Assert.AreEqual(0, transaction.GetRollbackActions().Count);
+        Assert.IsEmpty(transaction.GetRollbackActions());
         Assert.ThrowsExactly<InvalidOperationException>(
             transaction.RecordCertificateCreated);
         Assert.ThrowsExactly<InvalidOperationException>(
@@ -64,3 +66,5 @@ public sealed class SetupTransactionTests
             transaction.RecordDriverPackageCreated);
     }
 }
+
+#pragma warning restore CA1515
