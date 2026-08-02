@@ -175,15 +175,12 @@ internal struct NativeAudioDiagnostics
 
 #pragma warning disable CA1032 // The stable native status is required for runtime recovery decisions.
 
-public sealed class NativeAudioException : Exception
+public sealed class NativeAudioException : AudioEngineException
 {
     public NativeAudioException(AudioEngineStatus status, string message)
-        : base(message)
+        : base(status, message)
     {
-        Status = status;
     }
-
-    public AudioEngineStatus Status { get; }
 }
 
 #pragma warning restore CA1032

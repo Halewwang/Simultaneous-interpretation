@@ -57,6 +57,27 @@ public sealed class NativeAudioPollingTests
     }
 
     [TestMethod]
+    public async Task QueueFullCreateReturnsTheSharedBackpressureExceptionAndReleasesItsHandle()
+    {
+        FakeNativeAudioApi native = new()
+        {
+            CreateStatus = NativeAudioStatus.QueueFull,
+            ReturnHandleOnCreateFailure = true,
+        };
+        await using NativeAudioEngine engine = new(
+            native,
+            ArrayPool<byte>.Shared,
+            new ControlledPollDelay());
+
+        AudioEngineException exception =
+            await Assert.ThrowsExactlyAsync<NativeAudioException>(
+                () => engine.StartAsync(ValidConfiguration, CancellationToken.None));
+
+        Assert.AreEqual(AudioEngineStatus.QueueFull, exception.Status);
+        Assert.AreEqual(1, native.DestroyCount);
+    }
+
+    [TestMethod]
     public async Task ThrownStartFailureReleasesCreatedNativeHandle()
     {
         FakeNativeAudioApi native = new()

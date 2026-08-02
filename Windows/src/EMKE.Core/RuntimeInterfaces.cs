@@ -36,6 +36,22 @@ public enum AudioEngineStatus
     InternalError,
 }
 
+#pragma warning disable CA1032 // The status is the only safe cross-boundary diagnostic.
+
+public class AudioEngineException : Exception
+{
+    public AudioEngineException(AudioEngineStatus status, string message)
+        : base(message)
+    {
+        DomainEnum.ThrowIfUndefined(status, nameof(status));
+        Status = status;
+    }
+
+    public AudioEngineStatus Status { get; }
+}
+
+#pragma warning restore CA1032
+
 public enum AudioEngineRoute
 {
     Stopped,
