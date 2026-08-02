@@ -786,6 +786,22 @@ public sealed class TranslationRuntimeIntegrationTests
         }
     }
 
+    private static async Task AssertReleasedAsync(
+        MockTranslationServer server,
+        TestAudioEngine audio)
+    {
+        await Task.WhenAll(
+            server.WaitForConnectionClosedAsync(LanguageCode.Zh),
+            server.WaitForConnectionClosedAsync(LanguageCode.En),
+            audio.PollQuiesced).WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        Assert.AreEqual(0, server.ActiveConnectionCount);
+        Assert.AreEqual(0, audio.ActivePollCount);
+        Assert.AreEqual(0, audio.PendingEventCount);
+        Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
+        Assert.AreEqual(0, audio.ActivePcmLeaseCount);
+    }
+
     private sealed class PassingWindowsBuildGate : IWindowsBuildGate
     {
         public ValueTask<RuntimeError?> CheckAsync(
