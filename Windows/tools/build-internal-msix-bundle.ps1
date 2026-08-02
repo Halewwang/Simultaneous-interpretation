@@ -145,6 +145,86 @@ function Get-FileEvidence {
     }
 }
 
+function Write-RenderedLifecycleScript {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SourcePath,
+
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [Collections.IDictionary]$Replacements
+    )
+
+    $expectedTokenCounts = [ordered]@{
+        '__EMKE_PACKAGE_VERSION__' = 1
+        '__EMKE_ARCHITECTURE__' = 1
+        '__EMKE_PACKAGE_BASE_NAME__' = 2
+    }
+    if ($Replacements.Count -ne $expectedTokenCounts.Count) {
+        throw 'Lifecycle template replacements are incomplete.'
+    }
+    foreach ($token in $expectedTokenCounts.Keys) {
+        if (
+            -not $Replacements.Contains($token) -or
+            [string]::IsNullOrWhiteSpace([string]$Replacements[$token])
+        ) {
+            throw 'Lifecycle template replacements are incomplete.'
+        }
+    }
+
+    $template = [IO.File]::ReadAllText($SourcePath)
+    $tokenMatches = [regex]::Matches(
+        $template,
+        '__EMKE_[A-Za-z0-9_]+__',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+    )
+    $actualTokenCounts = @{}
+    foreach ($tokenMatch in $tokenMatches) {
+        $token = $tokenMatch.Value
+        if (-not $expectedTokenCounts.Contains($token)) {
+            throw "Lifecycle template contains an unexpected token: $token"
+        }
+        if (-not $actualTokenCounts.ContainsKey($token)) {
+            $actualTokenCounts[$token] = 0
+        }
+        $actualTokenCounts[$token] += 1
+    }
+    foreach ($token in $expectedTokenCounts.Keys) {
+        $actualCount = if ($actualTokenCounts.ContainsKey($token)) {
+            $actualTokenCounts[$token]
+        } else {
+            0
+        }
+        if ($actualCount -ne $expectedTokenCounts[$token]) {
+            throw (
+                "Lifecycle template token inventory is invalid: $token " +
+                "must occur exactly $($expectedTokenCounts[$token]) time(s)."
+            )
+        }
+        $template = $template.Replace(
+            $token,
+            [string]$Replacements[$token]
+        )
+    }
+    if (
+        [regex]::IsMatch(
+            $template,
+            '__EMKE_[A-Za-z0-9_]+__',
+            [Text.RegularExpressions.RegexOptions]::CultureInvariant
+        )
+    ) {
+        throw 'Lifecycle template rendering left an unresolved token.'
+    }
+
+    [IO.File]::WriteAllText(
+        $OutputPath,
+        $template,
+        [Text.UTF8Encoding]::new($false)
+    )
+}
+
 $resolvedInputs = [ordered]@{}
 foreach ($entry in $expectedInputs.GetEnumerator()) {
     $resolvedInputs[$entry.Key] = Resolve-ExactInputFile `
@@ -203,12 +283,24 @@ if (Test-Path -LiteralPath $resolvedOutput) {
 }
 $resolvedOutput = Assert-NoReparsePathChain -Path $resolvedOutput
 
+$lifecycleReplacements = [ordered]@{
+    '__EMKE_PACKAGE_VERSION__' = $releaseMetadata.PackageVersion
+    '__EMKE_ARCHITECTURE__' = $releaseMetadata.Architecture
+    '__EMKE_PACKAGE_BASE_NAME__' = $packageBaseName
+}
 foreach ($entry in $resolvedInputs.GetEnumerator()) {
-    [IO.File]::Copy(
-        $entry.Value,
-        (Join-Path $resolvedOutput $entry.Key),
-        $false
-    )
+    $outputPath = Join-Path $resolvedOutput $entry.Key
+    if (
+        $entry.Key -ceq 'Install-EMKE-Translation-Internal.ps1' -or
+        $entry.Key -ceq 'Uninstall-EMKE-Translation-Internal.ps1'
+    ) {
+        Write-RenderedLifecycleScript `
+            -SourcePath $entry.Value `
+            -OutputPath $outputPath `
+            -Replacements $lifecycleReplacements
+    } else {
+        [IO.File]::Copy($entry.Value, $outputPath, $false)
+    }
 }
 
 $hashLines = foreach ($name in $resolvedInputs.Keys) {

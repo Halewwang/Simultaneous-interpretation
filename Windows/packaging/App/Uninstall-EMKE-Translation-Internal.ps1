@@ -28,13 +28,13 @@ $ErrorActionPreference = "Stop"
 
 $script:PackageName = "EMKE.Translation.Internal"
 $script:ExpectedPublisher = "CN=EMKE Internal Test"
-$script:ExpectedVersion = "0.1.0.0"
-$script:ExpectedArchitecture = "x64"
+$script:ExpectedVersion = "__EMKE_PACKAGE_VERSION__"
+$script:ExpectedArchitecture = "__EMKE_ARCHITECTURE__"
 $script:ExpectedCertificateSubject = "CN=EMKE Internal Test"
 $script:PackageFileName =
-    "EMKE-Translation-Windows-0.1.0-internal-x64.msix"
+    "__EMKE_PACKAGE_BASE_NAME__.msix"
 $script:CertificateFileName =
-    "EMKE-Translation-Windows-0.1.0-internal-x64.cer"
+    "__EMKE_PACKAGE_BASE_NAME__.cer"
 $script:InstallScriptFileName =
     "Install-EMKE-Translation-Internal.ps1"
 $script:UninstallScriptFileName =
