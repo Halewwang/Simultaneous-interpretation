@@ -493,11 +493,6 @@ internal sealed class AppCompositionRoot
         List<AppExitError> errors = [];
         _commandGate.Disable();
 
-        await RunAsync(
-            AppExitErrorKind.DiagnosticsStop,
-            cancellationToken => _diagnostics.StopAsync(cancellationToken),
-            CancellationToken.None).ConfigureAwait(false);
-
         using (CancellationTokenSource stopCancellation = new(
                    _runtimeStopDeadline))
         {
@@ -534,6 +529,11 @@ internal sealed class AppCompositionRoot
                     exception));
             }
         }
+
+        await RunAsync(
+            AppExitErrorKind.DiagnosticsStop,
+            cancellationToken => _diagnostics.StopAsync(cancellationToken),
+            CancellationToken.None).ConfigureAwait(false);
 
         Run(
             AppExitErrorKind.SnapshotDispose,
