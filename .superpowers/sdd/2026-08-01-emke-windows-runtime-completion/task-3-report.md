@@ -9,7 +9,9 @@
   (`feat: expose native Windows audio device catalog`)
 - Windows SDK correction: `dc3be33b7b8680b95fc3bbbba93b60b6093e52ad`,
   `2ab864389a1161558d6b19b9dc8febec9511e0e1`
-- Managed fixture correction: `8f38a3e7b86e0d13b885cce6738a83773faf525f`
+- Managed fixture corrections: `8f38a3e7b86e0d13b885cce6738a83773faf525f`,
+  `c548cd690ecf39b8a14c4437c0a85605e89afeb1`, and
+  `cb3479cdec53e3001aec93ed0abd956f1a5fc8ae`
 
 ## Delivered boundary
 
@@ -43,10 +45,24 @@
 - Second attempt: Runtime `30732753733` and Internal MSIX `30732753777`
   reached native build/test successfully. Managed compilation then found only
   test-fixture initializer/fixed-buffer/analyzer defects, corrected in
-  `8f38a3e`; those failures are not presented as behavior evidence.
-- Current final evidence run is the evidence-only draft PR #8 head
-  `8f38a3e`; its completion is recorded in the ledger after its workflows
-  finish. Product branch has not been pushed.
+  `8f38a3e` through `cb3479c`; those failures are not presented as behavior
+  evidence.
+- GREEN evidence: evidence-only PR #8 head `cb3479c` (closed unmerged), Windows Internal
+  MSIX run `30733201383`, job `91457028235`, succeeded. Its native release
+  gate passed and its managed suite reports Core 50/50, Contract 18/18,
+  Application 94/94, Realtime 109/109, Routing 50/50, Windows App 144/144,
+  and Integration 99 passed + 1 intentional non-Windows skip (100 total).
+  The Windows Translation Runtime run `30733201382`, job `91457021568`, also
+  passed native CTest 18/18 and that same managed suite result. Its final
+  owned-PCM adapter subgate nevertheless failed because the workflow looks
+  for a missing `Windows/out/native/x64-release/integration/Release/EMKE.NativeAudio.Tests.exe`;
+  this is recorded as a fixture-path gate failure, not catalog behavior.
+- Windows Audio Foundation run `30733201401`, hosted-toolchain job
+  `91457021715`, passed native CTest 18/18 plus managed seam 18/18 and native
+  fake 7/7. It then failed only its existing output-directory evidence guard
+  (`Managed native-audio integration output directory is missing`), after
+  those tests had completed.
+  Product branch has not been pushed.
 
 ## Remaining boundary
 
