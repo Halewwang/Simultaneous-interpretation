@@ -1090,6 +1090,26 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task NativeQueueFullStartFailureMapsToStableBackpressureBeforeRuntimeStarts()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.Audio.StartException = new AudioEngineException(
+            AudioEngineStatus.QueueFull,
+            "native queue detail must not escape");
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.Backpressure, error?.Category);
+        Assert.AreEqual("translationRuntime.audioBackpressure", error?.Code);
+        Assert.AreEqual(RecoveryAction.Retry, error?.RecoveryAction);
+        Assert.HasCount(0, error!.Parameters);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreEqual(1, harness.AudioStopCount);
+    }
+
+    [TestMethod]
     public async Task StartCompletesWithPrimaryErrorWhenRollbackCleanupThrows()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -1889,6 +1909,8 @@ internal sealed class RuntimeHarness
 
         public RuntimeError? StartError { get; set; }
 
+        public Exception? StartException { get; set; }
+
         public Exception? StopException { get; set; }
 
         public Exception? OutboundRouteException { get; set; }
@@ -1925,6 +1947,10 @@ internal sealed class RuntimeHarness
                 if (StartError is not null)
                 {
                     throw new RuntimeOperationException(StartError);
+                }
+                if (StartException is not null)
+                {
+                    throw StartException;
                 }
             }
             finally
