@@ -87,7 +87,9 @@ function Assert-RealDirectory {
         [string]$Path,
 
         [Parameter(Mandatory)]
-        [string]$Description
+        [string]$Description,
+
+        [switch]$CaseInsensitiveNames
     )
 
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -152,7 +154,12 @@ function Assert-ExactFlatInventory {
         throw "$Description must contain the exact immutable inventory."
     }
     foreach ($expectedName in $ExpectedNames) {
-        if (@($files | Where-Object { $_.Name -ceq $expectedName }).Count -ne 1) {
+        [object[]]$matches = if ($CaseInsensitiveNames) {
+            @($files | Where-Object { $_.Name -ieq $expectedName })
+        } else {
+            @($files | Where-Object { $_.Name -ceq $expectedName })
+        }
+        if ($matches.Count -ne 1) {
             throw "$Description must contain the exact immutable inventory."
         }
     }
@@ -350,7 +357,8 @@ function New-DriverSubmission {
     Assert-ExactFlatInventory `
         -Directory $resolvedInput `
         -ExpectedNames $script:PackageFileNames `
-        -Description "Verified driver package"
+        -Description "Verified driver package" `
+        -CaseInsensitiveNames
 
     $sourceHashes = [ordered]@{}
     foreach ($name in $script:PackageFileNames) {
