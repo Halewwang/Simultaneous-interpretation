@@ -125,7 +125,7 @@ public sealed class SetupExtractionDirectoryTests
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
 
-        using SetupExtractionResult result = extraction.CopyVerified(
+        SetupExtractionResult result = extraction.CopyVerified(
             "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
@@ -143,7 +143,7 @@ public sealed class SetupExtractionDirectoryTests
         using TemporaryDirectory temporary = new();
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
-        using SetupExtractionResult result = extraction.CopyVerified(
+        SetupExtractionResult result = extraction.CopyVerified(
             "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());

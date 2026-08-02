@@ -1,12 +1,19 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace EMKE.Setup;
 
 internal sealed class SetupExtractionException : Exception
 {
+    private const string DefaultFailureCode = "setupExtractionFailed";
+
+    public SetupExtractionException()
+        : this(DefaultFailureCode)
+    {
+    }
+
     public SetupExtractionException(string failureCode)
         : base("Setup extraction failed.")
     {
@@ -14,23 +21,65 @@ internal sealed class SetupExtractionException : Exception
         FailureCode = failureCode;
     }
 
+    public SetupExtractionException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ArgumentNullException.ThrowIfNull(innerException);
+        FailureCode = DefaultFailureCode;
+    }
+
     public string FailureCode { get; }
 }
 
-internal sealed class SetupExtractionResult : IDisposable
+internal sealed class SetupExtractionCleanupState
 {
-    private readonly FileStream? _verificationLease;
+    private SetupExtractionCleanupState(
+        bool completed,
+        bool residualRetained,
+        string? failureCode)
+    {
+        Completed = completed;
+        ResidualRetained = residualRetained;
+        FailureCode = failureCode;
+    }
 
+    public bool Completed { get; }
+
+    public bool ResidualRetained { get; }
+
+    public string? FailureCode { get; }
+
+    public static SetupExtractionCleanupState NotAttempted { get; } = new(
+        completed: false,
+        residualRetained: false,
+        failureCode: null);
+
+    public static SetupExtractionCleanupState Cleaned { get; } = new(
+        completed: true,
+        residualRetained: false,
+        failureCode: null);
+
+    public static SetupExtractionCleanupState Residual(string failureCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
+        return new SetupExtractionCleanupState(
+            completed: false,
+            residualRetained: true,
+            failureCode);
+    }
+}
+
+internal sealed class SetupExtractionResult
+{
     private SetupExtractionResult(
         bool succeeded,
         string? failureCode,
-        string outputPath,
-        FileStream? verificationLease)
+        string outputPath)
     {
         Succeeded = succeeded;
         FailureCode = failureCode;
         OutputPath = outputPath;
-        _verificationLease = verificationLease;
     }
 
     public bool Succeeded { get; }
@@ -39,47 +88,80 @@ internal sealed class SetupExtractionResult : IDisposable
 
     public string OutputPath { get; }
 
-    public static SetupExtractionResult Success(
-        string outputPath,
-        FileStream? verificationLease) => new(
-            true,
-            null,
-            outputPath,
-            verificationLease);
+    public static SetupExtractionResult Success(string outputPath) => new(
+        true,
+        null,
+        outputPath);
 
     public static SetupExtractionResult Rejected(string failureCode) => new(
         false,
         failureCode,
-        string.Empty,
-        verificationLease: null);
-
-    public void Dispose()
-    {
-        _verificationLease?.Dispose();
-    }
+        string.Empty);
 }
 
 internal sealed class SetupExtractionDirectory : IDisposable
 {
+    private const int ErrorFileExists = 80;
     private const int ErrorAlreadyExists = 183;
     private const int MaximumCreateAttempts = 8;
-    private readonly List<SetupExtractionResult> _verificationLeases = [];
-    private readonly string _rootIdentityPath;
-    private readonly FileStream _rootIdentityLease;
+    private const int CopyBufferSize = 81920;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint DeleteAccess = 0x00010000;
+    private const uint FileReadAttributes = 0x00000080;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
+    private const uint CreateNew = 1;
+    private const uint OpenExisting = 3;
+    private const uint FileAttributeReadOnly = 0x00000001;
+    private const uint FileAttributeNormal = 0x00000080;
+    private const uint FileFlagSequentialScan = 0x08000000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileAttributeReparsePoint = 0x00000400;
+    private readonly List<PayloadLease> _payloadLeases = [];
+    private readonly SafeFileHandle _rootHandle;
+    private readonly FileIdentity _rootIdentity;
     private bool _disposed;
+    private string? _cleanupUncertaintyCode;
 
     private SetupExtractionDirectory(string rootPath)
     {
         RootPath = rootPath;
-        _rootIdentityPath = Path.Combine(rootPath, ".emke-setup-root.lock");
-        _rootIdentityLease = new FileStream(
-            _rootIdentityPath,
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.Read);
+        SafeFileHandle? rootHandle = null;
+        try
+        {
+            rootHandle = OpenRootHandle(rootPath);
+            if (!TryReadIdentity(rootHandle, out FileIdentity identity)
+                || (identity.FileAttributes & FileAttributeReparsePoint) != 0
+                || !IsFinalResolvedPathEqual(rootHandle, rootPath))
+            {
+                throw new SetupExtractionException("rootIdentityUnavailable");
+            }
+
+            _rootIdentity = identity;
+            _rootHandle = rootHandle;
+            rootHandle = null;
+        }
+        catch
+        {
+            if (rootHandle is not null && !rootHandle.IsInvalid)
+            {
+                _ = TrySetDeleteDisposition(rootHandle);
+            }
+            throw;
+        }
+        finally
+        {
+            rootHandle?.Dispose();
+        }
     }
 
     public string RootPath { get; }
+
+    public SetupExtractionCleanupState CleanupState { get; private set; } =
+        SetupExtractionCleanupState.NotAttempted;
 
     public static SetupExtractionDirectory Create(
         string setupOwnedBase,
@@ -140,9 +222,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
             string candidate = Path.Combine(basePath, rootName);
             return TryCreateNewDirectory(candidate)
-                ? SetupExtractionResult.Success(
-                    candidate,
-                    verificationLease: null)
+                ? SetupExtractionResult.Success(candidate)
                 : SetupExtractionResult.Rejected("extractionRootAlreadyExists");
         }
         catch (SetupExtractionException exception)
@@ -171,6 +251,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
 
         string outputPath = Path.Combine(RootPath, outputName);
+        PayloadLease? lease = null;
         try
         {
             EnsureNoReparsePointAtAnyExistingComponent(outputPath);
@@ -179,51 +260,41 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 return SetupExtractionResult.Rejected("unsafeOutputPath");
             }
 
-            string hash;
-            long length;
-            FileStream lease;
-            try
-            {
-                (length, hash, lease) = CopyAndHash(source, outputPath, expectedPayload.Length);
-            }
-            catch (IOException) when (File.Exists(outputPath))
-            {
-                return SetupExtractionResult.Rejected("existingOutputRejected");
-            }
-
+            lease = CreateTrackedPayloadLease(outputPath);
+            (long length, string hash) = CopyAndHash(
+                source,
+                lease.Stream,
+                expectedPayload.Length);
             if (length != expectedPayload.Length)
             {
-                lease.Dispose();
-                DeleteCreatedOutput(outputPath);
-                return SetupExtractionResult.Rejected("tamperedPayloadLength");
+                return RejectCreatedPayload(lease, "tamperedPayloadLength");
             }
             if (!string.Equals(hash, expectedPayload.Sha256, StringComparison.Ordinal))
             {
-                lease.Dispose();
-                DeleteCreatedOutput(outputPath);
-                return SetupExtractionResult.Rejected("tamperedPayloadHash");
+                return RejectCreatedPayload(lease, "tamperedPayloadHash");
             }
-
-            File.SetAttributes(outputPath, FileAttributes.ReadOnly);
-            if (!IsFinalResolvedPathContainedByRoot(lease, RootPath))
+            if (!SetFileAttributesByHandle(lease.Stream.SafeFileHandle, FileAttributeReadOnly)
+                || !IsFinalResolvedPathContainedByRoot(lease.Stream.SafeFileHandle, RootPath))
             {
-                lease.Dispose();
-                DeleteCreatedOutput(outputPath);
-                return SetupExtractionResult.Rejected("unsafeOutputPath");
+                return RejectCreatedPayload(lease, "unsafeOutputPath");
             }
 
-            SetupExtractionResult result = SetupExtractionResult.Success(outputPath, lease);
-            _verificationLeases.Add(result);
-            return result;
+            return SetupExtractionResult.Success(outputPath);
         }
         catch (SetupExtractionException exception)
         {
-            DeleteCreatedOutput(outputPath);
+            if (lease is not null)
+            {
+                _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+            }
             return SetupExtractionResult.Rejected(exception.FailureCode);
         }
         catch (IOException)
         {
-            DeleteCreatedOutput(outputPath);
+            if (lease is not null)
+            {
+                _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+            }
             return SetupExtractionResult.Rejected("payloadWriteFailed");
         }
     }
@@ -236,23 +307,48 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
 
         _disposed = true;
-        foreach (SetupExtractionResult lease in _verificationLeases.AsEnumerable().Reverse())
+        bool payloadCleanupCertain = true;
+        foreach (PayloadLease lease in _payloadLeases.AsEnumerable().Reverse().ToArray())
         {
-            lease.Dispose();
-            DeleteCreatedOutput(lease.OutputPath);
+            payloadCleanupCertain &= TryDeletePayloadLease(lease, closeOnFailure: true);
         }
 
-        _rootIdentityLease.Dispose();
-        DeleteCreatedOutput(_rootIdentityPath);
-        try
+        if (!payloadCleanupCertain || _cleanupUncertaintyCode is not null)
         {
-            EnsureNoReparsePointAtAnyExistingComponent(RootPath);
-            Directory.Delete(RootPath, recursive: false);
+            _rootHandle.Dispose();
+            CleanupState = SetupExtractionCleanupState.Residual(
+                _cleanupUncertaintyCode ?? "payloadCleanupUncertain");
+            return;
         }
-        catch (IOException)
+
+        if (!IsRootPathStillBoundToHeldHandle())
         {
-            // A non-empty or externally changed root is deliberately left intact.
+            _rootHandle.Dispose();
+            CleanupState = SetupExtractionCleanupState.Residual("rootIdentityChanged");
+            return;
         }
+
+        bool rootInspectionSucceeded;
+        bool rootHasEntries = TryRootHasEntries(out rootInspectionSucceeded);
+        if (!rootInspectionSucceeded)
+        {
+            _rootHandle.Dispose();
+            CleanupState = SetupExtractionCleanupState.Residual("rootInspectionFailed");
+            return;
+        }
+        if (rootHasEntries)
+        {
+            _rootHandle.Dispose();
+            CleanupState = SetupExtractionCleanupState.Residual(
+                "unexpectedExtractionEntriesRetained");
+            return;
+        }
+
+        bool rootDeleteMarked = TrySetDeleteDisposition(_rootHandle);
+        _rootHandle.Dispose();
+        CleanupState = rootDeleteMarked
+            ? SetupExtractionCleanupState.Cleaned
+            : SetupExtractionCleanupState.Residual("rootCleanupUncertain");
     }
 
     private static string EnsureSafeBase(string setupOwnedBase)
@@ -267,17 +363,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private static bool TryCreateNewDirectory(string candidate)
     {
         EnsureNoReparsePointAtAnyExistingComponent(Path.GetDirectoryName(candidate)!);
-        if (!OperatingSystem.IsWindows())
-        {
-            if (Directory.Exists(candidate) || File.Exists(candidate))
-            {
-                return false;
-            }
-
-            _ = Directory.CreateDirectory(candidate);
-            return true;
-        }
-
         bool created = CreateDirectory(candidate, nint.Zero);
         if (created)
         {
@@ -285,46 +370,192 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
 
         int error = Marshal.GetLastPInvokeError();
-        return error == ErrorAlreadyExists ? false : throw new IOException();
+        return error == ErrorAlreadyExists ? false : throw new Win32Exception(error);
     }
 
-    private static (long length, string hash, FileStream lease) CopyAndHash(
-        Stream source,
-        string outputPath,
-        long maximumLength)
+    private PayloadLease CreateTrackedPayloadLease(string outputPath)
     {
-        FileStream destination = new(
-            outputPath,
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.Read,
-            bufferSize: 81920,
-            FileOptions.SequentialScan);
+        PayloadLease lease = CreatePayloadLease(outputPath);
         try
         {
-            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            byte[] buffer = new byte[81920];
-            long length = 0;
-            int read;
-            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                if (read > maximumLength - length)
-                {
-                    throw new SetupExtractionException("tamperedPayloadLength");
-                }
-
-                destination.Write(buffer, 0, read);
-                hash.AppendData(buffer, 0, read);
-                length += read;
-            }
-
-            destination.Flush(flushToDisk: true);
-            return (length, Convert.ToHexStringLower(hash.GetHashAndReset()), destination);
+            _payloadLeases.Add(lease);
+            return lease;
         }
         catch
         {
-            destination.Dispose();
+            SafeFileHandle handle = lease.Stream.SafeFileHandle;
+            _ = SetFileAttributesByHandle(handle, FileAttributeNormal)
+                && TrySetDeleteDisposition(handle);
+            lease.Dispose();
             throw;
+        }
+    }
+
+    private static PayloadLease CreatePayloadLease(string outputPath)
+    {
+        SafeFileHandle? handle = null;
+        FileStream? stream = null;
+        try
+        {
+            handle = CreateFile(
+                outputPath,
+                GenericRead | GenericWrite | DeleteAccess,
+                FileShareRead,
+                nint.Zero,
+                CreateNew,
+                FileAttributeNormal | FileFlagSequentialScan | FileFlagOpenReparsePoint,
+                nint.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                handle.Dispose();
+                handle = null;
+                throw error is ErrorFileExists or ErrorAlreadyExists
+                    ? new SetupExtractionException("existingOutputRejected")
+                    : new Win32Exception(error);
+            }
+
+            stream = new FileStream(
+                handle,
+                FileAccess.ReadWrite,
+                CopyBufferSize,
+                isAsync: false);
+            handle = null;
+            PayloadLease lease = new(stream);
+            stream = null;
+            return lease;
+        }
+        finally
+        {
+            stream?.Dispose();
+            handle?.Dispose();
+        }
+    }
+
+    private static (long length, string hash) CopyAndHash(
+        Stream source,
+        FileStream destination,
+        long maximumLength)
+    {
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[CopyBufferSize];
+        long length = 0;
+        int read;
+        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (read > maximumLength - length)
+            {
+                throw new SetupExtractionException("tamperedPayloadLength");
+            }
+
+            destination.Write(buffer, 0, read);
+            hash.AppendData(buffer, 0, read);
+            length += read;
+        }
+
+        destination.Flush(flushToDisk: true);
+        return (length, Convert.ToHexStringLower(hash.GetHashAndReset()));
+    }
+
+    private SetupExtractionResult RejectCreatedPayload(
+        PayloadLease lease,
+        string failureCode)
+    {
+        _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+        return SetupExtractionResult.Rejected(failureCode);
+    }
+
+    private bool TryDeletePayloadLease(PayloadLease lease, bool closeOnFailure)
+    {
+        if (lease.Closed)
+        {
+            _ = _payloadLeases.Remove(lease);
+            return true;
+        }
+
+        SafeFileHandle handle = lease.Stream.SafeFileHandle;
+        bool deleteMarked = SetFileAttributesByHandle(handle, FileAttributeNormal)
+            && TrySetDeleteDisposition(handle);
+        if (deleteMarked || closeOnFailure)
+        {
+            lease.Dispose();
+            _ = _payloadLeases.Remove(lease);
+        }
+        if (!deleteMarked && closeOnFailure)
+        {
+            _cleanupUncertaintyCode ??= "payloadCleanupUncertain";
+        }
+        return deleteMarked;
+    }
+
+    private bool IsRootPathStillBoundToHeldHandle()
+    {
+        SafeFileHandle? pathHandle = null;
+        try
+        {
+            pathHandle = CreateFile(
+                RootPath,
+                FileReadAttributes,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                nint.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                nint.Zero);
+            return !pathHandle.IsInvalid
+                && TryReadIdentity(pathHandle, out FileIdentity currentIdentity)
+                && currentIdentity.Equals(_rootIdentity)
+                && (currentIdentity.FileAttributes & FileAttributeReparsePoint) == 0;
+        }
+        finally
+        {
+            pathHandle?.Dispose();
+        }
+    }
+
+    private bool TryRootHasEntries(out bool inspectionSucceeded)
+    {
+        try
+        {
+            bool hasEntries = Directory.EnumerateFileSystemEntries(RootPath).Any();
+            inspectionSucceeded = true;
+            return hasEntries;
+        }
+        catch (IOException)
+        {
+            inspectionSucceeded = false;
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            inspectionSucceeded = false;
+            return true;
+        }
+    }
+
+    private static SafeFileHandle OpenRootHandle(string rootPath)
+    {
+        SafeFileHandle? handle = CreateFile(
+                rootPath,
+                FileReadAttributes | DeleteAccess,
+                FileShareRead | FileShareWrite,
+                nint.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                nint.Zero);
+        try
+        {
+            if (handle.IsInvalid)
+            {
+                throw new SetupExtractionException("rootIdentityUnavailable");
+            }
+
+            SafeFileHandle ownedHandle = handle;
+            handle = null;
+            return ownedHandle;
+        }
+        finally
+        {
+            handle?.Dispose();
         }
     }
 
@@ -384,27 +615,44 @@ internal sealed class SetupExtractionDirectory : IDisposable
     }
 
     private static bool IsFinalResolvedPathContainedByRoot(
-        FileStream output,
+        SafeFileHandle output,
         string root)
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return IsContainedByRoot(Path.GetFullPath(output.Name), root);
-        }
+        return TryGetFinalPath(output, out string finalOutput)
+            && IsContainedByRoot(finalOutput, root);
+    }
 
-        StringBuilder buffer = new(32768);
+    private static bool IsFinalResolvedPathEqual(SafeFileHandle handle, string expectedPath)
+    {
+        return TryGetFinalPath(handle, out string finalPath)
+            && string.Equals(
+                Path.GetFullPath(finalPath).TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(expectedPath).TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetFinalPath(
+        SafeFileHandle handle,
+        out string finalPath)
+    {
+        char[] buffer = new char[32768];
         uint length = GetFinalPathNameByHandle(
-            output.SafeFileHandle,
+            handle,
             buffer,
             checked((uint)buffer.Length),
             flags: 0);
         if (length == 0 || length >= buffer.Length)
         {
+            finalPath = string.Empty;
             return false;
         }
 
-        string finalOutput = NormalizeFinalPath(buffer.ToString());
-        return IsContainedByRoot(finalOutput, root);
+        finalPath = NormalizeFinalPath(new string(buffer, 0, checked((int)length)));
+        return true;
     }
 
     private static string NormalizeFinalPath(string path)
@@ -418,27 +666,124 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 : path;
     }
 
-    private static void DeleteCreatedOutput(string outputPath)
+    private static bool TryReadIdentity(
+        SafeFileHandle handle,
+        out FileIdentity identity)
     {
-        if (!File.Exists(outputPath))
+        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information))
         {
-            return;
+            identity = default;
+            return false;
         }
 
-        try
+        identity = new FileIdentity(
+            information.VolumeSerialNumber,
+            information.FileIndexHigh,
+            information.FileIndexLow,
+            information.FileAttributes);
+        return true;
+    }
+
+    private static bool SetFileAttributesByHandle(
+        SafeFileHandle handle,
+        uint attributes)
+    {
+        FileBasicInformation information = new()
         {
-            File.SetAttributes(outputPath, FileAttributes.Normal);
-            File.Delete(outputPath);
-        }
-        catch (IOException)
+            FileAttributes = attributes,
+        };
+        return SetFileBasicInformationByHandle(
+            handle,
+            FileInformationClass.FileBasicInfo,
+            ref information,
+            checked((uint)Marshal.SizeOf<FileBasicInformation>()));
+    }
+
+    private static bool TrySetDeleteDisposition(SafeFileHandle handle)
+    {
+        FileDispositionInformation information = new()
         {
-            // Cleanup is best-effort and never expands to a parent directory.
-        }
+            DeleteFile = true,
+        };
+        return SetFileDispositionByHandle(
+            handle,
+            FileInformationClass.FileDispositionInfo,
+            ref information,
+            checked((uint)Marshal.SizeOf<FileDispositionInformation>()));
     }
 
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private sealed class PayloadLease : IDisposable
+    {
+        public PayloadLease(FileStream stream)
+        {
+            Stream = stream;
+        }
+
+        public FileStream Stream { get; }
+
+        public bool Closed { get; private set; }
+
+        public void Dispose()
+        {
+            if (Closed)
+            {
+                return;
+            }
+            Closed = true;
+            Stream.Dispose();
+        }
+    }
+
+    private readonly record struct FileIdentity(
+        uint VolumeSerialNumber,
+        uint FileIndexHigh,
+        uint FileIndexLow,
+        uint FileAttributes);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileBasicInformation
+    {
+        public long CreationTime;
+        public long LastAccessTime;
+        public long LastWriteTime;
+        public long ChangeTime;
+        public uint FileAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation
+    {
+        [MarshalAs(UnmanagedType.U1)]
+        public bool DeleteFile;
+    }
+
+    private enum FileInformationClass
+    {
+        FileBasicInfo,
+        FileStandardInfo,
+        FileNameInfo,
+        FileRenameInfo,
+        FileDispositionInfo,
     }
 
     [DllImport(
@@ -453,6 +798,22 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
     [DllImport(
         "kernel32.dll",
+        EntryPoint = "CreateFileW",
+        SetLastError = true,
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern SafeFileHandle CreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        nint securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        nint templateFile);
+
+    [DllImport(
+        "kernel32.dll",
         EntryPoint = "GetFinalPathNameByHandleW",
         SetLastError = true,
         CharSet = CharSet.Unicode,
@@ -460,7 +821,44 @@ internal sealed class SetupExtractionDirectory : IDisposable
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern uint GetFinalPathNameByHandle(
         SafeFileHandle file,
-        StringBuilder path,
+        [Out] char[] path,
         uint pathLength,
         uint flags);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "GetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle file,
+        out ByHandleFileInformation fileInformation);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "SetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileBasicInformationByHandle(
+        SafeFileHandle file,
+        FileInformationClass fileInformationClass,
+        ref FileBasicInformation fileInformation,
+        uint bufferSize);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "SetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileDispositionByHandle(
+        SafeFileHandle file,
+        FileInformationClass fileInformationClass,
+        ref FileDispositionInformation fileInformation,
+        uint bufferSize);
 }

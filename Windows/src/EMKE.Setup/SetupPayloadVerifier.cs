@@ -340,9 +340,8 @@ internal sealed class SetupPayloadVerifier
                 "embeddedPayloadInventoryMismatch");
         }
 
-        SetupExtractionDirectory extraction =
+        SetupExtractionDirectory? extraction =
             _createExtractionDirectory(manifest.ProductVersion);
-        SetupPayloadVerificationAttempt attempt = new(extraction);
         try
         {
             List<VerifiedSetupPayload> verified = [];
@@ -355,7 +354,8 @@ internal sealed class SetupPayloadVerifier
                         StringComparison.OrdinalIgnoreCase));
                 if (embedded is null || embedded.DeclaredLength != expected.Length)
                 {
-                    return RejectAndDispose(attempt, "tamperedPayloadLength");
+                    return SetupPayloadVerificationResult.Rejected(
+                        "tamperedPayloadLength");
                 }
 
                 using Stream source = embedded.OpenRead();
@@ -365,7 +365,8 @@ internal sealed class SetupPayloadVerifier
                     expected);
                 if (!extracted.Succeeded)
                 {
-                    return RejectAndDispose(attempt, extracted.FailureCode!);
+                    return SetupPayloadVerificationResult.Rejected(
+                        extracted.FailureCode!);
                 }
 
                 verified.Add(new VerifiedSetupPayload(
@@ -380,23 +381,32 @@ internal sealed class SetupPayloadVerifier
                 verified.AsReadOnly());
             if (!signature.Trusted)
             {
-                return RejectAndDispose(attempt, signature.FailureCode!);
+                return SetupPayloadVerificationResult.Rejected(signature.FailureCode!);
             }
 
-            return SetupPayloadVerificationResult.VerifiedAttempt(attempt);
+            SetupPayloadVerificationAttempt? attempt = null;
+            try
+            {
+                attempt = new SetupPayloadVerificationAttempt(extraction);
+                extraction = null;
+                SetupPayloadVerificationResult result =
+                    SetupPayloadVerificationResult.VerifiedAttempt(attempt);
+                attempt = null;
+                return result;
+            }
+            finally
+            {
+                attempt?.Dispose();
+            }
         }
         catch (Exception)
         {
-            return RejectAndDispose(attempt, "embeddedPayloadUnreadable");
+            return SetupPayloadVerificationResult.Rejected("embeddedPayloadUnreadable");
         }
-    }
-
-    private static SetupPayloadVerificationResult RejectAndDispose(
-        SetupPayloadVerificationAttempt attempt,
-        string failureCode)
-    {
-        attempt.Dispose();
-        return SetupPayloadVerificationResult.Rejected(failureCode);
+        finally
+        {
+            extraction?.Dispose();
+        }
     }
 #pragma warning restore CA1031
 
