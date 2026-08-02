@@ -16,11 +16,14 @@ or release-promotion behavior.
 - Five production-path safety contracts execute 100 times each (500 total),
   with controlled clocks and explicit iteration counters.
 - The review follow-up classifies native QueueFull as stable backpressure,
-  classifies collected provider 401/403/404 HTTP statuses without parsing
+  classifies collected provider 401/403/422 HTTP statuses without parsing
   exception text, and verifies the Runtime's safe stopped-route cleanup.
 - Every repeated shutdown now checks mock session/socket, poll worker, event
   and translation queues, and tracked PCM lease ownership. A blocked remote
   close remains explicitly reported as `localCloseTimeout` quarantine.
+- The re-review adds a real WebSocket close-output frame and raw malformed Text
+  through the complete Runtime, and replaces matrix ownership polling with
+  deterministic connection-closed and poll-quiesced barriers.
 - The row-by-row production seam, error mapping, safe routes, diagnostics, and
   ownership evidence are in
   `docs/quality/windows-runtime-completion-evidence.md`.
@@ -38,6 +41,7 @@ All Task 5 validation branches were evidence-only and closed without merge:
 | #19 | Runtime logs, hostile codes, failure aggregation | Closed unmerged |
 | #20 | Cross-layer mapping and final report | Closed unmerged |
 | #21 | Review follow-up: QueueFull, provider HTTP status, PCM probes, ownership | Closed unmerged after Runtime `30742018521` / job `91480993354` and MSIX `30742018519` / job `91480993337` evidence |
+| #22 | Re-review: real close frame, raw malformed Text, deterministic ownership barriers | Closed unmerged after Runtime `30742489577` / job `91482265599` and MSIX `30742489586` / job `91482275579` evidence |
 
 The product branch `codex/windows-internal-msix` remains local only. The sole
 pre-existing dirty file, `progress.md`, is intentionally neither altered nor
