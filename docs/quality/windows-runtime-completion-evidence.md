@@ -44,12 +44,14 @@ times each, and its `SafetyAudit` counters assert every iteration completed:
 
 ## Protocol and diagnostic contract
 
-The frozen runtime accepts exactly these five service events:
+The frozen runtime accepts exactly these five service forms:
 
-`session.audio.output.language`, `session.input_audio_buffer.append`,
+the `session.audio.output.language` member of `session.update`,
+`session.input_audio_buffer.append`,
 `session.output_audio.delta`, `session.input_transcript.delta`, and
 `session.output_transcript.delta`.
 
+The four event-type constants plus the nested language member are source-guarded;
 `session.completed`, `session.audio.delta`, and legacy aliases are rejected.
 The source settings keep 24 kHz mono PCM16 for network audio and 48 kHz local
 audio; no `voice`, `speed`, or `instructions` protocol controls are present.
@@ -60,6 +62,16 @@ emits only stable `code`. Hostile codes, exception summaries, test aggregation,
 credentials, credential-bearing URIs, raw endpoint IDs, captions, and PCM are
 rejected or excluded by `RuntimeErrorTests`, `TranslationRuntimeTests`,
 `TranslationSessionFactoryTests`, and `FailureSafetyTests`.
+
+Local source guards on the evidence commit passed:
+
+- `node Scripts/validate-shared-contracts.mjs` — `contract v1: 3 schemas, 8 fixtures`.
+- The exact protocol guard found the four allowed event-type constants and no
+  `session.completed` or `session.audio.delta` in Windows realtime sources.
+- No `voice`, `speed`, or `instructions` setting/control exists in the Windows
+  translation protocol sources; the only `voice` matches are internal VAD
+  implementation identifiers.
+- `git diff --check` passed.
 
 ## Prior RED/GREEN evidence
 
