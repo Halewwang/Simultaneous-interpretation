@@ -189,8 +189,8 @@ public sealed class ProductionCompositionTests
             Assert.IsInstanceOfType<CredentialManagerSecretStore>(
                 bundle.SecretStore);
             Assert.AreSame(
-                bundle.RuntimeDependencies.SettingsStore,
-                bundle.ProductSettings);
+                (object)bundle.RuntimeDependencies.SettingsStore,
+                (object?)bundle.ProductSettings);
         }
         finally
         {
