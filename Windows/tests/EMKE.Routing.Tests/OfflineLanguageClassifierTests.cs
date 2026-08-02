@@ -140,6 +140,36 @@ public sealed class OfflineLanguageClassifierTests
     }
 
     [TestMethod]
+    public void MissingProfileResourceFailsClosedDuringConstruction()
+    {
+        TargetInvocationException failure =
+            Assert.ThrowsExactly<TargetInvocationException>(
+                () => CreateClassifier(() => null));
+
+        InvalidDataException inner =
+            Assert.IsInstanceOfType<InvalidDataException>(failure.InnerException);
+        StringAssert.Contains(
+            inner.Message,
+            "missing",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
+    public void CorruptProfileResourceFailsClosedDuringConstruction()
+    {
+        TargetInvocationException failure =
+            Assert.ThrowsExactly<TargetInvocationException>(
+                () => CreateClassifier(static () => new MemoryStream("{"u8.ToArray())));
+
+        InvalidDataException inner =
+            Assert.IsInstanceOfType<InvalidDataException>(failure.InnerException);
+        StringAssert.Contains(
+            inner.Message,
+            "invalid",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
     public async Task ClassifierIsImmutableAndSafeForConcurrentCalls()
     {
         OfflineLanguageClassifier classifier = new();
@@ -315,6 +345,19 @@ public sealed class OfflineLanguageClassifierTests
         using MemoryStream stream = new(
             JsonSerializer.SerializeToUtf8Bytes(model));
         _ = parse.Invoke(null, [stream]);
+    }
+
+    private static OfflineLanguageClassifier CreateClassifier(
+        Func<Stream?> openProfile)
+    {
+        ConstructorInfo? constructor = typeof(OfflineLanguageClassifier)
+            .GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                binder: null,
+                [typeof(Func<Stream?>)],
+                modifiers: null);
+        Assert.IsNotNull(constructor);
+        return (OfflineLanguageClassifier)constructor.Invoke([openProfile]);
     }
 
     private static LanguageCode ParseLanguage(string value)
