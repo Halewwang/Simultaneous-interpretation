@@ -1126,6 +1126,21 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task FailureLogUsesOnlyTheStableCodeField()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        RuntimeHarness.RecordingRuntimeLog log = new();
+        harness.RuntimeLog = log;
+        harness.AudioStartError = Error(ErrorCategory.Device, "test.audioStart");
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        _ = await runtime.StartAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEquivalent(["code"], log.Fields.Keys.ToArray());
+        Assert.AreEqual("test.audioStart", log.Fields["code"]);
+    }
+
+    [TestMethod]
     public async Task AudioStopFailureQuarantinesRuntimeAndRejectsRestart()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -2162,6 +2177,17 @@ internal sealed class RuntimeHarness
             IReadOnlyDictionary<string, string> safeFields)
         {
             throw new NotSupportedException("log probe");
+        }
+    }
+
+    internal sealed class RecordingRuntimeLog : IRuntimeLog
+    {
+        public IReadOnlyDictionary<string, string> Fields { get; private set; } =
+            new Dictionary<string, string>();
+
+        public void Write(RuntimeLogLevel level, string eventName, IReadOnlyDictionary<string, string> safeFields)
+        {
+            Fields = new Dictionary<string, string>(safeFields);
         }
     }
 }
