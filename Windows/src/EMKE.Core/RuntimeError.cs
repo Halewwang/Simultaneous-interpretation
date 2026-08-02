@@ -60,6 +60,11 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
             @"sk-[A-Za-z0-9_-]{16,}",
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex StableCodePattern =
+        new(
+            @"^[a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)*$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public RuntimeError(
         ErrorCategory category,
         string code,
@@ -73,9 +78,9 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
             throw new ArgumentException("Error code must not be empty.", nameof(code));
         }
 
-        if (ApiKeyPattern.IsMatch(code))
+        if (ApiKeyPattern.IsMatch(code) || !StableCodePattern.IsMatch(code))
         {
-            throw new ArgumentException("Error code must not contain an API key.", nameof(code));
+            throw new ArgumentException("Error code must be a stable safe identifier.", nameof(code));
         }
 
         ArgumentNullException.ThrowIfNull(parameters);
