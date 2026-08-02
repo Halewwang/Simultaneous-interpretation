@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace EMKE.Setup;
 
-public enum SetupPayloadKind
+internal enum SetupPayloadKind
 {
     Msix,
     Certificate,
@@ -11,7 +11,7 @@ public enum SetupPayloadKind
     DriverCatalog,
 }
 
-public sealed record SetupPayload
+internal sealed record SetupPayload
 {
     public SetupPayload(
         string logicalName,
@@ -83,11 +83,11 @@ public sealed record SetupPayload
     }
 }
 
-public sealed record SetupManifest
+internal sealed record SetupManifest
 {
     private const string InternalChannel = "internal";
-    private const string InternalPackagePrefix =
-        "EMKE.Translation.Internal_";
+    private const string InternalPackageFamilyName =
+        "EMKE.Translation.Internal_kvab4te83cr7p";
     private const string InternalPublisher = "CN=EMKE Internal Test";
     private const string DriverHardwareIdentity =
         "ROOT\\EMKEVIRTUALAUDIO";
@@ -114,11 +114,13 @@ public sealed record SetupManifest
                 "Setup supports only the frozen internal channel.",
                 nameof(channel));
         }
-        if (productVersion != FrozenProductVersion)
-        {
-            throw new ArgumentOutOfRangeException(nameof(productVersion));
-        }
-        if (!IsInternalPackageFamilyName(packageFamilyName))
+        ArgumentOutOfRangeException.ThrowIfNotEqual(
+            productVersion,
+            FrozenProductVersion);
+        if (!string.Equals(
+                packageFamilyName,
+                InternalPackageFamilyName,
+                StringComparison.Ordinal))
         {
             throw new ArgumentException(
                 "The package family name does not match the internal package identity.",
@@ -130,10 +132,9 @@ public sealed record SetupManifest
                 "The publisher does not match the pinned internal certificate.",
                 nameof(publisher));
         }
-        if (minimumWindowsBuild != 19045)
-        {
-            throw new ArgumentOutOfRangeException(nameof(minimumWindowsBuild));
-        }
+        ArgumentOutOfRangeException.ThrowIfNotEqual(
+            minimumWindowsBuild,
+            19045);
         if (architecture != Architecture.X64)
         {
             throw new ArgumentOutOfRangeException(nameof(architecture));
@@ -147,10 +148,9 @@ public sealed record SetupManifest
                 "The driver hardware ID does not match the frozen driver contract.",
                 nameof(driverHardwareId));
         }
-        if (driverVersion != FrozenDriverVersion)
-        {
-            throw new ArgumentOutOfRangeException(nameof(driverVersion));
-        }
+        ArgumentOutOfRangeException.ThrowIfNotEqual(
+            driverVersion,
+            FrozenDriverVersion);
 
         SetupPayload[] copiedPayloads = payloads.ToArray();
         ValidatePayloadInventory(copiedPayloads);
@@ -183,36 +183,6 @@ public sealed record SetupManifest
     public Version DriverVersion { get; }
 
     public IReadOnlyList<SetupPayload> Payloads { get; }
-
-    private static bool IsInternalPackageFamilyName(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)
-            || !value.StartsWith(
-                InternalPackagePrefix,
-                StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        ReadOnlySpan<char> publisherId =
-            value.AsSpan(InternalPackagePrefix.Length);
-        if (publisherId.Length != 13)
-        {
-            return false;
-        }
-
-        foreach (char character in publisherId)
-        {
-            bool digit = character is >= '0' and <= '9';
-            bool lowercaseLetter = character is >= 'a' and <= 'z';
-            if (!digit && !lowercaseLetter)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 
     private static void ValidatePayloadInventory(SetupPayload[] payloads)
     {

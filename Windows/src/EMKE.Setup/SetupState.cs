@@ -1,6 +1,6 @@
 namespace EMKE.Setup;
 
-public enum SetupState
+internal enum SetupState
 {
     Preflight,
     Verified,
@@ -12,7 +12,7 @@ public enum SetupState
     RollbackRequired,
 }
 
-public enum SetupOutcome
+internal enum SetupOutcome
 {
     Succeeded,
     Cancelled,
@@ -21,7 +21,7 @@ public enum SetupOutcome
     Failed,
 }
 
-public sealed class SetupStateMachine
+internal sealed class SetupStateMachine
 {
     public SetupState State { get; private set; } = SetupState.Preflight;
 

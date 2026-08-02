@@ -1,6 +1,6 @@
 namespace EMKE.Setup;
 
-public enum SetupRollbackAction
+internal enum SetupRollbackAction
 {
     RemoveCertificate,
     RemoveDriverPackage,
@@ -8,7 +8,7 @@ public enum SetupRollbackAction
     RemoveUserPackage,
 }
 
-public sealed class SetupTransaction
+internal sealed class SetupTransaction
 {
     private readonly List<SetupRollbackAction> _createdComponents = [];
     private bool _certificateCreated;

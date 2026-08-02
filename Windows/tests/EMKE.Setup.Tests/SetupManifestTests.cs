@@ -101,6 +101,9 @@ public sealed class SetupManifestTests
             packageFamilyName: "Other.Product_123456789abcd"));
         Assert.ThrowsExactly<ArgumentException>(() => CreateManifest(
             payloads,
+            packageFamilyName: "EMKE.Translation.Internal_kvab4te83cr7q"));
+        Assert.ThrowsExactly<ArgumentException>(() => CreateManifest(
+            payloads,
             publisher: "CN=Other Publisher"));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => CreateManifest(
             payloads,
@@ -123,7 +126,8 @@ public sealed class SetupManifestTests
         IReadOnlyList<SetupPayload> payloads,
         string channel = "internal",
         Version? productVersion = null,
-        string packageFamilyName = "EMKE.Translation.Internal_123456789abcd",
+        string packageFamilyName =
+            "EMKE.Translation.Internal_kvab4te83cr7p",
         string publisher = "CN=EMKE Internal Test",
         int minimumWindowsBuild = 19045,
         Architecture architecture = Architecture.X64,
