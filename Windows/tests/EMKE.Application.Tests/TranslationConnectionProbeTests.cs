@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Threading.Channels;
 using EMKE.Core;
+using EMKE.Realtime;
 
 namespace EMKE.Application.Tests;
 
@@ -180,12 +182,98 @@ public sealed class TranslationConnectionProbeTests
         Assert.AreSame(outboundRequest, factory.Requests[1]);
     }
 
+    [TestMethod]
+    public async Task ProbePreservesTheStableTranslationSessionFailureCode()
+    {
+        RuntimeError expected = new(
+            ErrorCategory.Authentication,
+            "translationSession.authenticationFailed",
+            new Dictionary<string, string>(),
+            RecoveryAction.UpdateApiKey);
+        TranslationConnectionProbe probe = new(
+            new ThrowingSessionFactory(new TranslationSessionException(expected)));
+
+        TranslationCompatibilityReport report =
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
+
+        Assert.AreEqual(
+            expected.Code,
+            report.Stage("authentication").FailureCode);
+        AssertNoSensitiveFailureData(report);
+    }
+
+    [TestMethod]
+    public async Task ProbeMapsIoFailuresToTheStableNetworkCode()
+    {
+        TranslationConnectionProbe probe = new(
+            new ThrowingSessionFactory(new IOException(
+                "socket https://example.test/?key=sk-test-secret-value")));
+
+        TranslationCompatibilityReport report =
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
+
+        Assert.AreEqual(
+            "translationProbe.networkFailed",
+            report.Stage("authentication").FailureCode);
+        AssertNoSensitiveFailureData(report);
+    }
+
+    [TestMethod]
+    public async Task ProbeKeepsGenericFailuresOnTheStableConnectionCode()
+    {
+        TranslationConnectionProbe probe = new(
+            new ThrowingSessionFactory(new InvalidOperationException(
+                "provider https://example.test/?key=sk-test-secret-value")));
+
+        TranslationCompatibilityReport report =
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
+
+        Assert.AreEqual(
+            "translationProbe.connectionFailed",
+            report.Stage("authentication").FailureCode);
+        AssertNoSensitiveFailureData(report);
+    }
+
+    [TestMethod]
+    public async Task ProbePropagatesCallerCancellation()
+    {
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        TranslationConnectionProbe probe = new(
+            new ThrowingSessionFactory(new InvalidOperationException()));
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => probe.RunAsync(Request(Inbound), Request(Outbound), cancellation.Token));
+    }
+
     private static TranslationSessionRequest Request(
         TranslationSessionConfiguration configuration)
     {
         return new TranslationSessionRequest(
             new Uri("https://translation.example.test/v1", UriKind.Absolute),
             configuration);
+    }
+
+    private static void AssertNoSensitiveFailureData(
+        TranslationCompatibilityReport report)
+    {
+        Assert.IsFalse(report.Stages
+            .Select(static stage => stage.FailureCode)
+            .Where(static code => code is not null)
+            .Any(static code => code!.Contains("sk-", StringComparison.Ordinal)));
+    }
+
+    private sealed class ThrowingSessionFactory(Exception exception)
+        : ITranslationSessionFactory
+    {
+        public ValueTask<ITranslationSession> CreateAsync(
+            TranslationSessionRequest request,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromException<ITranslationSession>(exception);
+        }
     }
 
     private sealed class QueueSessionFactory(
