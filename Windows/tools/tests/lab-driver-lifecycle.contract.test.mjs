@@ -145,7 +145,7 @@ test("install lifecycle input is line-ending stable and fail-closed", async () =
   assert.match(source, /Resolve-RequiredFile\s+-Path\s+\$SmokePath/);
   assert.match(source, /FixedTimeEquals/);
   assert.match(source, /DriverVer/);
-  assert.match(source, /ROOT\\EMKEVIRTUALAUDIO/);
+  assert.match(source, /DriverHardwareId/);
   assert.match(source, /\/add-driver/);
   assert.match(source, /\/install/);
   assert.match(
@@ -268,7 +268,7 @@ test("uninstall lifecycle resolves one exact published INF from PnP metadata", a
   assertCommonSafetyContract(source, "uninstall");
 
   assert.match(source, /\[switch\]\$ConfirmUninstall/);
-  assert.match(source, /ROOT\\EMKEVIRTUALAUDIO/);
+  assert.match(source, /DriverHardwareId/);
   assert.match(source, /Win32_PnPEntity/);
   assert.match(source, /Win32_PnPSignedDriver/);
   assert.match(source, /\$matching\.Count\s+-ne\s+1/);
@@ -286,17 +286,19 @@ test("uninstall lifecycle resolves one exact published INF from PnP metadata", a
   );
   assert.match(
     source,
-    /Invoke-PnpUtilRemoveDevice\s+-InstanceId\s+\$devnode\.PNPDeviceID/,
+    /Invoke-PnpUtilRemoveDevice[^]*-InstanceId\s+\$devnode\.PNPDeviceID[^]*-HardwareId\s+\$hardwareId/,
   );
   assert.match(
     source,
-    /Wait-TargetDevnodeAbsent\s+-ExpectedInstanceId\s+\$devnode\.PNPDeviceID/,
+    /Wait-TargetDevnodeAbsent[^]*-ExpectedInstanceId\s+\$devnode\.PNPDeviceID[^]*-HardwareId\s+\$hardwareId/,
   );
   assert.match(
     source,
     /Invoke-PnpUtilDeleteDriver\s+-PublishedInf\s+\$publishedInf/,
   );
-  const removeDevice = source.search(/Invoke-PnpUtilRemoveDevice\s+-InstanceId/);
+  const removeDevice = source.search(
+    /Invoke-PnpUtilRemoveDevice[^]*?-InstanceId\s+\$devnode\.PNPDeviceID/,
+  );
   const deleteDriver = source.search(
     /Invoke-PnpUtilDeleteDriver\s+-PublishedInf/,
   );

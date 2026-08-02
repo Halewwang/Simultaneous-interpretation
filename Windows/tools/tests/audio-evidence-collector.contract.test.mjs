@@ -102,7 +102,7 @@ test("collector freezes trusted input and privacy contracts", async () => {
   assert.match(source, /Get-AuthenticodeSignature/);
   assert.match(source, /host Authenticode only/);
   assert.match(source, /Microsoft\/WHQL not established/);
-  assert.match(source, /ROOT\\EMKEVIRTUALAUDIO/);
+  assert.match(source, /DriverHardwareId/);
   assert.match(source, /DriverAbi/);
 
   for (const role of [

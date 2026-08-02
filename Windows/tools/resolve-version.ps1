@@ -196,9 +196,25 @@ $settingsSchemaVersion = Get-RequiredProperty `
     -Object $version `
     -Name 'settingsSchemaVersion' `
     -Context 'version metadata'
+$driverPackageVersion = Get-RequiredProperty `
+    -Object $version `
+    -Name 'driverPackageVersion' `
+    -Context 'version metadata'
 $driverAbiVersion = Get-RequiredProperty `
     -Object $version `
     -Name 'driverAbiVersion' `
+    -Context 'version metadata'
+$driverHardwareId = Get-RequiredProperty `
+    -Object $version `
+    -Name 'driverHardwareId' `
+    -Context 'version metadata'
+$driverKmdfLibraryVersion = Get-RequiredProperty `
+    -Object $version `
+    -Name 'driverKmdfLibraryVersion' `
+    -Context 'version metadata'
+$driverEndpointRoles = Get-RequiredProperty `
+    -Object $version `
+    -Name 'driverEndpointRoles' `
     -Context 'version metadata'
 $minimumWindowsBuild = Get-RequiredProperty `
     -Object $version `
@@ -224,6 +240,13 @@ $channel = Get-RequiredProperty `
 Assert-NonEmptyString -Value $productVersion -Name 'productVersion'
 Assert-NonEmptyString -Value $packageVersion -Name 'packageVersion'
 Assert-NonEmptyString -Value $metadataExpectedTag -Name 'expectedTag'
+Assert-NonEmptyString `
+    -Value $driverPackageVersion `
+    -Name 'driverPackageVersion'
+Assert-NonEmptyString -Value $driverHardwareId -Name 'driverHardwareId'
+Assert-NonEmptyString `
+    -Value $driverKmdfLibraryVersion `
+    -Name 'driverKmdfLibraryVersion'
 Assert-NonEmptyString -Value $architecture -Name 'architecture'
 Assert-NonEmptyString -Value $channel -Name 'channel'
 Assert-NonEmptyString `
@@ -255,6 +278,27 @@ Assert-ThreePartVersion `
 Assert-PackageVersion `
     -Value $packageVersion `
     -ProductVersion $productVersion
+Assert-PackageVersion `
+    -Value $driverPackageVersion `
+    -ProductVersion '1.0.0'
+
+$expectedDriverEndpointRoles = @(
+    'emke.meeting-speaker.render',
+    'emke.app-speaker.capture',
+    'emke.app-microphone.render',
+    'emke.meeting-microphone.capture'
+)
+$resolvedDriverEndpointRoles = @($driverEndpointRoles)
+if ($resolvedDriverEndpointRoles.Count -ne
+    $expectedDriverEndpointRoles.Count) {
+    throw 'driverEndpointRoles must contain exactly four roles.'
+}
+for ($index = 0; $index -lt $expectedDriverEndpointRoles.Count; $index += 1) {
+    if ($resolvedDriverEndpointRoles[$index] -cne
+        $expectedDriverEndpointRoles[$index]) {
+        throw 'driverEndpointRoles must match the frozen four-role contract.'
+    }
+}
 
 if ($minimumWindowsBuild -ne 19045) {
     throw 'minimumWindowsBuild must be 19045 for Windows 0.2.0.'
@@ -267,6 +311,15 @@ if ($maximumVersionTested -ne '10.0.26200.0') {
 }
 if ($architecture -cne 'x64') {
     throw "Unsupported architecture '$architecture'; expected 'x64'."
+}
+if ($driverPackageVersion -cne '1.0.0.2') {
+    throw 'driverPackageVersion must be 1.0.0.2.'
+}
+if ($driverHardwareId -cne 'ROOT\EMKEVIRTUALAUDIO') {
+    throw 'driverHardwareId must be ROOT\EMKEVIRTUALAUDIO.'
+}
+if ($driverKmdfLibraryVersion -cne '1.31') {
+    throw 'driverKmdfLibraryVersion must be 1.31.'
 }
 if (-not [regex]::IsMatch($channel, '^[a-z0-9]+(?:-[a-z0-9]+)*$')) {
     throw 'channel must be a lowercase alphanumeric identifier with optional hyphens.'
@@ -434,6 +487,10 @@ if ($minimumDriverVersion -cne '1.0.0.2') {
 if ($recommendedDriverVersion -cne '1.0.0.2') {
     throw 'recommendedDriverVersion must be 1.0.0.2 for Windows 0.2.0.'
 }
+if ($driverPackageVersion -cne $minimumDriverVersion -or
+    $driverPackageVersion -cne $recommendedDriverVersion) {
+    throw 'Driver package version must match compatibility driver versions.'
+}
 
 $hasDriverPackageUrl = Test-ExactPropertyExists `
     -Object $compatibility `
@@ -465,6 +522,12 @@ if ($driverPackageAvailable) {
     Channel = $channel
     Architecture = $architecture
     MinimumWindowsBuild = $minimumWindowsBuild
+    DriverPackageVersion = $driverPackageVersion
+    DriverAbiVersion = $driverAbiVersion
+    DriverHardwareId = $driverHardwareId
+    DriverKmdfLibraryVersion = $driverKmdfLibraryVersion
+    DriverModelSection = "EMKE.NTamd64.10.0...$minimumWindowsBuild"
+    DriverEndpointRoles = @($resolvedDriverEndpointRoles)
     MinimumWindowsApiContract = $minimumWindowsApiContract
     MaximumVersionTested = $maximumVersionTested
     CredentialTarget = $credentialTarget

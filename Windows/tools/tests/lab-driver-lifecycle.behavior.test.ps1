@@ -318,7 +318,9 @@ Invoke-Case -Name "invalid or unsigned catalog" -Action {
 Invoke-Case -Name "unsupported OS build" -Action {
     Import-LifecycleFunctions -Path $installScript
     Set-SafeInstallDefaults -UseRealPrerequisites
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19044 }
+    Set-TestFunction -Name Get-WindowsHostInfo -Body {
+        New-TestHostInfo -Build 19044
+    }
     Set-TestFunction -Name Test-IsAdministrator -Body { $true }
     Assert-Throws -Pattern "19045" -Action {
         Invoke-InstallWithDefaults
@@ -363,7 +365,9 @@ Invoke-Case -Name "non-workstation and non-x64 hosts" -Action {
 Invoke-Case -Name "non-administrator" -Action {
     Import-LifecycleFunctions -Path $installScript
     Set-SafeInstallDefaults -UseRealPrerequisites
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19045 }
+    Set-TestFunction -Name Get-WindowsHostInfo -Body {
+        New-TestHostInfo -Build 19045
+    }
     Set-TestFunction -Name Test-IsAdministrator -Body { $false }
     Assert-Throws -Pattern "administrator|elevat" -Action {
         Invoke-InstallWithDefaults
@@ -522,7 +526,9 @@ Invoke-Case -Name "missing uninstall confirmation" -Action {
         $script:pnpCalls += 1
     }
     Assert-Throws -Pattern "ConfirmUninstall" -Action {
-        Invoke-UninstallTestDriver -ConfirmUninstall:$false
+        Invoke-UninstallTestDriver `
+            -ReleaseMetadata (New-TestReleaseMetadata) `
+            -ConfirmUninstall:$false
     }
     if ($script:pnpCalls -ne 0) {
         throw "pnputil boundary was reached without uninstall confirmation."
@@ -545,7 +551,9 @@ Invoke-Case -Name "one exact remove-device command" -Action {
         [pscustomobject]@{ ExitCode = 0; OutputLines = @() }
     }
     $instanceId = "ROOT\EMKEVIRTUALAUDIO\0000"
-    Invoke-PnpUtilRemoveDevice -InstanceId $instanceId
+    Invoke-PnpUtilRemoveDevice `
+        -InstanceId $instanceId `
+        -HardwareId $script:TargetHardwareId
     $expectedExecutable = "C:\Windows\System32\pnputil.exe"
     if ($script:processCall.Executable -cne $expectedExecutable) {
         throw "Uninstall executable was not fixed to the system pnputil.exe."

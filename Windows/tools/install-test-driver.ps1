@@ -29,8 +29,30 @@ if ($MyInvocation.InvocationName -ceq ".") {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:TargetHardwareId = "ROOT\EMKEVIRTUALAUDIO"
-$script:MinimumWindowsBuild = 26200
+function Get-DriverReleaseMetadata {
+    $resolver = Join-Path $PSScriptRoot "resolve-version.ps1"
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+        throw "Required release metadata resolver is missing."
+    }
+    $resolved = @(& $resolver)
+    if ($resolved.Count -ne 1) {
+        throw "Release metadata resolver must return exactly one object."
+    }
+    $release = $resolved[0]
+    foreach ($name in @(
+        "MinimumWindowsBuild",
+        "Architecture",
+        "DriverPackageVersion",
+        "DriverAbiVersion",
+        "DriverHardwareId",
+        "DriverModelSection"
+    )) {
+        if ($null -eq $release.PSObject.Properties[$name]) {
+            throw "Release metadata is missing required property '$name'."
+        }
+    }
+    return $release
+}
 
 function Assert-SupportedWindowsHost {
     if ($PSVersionTable.PSVersion.Major -ne 7) {
@@ -41,8 +63,27 @@ function Assert-SupportedWindowsHost {
     }
 }
 
-function Get-WindowsBuildNumber {
-    return [Environment]::OSVersion.Version.Build
+function Get-WindowsHostInfo {
+    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+    [int]$build = 0
+    [int]$productType = 0
+    if (-not [int]::TryParse(
+        [string]$operatingSystem.BuildNumber,
+        [ref]$build
+    ) -or -not [int]::TryParse(
+        [string]$operatingSystem.ProductType,
+        [ref]$productType
+    )) {
+        throw "Windows host identity could not be resolved."
+    }
+    $architecture = [string](
+        [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    )
+    return [pscustomobject]@{
+        Build = $build
+        Architecture = $architecture
+        ProductType = $productType
+    }
 }
 
 function Test-IsAdministrator {
@@ -54,16 +95,31 @@ function Test-IsAdministrator {
 }
 
 function Assert-LabMachinePrerequisites {
-    $build = Get-WindowsBuildNumber
-    if ($build -lt $script:MinimumWindowsBuild) {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
+        [psobject]$HostInfo = (Get-WindowsHostInfo)
+    )
+
+    if ($ReleaseMetadata.Architecture -cne "x64" -or
+        $HostInfo.Architecture -ine "x64") {
+        throw "Only an x64 release on an x64 host is supported."
+    }
+    if ([int]$HostInfo.ProductType -ne 1) {
+        throw "Only Windows workstation hosts are supported."
+    }
+    if ([int]$HostInfo.Build -lt
+        [int]$ReleaseMetadata.MinimumWindowsBuild) {
         throw (
-            "Windows build $build is unsupported; build " +
-            "$($script:MinimumWindowsBuild) or newer is required."
+            "Windows build $($HostInfo.Build) is unsupported; build " +
+            "$($ReleaseMetadata.MinimumWindowsBuild) or newer is required."
         )
     }
     if (-not (Test-IsAdministrator)) {
         throw "An elevated PowerShell 7 administrator session is required."
     }
+    return $HostInfo
 }
 
 function Assert-LocalNonReparsePath {
@@ -867,7 +923,10 @@ function Get-DriverInfMetadata {
         [System.IO.FileInfo]$Inf,
 
         [Parameter(Mandatory)]
-        [int]$WindowsBuild
+        [psobject]$ReleaseMetadata,
+
+        [Parameter(Mandatory)]
+        [psobject]$HostInfo
     )
 
     $text = Get-Content -LiteralPath $Inf.FullName -Raw
@@ -909,10 +968,22 @@ function Get-DriverInfMetadata {
         throw "INF DriverVer must contain one date and four-part version."
     }
     $driverVersion = ([version]$Matches["version"]).ToString()
-
-    if ($WindowsBuild -lt $script:MinimumWindowsBuild) {
-        throw "INF Models selection requires Windows build 26200 or newer."
+    if ($driverVersion -cne $ReleaseMetadata.DriverPackageVersion) {
+        throw "INF DriverVer does not match trusted release metadata."
     }
+
+    if ([int]$HostInfo.Build -lt
+        [int]$ReleaseMetadata.MinimumWindowsBuild) {
+        throw "INF Models selection requires the trusted Windows build floor."
+    }
+    $modelSection = [string]$ReleaseMetadata.DriverModelSection
+    if ($modelSection -notmatch (
+        "^EMKE\.NTamd64\.10\.0\.\.\.(?<build>[0-9]+)$"
+    ) -or [int]$Matches["build"] -ne
+        [int]$ReleaseMetadata.MinimumWindowsBuild) {
+        throw "Trusted release Models metadata is invalid."
+    }
+    $modelDecoration = $modelSection.Substring("EMKE.".Length)
     $manufacturerLines = $sections["Manufacturer"]
     if ($manufacturerLines.Count -ne 1) {
         throw "INF [Manufacturer] must contain exactly one Models mapping."
@@ -928,10 +999,9 @@ function Get-DriverInfMetadata {
         ForEach-Object { $_.Trim() })
     if ($manufacturerParts.Count -ne 2 -or
         $manufacturerParts[0] -cne "EMKE" -or
-        $manufacturerParts[1] -cne "NTamd64.10.0...26200") {
+        $manufacturerParts[1] -cne $modelDecoration) {
         throw "INF [Manufacturer] has an unsupported Models decoration."
     }
-    $modelSection = "EMKE.NTamd64.10.0...26200"
     if (-not $sections.ContainsKey($modelSection)) {
         throw "INF is missing the active x64 Models section [$modelSection]."
     }
@@ -955,7 +1025,7 @@ function Get-DriverInfMetadata {
     )
     if ($modelParts.Count -ne 2 -or
         $modelParts[0] -cne "EMKE_Install" -or
-        $modelParts[1] -cne $script:TargetHardwareId) {
+        $modelParts[1] -cne $ReleaseMetadata.DriverHardwareId) {
         throw (
             "Active INF model must use EMKE_Install and contain only the " +
             "exact target hardware ID with no compatible IDs."
@@ -965,6 +1035,32 @@ function Get-DriverInfMetadata {
     if (-not $sections.ContainsKey("$installSection.NT")) {
         throw "INF active model references a missing install section."
     }
+    $install = ConvertTo-InfKeyValueMap `
+        -Lines $sections["$installSection.NT"] `
+        -SectionName "$installSection.NT"
+    if (-not $install.ContainsKey("AddReg") -or
+        $install["AddReg"] -cne "EMKE.Device.AddReg" -or
+        -not $sections.ContainsKey("EMKE.Device.AddReg")) {
+        throw "INF active model has an invalid AddReg chain."
+    }
+    $driverAbiEntries = @($sections["EMKE.Device.AddReg"] |
+        Where-Object { $_ -imatch "^HKR\s*,\s*,\s*DriverAbi\s*," })
+    if ($driverAbiEntries.Count -ne 1) {
+        throw "INF active AddReg chain must contain exactly one DriverAbi."
+    }
+    $expectedAbiHex = (
+        "0x{0:X8}" -f [int]$ReleaseMetadata.DriverAbiVersion
+    )
+    $driverAbiParts = @($driverAbiEntries[0].Split(",") |
+        ForEach-Object { $_.Trim() })
+    if ($driverAbiParts.Count -ne 5 -or
+        $driverAbiParts[0] -ine "HKR" -or
+        $driverAbiParts[1] -cne "" -or
+        $driverAbiParts[2] -ine "DriverAbi" -or
+        $driverAbiParts[3] -ine "0x00010001" -or
+        $driverAbiParts[4] -ine $expectedAbiHex) {
+        throw "INF active DriverAbi does not match trusted release metadata."
+    }
 
     return [pscustomobject]@{
         DriverVer = $driverVer
@@ -973,6 +1069,7 @@ function Get-DriverInfMetadata {
         ModelSection = $modelSection
         InstallSection = $installSection
         HardwareId = $modelParts[1]
+        Abi = [int]$ReleaseMetadata.DriverAbiVersion
     }
 }
 
@@ -1608,10 +1705,13 @@ function New-RootDevnodeFromInf {
         [string]$InfPath,
 
         [Parameter(Mandatory)]
-        [string]$HardwareId
+        [string]$HardwareId,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedHardwareId
     )
 
-    if ($HardwareId -cne $script:TargetHardwareId) {
+    if ($HardwareId -cne $ExpectedHardwareId) {
         throw "Only the exact EMKE root hardware ID may be created."
     }
     Initialize-RootDevnodeSetupApi
@@ -1654,11 +1754,16 @@ function Remove-ExactCreatedRootDevnode {
 }
 
 function Get-TargetDevnodes {
+    param(
+        [Parameter(Mandatory)]
+        [string]$HardwareId
+    )
+
     $rootDevices = @(Get-CimInstance `
         -ClassName Win32_PnPEntity `
         -Filter "PNPDeviceID LIKE 'ROOT%'")
     return @($rootDevices | Where-Object {
-        @($_.HardwareID) -icontains $script:TargetHardwareId
+        @($_.HardwareID) -icontains $HardwareId
     })
 }
 
@@ -1713,6 +1818,9 @@ function Wait-TargetDevnode {
         [Parameter(Mandatory)]
         [string]$ExpectedInstanceId,
 
+        [Parameter(Mandatory)]
+        [string]$HardwareId,
+
         [ValidateRange(1, 300)]
         [int]$MaxAttempts = 30,
 
@@ -1722,7 +1830,7 @@ function Wait-TargetDevnode {
 
     $state = Invoke-BoundedPoll `
         -Action {
-            $devnodes = @(Get-TargetDevnodes)
+            $devnodes = @(Get-TargetDevnodes -HardwareId $HardwareId)
             [pscustomobject]@{
                 All = $devnodes
                 Exact = @($devnodes | Where-Object {
@@ -1747,6 +1855,9 @@ function Wait-TargetDevnodeAbsent {
         [Parameter(Mandatory)]
         [string]$ExpectedInstanceId,
 
+        [Parameter(Mandatory)]
+        [string]$HardwareId,
+
         [ValidateRange(1, 300)]
         [int]$MaxAttempts = 30,
 
@@ -1756,7 +1867,7 @@ function Wait-TargetDevnodeAbsent {
 
     [void](Invoke-BoundedPoll `
         -Action {
-            @(Get-TargetDevnodes)
+            @(Get-TargetDevnodes -HardwareId $HardwareId)
         } `
         -IsComplete {
             param($Value)
@@ -1771,12 +1882,15 @@ function Assert-InstalledDevnodeHealthy {
     param(
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
-        [object[]]$Devnodes
+        [object[]]$Devnodes,
+
+        [Parameter(Mandatory)]
+        [string]$HardwareId
     )
 
     if ($Devnodes.Count -ne 1) {
         throw (
-            "Expected exactly one $script:TargetHardwareId devnode after install; " +
+            "Expected exactly one $HardwareId devnode after install; " +
             "found $($Devnodes.Count)."
         )
     }
@@ -1984,11 +2098,15 @@ function Invoke-CreateAndBindRootDevnode {
         [psobject]$TrustedPackage,
 
         [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
+        [Parameter(Mandatory)]
         [ValidatePattern("^[0-9A-Fa-f]{64}$")]
         [string]$ExpectedPackageSha256
     )
 
-    $existing = @(Get-TargetDevnodes)
+    $hardwareId = [string]$ReleaseMetadata.DriverHardwareId
+    $existing = @(Get-TargetDevnodes -HardwareId $hardwareId)
     if ($existing.Count -ne 0) {
         throw (
             "A pre-existing target devnode already exists; refusing an " +
@@ -2000,17 +2118,22 @@ function Invoke-CreateAndBindRootDevnode {
     try {
         $createdInstanceId = New-RootDevnodeFromInf `
             -InfPath $StagedInf.FullName `
-            -HardwareId $script:TargetHardwareId
+            -HardwareId $InfMetadata.HardwareId `
+            -ExpectedHardwareId $hardwareId
         $createdDevnode = Wait-TargetDevnode `
-            -ExpectedInstanceId $createdInstanceId
+            -ExpectedInstanceId $createdInstanceId `
+            -HardwareId $hardwareId
         if ($createdDevnode.PNPDeviceID -cne $createdInstanceId) {
             throw "Created devnode discovery returned the wrong instance ID."
         }
 
         Invoke-PnpUtilInstall -InfPath $StagedInf.FullName
         $installedDevnode = Wait-TargetDevnode `
-            -ExpectedInstanceId $createdInstanceId
-        Assert-InstalledDevnodeHealthy -Devnodes @($installedDevnode)
+            -ExpectedInstanceId $createdInstanceId `
+            -HardwareId $hardwareId
+        Assert-InstalledDevnodeHealthy `
+            -Devnodes @($installedDevnode) `
+            -HardwareId $hardwareId
         $identity = Assert-InstalledDriverPackageIdentity `
             -Devnode $installedDevnode `
             -InfMetadata $InfMetadata `
@@ -2050,7 +2173,7 @@ function Invoke-CreateAndBindRootDevnode {
             $failureMetadata.StateUncertain -eq $true) {
             $inventorySummary = "read-only inventory failed"
             try {
-                $inventory = @(Get-TargetDevnodes)
+                $inventory = @(Get-TargetDevnodes -HardwareId $hardwareId)
                 $inventorySummary = (
                     "read-only inventory observed $($inventory.Count) target " +
                     "devnode(s)"
@@ -2085,7 +2208,8 @@ function Invoke-CreateAndBindRootDevnode {
             Remove-ExactCreatedRootDevnode `
                 -InstanceId $createdInstanceId
             Wait-TargetDevnodeAbsent `
-                -ExpectedInstanceId $createdInstanceId
+                -ExpectedInstanceId $createdInstanceId `
+                -HardwareId $hardwareId
             $cleanupStatus = "exact created instance confirmed absent"
         } catch {
             $cleanupStatus = (
@@ -2166,6 +2290,9 @@ function Invoke-InstallTestDriver {
         [ValidatePattern("^[0-9A-Fa-f]{64}$")]
         [string]$ExpectedSmokeSha256,
 
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
         [switch]$ConfirmInstall
     )
 
@@ -2173,7 +2300,8 @@ function Invoke-InstallTestDriver {
         throw "Installation requires the explicit -ConfirmInstall switch."
     }
     Assert-SupportedWindowsHost
-    Assert-LabMachinePrerequisites
+    $hostInfo = Assert-LabMachinePrerequisites `
+        -ReleaseMetadata $ReleaseMetadata
 
     $resolvedSmoke = Resolve-RequiredFile -Path $SmokePath
     $inputSmoke = [pscustomobject]@{
@@ -2215,8 +2343,10 @@ function Invoke-InstallTestDriver {
         Assert-CatalogSignatureValid -Metadata $signature
         $infMetadata = Get-DriverInfMetadata `
             -Inf $package.Inf `
-            -WindowsBuild (Get-WindowsBuildNumber)
-        if ($infMetadata.HardwareId -cne $script:TargetHardwareId) {
+            -ReleaseMetadata $ReleaseMetadata `
+            -HostInfo $hostInfo
+        if ($infMetadata.HardwareId -cne
+            $ReleaseMetadata.DriverHardwareId) {
             throw "Driver INF hardware ID is not the exact target."
         }
 
@@ -2234,6 +2364,7 @@ function Invoke-InstallTestDriver {
             -StagedInf $package.Inf `
             -InfMetadata $infMetadata `
             -TrustedPackage $package `
+            -ReleaseMetadata $ReleaseMetadata `
             -ExpectedPackageSha256 $actualPackageSha256
         $installedIdentity = $binding.Identity
         Write-Host (
@@ -2318,6 +2449,7 @@ function Invoke-InstallTestDriver {
     }
 }
 
+$releaseMetadata = Get-DriverReleaseMetadata
 if ($PSCmdlet.ParameterSetName -ceq "Digest") {
     Assert-SupportedWindowsHost
     $observedPackage = Get-StrictDriverPackage -Directory $PackagePath
@@ -2329,4 +2461,6 @@ if ($PSCmdlet.ParameterSetName -ceq "Digest") {
     return
 }
 
-Invoke-InstallTestDriver @PSBoundParameters
+Invoke-InstallTestDriver `
+    @PSBoundParameters `
+    -ReleaseMetadata $releaseMetadata

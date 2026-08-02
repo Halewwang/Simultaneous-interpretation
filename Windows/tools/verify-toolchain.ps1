@@ -4,10 +4,40 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$requiredBuild = 26200
-$build = [Environment]::OSVersion.Version.Build
-if ($RequireTargetOs -and $build -lt $requiredBuild) {
-    throw "Windows build $build is below required build $requiredBuild"
+$resolver = Join-Path $PSScriptRoot "resolve-version.ps1"
+$resolved = @(& $resolver)
+if ($resolved.Count -ne 1) {
+    throw "Release metadata resolver must return exactly one object."
+}
+$release = $resolved[0]
+$operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+[int]$build = 0
+[int]$productType = 0
+if (-not [int]::TryParse(
+    [string]$operatingSystem.BuildNumber,
+    [ref]$build
+) -or -not [int]::TryParse(
+    [string]$operatingSystem.ProductType,
+    [ref]$productType
+)) {
+    throw "Windows host identity could not be resolved."
+}
+$hostArchitecture = [string](
+    [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+)
+if ($release.Architecture -cne "x64" -or
+    $hostArchitecture -ine "x64") {
+    throw "Only an x64 release on an x64 host is supported."
+}
+if ($productType -ne 1) {
+    throw "Only Windows workstation hosts are supported."
+}
+$targetOsEligible = $build -ge [int]$release.MinimumWindowsBuild
+if ($RequireTargetOs -and -not $targetOsEligible) {
+    throw (
+        "Windows build $build is below required build " +
+        "$($release.MinimumWindowsBuild)"
+    )
 }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -37,9 +67,14 @@ if ($RequireInstalledWdk) {
 
 [ordered]@{
     windowsBuild = $build
+    minimumWindowsBuild = $release.MinimumWindowsBuild
+    productType = $productType
     visualStudio = $install
     cmake = $cmakeVersion.ToString()
     wdk = $wdkVersion
-    architecture = $env:PROCESSOR_ARCHITECTURE
-    targetOsEligible = ($build -ge $requiredBuild)
+    architecture = $hostArchitecture
+    driverPackageVersion = $release.DriverPackageVersion
+    driverAbiVersion = $release.DriverAbiVersion
+    driverHardwareId = $release.DriverHardwareId
+    targetOsEligible = $targetOsEligible
 } | ConvertTo-Json

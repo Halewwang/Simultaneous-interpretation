@@ -10,8 +10,30 @@ if ($MyInvocation.InvocationName -ceq ".") {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:TargetHardwareId = "ROOT\EMKEVIRTUALAUDIO"
-$script:MinimumWindowsBuild = 26200
+function Get-DriverReleaseMetadata {
+    $resolver = Join-Path $PSScriptRoot "resolve-version.ps1"
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+        throw "Required release metadata resolver is missing."
+    }
+    $resolved = @(& $resolver)
+    if ($resolved.Count -ne 1) {
+        throw "Release metadata resolver must return exactly one object."
+    }
+    $release = $resolved[0]
+    foreach ($name in @(
+        "MinimumWindowsBuild",
+        "Architecture",
+        "DriverPackageVersion",
+        "DriverAbiVersion",
+        "DriverHardwareId",
+        "DriverModelSection"
+    )) {
+        if ($null -eq $release.PSObject.Properties[$name]) {
+            throw "Release metadata is missing required property '$name'."
+        }
+    }
+    return $release
+}
 
 function Assert-SupportedWindowsHost {
     if ($PSVersionTable.PSVersion.Major -ne 7) {
@@ -22,8 +44,27 @@ function Assert-SupportedWindowsHost {
     }
 }
 
-function Get-WindowsBuildNumber {
-    return [Environment]::OSVersion.Version.Build
+function Get-WindowsHostInfo {
+    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+    [int]$build = 0
+    [int]$productType = 0
+    if (-not [int]::TryParse(
+        [string]$operatingSystem.BuildNumber,
+        [ref]$build
+    ) -or -not [int]::TryParse(
+        [string]$operatingSystem.ProductType,
+        [ref]$productType
+    )) {
+        throw "Windows host identity could not be resolved."
+    }
+    $architecture = [string](
+        [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    )
+    return [pscustomobject]@{
+        Build = $build
+        Architecture = $architecture
+        ProductType = $productType
+    }
 }
 
 function Test-IsAdministrator {
@@ -35,16 +76,31 @@ function Test-IsAdministrator {
 }
 
 function Assert-LabMachinePrerequisites {
-    $build = Get-WindowsBuildNumber
-    if ($build -lt $script:MinimumWindowsBuild) {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
+        [psobject]$HostInfo = (Get-WindowsHostInfo)
+    )
+
+    if ($ReleaseMetadata.Architecture -cne "x64" -or
+        $HostInfo.Architecture -ine "x64") {
+        throw "Only an x64 release on an x64 host is supported."
+    }
+    if ([int]$HostInfo.ProductType -ne 1) {
+        throw "Only Windows workstation hosts are supported."
+    }
+    if ([int]$HostInfo.Build -lt
+        [int]$ReleaseMetadata.MinimumWindowsBuild) {
         throw (
-            "Windows build $build is unsupported; build " +
-            "$($script:MinimumWindowsBuild) or newer is required."
+            "Windows build $($HostInfo.Build) is unsupported; build " +
+            "$($ReleaseMetadata.MinimumWindowsBuild) or newer is required."
         )
     }
     if (-not (Test-IsAdministrator)) {
         throw "An elevated PowerShell 7 administrator session is required."
     }
+    return $HostInfo
 }
 
 function Resolve-SystemPnpUtil {
@@ -133,11 +189,16 @@ function Invoke-CapturedProcess {
 }
 
 function Get-TargetDevnodes {
+    param(
+        [Parameter(Mandatory)]
+        [string]$HardwareId
+    )
+
     $rootDevices = @(Get-CimInstance `
         -ClassName Win32_PnPEntity `
         -Filter "PNPDeviceID LIKE 'ROOT%'")
     return @($rootDevices | Where-Object {
-        @($_.HardwareID) -icontains $script:TargetHardwareId
+        @($_.HardwareID) -icontains $HardwareId
     })
 }
 
@@ -191,17 +252,20 @@ function Assert-CurrentTargetDevnode {
     param(
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
-        [object[]]$Devnodes
+        [object[]]$Devnodes,
+
+        [Parameter(Mandatory)]
+        [string]$HardwareId
     )
 
     $present = @($Devnodes | Where-Object { $_.Present -eq $true })
     if ($present.Count -ne 1) {
         throw (
-            "Expected exactly one present $script:TargetHardwareId devnode; " +
+            "Expected exactly one present $HardwareId devnode; " +
             "found $($present.Count)."
         )
     }
-    if (@($present[0].HardwareID) -inotcontains $script:TargetHardwareId) {
+    if (@($present[0].HardwareID) -inotcontains $HardwareId) {
         throw "The current devnode does not have the exact target hardware ID."
     }
     return $present[0]
@@ -245,10 +309,14 @@ function Get-PublishedInfForDevnode {
 function Assert-ExactTargetInstanceId {
     param(
         [Parameter(Mandatory)]
-        [string]$InstanceId
+        [string]$InstanceId,
+
+        [Parameter(Mandatory)]
+        [string]$HardwareId
     )
 
-    if ($InstanceId -notmatch "^ROOT\\EMKEVIRTUALAUDIO\\[^\\]+$") {
+    $escapedHardwareId = [regex]::Escape($HardwareId)
+    if ($InstanceId -notmatch "^$escapedHardwareId\\[^\\]+$") {
         throw "Refusing a non-exact EMKE target instance ID."
     }
 }
@@ -256,10 +324,15 @@ function Assert-ExactTargetInstanceId {
 function Invoke-PnpUtilRemoveDevice {
     param(
         [Parameter(Mandatory)]
-        [string]$InstanceId
+        [string]$InstanceId,
+
+        [Parameter(Mandatory)]
+        [string]$HardwareId
     )
 
-    Assert-ExactTargetInstanceId -InstanceId $InstanceId
+    Assert-ExactTargetInstanceId `
+        -InstanceId $InstanceId `
+        -HardwareId $HardwareId
     $pnpUtil = Resolve-SystemPnpUtil
     $result = Invoke-CapturedProcess `
         -Executable $pnpUtil `
@@ -340,6 +413,9 @@ function Wait-TargetDevnodeAbsent {
         [Parameter(Mandatory)]
         [string]$ExpectedInstanceId,
 
+        [Parameter(Mandatory)]
+        [string]$HardwareId,
+
         [ValidateRange(1, 300)]
         [int]$MaxAttempts = 30,
 
@@ -349,7 +425,7 @@ function Wait-TargetDevnodeAbsent {
 
     [void](Invoke-BoundedPoll `
         -Action {
-            @(Get-TargetDevnodes)
+            @(Get-TargetDevnodes -HardwareId $HardwareId)
         } `
         -IsComplete {
             param($Value)
@@ -393,6 +469,9 @@ function Wait-PublishedInfUnreferenced {
 
 function Invoke-UninstallTestDriver {
     param(
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
         [switch]$ConfirmUninstall
     )
 
@@ -400,22 +479,30 @@ function Invoke-UninstallTestDriver {
         throw "Removal requires the explicit -ConfirmUninstall switch."
     }
     Assert-SupportedWindowsHost
-    Assert-LabMachinePrerequisites
+    [void](Assert-LabMachinePrerequisites `
+        -ReleaseMetadata $ReleaseMetadata)
 
-    $devnodes = @(Get-TargetDevnodes)
-    $devnode = Assert-CurrentTargetDevnode -Devnodes $devnodes
+    $hardwareId = [string]$ReleaseMetadata.DriverHardwareId
+    $devnodes = @(Get-TargetDevnodes -HardwareId $hardwareId)
+    $devnode = Assert-CurrentTargetDevnode `
+        -Devnodes $devnodes `
+        -HardwareId $hardwareId
     $publishedInf = Get-PublishedInfForDevnode -Devnode $devnode
     Assert-PublishedInfName -PublishedInf $publishedInf
     Assert-NoOtherPublishedInfReferences `
         -TargetDevnode $devnode `
         -PublishedInf $publishedInf
 
-    Write-Host "Hardware ID: $script:TargetHardwareId"
+    Write-Host "Hardware ID: $hardwareId"
     Write-Host "Target instance: $($devnode.PNPDeviceID)"
     Write-Host "Published INF: $publishedInf"
 
-    Invoke-PnpUtilRemoveDevice -InstanceId $devnode.PNPDeviceID
-    Wait-TargetDevnodeAbsent -ExpectedInstanceId $devnode.PNPDeviceID
+    Invoke-PnpUtilRemoveDevice `
+        -InstanceId $devnode.PNPDeviceID `
+        -HardwareId $hardwareId
+    Wait-TargetDevnodeAbsent `
+        -ExpectedInstanceId $devnode.PNPDeviceID `
+        -HardwareId $hardwareId
     Write-Host "Exact target devnode is no longer present."
 
     Wait-PublishedInfUnreferenced -PublishedInf $publishedInf
@@ -423,4 +510,7 @@ function Invoke-UninstallTestDriver {
     Write-Host "Unreferenced published INF was removed."
 }
 
-Invoke-UninstallTestDriver @PSBoundParameters
+$releaseMetadata = Get-DriverReleaseMetadata
+Invoke-UninstallTestDriver `
+    @PSBoundParameters `
+    -ReleaseMetadata $releaseMetadata

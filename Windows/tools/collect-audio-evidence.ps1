@@ -35,9 +35,37 @@ if ($MyInvocation.InvocationName -ceq ".") {
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$script:CollectorMinimumWindowsBuild = 26200
+function Get-DriverReleaseMetadata {
+    $resolver = Join-Path $PSScriptRoot "resolve-version.ps1"
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
+        throw "Required release metadata resolver is missing."
+    }
+    $resolved = @(& $resolver)
+    if ($resolved.Count -ne 1) {
+        throw "Release metadata resolver must return exactly one object."
+    }
+    $release = $resolved[0]
+    foreach ($name in @(
+        "MinimumWindowsBuild",
+        "Architecture",
+        "DriverPackageVersion",
+        "DriverAbiVersion",
+        "DriverHardwareId",
+        "DriverModelSection"
+    )) {
+        if ($null -eq $release.PSObject.Properties[$name]) {
+            throw "Release metadata is missing required property '$name'."
+        }
+    }
+    return $release
+}
 
 function Get-CollectorHostInfo {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata
+    )
+
     if ($PSVersionTable.PSVersion.Major -ne 7) {
         throw "Collector host is unsupported."
     }
@@ -46,16 +74,24 @@ function Get-CollectorHostInfo {
     }
     $architecture =
         [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    if ($architecture -ne [Runtime.InteropServices.Architecture]::X64) {
+    if ($ReleaseMetadata.Architecture -cne "x64" -or
+        $architecture -ne [Runtime.InteropServices.Architecture]::X64) {
         throw "Collector host is unsupported."
     }
     $build = [Environment]::OSVersion.Version.Build
-    if ($build -lt $script:CollectorMinimumWindowsBuild) {
+    if ($build -lt [int]$ReleaseMetadata.MinimumWindowsBuild) {
+        throw "Collector host is unsupported."
+    }
+    $productType = Get-ItemPropertyValue `
+        -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Control\ProductOptions" `
+        -Name ProductType
+    if ([string]$productType -cne "WinNT") {
         throw "Collector host is unsupported."
     }
     return [pscustomobject]@{
         OsBuild = $build
         Architecture = "x64"
+        ProductType = 1
     }
 }
 
@@ -328,7 +364,10 @@ function Get-CollectorInfMetadata {
         [string]$Text,
 
         [Parameter(Mandatory)]
-        [int]$WindowsBuild
+        [psobject]$ReleaseMetadata,
+
+        [Parameter(Mandatory)]
+        [psobject]$HostInfo
     )
 
     try {
@@ -367,8 +406,13 @@ function Get-CollectorInfMetadata {
         }
         $driverVer = $version["DriverVer"]
         $driverVersion = ([version]$Matches["version"]).ToString()
+        if ($driverVersion -cne
+            [string]$ReleaseMetadata.DriverPackageVersion) {
+            throw [InvalidOperationException]::new()
+        }
 
-        if ($WindowsBuild -lt 26200) {
+        if ([int]$HostInfo.OsBuild -lt
+            [int]$ReleaseMetadata.MinimumWindowsBuild) {
             throw [InvalidOperationException]::new()
         }
         $manufacturer = ConvertTo-CollectorInfKeyValueMap `
@@ -381,19 +425,19 @@ function Get-CollectorInfMetadata {
             $manufacturer["%ManufacturerName%"].Split(",") |
                 ForEach-Object { $_.Trim() }
         )
+        $modelSection = [string]$ReleaseMetadata.DriverModelSection
+        if ($modelSection -notmatch (
+            "^EMKE\.NTamd64\.10\.0\.\.\.(?<build>[0-9]+)$"
+        ) -or [int]$Matches["build"] -ne
+            [int]$ReleaseMetadata.MinimumWindowsBuild) {
+            throw [InvalidOperationException]::new()
+        }
+        $modelDecoration = $modelSection.Substring("EMKE.".Length)
         if ($manufacturerParts.Count -ne 2 -or
             $manufacturerParts[0] -cne "EMKE" -or
-            $manufacturerParts[1] -notmatch (
-                "^NTamd64\.10\.0\.\.\.(?<build>[0-9]+)$"
-            )) {
+            $manufacturerParts[1] -cne $modelDecoration) {
             throw [InvalidOperationException]::new()
         }
-        $minimumBuild = [int]$Matches["build"]
-        if ($minimumBuild -lt 26200 -or
-            $minimumBuild -gt $WindowsBuild) {
-            throw [InvalidOperationException]::new()
-        }
-        $modelSection = "EMKE.$($manufacturerParts[1])"
         if (-not $sections.ContainsKey($modelSection)) {
             throw [InvalidOperationException]::new()
         }
@@ -416,7 +460,7 @@ function Get-CollectorInfMetadata {
         )
         if ($modelParts.Count -ne 2 -or
             $modelParts[0] -cne "EMKE_Install" -or
-            $modelParts[1] -cne "ROOT\EMKEVIRTUALAUDIO") {
+            $modelParts[1] -cne $ReleaseMetadata.DriverHardwareId) {
             throw [InvalidOperationException]::new()
         }
 
@@ -454,12 +498,15 @@ function Get-CollectorInfMetadata {
             $driverAbiEntries[0].Split(",") |
                 ForEach-Object { $_.Trim() }
         )
+        $expectedAbiHex = (
+            "0x{0:X8}" -f [int]$ReleaseMetadata.DriverAbiVersion
+        )
         if ($driverAbiParts.Count -ne 5 -or
             $driverAbiParts[0] -ine "HKR" -or
             $driverAbiParts[1] -cne "" -or
             $driverAbiParts[2] -ine "DriverAbi" -or
             $driverAbiParts[3] -ine "0x00010001" -or
-            $driverAbiParts[4] -ine "0x00000001") {
+            $driverAbiParts[4] -ine $expectedAbiHex) {
             throw [InvalidOperationException]::new()
         }
 
@@ -467,8 +514,8 @@ function Get-CollectorInfMetadata {
             DriverVer = $driverVer
             Version = $driverVersion
             Provider = "EMKE"
-            HardwareId = "ROOT\EMKEVIRTUALAUDIO"
-            Abi = 1
+            HardwareId = [string]$ReleaseMetadata.DriverHardwareId
+            Abi = [int]$ReleaseMetadata.DriverAbiVersion
             ModelSection = $modelSection
             InstallSection = $installSection
         }
@@ -559,7 +606,10 @@ function Get-CollectorPackageEvidence {
         [string]$ExpectedPackageSha256,
 
         [Parameter(Mandatory)]
-        [int]$WindowsBuild
+        [psobject]$ReleaseMetadata,
+
+        [Parameter(Mandatory)]
+        [psobject]$HostInfo
     )
 
     $package = Get-StrictCollectorPackage -Directory $Directory
@@ -594,7 +644,8 @@ function Get-CollectorPackageEvidence {
         }
         $driverMetadata = Get-CollectorInfMetadata `
             -Text $infText `
-            -WindowsBuild $WindowsBuild
+            -ReleaseMetadata $ReleaseMetadata `
+            -HostInfo $HostInfo
         $catalogMetadata =
             Get-CollectorCatalogMetadata -Catalog $package.Cat
         return [pscustomobject]@{
@@ -1436,14 +1487,19 @@ function Invoke-CollectAudioEvidence {
 
         [string]$RecordingBundlePath,
 
+        [Parameter(Mandatory)]
+        [psobject]$ReleaseMetadata,
+
         [switch]$ConfirmCollect
     )
     if (-not $ConfirmCollect) {
         throw "Collection requires explicit -ConfirmCollect."
     }
-    $hostInfo = Get-CollectorHostInfo
-    if ($hostInfo.OsBuild -lt 26200 -or
-        $hostInfo.Architecture -cne "x64") {
+    $hostInfo = Get-CollectorHostInfo `
+        -ReleaseMetadata $ReleaseMetadata
+    if ($hostInfo.OsBuild -lt $ReleaseMetadata.MinimumWindowsBuild -or
+        $hostInfo.Architecture -cne "x64" -or
+        [int]$hostInfo.ProductType -ne 1) {
         throw "Collector host is unsupported."
     }
 
@@ -1473,7 +1529,8 @@ function Invoke-CollectAudioEvidence {
     $packageEvidence = Get-CollectorPackageEvidence `
         -Directory $packageDirectory `
         -ExpectedPackageSha256 $ExpectedPackageSha256 `
-        -WindowsBuild $hostInfo.OsBuild
+        -ReleaseMetadata $ReleaseMetadata `
+        -HostInfo $hostInfo
     $observationSnapshot =
         Read-CollectorObservation -Path $observationFile
     $salt = Read-CollectorSalt -Path $saltFile
@@ -1499,4 +1556,7 @@ function Invoke-CollectAudioEvidence {
     Write-Output "Audio evidence collection completed."
 }
 
-Invoke-CollectAudioEvidence @PSBoundParameters
+$releaseMetadata = Get-DriverReleaseMetadata
+Invoke-CollectAudioEvidence `
+    @PSBoundParameters `
+    -ReleaseMetadata $releaseMetadata
