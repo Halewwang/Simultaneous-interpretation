@@ -189,6 +189,20 @@ public sealed class ProductionCompositionTests
     }
 
     [TestMethod]
+    public void ProductionCompositionContainsNoPendingRuntimeAdapters()
+    {
+        string source = File.ReadAllText(TestSourceLocator.Find(
+            Path.Combine(
+                "Bootstrap",
+                "ProductionAppAdapterFactory.cs")));
+
+        StringAssert.DoesNotContain(source, "PendingAudioDeviceCatalog");
+        StringAssert.DoesNotContain(source, "PendingTranslationSessionFactory");
+        StringAssert.DoesNotContain(source, "PendingLanguageClassifier");
+        StringAssert.DoesNotContain(source, "composition is not available");
+    }
+
+    [TestMethod]
     public async Task StartupPreflightControlsStartWithoutOpeningNetworkOrAudio()
     {
         await AssertStartupPreflightAsync(
