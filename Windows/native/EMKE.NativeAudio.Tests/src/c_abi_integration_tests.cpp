@@ -428,6 +428,33 @@ void test_endpoint_enumeration_c_export_contract(TestContext& context) {
          std::memcmp(guarded.data(), guarded_before.data(), sizeof(guarded)) ==
              0);
 
+  std::vector<emke_audio_endpoint_descriptor_v1> grown(
+      fixture.begin(), fixture.end());
+  grown.push_back(endpoint_descriptor(
+      EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+      EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE,
+      "fixture-extra-output", "Fixture extra speakers"));
+  EXPECT(context,
+         emke_audio_test_set_endpoint_enumeration_fixture(
+             grown.data(), static_cast<std::uint32_t>(grown.size())) ==
+             EMKE_AUDIO_OK);
+  std::array<emke_audio_endpoint_descriptor_v1, fixture_count> growth_guard{};
+  std::memset(growth_guard.data(), 0x5a, sizeof(growth_guard));
+  const auto growth_guard_before = growth_guard;
+  required = fixture_count;
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(
+             growth_guard.data(), growth_guard.size(), &required) ==
+             EMKE_AUDIO_INVALID_ARGUMENT);
+  EXPECT(context, required == fixture_count + 1u);
+  EXPECT(context,
+         std::memcmp(
+             growth_guard.data(), growth_guard_before.data(),
+             sizeof(growth_guard)) == 0);
+
+  EXPECT(context,
+         emke_audio_test_set_endpoint_enumeration_fixture(
+             fixture.data(), fixture.size()) == EMKE_AUDIO_OK);
   std::array<emke_audio_endpoint_descriptor_v1, fixture_count> filled{};
   required = 0u;
   EXPECT(context,
