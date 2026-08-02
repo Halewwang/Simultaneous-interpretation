@@ -31,6 +31,13 @@ const sourceInf = path.join(
   "EMKE.VirtualAudio",
   "EMKE.VirtualAudio.inf",
 );
+const sourceProject = path.join(
+  repositoryRoot,
+  "Windows",
+  "driver",
+  "EMKE.VirtualAudio",
+  "EMKE.VirtualAudio.vcxproj",
+);
 
 function runNode(script, args) {
   return spawnSync(process.execPath, [script, ...args], {
@@ -118,13 +125,13 @@ async function makePackageFixture(infText) {
 
 const stampedInf = `[Version]
 Signature="$Windows NT$"
-DriverVer=07/26/2026,1.0.0.1
+DriverVer=08/01/2026,1.0.0.2
 
 [EMKE_Install.NT.Wdf]
 KmdfService=EMKEVirtualAudio,EMKE_Wdf
 
 [EMKE_Wdf]
-KmdfLibraryVersion=1.33
+KmdfLibraryVersion=1.31
 `;
 
 test("stager copies the exact WDK-stamped INF and SYS bytes", async () => {
@@ -152,7 +159,7 @@ test("stager copies the exact WDK-stamped INF and SYS bytes", async () => {
 
 test("stager rejects an unresolved source INF before creating an artifact", async () => {
   const fixture = await makePackageFixture(
-    stampedInf.replace("1.33", "$KMDFVERSION$"),
+    stampedInf.replace("1.31", "$KMDFVERSION$"),
   );
   const result = runNode(stagingScript, [
     "--repository-root",
@@ -218,6 +225,113 @@ test("INF validator accepts the real INF only when it matches the shared header"
   ]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /driver INF contract validation passed/i);
+});
+
+test("resolved package validator rejects version, floor, and KMDF drift", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "emke-package-contract-"));
+  const sourceText = await readFile(sourceInf, "utf8");
+  const projectText = await readFile(sourceProject, "utf8");
+  const desiredInf = sourceText
+    .replace("DriverVer=07/26/2026,1.0.0.1", "DriverVer=08/01/2026,1.0.0.2")
+    .replaceAll("NTamd64.10.0...26200", "NTamd64.10.0...19045")
+    .replace(
+      "%DeviceDescription%=EMKE_Install,ROOT\\EMKEVIRTUALAUDIO",
+      "%EMKE.VirtualAudio.DeviceDesc%=EMKE.VirtualAudio,ROOT\\EMKEVIRTUALAUDIO",
+    )
+    .replaceAll("EMKE_Install.NT", "EMKE.VirtualAudio.NT")
+    .replace("KmdfLibraryVersion=$KMDFVERSION$", "KmdfLibraryVersion=1.31");
+  const desiredProject = projectText
+    .replace("<EMKETargetOS>Windows11</EMKETargetOS>", "<EMKETargetOS>Windows10</EMKETargetOS>")
+    .replace(
+      "<KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>",
+      "<KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>\n    <KMDF_VERSION_MINOR>31</KMDF_VERSION_MINOR>",
+    )
+    .replace("<DateStamp>07/26/2026</DateStamp>", "<DateStamp>08/01/2026</DateStamp>")
+    .replace("<TimeStamp>1.0.0.1</TimeStamp>", "<TimeStamp>1.0.0.2</TimeStamp>")
+    .replace(
+      "<TimeStamp>1.0.0.2</TimeStamp>",
+      "<TimeStamp>1.0.0.2</TimeStamp>\n      <KmdfVersionNumber>1.31</KmdfVersionNumber>",
+    );
+  const version = {
+    driverPackageVersion: "1.0.0.2",
+    minimumWindowsBuild: 19045,
+    driverAbiVersion: 1,
+    driverHardwareId: "ROOT\\EMKEVIRTUALAUDIO",
+    driverKmdfLibraryVersion: "1.31",
+    driverEndpointRoles: [
+      "emke.meeting-speaker.render",
+      "emke.app-speaker.capture",
+      "emke.app-microphone.render",
+      "emke.meeting-microphone.capture",
+    ],
+  };
+  const compatibility = {
+    minimumDriverVersion: "1.0.0.2",
+    recommendedDriverVersion: "1.0.0.2",
+    minimumWindowsBuild: 19045,
+    driverAbiVersion: 1,
+    driverHardwareId: "ROOT\\EMKEVIRTUALAUDIO",
+    driverKmdfLibraryVersion: "1.31",
+    driverEndpointRoles: version.driverEndpointRoles,
+  };
+  const project = path.join(root, "EMKE.VirtualAudio.vcxproj");
+  const versionPath = path.join(root, "version.json");
+  const compatibilityPath = path.join(root, "compatibility.internal.json");
+  await writeFile(project, desiredProject, "utf8");
+  await writeFile(versionPath, JSON.stringify(version), "utf8");
+  await writeFile(compatibilityPath, JSON.stringify(compatibility), "utf8");
+
+  const mutations = [
+    {
+      name: "old driver version",
+      inf: desiredInf.replace("1.0.0.2", "1.0.0.1"),
+      error: /version|DriverVer/i,
+    },
+    {
+      name: "Windows 11-only floor",
+      inf: desiredInf.replaceAll("19045", "26200"),
+      error: /19045|minimum Windows|model/i,
+    },
+    {
+      name: "KMDF 1.32",
+      inf: desiredInf.replace("KmdfLibraryVersion=1.31", "KmdfLibraryVersion=1.32"),
+      error: /KMDF|1\.31/i,
+    },
+    {
+      name: "KMDF 1.33",
+      inf: desiredInf.replace("KmdfLibraryVersion=1.31", "KmdfLibraryVersion=1.33"),
+      error: /KMDF|1\.31/i,
+    },
+  ];
+
+  for (const mutation of mutations) {
+    const inf = path.join(root, `${mutation.name.replaceAll(" ", "-")}.inf`);
+    await writeFile(inf, mutation.inf, "utf8");
+    const result = runNode(contractValidator, [
+      "--header", sharedHeader,
+      "--inf", inf,
+      "--project", project,
+      "--version", versionPath,
+      "--compatibility", compatibilityPath,
+    ]);
+    assert.notEqual(result.status, 0, `${mutation.name} must be rejected`);
+    assert.match(result.stderr, mutation.error);
+  }
+});
+
+test("driver build validates the resolved staged INF before Inf2Cat", async () => {
+  const script = await readFile(
+    path.join(repositoryRoot, "Windows", "tools", "build-driver.ps1"),
+    "utf8",
+  );
+  const stagingOffset = script.indexOf('"--artifact-directory", $artifactDirectory');
+  const stagedValidationOffset = script.indexOf(
+    '"--inf", (Join-Path $artifactDirectory "EMKE.VirtualAudio.inf")',
+  );
+  const inf2CatOffset = script.indexOf("-Executable $inf2Cat");
+  assert.ok(stagingOffset >= 0);
+  assert.ok(stagingOffset < stagedValidationOffset);
+  assert.ok(stagedValidationOffset < inf2CatOffset);
 });
 
 test("INF validator rejects a role string that diverges from the shared header", async () => {

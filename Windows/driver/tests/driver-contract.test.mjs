@@ -35,12 +35,14 @@ test("provenance is immutable and names the Microsoft sample license", async () 
   assert.match(notice, /Local modifications/i);
 });
 
-test("project is a pinned x64 Windows 11 KMDF driver built by MSBuild", async () => {
+test("project is a pinned x64 Windows 10-11 KMDF 1.31 driver built by MSBuild", async () => {
   const project = await text("EMKE.VirtualAudio.vcxproj");
   assert.match(project, /<PlatformToolset>WindowsKernelModeDriver10\.0<\/PlatformToolset>/);
   assert.match(project, /<ConfigurationType>Driver<\/ConfigurationType>/);
   assert.match(project, /<DriverType>KMDF<\/DriverType>/);
-  assert.match(project, /<EMKETargetOS>Windows11<\/EMKETargetOS>/);
+  assert.match(project, /<EMKETargetOS>Windows10<\/EMKETargetOS>/);
+  assert.match(project, /<KMDF_VERSION_MAJOR>1<\/KMDF_VERSION_MAJOR>/);
+  assert.match(project, /<KMDF_VERSION_MINOR>31<\/KMDF_VERSION_MINOR>/);
   assert.match(project, /<WindowsTargetPlatformVersion>10\.0\.28000\.0<\/WindowsTargetPlatformVersion>/);
   assert.match(project, /<TargetVersion>Windows10<\/TargetVersion>/);
   assert.doesNotMatch(project, /<TargetVersion>Windows11<\/TargetVersion>/);
@@ -85,23 +87,38 @@ test("WDK StampInf metadata freezes the packaged INF version and date", async ()
     infItem.groups.metadata,
     /<SpecifyDriverVerDirectiveDate>true<\/SpecifyDriverVerDirectiveDate>/,
   );
-  assert.match(infItem.groups.metadata, /<DateStamp>07\/26\/2026<\/DateStamp>/);
+  assert.match(infItem.groups.metadata, /<DateStamp>08\/01\/2026<\/DateStamp>/);
   assert.match(
     infItem.groups.metadata,
     /<SpecifyDriverVerDirectiveVersion>true<\/SpecifyDriverVerDirectiveVersion>/,
   );
-  assert.match(infItem.groups.metadata, /<TimeStamp>1\.0\.0\.1<\/TimeStamp>/);
+  assert.match(infItem.groups.metadata, /<TimeStamp>1\.0\.0\.2<\/TimeStamp>/);
+  assert.match(
+    infItem.groups.metadata,
+    /<KmdfVersionNumber>1\.31<\/KmdfVersionNumber>/,
+  );
   assert.doesNotMatch(infItem.groups.metadata, /<SpecifyDriverDirectiveVersion>/);
   assert.doesNotMatch(infItem.groups.metadata, />\s*\*\s*</);
-  assert.match(inf, /^DriverVer=07\/26\/2026,1\.0\.0\.1$/m);
-  assert.match(resource, /^\s*FILEVERSION 1,0,0,1$/m);
-  assert.match(resource, /VALUE "FileVersion", "1\.0\.0\.1\\0"/);
+  assert.match(inf, /^DriverVer=08\/01\/2026,1\.0\.0\.2$/m);
+  assert.match(resource, /^\s*FILEVERSION 1,0,0,2$/m);
+  assert.match(resource, /^\s*PRODUCTVERSION 1,0,0,2$/m);
+  assert.match(resource, /VALUE "FileVersion", "1\.0\.0\.2\\0"/);
+  assert.match(resource, /VALUE "ProductVersion", "1\.0\.0\.2\\0"/);
 });
 
 test("INF freezes the root identity, driver ABI, roles, and endpoint names", async () => {
   const inf = await text("EMKE.VirtualAudio.inf");
   assert.match(inf, /ROOT\\EMKEVIRTUALAUDIO/i);
-  assert.match(inf, /NTamd64\.10\.0\.\.\.26200/);
+  assert.match(
+    inf,
+    /^%ManufacturerName%=EMKE,NTamd64\.10\.0\.\.\.19045$/m,
+  );
+  assert.match(inf, /^\[EMKE\.NTamd64\.10\.0\.\.\.19045\]$/m);
+  assert.match(
+    inf,
+    /^%EMKE\.VirtualAudio\.DeviceDesc%=EMKE\.VirtualAudio,ROOT\\EMKEVIRTUALAUDIO$/m,
+  );
+  assert.doesNotMatch(inf, /NTamd64\.10\.0\.\.\.26200/);
   assert.match(inf, /DriverAbi[^\\r\\n]*0x00000001/i);
   assert.match(inf, /EMKE Virtual Speaker/);
   assert.match(inf, /EMKE Virtual Microphone/);
@@ -318,4 +335,39 @@ test("authorized hosted workflow builds, verifies, and uploads only the package"
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /Windows\/artifacts\/driver\/x64\/Release/);
   assert.doesNotMatch(workflow, /\b(?:pnputil|devcon|bcdedit)\b/i);
+});
+
+test("driver release metadata agrees on version, floor, ABI, identity, KMDF, and roles", async () => {
+  const version = JSON.parse(
+    await readFile(path.resolve(driverDirectory, "..", "version.json"), "utf8"),
+  );
+  const compatibility = JSON.parse(
+    await readFile(
+      path.resolve(
+        driverDirectory,
+        "..",
+        "packaging",
+        "compatibility.internal.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.equal(version.driverPackageVersion, "1.0.0.2");
+  assert.equal(version.minimumWindowsBuild, 19045);
+  assert.equal(version.driverAbiVersion, 1);
+  assert.equal(version.driverHardwareId, "ROOT\\EMKEVIRTUALAUDIO");
+  assert.equal(version.driverKmdfLibraryVersion, "1.31");
+  assert.deepEqual(version.driverEndpointRoles, roles);
+
+  assert.equal(compatibility.minimumDriverVersion, version.driverPackageVersion);
+  assert.equal(compatibility.recommendedDriverVersion, version.driverPackageVersion);
+  assert.equal(compatibility.minimumWindowsBuild, version.minimumWindowsBuild);
+  assert.equal(compatibility.driverAbiVersion, version.driverAbiVersion);
+  assert.equal(compatibility.driverHardwareId, version.driverHardwareId);
+  assert.equal(
+    compatibility.driverKmdfLibraryVersion,
+    version.driverKmdfLibraryVersion,
+  );
+  assert.deepEqual(compatibility.driverEndpointRoles, version.driverEndpointRoles);
 });
