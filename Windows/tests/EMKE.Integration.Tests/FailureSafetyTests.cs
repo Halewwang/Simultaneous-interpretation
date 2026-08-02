@@ -229,8 +229,8 @@ public sealed class FailureSafetyTests
             _ = await runtime.StopAsync().ConfigureAwait(false);
         }
 
-        RuntimeError? finalError = runtime.CurrentSnapshot.Error;
-        Require(finalError is not null, "failure did not preserve a runtime error");
+        RuntimeError finalError = runtime.CurrentSnapshot.Error
+            ?? throw new InvalidOperationException("failure did not preserve a runtime error");
         Require(
             finalError.Parameters.Count == 0,
             "runtime failure exposed unsafe parameters");

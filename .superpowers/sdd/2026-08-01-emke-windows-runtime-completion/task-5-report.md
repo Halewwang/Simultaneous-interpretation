@@ -15,6 +15,12 @@ or release-promotion behavior.
   network error and bounded retry schedule.
 - Five production-path safety contracts execute 100 times each (500 total),
   with controlled clocks and explicit iteration counters.
+- The review follow-up classifies native QueueFull as stable backpressure,
+  classifies collected provider 401/403/404 HTTP statuses without parsing
+  exception text, and verifies the Runtime's safe stopped-route cleanup.
+- Every repeated shutdown now checks mock session/socket, poll worker, event
+  and translation queues, and tracked PCM lease ownership. A blocked remote
+  close remains explicitly reported as `localCloseTimeout` quarantine.
 - The row-by-row production seam, error mapping, safe routes, diagnostics, and
   ownership evidence are in
   `docs/quality/windows-runtime-completion-evidence.md`.
@@ -31,6 +37,7 @@ All Task 5 validation branches were evidence-only and closed without merge:
 | #18 | Stabilized matrix completion | Closed unmerged |
 | #19 | Runtime logs, hostile codes, failure aggregation | Closed unmerged |
 | #20 | Cross-layer mapping and final report | Closed unmerged |
+| #21 | Review follow-up: QueueFull, provider HTTP status, PCM probes, ownership | Draft evidence branch; close unmerged after final hosted gate |
 
 The product branch `codex/windows-internal-msix` remains local only. The sole
 pre-existing dirty file, `progress.md`, is intentionally neither altered nor
