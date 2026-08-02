@@ -12,6 +12,18 @@ namespace EMKE.Integration.Tests;
 public sealed class FailureSafetyTests
 {
     [TestMethod]
+    public void FailureSummaryExcludesHostileExceptionMessage()
+    {
+        string hostile = "Bearer opaque-token https://user:secret@example.test/?q=private";
+        string summary = FormatFailure(7, SafetyInjection.ServerError,
+            new InvalidOperationException(hostile));
+
+        Assert.IsFalse(summary.Contains(hostile, StringComparison.Ordinal));
+        StringAssert.Contains(summary, "seed=7");
+        StringAssert.Contains(summary, "injection=ServerError");
+        StringAssert.Contains(summary, nameof(InvalidOperationException));
+    }
+    [TestMethod]
     public async Task OneHundredDeterministicSeedsKeepVirtualMicrophoneZero()
     {
         List<string> failures = [];
@@ -31,9 +43,7 @@ public sealed class FailureSafetyTests
             catch (Exception exception)
 #pragma warning restore CA1031
             {
-                failures.Add(
-                    $"seed={seed} injection={injection} failed: "
-                    + exception.GetType().Name);
+                failures.Add(FormatFailure(seed, injection, exception));
             }
         }
 
@@ -45,6 +55,11 @@ public sealed class FailureSafetyTests
             0,
             failures,
             string.Join(Environment.NewLine, failures));
+    }
+
+    private static string FormatFailure(int seed, SafetyInjection injection, Exception exception)
+    {
+        return $"seed={seed} injection={injection} failed: {exception.GetType().Name}";
     }
 
     private static async Task RunSeedAsync(
