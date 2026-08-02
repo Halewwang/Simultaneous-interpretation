@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using System.Net;
 using System.Text;
 using EMKE.Core;
 
@@ -190,6 +191,31 @@ public sealed class TranslationSocketTests
     }
 
     [TestMethod]
+    [DataRow(HttpStatusCode.Unauthorized, ErrorCategory.Authentication, "translationSocket.authenticationRejected", RecoveryAction.UpdateApiKey)]
+    [DataRow(HttpStatusCode.Forbidden, ErrorCategory.Authentication, "translationSocket.authenticationRejected", RecoveryAction.UpdateApiKey)]
+    [DataRow(HttpStatusCode.NotFound, ErrorCategory.EndpointModel, "translationSocket.endpointModelRejected", RecoveryAction.EditSettings)]
+    public async Task ConnectHttpStatusUsesStableAuthenticationOrEndpointModelError(
+        HttpStatusCode statusCode,
+        ErrorCategory category,
+        string code,
+        RecoveryAction recoveryAction)
+    {
+        FakeClientWebSocket adapter = new()
+        {
+            ConnectException = new WebSocketException("opaque provider response"),
+            HttpStatusCode = statusCode,
+        };
+
+        RuntimeError? error = await new TranslationSocket(adapter, 128)
+            .ConnectAsync(new Uri("wss://api.example.test/realtime/translations?model=x"), CancellationToken.None);
+
+        Assert.AreEqual(category, error?.Category);
+        Assert.AreEqual(code, error?.Code);
+        Assert.AreEqual(recoveryAction, error?.RecoveryAction);
+        Assert.HasCount(0, error!.Parameters);
+    }
+
+    [TestMethod]
     public void AuthorizationConfigurationRejectsEmptyAndLineBreakSecretsBeforeAdapterInjection()
     {
         FakeClientWebSocket adapter = new();
@@ -275,6 +301,8 @@ public sealed class TranslationSocketTests
         internal List<SendRecord> Sends { get; } = [];
 
         internal Exception? ConnectException { get; init; }
+
+        public HttpStatusCode? HttpStatusCode { get; init; }
 
         internal Exception? SendException { get; init; }
 

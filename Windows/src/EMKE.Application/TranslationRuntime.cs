@@ -2405,6 +2405,13 @@ public sealed class TranslationRuntime :
         {
             RuntimeOperationException operation => operation.Error,
             TranslationSessionException session => session.Error,
+            AudioEngineException
+            {
+                Status: AudioEngineStatus.QueueFull,
+            } => Error(
+                ErrorCategory.Backpressure,
+                "translationRuntime.audioBackpressure",
+                RecoveryAction.Retry),
             IOException => Error(
                 ErrorCategory.Network,
                 "translationRuntime.networkFailure",
