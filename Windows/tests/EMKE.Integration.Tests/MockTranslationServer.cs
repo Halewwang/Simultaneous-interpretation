@@ -76,6 +76,8 @@ internal sealed class MockTranslationServer : IAsyncDisposable
     public int TotalConnectionCount =>
         Volatile.Read(ref _totalConnectionCount);
 
+    public int ActiveConnectionCount => _connections.Count;
+
     public int ClientAudioBackpressureCount =>
         Volatile.Read(ref _clientAudioBackpressureCount);
 
