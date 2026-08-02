@@ -163,6 +163,16 @@ public sealed class FailureSafetyTests
 #pragma warning restore CA2000
                 audio.EmitControl(underrun);
                 break;
+            case SafetyInjection.DeviceChanged:
+#pragma warning disable CA2000 // Ownership transfers to the test audio engine event queue.
+                AudioEngineEvent deviceChanged = AudioEngineEvent.CreateControl(
+                    AudioEngineEventKind.DeviceChanged,
+                    AudioEngineStatus.DeviceMissing,
+                    AudioEngineRoute.Stopped,
+                    (ulong)seed + 1);
+#pragma warning restore CA2000
+                audio.EmitControl(deviceChanged);
+                break;
             case SafetyInjection.CloseTimeout:
                 RuntimeError? closeError =
                     await runtime.StopAsync().ConfigureAwait(false);
@@ -217,6 +227,41 @@ public sealed class FailureSafetyTests
         if (runtime.CurrentSnapshot.RuntimeState != RuntimeState.Stopped)
         {
             _ = await runtime.StopAsync().ConfigureAwait(false);
+        }
+
+        RuntimeError? finalError = runtime.CurrentSnapshot.Error;
+        Require(finalError is not null, "failure did not preserve a runtime error");
+        Require(
+            finalError.Parameters.Count == 0,
+            "runtime failure exposed unsafe parameters");
+        if (injection == SafetyInjection.CloseTimeout)
+        {
+            Require(
+                finalError.Category == ErrorCategory.CloseTimeout
+                    && string.Equals(
+                        finalError.Code,
+                        "translationRuntime.localCloseTimeout",
+                        StringComparison.Ordinal),
+                "close timeout did not remain explicitly quarantined");
+            Require(audio.ActivePollCount == 0, "close timeout left an audio poller");
+            Require(audio.PendingEventCount == 0, "close timeout left an audio event");
+            Require(
+                audio.PendingOutboundTranslationCount == 0,
+                "close timeout left an audio translation queue entry");
+            Require(audio.ActivePcmLeaseCount == 0, "close timeout leaked a PCM lease");
+        }
+        else
+        {
+            await WaitUntilAsync(
+                () => server.ActiveConnectionCount == 0
+                    && audio.ActivePollCount == 0).ConfigureAwait(false);
+            Require(server.ActiveConnectionCount == 0, "sessions or sockets remained active");
+            Require(audio.ActivePollCount == 0, "audio poll worker remained active");
+            Require(audio.PendingEventCount == 0, "audio event queue was not drained");
+            Require(
+                audio.PendingOutboundTranslationCount == 0,
+                "audio translation queue was not drained");
+            Require(audio.ActivePcmLeaseCount == 0, "PCM lease was not released");
         }
     }
 
@@ -277,6 +322,7 @@ public sealed class FailureSafetyTests
         ReceiveFailure,
         QueueFull,
         TranslatedAudioUnderrun,
+        DeviceChanged,
         CloseTimeout,
     }
 
