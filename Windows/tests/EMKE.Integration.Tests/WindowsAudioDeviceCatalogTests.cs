@@ -178,7 +178,7 @@ public sealed class WindowsAudioDeviceCatalogTests
 
     private static unsafe void WriteTerminated(ushort* buffer, int capacity, string value)
     {
-        Assert.IsLessThan(value.Length, capacity);
+        Assert.IsLessThan(capacity, value.Length);
         for (int index = 0; index < value.Length; index++)
         {
             buffer[index] = value[index];
