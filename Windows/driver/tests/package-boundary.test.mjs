@@ -255,9 +255,19 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
   const project = path.join(root, "EMKE.VirtualAudio.vcxproj");
   const versionPath = path.join(root, "version.json");
   const compatibilityPath = path.join(root, "compatibility.internal.json");
+  const desiredInfPath = path.join(root, "desired.inf");
   await writeFile(project, desiredProject, "utf8");
   await writeFile(versionPath, JSON.stringify(version), "utf8");
   await writeFile(compatibilityPath, JSON.stringify(compatibility), "utf8");
+  await writeFile(desiredInfPath, desiredInf, "utf8");
+  const validFixture = runNode(contractValidator, [
+    "--header", sharedHeader,
+    "--inf", desiredInfPath,
+    "--project", project,
+    "--version", versionPath,
+    "--compatibility", compatibilityPath,
+  ]);
+  assert.equal(validFixture.status, 0, validFixture.stderr);
   const falsePositives = [];
 
   const mutations = [
@@ -357,10 +367,31 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
           "      <KmdfVersionNumber>1.33</KmdfVersionNumber>",
       ),
     },
+    {
+      name: "Debug-only INF stamp item",
+      project: desiredProject.replace(
+        '<Inf Include="EMKE.VirtualAudio.inf">',
+        '<Inf Include="EMKE.VirtualAudio.inf" ' +
+          'Condition="\'$(Configuration)|$(Platform)\'==\'Debug|x64\'">',
+      ),
+    },
+    {
+      name: "Debug-only INF stamp parent",
+      project: desiredProject.replace(
+        '  <ItemGroup>\n    <Inf Include="EMKE.VirtualAudio.inf">',
+        '  <ItemGroup Condition="\'$(Configuration)|$(Platform)\'==' +
+          '\'Debug|x64\'">\n    <Inf Include="EMKE.VirtualAudio.inf">',
+      ),
+    },
+    {
+      name: "wrong INF stamp include",
+      project: desiredProject.replace(
+        '<Inf Include="EMKE.VirtualAudio.inf">',
+        '<Inf Include="Wrong.inf">',
+      ),
+    },
   ];
 
-  const desiredInfPath = path.join(root, "desired.inf");
-  await writeFile(desiredInfPath, desiredInf, "utf8");
   for (const mutation of projectMutations) {
     await writeFile(project, mutation.project, "utf8");
     const result = runNode(contractValidator, [
