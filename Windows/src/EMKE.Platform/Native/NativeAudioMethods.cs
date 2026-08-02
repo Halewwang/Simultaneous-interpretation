@@ -45,10 +45,25 @@ internal static partial class NativeAudioMethods
 
     [DefaultDllImportSearchPaths(
         DllImportSearchPath.SafeDirectories)]
+    [LibraryImport(LibraryName, EntryPoint = "emke_audio_sizeof_endpoint_descriptor_v1")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint GetEndpointDescriptorV1Size();
+
+    [DefaultDllImportSearchPaths(
+        DllImportSearchPath.SafeDirectories)]
     [LibraryImport(LibraryName, EntryPoint = "emke_audio_discover_endpoints")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial NativeAudioStatus DiscoverEndpoints(
         ref NativeAudioEndpointSnapshot snapshot);
+
+    [DefaultDllImportSearchPaths(
+        DllImportSearchPath.SafeDirectories)]
+    [LibraryImport(LibraryName, EntryPoint = "emke_audio_enumerate_endpoints_v1")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static unsafe partial NativeAudioStatus EnumerateEndpointsV1(
+        NativeAudioEndpointDescriptorV1* items,
+        uint capacity,
+        out uint requiredCount);
 
     [DefaultDllImportSearchPaths(
         DllImportSearchPath.SafeDirectories)]
@@ -143,9 +158,25 @@ internal sealed class PInvokeNativeAudioApi : INativeAudioApi
     public uint GetEndpointSnapshotSize() =>
         NativeAudioMethods.GetEndpointSnapshotSize();
 
+    public uint GetEndpointDescriptorV1Size() =>
+        NativeAudioMethods.GetEndpointDescriptorV1Size();
+
     public NativeAudioStatus DiscoverEndpoints(
         ref NativeAudioEndpointSnapshot snapshot) =>
         NativeAudioMethods.DiscoverEndpoints(ref snapshot);
+
+    public unsafe NativeAudioStatus EnumerateEndpointsV1(
+        Span<NativeAudioEndpointDescriptorV1> items,
+        out uint requiredCount)
+    {
+        fixed (NativeAudioEndpointDescriptorV1* pointer = items)
+        {
+            return NativeAudioMethods.EnumerateEndpointsV1(
+                pointer,
+                checked((uint)items.Length),
+                out requiredCount);
+        }
+    }
 
     public NativeAudioStatus Create(
         in NativeAudioConfiguration configuration,

@@ -254,6 +254,19 @@ EndpointReadResult read_endpoint(IMMDevice* device) {
     };
   }
 
+  PropVariantValue friendly_name_value;
+  result = properties->GetValue(PKEY_Device_FriendlyName,
+                                friendly_name_value.put());
+  if (FAILED(result) || friendly_name_value.get().vt != VT_LPWSTR ||
+      friendly_name_value.get().pwszVal == nullptr ||
+      friendly_name_value.get().pwszVal[0] == L'\0') {
+    return {
+        .error = windows_error(
+            DeviceCatalogOperation::readFriendlyName,
+            FAILED(result) ? result : E_UNEXPECTED),
+    };
+  }
+
   PropVariantValue role_value;
   const PROPERTYKEY role_key = endpoint_role_property_key();
   result = properties->GetValue(role_key, role_value.put());
@@ -282,6 +295,8 @@ EndpointReadResult read_endpoint(IMMDevice* device) {
       .endpoint =
           DeviceEndpoint{
               .id = copy_endpoint_id(id.get()),
+              .friendly_name = copy_endpoint_id(
+                  friendly_name_value.get().pwszVal),
               .state = static_cast<std::uint32_t>(state),
               .data_flow = native_flow == eRender ? DeviceDataFlow::render
                                                   : DeviceDataFlow::capture,
@@ -379,6 +394,21 @@ class MmDeviceSource final : public DeviceSource {
 #endif
 
 }  // namespace
+
+bool contains_duplicate_or_empty_endpoint_id(
+    std::span<const DeviceEndpoint> endpoints) noexcept {
+  for (std::size_t current = 0u; current < endpoints.size(); ++current) {
+    if (endpoints[current].id.empty()) {
+      return true;
+    }
+    for (std::size_t prior = 0u; prior < current; ++prior) {
+      if (endpoints[current].id == endpoints[prior].id) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 VirtualEndpointAssessment assess_virtual_endpoints(
     std::span<const DeviceEndpoint> endpoints) noexcept {
@@ -486,6 +516,15 @@ CatalogRefreshResult DeviceCatalog::refresh() noexcept {
     }
     if (enumeration.error.has_value()) {
       return {.ok = false, .error = enumeration.error};
+    }
+    if (contains_duplicate_or_empty_endpoint_id(enumeration.endpoints)) {
+      return {
+          .ok = false,
+          .error = DeviceCatalogError{
+              .operation = DeviceCatalogOperation::enumerateEndpoints,
+              .native_code = 0,
+          },
+      };
     }
     auto replacement = std::make_shared<const DeviceCatalogSnapshot>(
         std::move(enumeration.endpoints));

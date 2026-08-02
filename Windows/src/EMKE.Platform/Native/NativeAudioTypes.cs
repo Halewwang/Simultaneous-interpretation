@@ -8,6 +8,9 @@ internal static class NativeAudioConstants
 {
     public const uint AbiVersion = 1;
     public const int EndpointIdCapacity = 512;
+    public const int EndpointNameCapacity = 256;
+    public const int EndpointRoleCapacity = 64;
+    public const uint MaximumEnumeratedEndpoints = 128;
     public const int NetworkSampleRate = 24_000;
     public const int NetworkChannelCount = 1;
     public const int EventChannelCapacity = 64;
@@ -56,6 +59,15 @@ internal enum NativeAudioEndpointDataFlow
 {
     Render = 0,
     Capture = 1,
+}
+
+[Flags]
+internal enum NativeAudioEndpointFlags
+{
+    None = 0,
+    Active = 1,
+    PhysicalDefault = 2,
+    VirtualRole = 4,
 }
 
 internal enum NativeAudioEndpointDiscoveryStatus
@@ -112,6 +124,17 @@ internal unsafe struct NativeAudioEndpointSnapshot
     public fixed ushort PhysicalInputEndpointId[NativeAudioConstants.EndpointIdCapacity];
     public uint PhysicalOutputEndpointIdLength;
     public fixed ushort PhysicalOutputEndpointId[NativeAudioConstants.EndpointIdCapacity];
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeAudioEndpointDescriptorV1
+{
+    public uint Size;
+    public uint Direction;
+    public uint Flags;
+    public fixed ushort Id[NativeAudioConstants.EndpointIdCapacity];
+    public fixed ushort Name[NativeAudioConstants.EndpointNameCapacity];
+    public fixed ushort Role[NativeAudioConstants.EndpointRoleCapacity];
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -206,7 +229,13 @@ internal interface INativeAudioApi
 
     uint GetEndpointSnapshotSize();
 
+    uint GetEndpointDescriptorV1Size();
+
     NativeAudioStatus DiscoverEndpoints(ref NativeAudioEndpointSnapshot snapshot);
+
+    NativeAudioStatus EnumerateEndpointsV1(
+        Span<NativeAudioEndpointDescriptorV1> items,
+        out uint requiredCount);
 
     NativeAudioStatus Create(
         in NativeAudioConfiguration configuration,

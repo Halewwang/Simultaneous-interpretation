@@ -256,6 +256,9 @@ internal sealed class FakeNativeAudioApi : INativeAudioApi
     public uint EndpointSnapshotSize { get; set; } =
         checked((uint)Marshal.SizeOf<NativeAudioEndpointSnapshot>());
 
+    public uint EndpointDescriptorV1Size { get; set; } =
+        checked((uint)Marshal.SizeOf<NativeAudioEndpointDescriptorV1>());
+
     public NativeAudioEndpointDiscoveryStatus DiscoveryStatus { get; set; } =
         NativeAudioEndpointDiscoveryStatus.Ready;
 
@@ -303,9 +306,20 @@ internal sealed class FakeNativeAudioApi : INativeAudioApi
 
     public uint GetEndpointSnapshotSize() => EndpointSnapshotSize;
 
+    public uint GetEndpointDescriptorV1Size() => EndpointDescriptorV1Size;
+
     public NativeAudioStatus DiscoverEndpoints(ref NativeAudioEndpointSnapshot snapshot)
     {
         snapshot = NativeAudioTestData.CreateSnapshot(DiscoveryStatus);
+        return NativeAudioStatus.Ok;
+    }
+
+    public NativeAudioStatus EnumerateEndpointsV1(
+        Span<NativeAudioEndpointDescriptorV1> items,
+        out uint requiredCount)
+    {
+        _ = items;
+        requiredCount = 0;
         return NativeAudioStatus.Ok;
     }
 

@@ -18,8 +18,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <new>
 #include <span>
+#include <thread>
+#include <vector>
 
 struct emke_audio_handle {
   explicit emke_audio_handle(const emke_audio_config& config)
@@ -69,7 +72,165 @@ class ScopedComApartment {
  private:
   HRESULT result_ = E_FAIL;
 };
+
+class ScopedMtaComApartment {
+ public:
+  ScopedMtaComApartment() noexcept
+      : result_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
+
+  ~ScopedMtaComApartment() {
+    if (SUCCEEDED(result_)) {
+      CoUninitialize();
+    }
+  }
+
+  [[nodiscard]] bool usable() const noexcept {
+    return SUCCEEDED(result_);
+  }
+
+ private:
+  HRESULT result_ = E_FAIL;
+};
 #endif
+
+struct EndpointEnumeration {
+  emke_audio_status status = EMKE_AUDIO_INTERNAL_ERROR;
+  std::vector<emke::audio::DeviceEndpoint> endpoints;
+  std::u16string default_physical_input_id;
+  std::u16string default_physical_output_id;
+};
+
+bool is_bounded_utf16(std::u16string_view value,
+                      std::size_t capacity) noexcept {
+  return !value.empty() && value.size() < capacity &&
+         value.find(u'\0') == std::u16string_view::npos;
+}
+
+template <std::size_t Capacity>
+bool copy_bounded_utf16(std::u16string_view source,
+                        std::uint16_t (&destination)[Capacity]) noexcept {
+  if (!is_bounded_utf16(source, Capacity)) {
+    return false;
+  }
+  for (std::size_t index = 0u; index < source.size(); ++index) {
+    destination[index] = static_cast<std::uint16_t>(source[index]);
+  }
+  destination[source.size()] = 0u;
+  return true;
+}
+
+bool copy_role(std::string_view source,
+               std::uint16_t (&destination)[EMKE_AUDIO_ENDPOINT_ROLE_CAPACITY])
+    noexcept {
+  if (source.empty() || source.size() >= EMKE_AUDIO_ENDPOINT_ROLE_CAPACITY) {
+    return false;
+  }
+  for (std::size_t index = 0u; index < source.size(); ++index) {
+    destination[index] = static_cast<std::uint16_t>(source[index]);
+  }
+  destination[source.size()] = 0u;
+  return true;
+}
+
+bool write_endpoint_descriptor(
+    const emke::audio::DeviceEndpoint& endpoint,
+    bool is_default,
+    emke_audio_endpoint_descriptor_v1& destination) noexcept {
+  destination = {};
+  destination.size = sizeof(destination);
+  destination.direction = endpoint.data_flow == emke::audio::DeviceDataFlow::render
+                              ? EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER
+                              : EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE;
+  destination.flags = EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE;
+  if (endpoint.has_emke_role_property) {
+    if (!endpoint.role.has_value() ||
+        endpoint.data_flow != emke::audio::endpoint_role_data_flow(*endpoint.role) ||
+        !copy_role(emke::audio::endpoint_role_string(*endpoint.role),
+                   destination.role)) {
+      return false;
+    }
+    destination.flags |= EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE;
+  } else if (is_default) {
+    destination.flags |= EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT;
+  }
+  return copy_bounded_utf16(endpoint.id, destination.id) &&
+         copy_bounded_utf16(endpoint.friendly_name, destination.name);
+}
+
+EndpointEnumeration enumerate_active_endpoints_on_mta_worker() noexcept {
+  EndpointEnumeration result;
+#if defined(_WIN32)
+  try {
+    std::thread worker([&result] {
+      try {
+        const ScopedMtaComApartment com;
+        if (!com.usable()) {
+          result.status = EMKE_AUDIO_INTERNAL_ERROR;
+          return;
+        }
+
+        emke::audio::DeviceCatalogError creation_error;
+        std::unique_ptr<emke::audio::DeviceSource> source =
+            emke::audio::create_mm_device_source(creation_error);
+        if (source == nullptr) {
+          result.status = EMKE_AUDIO_INTERNAL_ERROR;
+          return;
+        }
+
+        emke::audio::DeviceCatalog catalog(*source);
+        const emke::audio::CatalogRefreshResult refresh = catalog.refresh();
+        if (!refresh.ok) {
+          result.status = EMKE_AUDIO_INTERNAL_ERROR;
+          return;
+        }
+
+        const emke::audio::VirtualEndpointAssessment virtuals =
+            catalog.virtual_endpoint_assessment();
+        if (!virtuals.ready) {
+          result.status = EMKE_AUDIO_DEVICE_MISSING;
+          return;
+        }
+
+        const emke::audio::PhysicalEndpointResolution input =
+            catalog.resolve_physical({
+                .mode = emke::audio::PhysicalEndpointMode::followDefault,
+                .data_flow = emke::audio::DeviceDataFlow::capture,
+            });
+        const emke::audio::PhysicalEndpointResolution output =
+            catalog.resolve_physical({
+                .mode = emke::audio::PhysicalEndpointMode::followDefault,
+                .data_flow = emke::audio::DeviceDataFlow::render,
+            });
+        if (input.status != emke::audio::PhysicalResolutionStatus::resolved ||
+            output.status != emke::audio::PhysicalResolutionStatus::resolved ||
+            input.endpoint == nullptr || output.endpoint == nullptr) {
+          result.status = EMKE_AUDIO_DEVICE_MISSING;
+          return;
+        }
+
+        result.default_physical_input_id = input.endpoint->id;
+        result.default_physical_output_id = output.endpoint->id;
+        const auto snapshot = catalog.snapshot();
+        for (std::size_t index = 0u; index < snapshot->size(); ++index) {
+          const emke::audio::DeviceEndpoint endpoint = snapshot->endpoint_at(index);
+          if (endpoint.state == emke::audio::deviceStateActive) {
+            result.endpoints.push_back(endpoint);
+          }
+        }
+        result.status = EMKE_AUDIO_OK;
+      } catch (...) {
+        result.status = EMKE_AUDIO_INTERNAL_ERROR;
+      }
+    });
+    worker.join();
+  } catch (...) {
+    result.status = EMKE_AUDIO_INTERNAL_ERROR;
+  }
+#else
+  result.status = EMKE_AUDIO_INTERNAL_ERROR;
+#endif
+  return result;
+}
 
 }  // namespace
 
@@ -99,6 +260,11 @@ EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_discovered_endpoint(void) {
 EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_endpoint_snapshot(void) {
   return static_cast<std::uint32_t>(
       sizeof(emke_audio_endpoint_snapshot));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_endpoint_descriptor_v1(void) {
+  return static_cast<std::uint32_t>(
+      sizeof(emke_audio_endpoint_descriptor_v1));
 }
 
 EMKE_AUDIO_API emke_audio_status emke_audio_create(
@@ -325,6 +491,53 @@ EMKE_AUDIO_API emke_audio_status emke_audio_discover_endpoints(
           emke::audio::EndpointDiscoveryResult{}, *out_snapshot);
     }
     return EMKE_AUDIO_OK;
+  }
+}
+
+EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
+    emke_audio_endpoint_descriptor_v1* items,
+    std::uint32_t capacity,
+    std::uint32_t* required_count) {
+  if (required_count == nullptr || (items == nullptr && capacity != 0u) ||
+      (items != nullptr && capacity == 0u)) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  try {
+    const EndpointEnumeration enumeration =
+        enumerate_active_endpoints_on_mta_worker();
+    if (enumeration.status != EMKE_AUDIO_OK) {
+      return enumeration.status;
+    }
+    if (enumeration.endpoints.size() >
+        static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())) {
+      return EMKE_AUDIO_INTERNAL_ERROR;
+    }
+
+    const std::uint32_t required =
+        static_cast<std::uint32_t>(enumeration.endpoints.size());
+    *required_count = required;
+    if (items == nullptr) {
+      return EMKE_AUDIO_OK;
+    }
+    if (capacity < required) {
+      return EMKE_AUDIO_INVALID_ARGUMENT;
+    }
+
+    std::vector<emke_audio_endpoint_descriptor_v1> descriptors(required);
+    for (std::size_t index = 0u; index < enumeration.endpoints.size(); ++index) {
+      const emke::audio::DeviceEndpoint& endpoint = enumeration.endpoints[index];
+      const bool is_default = !endpoint.has_emke_role_property &&
+          (endpoint.id == enumeration.default_physical_input_id ||
+           endpoint.id == enumeration.default_physical_output_id);
+      if (!write_endpoint_descriptor(endpoint, is_default, descriptors[index])) {
+        return EMKE_AUDIO_INVALID_ARGUMENT;
+      }
+    }
+    std::copy(descriptors.begin(), descriptors.end(), items);
+    return EMKE_AUDIO_OK;
+  } catch (...) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
   }
 }
 

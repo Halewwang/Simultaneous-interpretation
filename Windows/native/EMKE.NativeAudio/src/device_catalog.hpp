@@ -86,6 +86,7 @@ inline constexpr std::string_view meetingMicrophoneCaptureRole =
 
 struct DeviceEndpoint {
   std::u16string id;
+  std::u16string friendly_name;
   std::uint32_t state = 0u;
   DeviceDataFlow data_flow = DeviceDataFlow::render;
   std::optional<EndpointRole> role;
@@ -101,6 +102,7 @@ enum class DeviceCatalogOperation : std::uint8_t {
   getEndpointState,
   getEndpointDataFlow,
   openPropertyStore,
+  readFriendlyName,
   readRoleProperty,
   getDefaultEndpoint,
   registerNotifications,

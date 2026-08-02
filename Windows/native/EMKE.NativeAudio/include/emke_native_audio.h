@@ -5,6 +5,8 @@
 
 #define EMKE_AUDIO_ABI_VERSION 1u
 #define EMKE_AUDIO_ENDPOINT_ID_CAPACITY 512u
+#define EMKE_AUDIO_ENDPOINT_NAME_CAPACITY 256u
+#define EMKE_AUDIO_ENDPOINT_ROLE_CAPACITY 64u
 #define EMKE_AUDIO_DISCOVERED_ENDPOINT_COUNT 4u
 #define EMKE_AUDIO_LOCAL_SAMPLE_RATE_HZ 48000u
 #define EMKE_AUDIO_NETWORK_SAMPLE_RATE_HZ 24000u
@@ -75,6 +77,12 @@ typedef enum emke_audio_endpoint_data_flow {
   EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE = 1
 } emke_audio_endpoint_data_flow;
 
+typedef enum emke_audio_endpoint_flags {
+  EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE = 1u,
+  EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT = 2u,
+  EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE = 4u
+} emke_audio_endpoint_flags;
+
 typedef enum emke_audio_endpoint_discovery_status {
   EMKE_AUDIO_ENDPOINT_DISCOVERY_READY = 0,
   EMKE_AUDIO_ENDPOINT_DISCOVERY_DRIVER_MISSING = 1,
@@ -133,6 +141,22 @@ typedef struct emke_audio_endpoint_snapshot {
 } emke_audio_endpoint_snapshot;
 
 /*
+ * Versioned endpoint-enumeration item. id, name, and role are fixed UTF-16
+ * NUL-terminated buffers. role is empty for physical endpoints and is one of
+ * the stable EMKE driver property values for virtual endpoints. direction is
+ * emke_audio_endpoint_data_flow; flags is a combination of
+ * emke_audio_endpoint_flags. The native side never retains caller storage.
+ */
+typedef struct emke_audio_endpoint_descriptor_v1 {
+  uint32_t size;
+  uint32_t direction;
+  uint32_t flags;
+  uint16_t id[EMKE_AUDIO_ENDPOINT_ID_CAPACITY];
+  uint16_t name[EMKE_AUDIO_ENDPOINT_NAME_CAPACITY];
+  uint16_t role[EMKE_AUDIO_ENDPOINT_ROLE_CAPACITY];
+} emke_audio_endpoint_descriptor_v1;
+
+/*
  * poll_event fills metadata here and copies PCM16 into the separate caller
  * buffer. frame_count is a mono frame count at 24 kHz. If capacity is too
  * small, poll returns EMKE_AUDIO_INVALID_ARGUMENT, reports the required
@@ -188,6 +212,7 @@ EMKE_AUDIO_API uint32_t emke_audio_sizeof_event(void);
 EMKE_AUDIO_API uint32_t emke_audio_sizeof_diagnostics(void);
 EMKE_AUDIO_API uint32_t emke_audio_sizeof_discovered_endpoint(void);
 EMKE_AUDIO_API uint32_t emke_audio_sizeof_endpoint_snapshot(void);
+EMKE_AUDIO_API uint32_t emke_audio_sizeof_endpoint_descriptor_v1(void);
 EMKE_AUDIO_API emke_audio_status emke_audio_create(
     const emke_audio_config* config,
     emke_audio_handle** out_handle);
@@ -225,6 +250,17 @@ EMKE_AUDIO_API emke_audio_status emke_audio_get_diagnostics(
  */
 EMKE_AUDIO_API emke_audio_status emke_audio_discover_endpoints(
     emke_audio_endpoint_snapshot* out_snapshot);
+/*
+ * Enumerates one fresh, active MMDevice catalog snapshot on a native MTA
+ * worker. Call once with items == NULL and capacity == 0 to receive the
+ * required count. On a nonzero capacity, items must point to exactly that
+ * caller-owned array. If capacity is insufficient, no partial snapshot is
+ * written and required_count is updated to the new count.
+ */
+EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
+    emke_audio_endpoint_descriptor_v1* items,
+    uint32_t capacity,
+    uint32_t* required_count);
 
 #ifdef __cplusplus
 }

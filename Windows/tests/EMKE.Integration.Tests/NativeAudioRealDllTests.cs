@@ -45,6 +45,9 @@ public sealed class NativeAudioRealDllTests
         Assert.AreEqual(
             checked((uint)Marshal.SizeOf<NativeAudioEndpointSnapshot>()),
             native.GetEndpointSnapshotSize());
+        Assert.AreEqual(
+            checked((uint)Marshal.SizeOf<NativeAudioEndpointDescriptorV1>()),
+            native.GetEndpointDescriptorV1Size());
     }
 }
 

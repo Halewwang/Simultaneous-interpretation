@@ -271,9 +271,16 @@ void test_public_abi_layout(TestContext& context) {
 
   using DiscoverFunction =
       emke_audio_status (*)(emke_audio_endpoint_snapshot*);
+  using EnumerateFunction = emke_audio_status (*) (
+      emke_audio_endpoint_descriptor_v1*, std::uint32_t, std::uint32_t*);
   EXPECT(context,
          EMKE_AUDIO_DISCOVERED_ENDPOINT_COUNT == 4u,
          name);
+  EXPECT(context, EMKE_AUDIO_ENDPOINT_NAME_CAPACITY == 256u, name);
+  EXPECT(context, EMKE_AUDIO_ENDPOINT_ROLE_CAPACITY == 64u, name);
+  EXPECT(context, EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE == 1u, name);
+  EXPECT(context, EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT == 2u, name);
+  EXPECT(context, EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE == 4u, name);
   EXPECT(context,
          offsetof(emke_audio_endpoint_snapshot, size) == 0u,
          name);
@@ -311,6 +318,31 @@ void test_public_abi_layout(TestContext& context) {
          name);
   EXPECT(context, sizeof(emke_audio_discovered_endpoint) == 1'048u, name);
   EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, size) == 0u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, direction) == 4u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, flags) == 8u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, id) == 12u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, name) == 1'036u,
+         name);
+  EXPECT(context,
+         offsetof(emke_audio_endpoint_descriptor_v1, role) == 1'548u,
+         name);
+  EXPECT(context,
+         sizeof(emke_audio_endpoint_descriptor_v1) == 1'676u,
+         name);
+  EXPECT(context,
+         emke_audio_sizeof_endpoint_descriptor_v1() ==
+             sizeof(emke_audio_endpoint_descriptor_v1),
+         name);
+  EXPECT(context,
          offsetof(emke_audio_endpoint_snapshot, discovery_status) == 8u,
          name);
   EXPECT(context,
@@ -334,6 +366,10 @@ void test_public_abi_layout(TestContext& context) {
   EXPECT(context,
          (std::is_same_v<decltype(&emke_audio_discover_endpoints),
                          DiscoverFunction>),
+         name);
+  EXPECT(context,
+         (std::is_same_v<decltype(&emke_audio_enumerate_endpoints_v1),
+                         EnumerateFunction>),
          name);
 }
 

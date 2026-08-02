@@ -76,8 +76,15 @@ internal sealed class ThrowingDestroyNativeAudioApi : INativeAudioApi
 
     public uint GetEndpointSnapshotSize() => throw new NotSupportedException();
 
+    public uint GetEndpointDescriptorV1Size() => throw new NotSupportedException();
+
     public NativeAudioStatus DiscoverEndpoints(
         ref NativeAudioEndpointSnapshot snapshot) =>
+        throw new NotSupportedException();
+
+    public NativeAudioStatus EnumerateEndpointsV1(
+        Span<NativeAudioEndpointDescriptorV1> items,
+        out uint requiredCount) =>
         throw new NotSupportedException();
 
     public NativeAudioStatus Create(
