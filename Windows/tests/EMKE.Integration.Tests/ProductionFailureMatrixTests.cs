@@ -262,6 +262,20 @@ public sealed class ProductionFailureMatrixTests
         Assert.AreEqual(0, audio.ActivePcmLeaseCount);
     }
 
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        while (!predicate())
+        {
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                Assert.Fail("Timed out waiting for released runtime ownership.");
+            }
+
+            await Task.Delay(10).ConfigureAwait(false);
+        }
+    }
+
     private sealed class SafetyAudit
     {
         private int _inboundFailOpen;
