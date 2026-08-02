@@ -36,6 +36,10 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     private int _outboundRoute = (int)OutboundRoute.Stopped;
     private int _startCount;
     private int _stopCount;
+    private int _activePcmLeaseCount;
+    private int _pendingEventCount;
+    private int _pendingOutboundTranslationCount;
+    private int _activePollCount;
     private readonly TaskCompletionSource _failClosedOrStopped =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _virtualMicrophoneTranslated =
@@ -57,6 +61,15 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
 
     public int StopCount => Volatile.Read(ref _stopCount);
 
+    public int ActivePcmLeaseCount => Volatile.Read(ref _activePcmLeaseCount);
+
+    public int PendingEventCount => Volatile.Read(ref _pendingEventCount);
+
+    public int PendingOutboundTranslationCount =>
+        Volatile.Read(ref _pendingOutboundTranslationCount);
+
+    public int ActivePollCount => Volatile.Read(ref _activePollCount);
+
     public byte[] VirtualMicrophoneOutput =>
         _virtualMicrophone.SelectMany(static chunk => chunk).ToArray();
 
@@ -72,7 +85,10 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         ReadOnlyMemory<byte> pcm16)
     {
 #pragma warning disable CA2000 // Ownership transfers into AudioEngineEvent.
-        TestPcmLease lease = new(pcm16);
+        Interlocked.Increment(ref _activePcmLeaseCount);
+        TestPcmLease lease = new(
+            pcm16,
+            () => Interlocked.Decrement(ref _activePcmLeaseCount));
         AudioEngineEvent audio = AudioEngineEvent.CreatePcm(
             lease,
             direction,
@@ -87,6 +103,8 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
             throw new InvalidOperationException(
                 "The test audio event queue is full.");
         }
+
+        Interlocked.Increment(ref _pendingEventCount);
     }
 
     public void EmitControl(AudioEngineEvent audio)
@@ -98,6 +116,8 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
             throw new InvalidOperationException(
                 "The test audio event queue is full.");
         }
+
+        Interlocked.Increment(ref _pendingEventCount);
     }
 
     public void ClearVirtualMicrophone()
@@ -140,6 +160,17 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
         Interlocked.Increment(ref _stopCount);
         Volatile.Write(ref _inboundRoute, (int)InboundRoute.Stopped);
         Volatile.Write(ref _outboundRoute, (int)OutboundRoute.Stopped);
+        while (_events.Reader.TryRead(out AudioEngineEvent? pendingEvent))
+        {
+            Interlocked.Decrement(ref _pendingEventCount);
+            pendingEvent.Dispose();
+        }
+
+        while (_outboundTranslationQueue.Reader.TryRead(out _))
+        {
+            Interlocked.Decrement(ref _pendingOutboundTranslationCount);
+        }
+
         _failClosedOrStopped.TrySetResult();
         return Task.CompletedTask;
     }
@@ -147,8 +178,18 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     public async ValueTask<AudioEngineEvent?> PollEventAsync(
         CancellationToken cancellationToken)
     {
-        return await _events.Reader.ReadAsync(cancellationToken)
-            .ConfigureAwait(false);
+        Interlocked.Increment(ref _activePollCount);
+        try
+        {
+            AudioEngineEvent audio = await _events.Reader.ReadAsync(cancellationToken)
+                .ConfigureAwait(false);
+            Interlocked.Decrement(ref _pendingEventCount);
+            return audio;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _activePollCount);
+        }
     }
 
     public ValueTask EnqueueInboundTranslationAsync(
@@ -172,6 +213,8 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
                 new Dictionary<string, string>(),
                 RecoveryAction.Retry));
         }
+
+        Interlocked.Increment(ref _pendingOutboundTranslationCount);
 
         _outboundTranslations.Enqueue(copy);
         if (CurrentOutboundRoute == OutboundRoute.Translated)
@@ -207,10 +250,12 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
     private sealed class TestPcmLease : IPcmBufferLease
     {
         private byte[]? _pcm16;
+        private readonly Action _onDisposed;
 
-        public TestPcmLease(ReadOnlyMemory<byte> pcm16)
+        public TestPcmLease(ReadOnlyMemory<byte> pcm16, Action onDisposed)
         {
             _pcm16 = pcm16.ToArray();
+            _onDisposed = onDisposed ?? throw new ArgumentNullException(nameof(onDisposed));
         }
 
         public ReadOnlyMemory<byte> Memory =>
@@ -223,6 +268,7 @@ internal sealed class TestAudioEngine : ITranslationAudioEngine
             if (pcm16 is not null)
             {
                 Array.Clear(pcm16);
+                _onDisposed();
             }
         }
     }

@@ -389,11 +389,26 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
-    [DataRow(MockTranslationScenario.Unauthorized)]
-    [DataRow(MockTranslationScenario.Forbidden)]
-    [DataRow(MockTranslationScenario.UnknownModel)]
+    [DataRow(
+        MockTranslationScenario.Unauthorized,
+        ErrorCategory.Authentication,
+        "translationSocket.authenticationRejected",
+        RecoveryAction.UpdateApiKey)]
+    [DataRow(
+        MockTranslationScenario.Forbidden,
+        ErrorCategory.Authentication,
+        "translationSocket.authenticationRejected",
+        RecoveryAction.UpdateApiKey)]
+    [DataRow(
+        MockTranslationScenario.UnknownModel,
+        ErrorCategory.EndpointModel,
+        "translationSocket.endpointModelRejected",
+        RecoveryAction.EditSettings)]
     public async Task MockServerRejectsConfiguredHandshake(
-        MockTranslationScenario scenario)
+        MockTranslationScenario scenario,
+        ErrorCategory expectedCategory,
+        string expectedCode,
+        RecoveryAction expectedRecovery)
     {
         await using MockTranslationServer server =
             await MockTranslationServer.StartAsync(scenario)
@@ -410,8 +425,51 @@ public sealed class TranslationRuntimeIntegrationTests
             await Assert.ThrowsExactlyAsync<TranslationSessionException>(
                 () => session.ConnectAsync(CancellationToken.None));
 
-        Assert.AreEqual(ErrorCategory.Network, failure.Error.Category);
-        Assert.AreEqual("translationSocket.connectFailed", failure.Error.Code);
+        Assert.AreEqual(expectedCategory, failure.Error.Category);
+        Assert.AreEqual(expectedCode, failure.Error.Code);
+        Assert.AreEqual(expectedRecovery, failure.Error.RecoveryAction);
+        Assert.IsEmpty(failure.Error.Parameters);
+    }
+
+    [TestMethod]
+    [DataRow(
+        MockTranslationScenario.Unauthorized,
+        ErrorCategory.Authentication,
+        "translationSocket.authenticationRejected",
+        RecoveryAction.UpdateApiKey)]
+    [DataRow(
+        MockTranslationScenario.Forbidden,
+        ErrorCategory.Authentication,
+        "translationSocket.authenticationRejected",
+        RecoveryAction.UpdateApiKey)]
+    [DataRow(
+        MockTranslationScenario.UnknownModel,
+        ErrorCategory.EndpointModel,
+        "translationSocket.endpointModelRejected",
+        RecoveryAction.EditSettings)]
+    public async Task RejectedProductionHandshakeStopsRuntimeWithStableSafeRoute(
+        MockTranslationScenario scenario,
+        ErrorCategory expectedCategory,
+        string expectedCode,
+        RecoveryAction expectedRecovery)
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync(scenario)
+                .ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+
+        RuntimeError? failure = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(expectedCategory, failure?.Category);
+        Assert.AreEqual(expectedCode, failure?.Code);
+        Assert.AreEqual(expectedRecovery, failure?.RecoveryAction);
+        Assert.IsEmpty(failure!.Parameters);
+        Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
+        Assert.AreEqual(1, audio.StartCount);
+        Assert.AreEqual(1, audio.StopCount);
     }
 
     [TestMethod]

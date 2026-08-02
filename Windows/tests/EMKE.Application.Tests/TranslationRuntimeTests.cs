@@ -1106,7 +1106,10 @@ public sealed class TranslationRuntimeTests
         Assert.HasCount(0, error!.Parameters);
         Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
         Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
-        Assert.AreEqual(1, harness.AudioStopCount);
+        // StartAsync failed before ownership transferred to the runtime. The
+        // native engine releases its failed-create handle itself; a runtime
+        // StopAsync here would be an ownership violation.
+        Assert.AreEqual(0, harness.AudioStopCount);
     }
 
     [TestMethod]

@@ -1,5 +1,7 @@
 using System.Net.WebSockets;
 using System.Net;
+using System.Net.Http;
+using System.Security.Authentication;
 using System.Text;
 using EMKE.Core;
 
@@ -213,6 +215,35 @@ public sealed class TranslationSocketTests
         Assert.AreEqual(code, error?.Code);
         Assert.AreEqual(recoveryAction, error?.RecoveryAction);
         Assert.HasCount(0, error!.Parameters);
+    }
+
+    [TestMethod]
+    public async Task DnsAndTlsConnectFailuresRemainRetryableNetworkErrors()
+    {
+        RuntimeError? dnsError = await new TranslationSocket(
+            new FakeClientWebSocket
+            {
+                ConnectException = new HttpRequestException("DNS probe detail"),
+            },
+            128).ConnectAsync(
+                new Uri("wss://translation.example.test/realtime"),
+                CancellationToken.None);
+        RuntimeError? tlsError = await new TranslationSocket(
+            new FakeClientWebSocket
+            {
+                ConnectException = new AuthenticationException("TLS probe detail"),
+            },
+            128).ConnectAsync(
+                new Uri("wss://translation.example.test/realtime"),
+                CancellationToken.None);
+
+        foreach (RuntimeError? error in new[] { dnsError, tlsError })
+        {
+            Assert.AreEqual(ErrorCategory.Network, error?.Category);
+            Assert.AreEqual("translationSocket.connectFailed", error?.Code);
+            Assert.AreEqual(RecoveryAction.Retry, error?.RecoveryAction);
+            Assert.HasCount(0, error!.Parameters);
+        }
     }
 
     [TestMethod]
