@@ -328,8 +328,8 @@ jobs:
             throw "Audio evidence collector behavior tests failed."
           }
 
-      - name: Build unsigned driver package
-        id: driver-build
+      - name: Build unsigned driver submission
+        id: driver-submission
         shell: pwsh
         run: |
           pwsh Windows/tools/build-driver.ps1 -Configuration Release -Platform x64
@@ -349,34 +349,72 @@ jobs:
             throw "Driver package verifier integration tests failed."
           }
 
-      - name: Upload unsigned driver package
+          $sourceCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+          pwsh -NoProfile -File Windows/tools/create-driver-submission.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release `
+            -OutputDirectory artifacts/windows-driver-submission `
+            -SourceCommit $sourceCommit `
+            -ArchivePath artifacts/windows-driver-submission.zip `
+            -EvidencePath artifacts/driver-submission-evidence.json `
+            -WorkflowRunId "${{ github.run_id }}" `
+            -WdkVersion "10.0.28000.2526"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission creation failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/driver-submission.validation.test.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission mutation validation failed."
+          }
+
+      - name: Upload portal-ready driver submission
         uses: actions/upload-artifact@v4
         with:
-          name: emke-virtual-audio-unsigned-${{ github.sha }}
-          path: Windows/artifacts/driver/x64/Release
+          name: emke-virtual-audio-submission-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            artifacts/windows-driver-submission.zip
+            artifacts/driver-submission-evidence.json
           if-no-files-found: error
           retention-days: 7
-          compression-level: 9
+          compression-level: 0
 
       - name: Record driver build boundary
         if: always()
         shell: pwsh
         run: |
-          $driverBuild = "${{ steps.driver-build.outcome }}"
+          $driverBuild = "${{ steps.driver-submission.outcome }}"
+          $archiveHash = "unavailable"
+          $sourceCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $wdkVersion = "10.0.28000.2526"
+          $evidencePath = "artifacts/driver-submission-evidence.json"
+          if (Test-Path -LiteralPath $evidencePath -PathType Leaf) {
+            $submissionEvidence = Get-Content -LiteralPath $evidencePath -Raw |
+              ConvertFrom-Json
+            $archiveHash = [string]$submissionEvidence.archive.sha256
+            $sourceCommit = [string]$submissionEvidence.sourceCommit
+            $wdkVersion = [string]$submissionEvidence.wdkVersion
+          }
           $summary = @"
-          ## EMKE virtual audio driver build proof
+          ## EMKE virtual audio driver submission proof
 
           ```text
           driverBuild = $driverBuild
           packageVerification = $driverBuild
+          submissionCreation = $driverBuild
           catalogGenerated = $driverBuild
           catalogSigned = false
+          sourceCommit = $sourceCommit
+          wdkVersion = $wdkVersion
+          archiveSha256 = $archiveHash
+          hardwareDevCenterSigning = external
           driverInstall = pending
           liveEndpoints = pending
           ```
 
-          The uploaded artifact is a build-only unsigned/test package. No
-          certificate, administrator action, driver installation, or public
-          release is part of this workflow.
+          The uploaded artifact contains a deterministic portal-ready archive
+          and its runtime evidence JSON. It is unsigned. Microsoft Hardware Dev
+          Center signing, administrator action, driver installation, endpoint
+          validation, and public release remain external gates.
           "@
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
