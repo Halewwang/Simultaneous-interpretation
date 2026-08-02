@@ -202,6 +202,10 @@ public sealed class ChannelSupervisorTests
                 .ConfigureAwait(false);
 
         Assert.AreEqual(ErrorCategory.Network, failed.Error?.Category);
+        Assert.AreEqual(
+            "translationRuntime.reconnectExhausted",
+            failed.Error?.Code);
+        Assert.AreEqual(RecoveryAction.Retry, failed.Error?.RecoveryAction);
         CollectionAssert.AreEqual(
             ExpectedReconnectMilliseconds,
             clock.Delays.Select(static delay => delay.TotalMilliseconds).ToArray());
