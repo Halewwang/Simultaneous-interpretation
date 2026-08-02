@@ -116,8 +116,9 @@ test("INF freezes the root identity, driver ABI, roles, and endpoint names", asy
   assert.match(inf, /^\[EMKE\.NTamd64\.10\.0\.\.\.19045\]$/m);
   assert.match(
     inf,
-    /^%EMKE\.VirtualAudio\.DeviceDesc%=EMKE\.VirtualAudio,ROOT\\EMKEVIRTUALAUDIO$/m,
+    /^%DeviceDescription%=EMKE_Install,ROOT\\EMKEVIRTUALAUDIO$/m,
   );
+  assert.match(inf, /^\[EMKE_Install\.NT\]$/m);
   assert.doesNotMatch(inf, /NTamd64\.10\.0\.\.\.26200/);
   assert.match(inf, /DriverAbi[^\\r\\n]*0x00000001/i);
   assert.match(inf, /EMKE Virtual Speaker/);
