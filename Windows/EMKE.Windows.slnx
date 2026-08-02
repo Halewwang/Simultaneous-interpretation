@@ -5,6 +5,7 @@
     <Project Path="src/EMKE.Platform/EMKE.Platform.csproj" />
     <Project Path="src/EMKE.Realtime/EMKE.Realtime.csproj" />
     <Project Path="src/EMKE.Routing/EMKE.Routing.csproj" />
+    <Project Path="src/EMKE.Setup/EMKE.Setup.csproj" />
     <Project Path="src/EMKE.Windows.App/EMKE.Windows.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
