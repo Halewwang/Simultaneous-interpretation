@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Net;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using EMKE.Core;
 
@@ -178,6 +179,7 @@ public sealed class TranslationSocket : ITranslationTransport
             exception is WebSocketException
                 or HttpRequestException
                 or IOException
+                or AuthenticationException
                 or ArgumentException
                 or InvalidOperationException)
         {
