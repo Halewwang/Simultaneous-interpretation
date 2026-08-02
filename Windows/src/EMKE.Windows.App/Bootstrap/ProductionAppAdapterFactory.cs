@@ -258,8 +258,8 @@ internal static class ProductionUiAdapters
                     context.Presentation,
                     context.RuntimeCommands,
                     floatingVisibility);
-                TranslationConnectionProbe connectionProbe = new(
-                    sessionFactory);
+                TranslationConnectionProbe connectionProbe =
+                    CreateTranslationConnectionProbe(sessionFactory);
                 WindowsAudioDiagnostics audioDiagnostics = new(
                     new WindowsNativeAudioDiagnosticBackend(),
                     () => IsTranslationActive(context.Snapshots.Current));
@@ -308,6 +308,12 @@ internal static class ProductionUiAdapters
         return result
             ?? throw new InvalidOperationException(
                 "The WPF product UI was not composed.");
+    }
+
+    internal static TranslationConnectionProbe CreateTranslationConnectionProbe(
+        ITranslationSessionFactory sessionFactory)
+    {
+        return new TranslationConnectionProbe(sessionFactory);
     }
 
     private enum PlaceholderSurface
