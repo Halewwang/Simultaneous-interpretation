@@ -14,8 +14,8 @@ public sealed class AppCompositionRootTests
     [
         "command",
         "commands.disable",
-        "diagnostics.stop",
         "runtime.stop",
+        "diagnostics.stop",
         "snapshots.dispose",
         "runtime.dispose",
         "adapters.dispose",
