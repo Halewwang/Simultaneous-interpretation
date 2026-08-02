@@ -32,6 +32,12 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
         _model = SharedModel.Value;
     }
 
+    internal OfflineLanguageClassifier(Func<Stream?> openProfile)
+    {
+        ArgumentNullException.ThrowIfNull(openProfile);
+        _model = LoadModel(openProfile);
+    }
+
     public int ProfileVersion => _model.Version;
 
     public string GeneratorVersion => _model.GeneratorVersion;
@@ -198,7 +204,13 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
     private static LanguageModel LoadModel()
     {
         Assembly assembly = typeof(OfflineLanguageClassifier).Assembly;
-        using Stream stream = assembly.GetManifestResourceStream(ResourceName)
+        return LoadModel(
+            () => assembly.GetManifestResourceStream(ResourceName));
+    }
+
+    private static LanguageModel LoadModel(Func<Stream?> openProfile)
+    {
+        using Stream stream = openProfile()
             ?? throw new InvalidDataException(
                 "The embedded language profile is missing.");
         return ParseModel(stream);
@@ -207,7 +219,26 @@ public sealed class OfflineLanguageClassifier : ILanguageClassifier
     private static LanguageModel ParseModel(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        using JsonDocument raw = JsonDocument.Parse(stream);
+        JsonDocument raw;
+        try
+        {
+            raw = JsonDocument.Parse(stream);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException(
+                "The embedded language profile is invalid.",
+                exception);
+        }
+
+        using (raw)
+        {
+            return ParseModelDocument(raw);
+        }
+    }
+
+    private static LanguageModel ParseModelDocument(JsonDocument raw)
+    {
         LanguageProfileDocument document = raw.RootElement.Deserialize(
             LanguageProfileJsonContext.Default.LanguageProfileDocument)
             ?? throw new InvalidDataException(

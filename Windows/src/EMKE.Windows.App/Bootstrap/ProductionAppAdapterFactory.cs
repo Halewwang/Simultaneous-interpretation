@@ -11,6 +11,8 @@ using EMKE.Platform.Diagnostics;
 using EMKE.Platform.Native;
 using EMKE.Platform.Security;
 using EMKE.Platform.Settings;
+using EMKE.Realtime;
+using EMKE.Routing;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Dashboard;
 using EMKE.Windows.App.Diagnostics;
@@ -101,66 +103,28 @@ internal static class ProductionCoreAdapters
             new FileSystemWindowsSettingsPersistence());
         CredentialManagerSecretStore secretStore = new(
             WindowsCredentialChannel.Internal);
+        WindowsAudioDeviceCatalog deviceCatalog = new();
+        TranslationSessionFactory sessionFactory = new(secretStore);
+        OfflineLanguageClassifier languageClassifier = new();
         TranslationRuntimeDependencies dependencies = new(
             new WindowsHostBuildGate(
                 compatibilityManifest,
                 new WindowsHostCompatibilityProbe()),
             settingsStore,
             driverManager,
-            new PendingAudioDeviceCatalog(),
+            deviceCatalog,
             audio,
-            new PendingTranslationSessionFactory(),
-            new PendingLanguageClassifier(),
+            sessionFactory,
+            languageClassifier,
             new SystemRuntimeClock(),
             new TraceRuntimeLog());
         return ValueTask.FromResult(
             new AppCoreAdapterBundle(
                 dependencies,
-                PendingDiagnosticsLifetime.Instance,
+                NoOpDiagnosticsLifetime.Instance,
                 new NativeAudioLifetime(audio),
                 settingsStore,
                 secretStore));
-    }
-
-    private sealed class PendingAudioDeviceCatalog : IAudioDeviceCatalog
-    {
-        public Task<AudioDeviceSnapshot> GetSnapshotAsync(
-            CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new AudioDeviceSnapshot([]));
-        }
-    }
-
-    private sealed class PendingTranslationSessionFactory :
-        ITranslationSessionFactory
-    {
-        public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionRequest request,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromException<ITranslationSession>(
-                new InvalidOperationException(
-                    "Translation session composition is not available in this Internal build."));
-        }
-    }
-
-    private sealed class PendingLanguageClassifier : ILanguageClassifier
-    {
-        public ValueTask<LanguageProbabilities> ClassifyAsync(
-            string text,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(text);
-            cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(
-                new LanguageProbabilities(
-                    1d / 3,
-                    1d / 3,
-                    1d / 3));
-        }
     }
 
     private sealed class SystemRuntimeClock : IClock
@@ -212,12 +176,12 @@ internal static class ProductionCoreAdapters
         }
     }
 
-    private sealed class PendingDiagnosticsLifetime :
+    private sealed class NoOpDiagnosticsLifetime :
         IAppDiagnosticsLifetime
     {
-        public static PendingDiagnosticsLifetime Instance { get; } = new();
+        public static NoOpDiagnosticsLifetime Instance { get; } = new();
 
-        private PendingDiagnosticsLifetime()
+        private NoOpDiagnosticsLifetime()
         {
         }
 
