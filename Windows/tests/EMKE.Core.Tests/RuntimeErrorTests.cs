@@ -78,6 +78,22 @@ public sealed class RuntimeErrorTests
     }
 
     [TestMethod]
+    [DataRow("auth.Bearer-opaque-token")]
+    [DataRow("network.failed?authorization=opaque")]
+    [DataRow("network.https://user:secret@example.test/path")]
+    [DataRow("device.{0.0.0.00000000}.{raw-endpoint-id}")]
+    [DataRow("caption.private transcript words")]
+    [DataRow("audio.AQIDBAUGBwgJCgsMDQ4PEA==")]
+    public void ConstructorRejectsNonStableOrHostileCodes(string code)
+    {
+        Assert.ThrowsExactly<ArgumentException>(() => new RuntimeError(
+            ErrorCategory.Protocol,
+            code,
+            new Dictionary<string, string>(),
+            RecoveryAction.ReportCompatibility));
+    }
+
+    [TestMethod]
     public void ConstructorAdmitsOnlyStructuredDiagnosticFields()
     {
         Dictionary<string, string> safe = new()
