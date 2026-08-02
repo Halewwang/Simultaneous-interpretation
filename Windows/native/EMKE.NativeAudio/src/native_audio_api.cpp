@@ -23,6 +23,9 @@
 #include <span>
 #include <thread>
 #include <vector>
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+#include <mutex>
+#endif
 
 struct emke_audio_handle {
   explicit emke_audio_handle(const emke_audio_config& config)
@@ -98,7 +101,21 @@ struct EndpointEnumeration {
   std::vector<emke::audio::DeviceEndpoint> endpoints;
   std::u16string default_physical_input_id;
   std::u16string default_physical_output_id;
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+  bool is_test_fixture = false;
+  std::vector<emke_audio_endpoint_descriptor_v1> test_descriptors;
+#endif
 };
+
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+struct EndpointEnumerationFixture {
+  std::mutex mutex;
+  bool configured = false;
+  std::vector<emke_audio_endpoint_descriptor_v1> descriptors;
+};
+
+EndpointEnumerationFixture endpoint_enumeration_fixture;
+#endif
 
 bool is_bounded_utf16(std::u16string_view value,
                       std::size_t capacity) noexcept {
@@ -159,6 +176,17 @@ bool write_endpoint_descriptor(
 
 EndpointEnumeration enumerate_active_endpoints_on_mta_worker() noexcept {
   EndpointEnumeration result;
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+  {
+    std::scoped_lock lock(endpoint_enumeration_fixture.mutex);
+    if (endpoint_enumeration_fixture.configured) {
+      result.status = EMKE_AUDIO_OK;
+      result.is_test_fixture = true;
+      result.test_descriptors = endpoint_enumeration_fixture.descriptors;
+      return result;
+    }
+  }
+#endif
 #if defined(_WIN32)
   try {
     std::thread worker([&result] {
@@ -509,13 +537,18 @@ EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
     if (enumeration.status != EMKE_AUDIO_OK) {
       return enumeration.status;
     }
-    if (enumeration.endpoints.size() >
+    const std::size_t endpoint_count =
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+        enumeration.is_test_fixture ? enumeration.test_descriptors.size() :
+#endif
+        enumeration.endpoints.size();
+    if (endpoint_count >
         static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)())) {
       return EMKE_AUDIO_INTERNAL_ERROR;
     }
 
     const std::uint32_t required =
-        static_cast<std::uint32_t>(enumeration.endpoints.size());
+        static_cast<std::uint32_t>(endpoint_count);
     *required_count = required;
     if (items == nullptr) {
       return EMKE_AUDIO_OK;
@@ -525,13 +558,20 @@ EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
     }
 
     std::vector<emke_audio_endpoint_descriptor_v1> descriptors(required);
-    for (std::size_t index = 0u; index < enumeration.endpoints.size(); ++index) {
-      const emke::audio::DeviceEndpoint& endpoint = enumeration.endpoints[index];
-      const bool is_default = !endpoint.has_emke_role_property &&
-          (endpoint.id == enumeration.default_physical_input_id ||
-           endpoint.id == enumeration.default_physical_output_id);
-      if (!write_endpoint_descriptor(endpoint, is_default, descriptors[index])) {
-        return EMKE_AUDIO_INVALID_ARGUMENT;
+#if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+    if (enumeration.is_test_fixture) {
+      descriptors = enumeration.test_descriptors;
+    } else
+#endif
+    {
+      for (std::size_t index = 0u; index < enumeration.endpoints.size(); ++index) {
+        const emke::audio::DeviceEndpoint& endpoint = enumeration.endpoints[index];
+        const bool is_default = !endpoint.has_emke_role_property &&
+            (endpoint.id == enumeration.default_physical_input_id ||
+             endpoint.id == enumeration.default_physical_output_id);
+        if (!write_endpoint_descriptor(endpoint, is_default, descriptors[index])) {
+          return EMKE_AUDIO_INVALID_ARGUMENT;
+        }
       }
     }
     std::copy(descriptors.begin(), descriptors.end(), items);
@@ -542,6 +582,28 @@ EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
 }
 
 #if defined(EMKE_NATIVE_AUDIO_TEST_HOOKS)
+EMKE_AUDIO_TEST_API emke_audio_status
+emke_audio_test_set_endpoint_enumeration_fixture(
+    const emke_audio_endpoint_descriptor_v1* items,
+    uint32_t count) {
+  if (items == nullptr && count != 0u) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  try {
+    std::vector<emke_audio_endpoint_descriptor_v1> descriptors;
+    if (count != 0u) {
+      descriptors.assign(items, items + count);
+    }
+    std::scoped_lock lock(endpoint_enumeration_fixture.mutex);
+    endpoint_enumeration_fixture.descriptors = std::move(descriptors);
+    endpoint_enumeration_fixture.configured = true;
+    return EMKE_AUDIO_OK;
+  } catch (...) {
+    return EMKE_AUDIO_INTERNAL_ERROR;
+  }
+}
+
 EMKE_AUDIO_TEST_API emke_audio_status
 emke_audio_test_accept_synthetic_float32(
     emke_audio_handle* handle,

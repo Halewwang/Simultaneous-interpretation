@@ -42,6 +42,15 @@ EMKE_AUDIO_TEST_API emke_audio_status emke_audio_test_render_pcm16(
 EMKE_AUDIO_TEST_API emke_audio_status emke_audio_test_inject_failure(
     emke_audio_handle* handle,
     emke_audio_test_failure failure);
+/*
+ * Configures the test-only source used by the public endpoint enumeration C
+ * export. The descriptors are copied synchronously; NULL is valid only with a
+ * zero count and configures an intentionally empty snapshot.
+ */
+EMKE_AUDIO_TEST_API emke_audio_status
+emke_audio_test_set_endpoint_enumeration_fixture(
+    const emke_audio_endpoint_descriptor_v1* items,
+    uint32_t count);
 
 #ifdef __cplusplus
 }

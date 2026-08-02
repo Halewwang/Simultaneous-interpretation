@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -57,6 +58,64 @@ emke_audio_endpoint_snapshot valid_endpoint_snapshot() {
   snapshot.size = sizeof(snapshot);
   snapshot.abi_version = EMKE_AUDIO_ABI_VERSION;
   return snapshot;
+}
+
+template <std::size_t Capacity>
+void write_utf16(std::uint16_t (&destination)[Capacity],
+                 std::string_view value) {
+  for (std::size_t index = 0u; index < value.size(); ++index) {
+    destination[index] = static_cast<std::uint16_t>(value[index]);
+  }
+  destination[value.size()] = 0u;
+}
+
+emke_audio_endpoint_descriptor_v1 endpoint_descriptor(
+    emke_audio_endpoint_data_flow flow,
+    std::uint32_t flags,
+    std::string_view id,
+    std::string_view name,
+    std::string_view role = {}) {
+  emke_audio_endpoint_descriptor_v1 descriptor{};
+  descriptor.size = sizeof(descriptor);
+  descriptor.direction = flow;
+  descriptor.flags = flags;
+  write_utf16(descriptor.id, id);
+  write_utf16(descriptor.name, name);
+  write_utf16(descriptor.role, role);
+  return descriptor;
+}
+
+std::array<emke_audio_endpoint_descriptor_v1, 6> endpoint_fixture() {
+  return {
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT,
+                          "fixture-input", "Fixture microphone"),
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT,
+                          "fixture-output", "Fixture speakers"),
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                          "fixture-speaker-render", "Fixture driver",
+                          "emke.meeting-speaker.render"),
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                          "fixture-speaker-capture", "Fixture driver",
+                          "emke.app-speaker.capture"),
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                          "fixture-microphone-render", "Fixture driver",
+                          "emke.app-microphone.render"),
+      endpoint_descriptor(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                          EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                              EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                          "fixture-microphone-capture", "Fixture driver",
+                          "emke.meeting-microphone.capture"),
+  };
 }
 
 std::vector<float> stereo_block(float sample) {
@@ -343,6 +402,61 @@ void test_discovery_validates_snapshot_and_reports_platform_source_error(
 #endif
 }
 
+void test_endpoint_enumeration_c_export_contract(TestContext& context) {
+  constexpr std::uint32_t fixture_count = 6u;
+  const auto fixture = endpoint_fixture();
+  EXPECT(context,
+         emke_audio_test_set_endpoint_enumeration_fixture(
+             fixture.data(), fixture.size()) == EMKE_AUDIO_OK);
+
+  std::uint32_t required = 0u;
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(nullptr, 0u, &required) ==
+             EMKE_AUDIO_OK);
+  EXPECT(context, required == fixture_count);
+
+  std::array<emke_audio_endpoint_descriptor_v1, fixture_count - 1u> guarded{};
+  std::memset(guarded.data(), 0xa5, sizeof(guarded));
+  const auto guarded_before = guarded;
+  required = 0u;
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(
+             guarded.data(), guarded.size(), &required) ==
+             EMKE_AUDIO_INVALID_ARGUMENT);
+  EXPECT(context, required == fixture_count);
+  EXPECT(context,
+         std::memcmp(guarded.data(), guarded_before.data(), sizeof(guarded)) ==
+             0);
+
+  std::array<emke_audio_endpoint_descriptor_v1, fixture_count> filled{};
+  required = 0u;
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(
+             filled.data(), filled.size(), &required) == EMKE_AUDIO_OK);
+  EXPECT(context, required == fixture_count);
+  EXPECT(context, filled[0].size == sizeof(emke_audio_endpoint_descriptor_v1));
+  EXPECT(context, filled[0].id[0] == u'f');
+  EXPECT(context,
+         filled[0].flags ==
+             (EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+              EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT));
+  EXPECT(context, filled[2].role[0] == u'e');
+  EXPECT(context,
+         filled[2].flags ==
+             (EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+              EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE));
+
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(nullptr, 0u, nullptr) ==
+             EMKE_AUDIO_INVALID_ARGUMENT);
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(nullptr, 1u, &required) ==
+             EMKE_AUDIO_INVALID_ARGUMENT);
+  EXPECT(context,
+         emke_audio_enumerate_endpoints_v1(filled.data(), 0u, &required) ==
+             EMKE_AUDIO_INVALID_ARGUMENT);
+}
+
 }  // namespace
 
 int main() {
@@ -353,5 +467,6 @@ int main() {
   test_running_device_failure_is_observable(context);
   test_public_same_route_reassertion_preserves_audio(context);
   test_discovery_validates_snapshot_and_reports_platform_source_error(context);
+  test_endpoint_enumeration_c_export_contract(context);
   return std::min(context.failures(), 255);
 }

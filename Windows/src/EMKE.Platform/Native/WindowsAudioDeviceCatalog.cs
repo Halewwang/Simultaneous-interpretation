@@ -30,11 +30,6 @@ public sealed class WindowsAudioDeviceCatalog : IAudioDeviceCatalog
             throw InvalidCatalog("count exceeds the supported maximum.");
         }
 
-        if (requiredCount == 0)
-        {
-            return Task.FromResult(new AudioDeviceSnapshot([]));
-        }
-
         NativeAudioEndpointDescriptorV1[] descriptors = [];
         for (int attempt = 0; attempt != 2; attempt++)
         {

@@ -1,6 +1,7 @@
 #include "emke_native_audio.h"
 #include "emke_native_audio_managed_fake.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -64,6 +65,55 @@ emke_audio_discovered_endpoint endpoint(emke_audio_endpoint_role role,
   return result;
 }
 
+emke_audio_endpoint_descriptor_v1 catalog_endpoint(
+    emke_audio_endpoint_data_flow flow,
+    std::uint32_t flags,
+    std::string_view id,
+    std::string_view name,
+    std::string_view role = {}) {
+  emke_audio_endpoint_descriptor_v1 result{};
+  result.size = sizeof(result);
+  result.direction = flow;
+  result.flags = flags;
+  (void)write_id(result.id, id);
+  (void)write_id(result.name, name);
+  (void)write_id(result.role, role);
+  return result;
+}
+
+std::array<emke_audio_endpoint_descriptor_v1, 6> catalog_endpoints() {
+  return {
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT,
+                       "fake-physical-input", "Fake microphone"),
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_PHYSICAL_DEFAULT,
+                       "fake-physical-output", "Fake speakers"),
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                       "fake-virtual-speaker-render", "Fake driver",
+                       "emke.meeting-speaker.render"),
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                       "fake-virtual-speaker-capture", "Fake driver",
+                       "emke.app-speaker.capture"),
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_RENDER,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                       "fake-virtual-microphone-render", "Fake driver",
+                       "emke.app-microphone.render"),
+      catalog_endpoint(EMKE_AUDIO_ENDPOINT_DATA_FLOW_CAPTURE,
+                       EMKE_AUDIO_ENDPOINT_FLAG_ACTIVE |
+                           EMKE_AUDIO_ENDPOINT_FLAG_VIRTUAL_ROLE,
+                       "fake-virtual-microphone-capture", "Fake driver",
+                       "emke.meeting-microphone.capture"),
+  };
+}
+
 template <typename Struct>
 emke_audio_status validate_struct(const Struct* value) {
   if (value == nullptr || value->size < sizeof(Struct)) {
@@ -103,6 +153,32 @@ EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_discovered_endpoint(void) {
 EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_endpoint_snapshot(void) {
   return static_cast<std::uint32_t>(
       sizeof(emke_audio_endpoint_snapshot));
+}
+
+EMKE_AUDIO_API std::uint32_t emke_audio_sizeof_endpoint_descriptor_v1(void) {
+  return static_cast<std::uint32_t>(sizeof(emke_audio_endpoint_descriptor_v1));
+}
+
+EMKE_AUDIO_API emke_audio_status emke_audio_enumerate_endpoints_v1(
+    emke_audio_endpoint_descriptor_v1* items,
+    std::uint32_t capacity,
+    std::uint32_t* required_count) {
+  if (required_count == nullptr || (items == nullptr && capacity != 0u) ||
+      (items != nullptr && capacity == 0u)) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  const auto endpoints = catalog_endpoints();
+  *required_count = static_cast<std::uint32_t>(endpoints.size());
+  if (items == nullptr) {
+    return EMKE_AUDIO_OK;
+  }
+  if (capacity < endpoints.size()) {
+    return EMKE_AUDIO_INVALID_ARGUMENT;
+  }
+
+  std::copy(endpoints.begin(), endpoints.end(), items);
+  return EMKE_AUDIO_OK;
 }
 
 EMKE_AUDIO_API emke_audio_status emke_audio_discover_endpoints(
