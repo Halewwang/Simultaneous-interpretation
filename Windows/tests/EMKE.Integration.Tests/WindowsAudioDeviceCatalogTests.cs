@@ -12,6 +12,18 @@ namespace EMKE.Integration.Tests;
 public sealed class WindowsAudioDeviceCatalogTests
 {
     [TestMethod]
+    public async Task EmptyNativeCatalogFailsClosedAsDeviceMissing()
+    {
+        CatalogNativeAudioApi native = new();
+        WindowsAudioDeviceCatalog catalog = new(native);
+
+        NativeAudioException exception = await Assert.ThrowsExactlyAsync<NativeAudioException>(
+            () => catalog.GetSnapshotAsync(CancellationToken.None));
+
+        Assert.AreEqual(AudioEngineStatus.DeviceMissing, exception.Status);
+    }
+
+    [TestMethod]
     public async Task MapsActivePhysicalDefaultsAndExactVirtualRoles()
     {
         CatalogNativeAudioApi native = new();

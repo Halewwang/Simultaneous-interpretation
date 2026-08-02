@@ -46,6 +46,25 @@ public sealed class NativeAudioNativeFakeTests
     }
 
     [TestMethod]
+    public async Task DeviceCatalogReadsFixedEndpointsThroughProductionPInvokePath()
+    {
+        WindowsAudioDeviceCatalog catalog = new();
+
+        AudioDeviceSnapshot snapshot = await catalog.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.AreEqual(6, snapshot.Devices.Count);
+        Assert.AreEqual(
+            "Fake microphone",
+            snapshot.Devices.Single(device => device.Id == "fake-physical-input").Label);
+        Assert.IsTrue(snapshot.Devices.Single(
+            device => device.Id == "fake-physical-input").IsDefault);
+        Assert.AreEqual(
+            "Meeting speaker render",
+            snapshot.Devices.Single(
+                device => device.Id == "fake-virtual-speaker-render").Label);
+    }
+
+    [TestMethod]
     public async Task AbiOneStartsThroughProductionPInvokePath()
     {
         await using NativeAudioEngine engine = new();
