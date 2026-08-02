@@ -40,6 +40,16 @@ test("submission creator exposes immutable package and validation entry points",
   assert.match(source, /verify-driver-package\.ps1/);
   assert.match(source, /driver-submission\.json/);
   assert.match(source, /1980-01-01/);
+  assert.match(source, /\[StringComparer\]::Ordinal/);
+  const realFileGuard = source.match(
+    /function Assert-RealFile(?<body>[^]*?)(?=\nfunction )/,
+  );
+  assert.ok(realFileGuard, "real-file guard is missing");
+  assert.match(realFileGuard.groups.body, /PSIsContainer/);
+  assert.match(
+    realFileGuard.groups.body,
+    /\[IO\.FileAttributes\]::ReparsePoint/,
+  );
   assert.match(source, /function Assert-ExactSourcePackageInventory/);
   assert.match(source, /Assert-ExactSourcePackageInventory\s*`/);
   assert.doesNotMatch(source, /-CaseInsensitiveNames/);

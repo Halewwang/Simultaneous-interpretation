@@ -117,6 +117,34 @@ try {
         throw "Identical package inputs did not produce a deterministic archive."
     }
 
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($first.Archive)
+    try {
+        [string[]]$actualEntryOrder = @(
+            $archive.Entries | ForEach-Object FullName
+        )
+    } finally {
+        $archive.Dispose()
+    }
+    [string[]]$expectedEntryOrder = @(
+        "EMKE.VirtualAudio.cat",
+        "EMKE.VirtualAudio.inf",
+        "EMKE.VirtualAudio.sys",
+        "driver-submission.json"
+    )
+    if ($actualEntryOrder.Count -ne $expectedEntryOrder.Count) {
+        throw "Submission archive entry count does not match the canonical inventory."
+    }
+    for ($index = 0; $index -lt $expectedEntryOrder.Count; $index++) {
+        if ($actualEntryOrder[$index] -cne $expectedEntryOrder[$index]) {
+            throw (
+                "Submission archive entries are not in Ordinal name order. " +
+                "Expected '$($expectedEntryOrder -join ",")'; received " +
+                "'$($actualEntryOrder -join ",")'."
+            )
+        }
+    }
+
     $manifest = Get-Content `
         -LiteralPath (Join-Path $first.Output "driver-submission.json") `
         -Raw | ConvertFrom-Json
@@ -134,6 +162,48 @@ try {
     foreach ($file in $manifest.files) {
         if (([string]$file.sha256) -cnotmatch "^[0-9a-f]{64}$") {
             throw "Submission manifest contains a non-canonical SHA-256 hash."
+        }
+    }
+
+    $referentDirectory = Join-Path $temporaryRoot "link-referents"
+    New-Item -ItemType Directory -Path $referentDirectory | Out-Null
+    foreach ($fileName in $expectedNames) {
+        $caseName = "reparse-" + [IO.Path]::GetExtension($fileName).TrimStart(".")
+        $fixture = Copy-PackageFixture -Name $caseName
+        $linkPath = Join-Path $fixture $fileName
+        $referent = Join-Path $referentDirectory $fileName
+        Copy-Item -LiteralPath $linkPath -Destination $referent
+        Remove-Item -LiteralPath $linkPath
+        New-Item `
+            -ItemType SymbolicLink `
+            -Path $linkPath `
+            -Target $referent | Out-Null
+        $referentHashBefore = (
+            Get-FileHash -LiteralPath $referent -Algorithm SHA256
+        ).Hash
+
+        Assert-CreateRejected `
+            -InputDirectory $fixture `
+            -Name $caseName `
+            -Pattern "reparse|symbolic|real file"
+
+        $referentHashAfter = (
+            Get-FileHash -LiteralPath $referent -Algorithm SHA256
+        ).Hash
+        if ($referentHashAfter -cne $referentHashBefore) {
+            throw "Source reparse mutation changed the referent for '$fileName'."
+        }
+        foreach ($forbiddenPath in @(
+            (Join-Path $temporaryRoot "$caseName-output"),
+            (Join-Path $temporaryRoot "$caseName.zip"),
+            (Join-Path $temporaryRoot "$caseName-evidence.json")
+        )) {
+            if (Test-Path -LiteralPath $forbiddenPath) {
+                throw (
+                    "Source reparse mutation created forbidden output for " +
+                    "'$fileName': $forbiddenPath"
+                )
+            }
         }
     }
 
