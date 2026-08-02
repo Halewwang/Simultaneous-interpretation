@@ -26,6 +26,7 @@ public enum MockTranslationScenario
     Unauthorized,
     Forbidden,
     UnknownModel,
+    LegacyAlias,
     DelayedClose,
     BlockedClose,
     LateDeltas,
@@ -400,6 +401,20 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 static _ => new TaskCompletionSource<Connection>(
                     TaskCreationOptions.RunContinuationsAsynchronously))
             .TrySetResult(connection);
+        if (Scenario == MockTranslationScenario.LegacyAlias)
+        {
+            await SendServerEventAsync(
+                connection,
+                """{"type":"session.audio.delta"}"""u8.ToArray())
+                .ConfigureAwait(false);
+            ResetConnectionWaiter(targetLanguage, connection);
+            _connections.TryRemove(
+                new KeyValuePair<LanguageCode, Connection>(
+                    targetLanguage,
+                    connection));
+            return;
+        }
+
         await SendServerEventAsync(
             connection,
             """{"type":"session.updated"}"""u8.ToArray()).ConfigureAwait(false);

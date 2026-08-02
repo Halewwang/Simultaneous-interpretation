@@ -188,6 +188,13 @@ public sealed class FailureSafetyTests
                         + $"code={closeError?.Code ?? "none"}.");
                 }
 
+                Require(
+                    closeError.RecoveryAction == RecoveryAction.Retry,
+                    "CloseTimeout did not preserve retry recovery");
+                Require(
+                    closeError.Parameters.Count == 0,
+                    "CloseTimeout exposed unsafe parameters");
+
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(injection));
@@ -213,6 +220,16 @@ public sealed class FailureSafetyTests
         Require(
             audio.CurrentOutboundRoute != OutboundRoute.OriginalBypass,
             "post-failure route unexpectedly used OriginalBypass");
+        if (injection != SafetyInjection.CloseTimeout)
+        {
+            await WaitUntilAsync(
+                () => runtime.CurrentSnapshot.Error is not null)
+                .ConfigureAwait(false);
+            AssertFailureContract(
+                injection,
+                runtime.CurrentSnapshot.Error!);
+        }
+
         byte[] postFailureProbe = CreateProbe(seed + 100, 16);
         audio.ClearVirtualMicrophone();
         audio.RenderVirtualMicrophone(postFailureProbe);
@@ -285,6 +302,52 @@ public sealed class FailureSafetyTests
         {
             throw new InvalidOperationException(message);
         }
+    }
+
+    private static void AssertFailureContract(
+        SafetyInjection injection,
+        RuntimeError error)
+    {
+        (ErrorCategory category, string code, RecoveryAction recovery) = injection switch
+        {
+            SafetyInjection.OutboundDisconnect => (
+                ErrorCategory.Network,
+                "translationSocket.receiveFailed",
+                RecoveryAction.Retry),
+            SafetyInjection.ServerError => (
+                ErrorCategory.Protocol,
+                "translationSession.remoteError",
+                RecoveryAction.Retry),
+            SafetyInjection.SendFailure => (
+                ErrorCategory.Network,
+                "translationSocket.sendFailed",
+                RecoveryAction.Retry),
+            SafetyInjection.ReceiveFailure => (
+                ErrorCategory.Network,
+                "translationRuntime.networkFailure",
+                RecoveryAction.Retry),
+            SafetyInjection.QueueFull => (
+                ErrorCategory.Backpressure,
+                "testAudioEngine.outboundQueueFull",
+                RecoveryAction.Retry),
+            SafetyInjection.TranslatedAudioUnderrun => (
+                ErrorCategory.Backpressure,
+                "translationRuntime.audioBackpressure",
+                RecoveryAction.Retry),
+            SafetyInjection.DeviceChanged => (
+                ErrorCategory.Device,
+                "translationRuntime.deviceChanged",
+                RecoveryAction.SelectDevice),
+            _ => throw new ArgumentOutOfRangeException(nameof(injection)),
+        };
+        Require(error.Category == category, $"{injection} category was not stable");
+        Require(
+            string.Equals(error.Code, code, StringComparison.Ordinal),
+            $"{injection} code was not stable");
+        Require(
+            error.RecoveryAction == recovery,
+            $"{injection} recovery was not stable");
+        Require(error.Parameters.Count == 0, $"{injection} exposed unsafe parameters");
     }
 
     private static async Task WaitForTaskAsync(Task task, string timeoutMessage)
