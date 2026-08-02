@@ -2,6 +2,8 @@ using EMKE.Setup;
 
 namespace EMKE.Setup.Tests;
 
+#pragma warning disable CA1515 // MSTest requires discoverable public test classes.
+
 [TestClass]
 public sealed class SetupStateTests
 {
@@ -90,3 +92,5 @@ public sealed class SetupStateTests
         return machine;
     }
 }
+
+#pragma warning restore CA1515
