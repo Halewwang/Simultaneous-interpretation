@@ -29,7 +29,7 @@ internal interface ISetupHostProbe
     SetupHostInfo Read();
 }
 
-internal sealed partial class WindowsSetupHostProbe : ISetupHostProbe
+internal sealed class WindowsSetupHostProbe : ISetupHostProbe
 {
     private const byte VerNtWorkstation = 1;
 
@@ -80,7 +80,7 @@ internal sealed partial class WindowsSetupHostProbe : ISetupHostProbe
         public byte Reserved;
     }
 
-    [LibraryImport("ntdll.dll")]
+    [DllImport("ntdll.dll", ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static partial int RtlGetVersion(ref OsVersionInfo versionInformation);
+    private static extern int RtlGetVersion(ref OsVersionInfo versionInformation);
 }

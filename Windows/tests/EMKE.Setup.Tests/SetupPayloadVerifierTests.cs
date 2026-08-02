@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.IO.Compression;
 using System.Text;
 using EMKE.Setup;
 
@@ -60,6 +61,24 @@ public sealed class SetupPayloadVerifierTests
         embedded = embedded.Select(payload => payload.LogicalName == "driver-sys"
             ? new SetupEmbeddedPayload(payload.LogicalName, payload.OpenRead, 9)
             : payload).ToArray();
+
+        SetupPayloadVerificationResult result = verifier.Verify(Manifest(), embedded);
+
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual("tamperedPayloadLength", result.FailureCode);
+    }
+
+    [TestMethod]
+    public void VerifyStopsReadingWhenAnEmbeddedStreamExceedsManifestLength()
+    {
+        SetupPayloadVerifier verifier = new(TrustedSignatures());
+        List<SetupEmbeddedPayload> embedded = EmbeddedPayloads(
+            "application-msix",
+            Encoding.UTF8.GetBytes("application-msix!"));
+        embedded[0] = new SetupEmbeddedPayload(
+            embedded[0].LogicalName,
+            embedded[0].OpenRead,
+            declaredLength: 16);
 
         SetupPayloadVerificationResult result = verifier.Verify(Manifest(), embedded);
 
@@ -213,9 +232,32 @@ public sealed class SetupPayloadVerifierTests
         Assert.IsTrue(probe.CatalogVerified);
     }
 
+    [TestMethod]
+    public void MsixPublisherIsReadFromTheNamespacedIdentityElement()
+    {
+        using TemporaryDirectory temporary = new();
+        string msixPath = Path.Combine(temporary.Path, "fixture.msix");
+        using (FileStream file = File.Create(msixPath))
+        using (ZipArchive archive = new(file, ZipArchiveMode.Create))
+        {
+            ZipArchiveEntry entry = archive.CreateEntry("AppxManifest.xml");
+            using StreamWriter writer = new(entry.Open(), Encoding.UTF8);
+            writer.Write(
+                "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\">"
+                + "<Identity Name=\"EMKE.Translation.Internal\" Publisher=\"CN=EMKE Internal Test\" "
+                + "Version=\"0.2.0.0\" ProcessorArchitecture=\"x64\" />"
+                + "</Package>");
+        }
+
+        string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(msixPath);
+
+        Assert.AreEqual("CN=EMKE Internal Test", publisher);
+    }
+
     private static ISetupPayloadSignatureVerifier TrustedSignatures()
     {
-        return new StaticSignatureVerifier(SetupPayloadSignatureEvidence.Trusted);
+        return new StaticSignatureVerifier(
+            SetupPayloadSignatureEvidence.TrustedEvidence);
     }
 
     private static SetupManifest Manifest()

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace EMKE.Setup;
@@ -58,7 +59,7 @@ internal sealed class SetupExtractionResult : IDisposable
     }
 }
 
-internal sealed partial class SetupExtractionDirectory : IDisposable
+internal sealed class SetupExtractionDirectory : IDisposable
 {
     private const int ErrorAlreadyExists = 183;
     private const int MaximumCreateAttempts = 8;
@@ -391,7 +392,7 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
             return IsContainedByRoot(Path.GetFullPath(output.Name), root);
         }
 
-        char[] buffer = new char[32768];
+        StringBuilder buffer = new(32768);
         uint length = GetFinalPathNameByHandle(
             output.SafeFileHandle,
             buffer,
@@ -402,7 +403,7 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
             return false;
         }
 
-        string finalOutput = NormalizeFinalPath(new string(buffer, 0, (int)length));
+        string finalOutput = NormalizeFinalPath(buffer.ToString());
         return IsContainedByRoot(finalOutput, root);
     }
 
@@ -440,23 +441,26 @@ internal sealed partial class SetupExtractionDirectory : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    [LibraryImport(
+    [DllImport(
         "kernel32.dll",
         EntryPoint = "CreateDirectoryW",
         SetLastError = true,
-        StringMarshalling = StringMarshalling.Utf16)]
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CreateDirectory(string path, nint securityAttributes);
+    private static extern bool CreateDirectory(string path, nint securityAttributes);
 
-    [LibraryImport(
+    [DllImport(
         "kernel32.dll",
         EntryPoint = "GetFinalPathNameByHandleW",
-        SetLastError = true)]
+        SetLastError = true,
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static partial uint GetFinalPathNameByHandle(
+    private static extern uint GetFinalPathNameByHandle(
         SafeFileHandle file,
-        [Out] char[] path,
+        StringBuilder path,
         uint pathLength,
         uint flags);
 }

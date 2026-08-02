@@ -80,7 +80,7 @@ internal sealed class SetupPayloadSignatureEvidence
 
     public string? FailureCode { get; }
 
-    public static SetupPayloadSignatureEvidence Trusted { get; } = new(true, null);
+    public static SetupPayloadSignatureEvidence TrustedEvidence { get; } = new(true, null);
 
     public static SetupPayloadSignatureEvidence Rejected(
         string failureCode,
@@ -288,12 +288,15 @@ internal sealed class SetupPayloadVerifier
                 return SetupPayloadVerificationResult.Rejected("tamperedPayloadLength");
             }
 
-            (long length, string hash)? observed = ReadAndHash(embedded.OpenRead);
+            (long length, string hash, bool exceededLength)? observed = ReadAndHash(
+                embedded.OpenRead,
+                expected.Length);
             if (observed is null)
             {
                 return SetupPayloadVerificationResult.Rejected("embeddedPayloadUnreadable");
             }
-            if (observed.Value.length != expected.Length)
+            if (observed.Value.exceededLength
+                || observed.Value.length != expected.Length)
             {
                 return SetupPayloadVerificationResult.Rejected("tamperedPayloadLength");
             }
@@ -398,7 +401,9 @@ internal sealed class SetupPayloadVerifier
 #pragma warning restore CA1031
 
 #pragma warning disable CA1031 // Corrupt or unavailable embedded streams fail closed.
-    private static (long length, string hash)? ReadAndHash(Func<Stream> openRead)
+    private static (long length, string hash, bool exceededLength)? ReadAndHash(
+        Func<Stream> openRead,
+        long maximumLength)
     {
         try
         {
@@ -414,11 +419,19 @@ internal sealed class SetupPayloadVerifier
             int read;
             while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
             {
-                length = checked(length + read);
+                if (read > maximumLength - length)
+                {
+                    return (length, string.Empty, exceededLength: true);
+                }
+
+                length += read;
                 hash.AppendData(buffer, 0, read);
             }
 
-            return (length, Convert.ToHexStringLower(hash.GetHashAndReset()));
+            return (
+                length,
+                Convert.ToHexStringLower(hash.GetHashAndReset()),
+                exceededLength: false);
         }
         catch (Exception)
         {
@@ -494,7 +507,7 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
             inf.Path,
             sys.Path);
         return driverEvidence.Trusted
-            ? SetupPayloadSignatureEvidence.Trusted
+            ? SetupPayloadSignatureEvidence.TrustedEvidence
             : SetupPayloadSignatureEvidence.Rejected("driverCatalogKernelTrustInvalid");
     }
 
@@ -593,7 +606,7 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
     }
 #pragma warning restore CA1031
 
-    private static string ReadMsixPublisher(string msixPath)
+    internal static string ReadMsixPublisher(string msixPath)
     {
         using FileStream file = File.OpenRead(msixPath);
         using ZipArchive archive = new(file, ZipArchiveMode.Read, leaveOpen: false);
@@ -601,7 +614,10 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
             ?? throw new InvalidDataException("MSIX identity manifest is missing.");
         using Stream manifestStream = entry.Open();
         XDocument document = XDocument.Load(manifestStream, LoadOptions.None);
-        return document.Root?.Attribute("Publisher")?.Value
+        XElement root = document.Root
+            ?? throw new InvalidDataException("MSIX identity manifest is missing.");
+        XElement? identity = root.Element(root.Name.Namespace + "Identity");
+        return identity?.Attribute("Publisher")?.Value
             ?? throw new InvalidDataException("MSIX publisher is missing.");
     }
 }
@@ -609,6 +625,8 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
 internal static class WindowsAuthenticodeVerifier
 {
     private const int TrustSuccess = 0;
+    private const int CertEUntrustedRoot = unchecked((int)0x800B0109);
+    private const int CertEChaining = unchecked((int)0x800B010A);
     private const uint WtdUiNone = 2;
     private const uint WtdChoiceFile = 1;
     private const uint WtdStateActionIgnore = 0;
@@ -627,7 +645,7 @@ internal static class WindowsAuthenticodeVerifier
         try
         {
             int result = VerifyFileTrust(Path.GetFullPath(filePath));
-            return result == TrustSuccess || result == unchecked((int)0x800B0109);
+            return result is TrustSuccess or CertEUntrustedRoot or CertEChaining;
         }
         catch (Exception)
         {
