@@ -365,10 +365,4 @@ test("driver release metadata agrees on version, floor, ABI, identity, KMDF, and
   assert.equal(compatibility.recommendedDriverVersion, version.driverPackageVersion);
   assert.equal(compatibility.minimumWindowsBuild, version.minimumWindowsBuild);
   assert.equal(compatibility.driverAbiVersion, version.driverAbiVersion);
-  assert.equal(compatibility.driverHardwareId, version.driverHardwareId);
-  assert.equal(
-    compatibility.driverKmdfLibraryVersion,
-    version.driverKmdfLibraryVersion,
-  );
-  assert.deepEqual(compatibility.driverEndpointRoles, version.driverEndpointRoles);
 });

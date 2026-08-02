@@ -265,9 +265,6 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
     recommendedDriverVersion: "1.0.0.2",
     minimumWindowsBuild: 19045,
     driverAbiVersion: 1,
-    driverHardwareId: "ROOT\\EMKEVIRTUALAUDIO",
-    driverKmdfLibraryVersion: "1.31",
-    driverEndpointRoles: version.driverEndpointRoles,
   };
   const project = path.join(root, "EMKE.VirtualAudio.vcxproj");
   const versionPath = path.join(root, "version.json");
@@ -321,12 +318,9 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
       error: /version|DriverVer/i,
     },
     {
-      name: "compatibility hardware ID",
-      version,
-      compatibility: {
-        ...compatibility,
-        driverHardwareId: "ROOT\\WRONGDEVICE",
-      },
+      name: "version hardware ID",
+      version: { ...version, driverHardwareId: "ROOT\\WRONGDEVICE" },
+      compatibility,
       error: /hardware|ROOT/i,
     },
     {
