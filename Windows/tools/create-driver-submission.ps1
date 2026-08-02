@@ -98,6 +98,60 @@ function Assert-RealDirectory {
     return $item.FullName
 }
 
+function Assert-RealFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.PSIsContainer -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Description must be a real file, not a symbolic link or reparse point: $Path"
+    }
+    return $item.FullName
+}
+
+function Assert-JsonString {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$Property,
+
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+
+    $value = $Property.Value
+    if ($null -eq $value -or
+        $value.PSObject.BaseObject -isnot [string]) {
+        throw "$Description must be a JSON string."
+    }
+    return $value.PSObject.BaseObject
+}
+
+function Assert-JsonInteger {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$Property,
+
+        [Parameter(Mandatory)]
+        [string]$Description
+    )
+
+    $value = $Property.Value
+    if ($null -eq $value) {
+        throw "$Description must be a JSON integer."
+    }
+    $baseValue = $value.PSObject.BaseObject
+    if ($baseValue -isnot [int] -and $baseValue -isnot [long]) {
+        throw "$Description must be a JSON integer."
+    }
+    return [long]$baseValue
+}
+
 function Assert-ExactPropertyNames {
     param(
         [Parameter(Mandatory)]
@@ -152,11 +206,15 @@ function Assert-ExactFlatInventory {
         throw "$Description must contain the exact immutable inventory."
     }
     foreach ($expectedName in $ExpectedNames) {
-        if (@($files | Where-Object {
+        [object[]]$matches = @($files | Where-Object {
             $_.Name -ceq $expectedName
-        }).Count -ne 1) {
+        })
+        if ($matches.Count -ne 1) {
             throw "$Description must contain the exact immutable inventory."
         }
+        Assert-RealFile `
+            -Path $matches[0].FullName `
+            -Description "$Description file '$expectedName'" | Out-Null
     }
 }
 
@@ -175,11 +233,15 @@ function Assert-ExactSourcePackageInventory {
         throw "Verified driver package must contain the exact immutable inventory."
     }
     foreach ($expectedName in $script:PackageFileNames) {
-        if (@($files | Where-Object {
+        [object[]]$matches = @($files | Where-Object {
             $_.Name -ieq $expectedName
-        }).Count -ne 1) {
+        })
+        if ($matches.Count -ne 1) {
             throw "Verified driver package must contain the exact immutable inventory."
         }
+        Assert-RealFile `
+            -Path $matches[0].FullName `
+            -Description "Verified driver package file '$expectedName'" | Out-Null
     }
 }
 
@@ -215,36 +277,64 @@ function Test-DriverSubmissionDirectory {
             "files"
         ) `
         -Description "Driver submission manifest"
-    if (([string]$manifest.sourceCommit) -cnotmatch "^[0-9a-f]{40}$") {
+    $sourceCommitValue = Assert-JsonString `
+        -Property $manifest.PSObject.Properties["sourceCommit"] `
+        -Description "Driver submission source commit"
+    $driverVersionValue = Assert-JsonString `
+        -Property $manifest.PSObject.Properties["driverVersion"] `
+        -Description "Driver submission driver version"
+    $driverAbiVersionValue = Assert-JsonInteger `
+        -Property $manifest.PSObject.Properties["driverAbiVersion"] `
+        -Description "Driver submission ABI version"
+    $minimumWindowsBuildValue = Assert-JsonInteger `
+        -Property $manifest.PSObject.Properties["minimumWindowsBuild"] `
+        -Description "Driver submission minimum Windows build"
+    $kmdfLibraryVersionValue = Assert-JsonString `
+        -Property $manifest.PSObject.Properties["kmdfLibraryVersion"] `
+        -Description "Driver submission KMDF library version"
+    if ($sourceCommitValue -cnotmatch "^[0-9a-f]{40}$") {
         throw "Driver submission source commit must be 40 lowercase hex characters."
     }
-    if ([string]$manifest.driverVersion -cne "1.0.0.2" -or
-        [int]$manifest.driverAbiVersion -ne 1 -or
-        [int]$manifest.minimumWindowsBuild -ne 19045 -or
-        [string]$manifest.kmdfLibraryVersion -cne "1.31") {
+    if ($driverVersionValue -cne "1.0.0.2" -or
+        $driverAbiVersionValue -ne 1 -or
+        $minimumWindowsBuildValue -ne 19045 -or
+        $kmdfLibraryVersionValue -cne "1.31") {
         throw "Driver submission manifest release metadata is invalid."
     }
 
-    [object[]]$manifestFiles = @($manifest.files)
+    $filesValue = $manifest.PSObject.Properties["files"].Value
+    if ($null -eq $filesValue -or
+        $filesValue.PSObject.BaseObject -isnot [Array]) {
+        throw "Driver submission manifest files must be a JSON array."
+    }
+    [object[]]$manifestFiles = @($filesValue.PSObject.BaseObject)
     if ($manifestFiles.Count -ne $script:PackageFileNames.Count) {
         throw "Driver submission manifest must list exactly three package files."
+    }
+    foreach ($manifestFile in $manifestFiles) {
+        Assert-ExactPropertyNames `
+            -Object $manifestFile `
+            -Expected @("name", "sha256") `
+            -Description "Driver submission file entry"
+        $manifestName = Assert-JsonString `
+            -Property $manifestFile.PSObject.Properties["name"] `
+            -Description "Driver submission file name"
+        $manifestHash = Assert-JsonString `
+            -Property $manifestFile.PSObject.Properties["sha256"] `
+            -Description "Driver submission file SHA-256"
+        if ($manifestHash -cnotmatch "^[0-9a-f]{64}$") {
+            throw "Driver submission manifest SHA-256 must be lowercase hex."
+        }
     }
     foreach ($expectedName in $script:PackageFileNames) {
         [object[]]$matches = @(
             $manifestFiles |
-                Where-Object { [string]$_.name -ceq $expectedName }
+                Where-Object { $_.name -ceq $expectedName }
         )
         if ($matches.Count -ne 1) {
             throw "Driver submission manifest package inventory is invalid."
         }
-        Assert-ExactPropertyNames `
-            -Object $matches[0] `
-            -Expected @("name", "sha256") `
-            -Description "Driver submission file entry"
-        $expectedHash = [string]$matches[0].sha256
-        if ($expectedHash -cnotmatch "^[0-9a-f]{64}$") {
-            throw "Driver submission manifest SHA-256 must be lowercase hex."
-        }
+        $expectedHash = $matches[0].sha256
         $actualHash = Get-LowercaseSha256 `
             -Path (Join-Path $resolvedDirectory $expectedName)
         if ($actualHash -cne $expectedHash) {
@@ -290,7 +380,12 @@ function Write-DeterministicSubmissionArchive {
             $false
         )
         try {
-            foreach ($name in $script:ExpectedOutputNames) {
+            [string[]]$archiveNames = @($script:ExpectedOutputNames)
+            [Array]::Sort($archiveNames, [StringComparer]::Ordinal)
+            foreach ($name in $archiveNames) {
+                $sourcePath = Assert-RealFile `
+                    -Path (Join-Path $SubmissionDirectory $name) `
+                    -Description "Driver submission archive source '$name'"
                 $entry = $archive.CreateEntry(
                     $name,
                     [IO.Compression.CompressionLevel]::NoCompression
@@ -299,9 +394,7 @@ function Write-DeterministicSubmissionArchive {
                 $entry.ExternalAttributes = 0
                 $entryStream = $entry.Open()
                 try {
-                    $sourceStream = [IO.File]::OpenRead(
-                        (Join-Path $SubmissionDirectory $name)
-                    )
+                    $sourceStream = [IO.File]::OpenRead($sourcePath)
                     try {
                         $sourceStream.CopyTo($entryStream)
                     } finally {
@@ -367,14 +460,14 @@ function New-DriverSubmission {
         throw "Archive and evidence files must be outside the submission directory."
     }
 
+    Assert-ExactSourcePackageInventory `
+        -Directory $resolvedInput
+
     $verifier = Join-Path $PSScriptRoot "verify-driver-package.ps1"
     & $verifier $resolvedInput
     if ($LASTEXITCODE -ne 0) {
         throw "Verified driver package gate failed with exit code $LASTEXITCODE."
     }
-    Assert-ExactSourcePackageInventory `
-        -Directory $resolvedInput
-
     $sourceHashes = [ordered]@{}
     foreach ($name in $script:PackageFileNames) {
         $sourceHashes[$name] = Get-LowercaseSha256 `
