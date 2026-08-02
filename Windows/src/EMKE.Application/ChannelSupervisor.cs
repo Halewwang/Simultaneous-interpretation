@@ -627,6 +627,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
     {
         ITranslationSession? session = CurrentSession();
         bool gracefulClose = true;
+        RuntimeError? closeFailure = null;
         if (session is not null)
         {
             try
@@ -641,7 +642,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
             }
             catch (Exception exception) when (IsRuntimeFailure(exception))
             {
-                _ = MapError(exception);
+                closeFailure = MapError(exception);
                 gracefulClose = false;
             }
         }
@@ -678,6 +679,13 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
         SetState(ChannelState.Inactive);
         await NotifyAsync(ChannelState.Inactive, null, null)
             .ConfigureAwait(false);
+        if (closeFailure?.Category == ErrorCategory.CloseTimeout)
+        {
+            throw new RuntimeOperationException(Error(
+                ErrorCategory.CloseTimeout,
+                "translationRuntime.localCloseTimeout",
+                RecoveryAction.Retry));
+        }
     }
 
     private bool TryInstallSession(ITranslationSession session)
