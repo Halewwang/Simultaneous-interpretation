@@ -9,6 +9,7 @@ $toolsDirectory = [System.IO.Path]::GetFullPath(
 )
 $installScript = Join-Path $toolsDirectory "install-test-driver.ps1"
 $uninstallScript = Join-Path $toolsDirectory "uninstall-test-driver.ps1"
+$toolchainScript = Join-Path $toolsDirectory "verify-toolchain.ps1"
 $script:failures = [System.Collections.Generic.List[string]]::new()
 $script:TargetHardwareId = "ROOT\EMKEVIRTUALAUDIO"
 $script:MinimumWindowsBuild = 19045
@@ -359,6 +360,38 @@ Invoke-Case -Name "non-workstation and non-x64 hosts" -Action {
                 -ReleaseMetadata $release `
                 -HostInfo $hostInfo
         }
+    }
+}
+
+Invoke-Case -Name "toolchain read-only Server proof is not target eligible" -Action {
+    Import-LifecycleFunctions -Path $toolchainScript
+    $release = New-TestReleaseMetadata
+    $workstationEligible = Test-TargetOsEligible `
+        -ReleaseMetadata $release `
+        -WindowsBuild 19045 `
+        -HostArchitecture "x64" `
+        -ProductType 1
+    $serverEligible = Test-TargetOsEligible `
+        -ReleaseMetadata $release `
+        -WindowsBuild 26100 `
+        -HostArchitecture "x64" `
+        -ProductType 3
+    if (-not $workstationEligible -or $serverEligible) {
+        throw "Toolchain target eligibility did not preserve workstation scope."
+    }
+    Assert-TargetOsRequirement `
+        -RequireTargetOs:$false `
+        -TargetOsEligible $serverEligible `
+        -ProductType 3 `
+        -WindowsBuild 26100 `
+        -MinimumWindowsBuild 19045
+    Assert-Throws -Pattern "workstation" -Action {
+        Assert-TargetOsRequirement `
+            -RequireTargetOs `
+            -TargetOsEligible $serverEligible `
+            -ProductType 3 `
+            -WindowsBuild 26100 `
+            -MinimumWindowsBuild 19045
     }
 }
 
