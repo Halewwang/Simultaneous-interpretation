@@ -57,6 +57,14 @@ public sealed class WindowsHostCompatibilityProbeTests
             .ConfigureAwait(false);
 
         Assert.AreEqual(expectedCode, error?.Code);
+        if (expectedCode is not null)
+        {
+            RuntimeError observed = error
+                ?? throw new AssertFailedException("Unsupported host must have a stable error.");
+            Assert.AreEqual(ErrorCategory.Configuration, observed.Category);
+            Assert.AreEqual(RecoveryAction.ReportCompatibility, observed.RecoveryAction);
+            Assert.HasCount(0, observed.Parameters);
+        }
     }
 
     private static CompatibilityManifest CreateManifest()

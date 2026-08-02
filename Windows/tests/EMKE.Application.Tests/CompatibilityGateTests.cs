@@ -163,10 +163,14 @@ public sealed class CompatibilityGateTests
 
         Assert.IsNotNull(error);
         Assert.AreEqual(ErrorCategory.Driver, error.Category);
+        Assert.AreEqual("translationRuntime.driverIncompatible", error.Code);
         Assert.AreEqual(RecoveryAction.ReportCompatibility, error.RecoveryAction);
+        Assert.HasCount(0, error.Parameters);
         Assert.IsFalse(decision.CanStart);
         Assert.AreEqual(0, harness.SessionCreateCount);
         Assert.AreEqual(0, harness.AudioStartCount);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
         Assert.AreEqual(
             "driverMissing",
             runtime.CurrentSnapshot.DriverCompatibility.StatusLabel);
@@ -245,9 +249,13 @@ public sealed class CompatibilityGateTests
         RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
 
         Assert.AreEqual("unsupportedWindowsBuild", error?.Code);
+        Assert.AreEqual(RecoveryAction.ReportCompatibility, error?.RecoveryAction);
+        Assert.HasCount(0, error!.Parameters);
         CollectionAssert.AreEqual(HostOnlyTrace, harness.Trace.ToArray());
         Assert.AreEqual(0, harness.AudioStartCount);
         Assert.AreEqual(0, harness.SessionCreateCount);
+        Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
+        Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
     }
 
     private static CompatibilityManifest CreateManifest(
