@@ -138,9 +138,11 @@ test('installer contains only the approved package and certificate mutation boun
   assert.match(source, /DefaultParameterSetName\s*=\s*["']Install["']/);
   assert.match(source, /EMKE\.Translation\.Internal/);
   assert.match(source, /CN=EMKE Internal Test/);
-  assert.match(source, /0\.1\.0\.0/);
-  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.msix/);
-  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.cer/);
+  assert.match(source, /__EMKE_PACKAGE_VERSION__/);
+  assert.match(source, /__EMKE_ARCHITECTURE__/);
+  assert.match(source, /__EMKE_PACKAGE_BASE_NAME__\.msix/);
+  assert.match(source, /__EMKE_PACKAGE_BASE_NAME__\.cer/);
+  assert.doesNotMatch(source, /0\.1\.0(?:\.0)?/);
   assert.match(source, /Install-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /Uninstall-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /LocalMachine/);
@@ -174,8 +176,11 @@ test('uninstaller contains only exact current-user AppX and certificate mutation
 
   assert.match(source, /DefaultParameterSetName\s*=\s*["']Uninstall["']/);
   assert.match(source, /EMKE\.Translation\.Internal/);
-  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.msix/);
-  assert.match(source, /EMKE-Translation-Windows-0\.1\.0-internal-x64\.cer/);
+  assert.match(source, /__EMKE_PACKAGE_VERSION__/);
+  assert.match(source, /__EMKE_ARCHITECTURE__/);
+  assert.match(source, /__EMKE_PACKAGE_BASE_NAME__\.msix/);
+  assert.match(source, /__EMKE_PACKAGE_BASE_NAME__\.cer/);
+  assert.doesNotMatch(source, /0\.1\.0(?:\.0)?/);
   assert.match(source, /Install-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /Uninstall-EMKE-Translation-Internal\.ps1/);
   assert.match(source, /LocalMachine/);

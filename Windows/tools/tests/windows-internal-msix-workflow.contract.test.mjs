@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
+  copyFile,
   mkdtemp,
   mkdir,
   readFile,
@@ -40,8 +42,25 @@ const hostedInstallPath = path.join(
   'tools',
   'test-hosted-msix-install.ps1',
 );
+const installLifecyclePath = path.join(
+  repositoryRoot,
+  'Windows',
+  'packaging',
+  'App',
+  'Install-EMKE-Translation-Internal.ps1',
+);
+const uninstallLifecyclePath = path.join(
+  repositoryRoot,
+  'Windows',
+  'packaging',
+  'App',
+  'Uninstall-EMKE-Translation-Internal.ps1',
+);
+const versionMetadata = JSON.parse(
+  await readFile(path.join(repositoryRoot, 'Windows', 'version.json'), 'utf8'),
+);
 
-const packageBaseName = 'EMKE-Translation-Windows-0.2.0-internal-x64';
+const packageBaseName = `EMKE-Translation-Windows-${versionMetadata.productVersion}-internal-${versionMetadata.architecture}`;
 const handoffNames = [
   `${packageBaseName}.msix`,
   `${packageBaseName}.cer`,
@@ -176,6 +195,16 @@ function runBundleBuilder({
     ],
     { encoding: 'utf8' },
   );
+}
+
+async function createBundleInputs(inputRoot) {
+  await mkdir(inputRoot, { recursive: true });
+  await Promise.all([
+    writeFile(path.join(inputRoot, handoffNames[0]), 'fixture-msix\n'),
+    writeFile(path.join(inputRoot, handoffNames[1]), 'fixture-certificate\n'),
+    copyFile(installLifecyclePath, path.join(inputRoot, handoffNames[2])),
+    copyFile(uninstallLifecyclePath, path.join(inputRoot, handoffNames[3])),
+  ]);
 }
 
 function workflowRunBlocks(source) {
@@ -505,10 +534,7 @@ test('bundle and hosted install reject reparse ancestors', async (t) => {
 
   const inputRoot = path.join(fixtureRoot, 'input');
   const linkedInputRoot = path.join(fixtureRoot, 'linked-input');
-  await mkdir(inputRoot);
-  for (const [index, name] of handoffNames.slice(0, 4).entries()) {
-    await writeFile(path.join(inputRoot, name), `fixture-${index}\n`);
-  }
+  await createBundleInputs(inputRoot);
   await symlink(
     inputRoot,
     linkedInputRoot,
@@ -569,10 +595,7 @@ test('bundle builder rejects output outside its controlled root', async (t) => {
   });
 
   const inputRoot = path.join(fixtureRoot, 'input');
-  await mkdir(inputRoot);
-  for (const [index, name] of handoffNames.slice(0, 4).entries()) {
-    await writeFile(path.join(inputRoot, name), `fixture-${index}\n`);
-  }
+  await createBundleInputs(inputRoot);
 
   const result = runBundleBuilder({
     inputRoot,
@@ -599,12 +622,8 @@ test('bundle builder emits an exact five-file ZIP plus hashes and provenance', a
 
   const inputRoot = path.join(fixtureRoot, 'input');
   const outputRoot = path.join(fixtureRoot, 'output');
-  await mkdir(inputRoot, { recursive: true });
-
   const fixtureNames = handoffNames.slice(0, 4);
-  for (const [index, name] of fixtureNames.entries()) {
-    await writeFile(path.join(inputRoot, name), `fixture-${index}\n`);
-  }
+  await createBundleInputs(inputRoot);
 
   const result = runBundleBuilder({
     inputRoot,
@@ -640,6 +659,18 @@ test('bundle builder emits an exact five-file ZIP plus hashes and provenance', a
   );
   assert.equal(expand.status, 0, expand.stderr);
   assert.deepEqual((await readdir(extractionRoot)).sort(), [...handoffNames].sort());
+
+  for (const lifecycleName of handoffNames.slice(2, 4)) {
+    const rendered = await readFile(path.join(outputRoot, lifecycleName), 'utf8');
+    const expanded = await readFile(path.join(extractionRoot, lifecycleName), 'utf8');
+    assert.equal(expanded, rendered, `${lifecycleName} ZIP bytes differ`);
+    assert.match(rendered, new RegExp(`ExpectedVersion = "${versionMetadata.packageVersion.replaceAll('.', '\\.')}"`));
+    assert.match(rendered, new RegExp(`ExpectedArchitecture = "${versionMetadata.architecture}"`));
+    assert.match(rendered, new RegExp(`${packageBaseName.replaceAll('.', '\\.')}\\.msix`));
+    assert.match(rendered, new RegExp(`${packageBaseName.replaceAll('.', '\\.')}\\.cer`));
+    assert.doesNotMatch(rendered, /__EMKE_[A-Z0-9_]+__/);
+    assert.doesNotMatch(rendered, /0\.1\.0(?:\.0)?/);
+  }
 
   const sums = await readFile(
     path.join(outputRoot, 'SHA256SUMS.txt'),
@@ -677,4 +708,35 @@ test('bundle builder emits an exact five-file ZIP plus hashes and provenance', a
   assert.equal(provenance.zip.name, `${packageBaseName}.zip`);
   assert.match(provenance.zip.sha256, /^[0-9A-F]{64}$/);
   assert.ok(provenance.zip.size > 0);
+  for (const lifecycleName of handoffNames.slice(2, 4)) {
+    const bytes = await readFile(path.join(outputRoot, lifecycleName));
+    const expectedHash = createHash('sha256').update(bytes).digest('hex').toUpperCase();
+    const evidence = provenance.handoffFiles.find(({ name }) => name === lifecycleName);
+    assert.equal(evidence.sha256, expectedHash);
+    assert.match(sums, new RegExp(`^${expectedHash}  ${lifecycleName}$`, 'm'));
+  }
 });
+
+for (const [label, mutate] of [
+  ['missing placeholder', (source) => source.replace('__EMKE_PACKAGE_VERSION__', 'missing')],
+  ['duplicate placeholder', (source) => source.replace('__EMKE_PACKAGE_VERSION__', '__EMKE_PACKAGE_VERSION____EMKE_PACKAGE_VERSION__')],
+  ['unexpected placeholder', (source) => `${source}\n__EMKE_UNEXPECTED__\n`],
+]) {
+  test(`bundle builder rejects lifecycle template with ${label}`, async (t) => {
+    const fixtureRoot = await realpath(
+      await mkdtemp(path.join(tmpdir(), 'emke-lifecycle-template-tamper-')),
+    );
+    t.after(async () => rm(fixtureRoot, { recursive: true, force: true }));
+    const inputRoot = path.join(fixtureRoot, 'input');
+    await createBundleInputs(inputRoot);
+    const installFixture = path.join(inputRoot, handoffNames[2]);
+    await writeFile(installFixture, mutate(await readFile(installFixture, 'utf8')));
+    const result = runBundleBuilder({
+      inputRoot,
+      outputRoot: path.join(fixtureRoot, 'output'),
+      allowedOutputRoot: fixtureRoot,
+    });
+    assert.notEqual(result.status, 0, `${label} was accepted`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /lifecycle template/i);
+  });
+}
