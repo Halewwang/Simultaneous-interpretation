@@ -1,6 +1,6 @@
 namespace EMKE.Setup;
 
-public sealed record SetupResult
+internal sealed record SetupResult
 {
     private SetupResult(
         SetupOutcome outcome,
