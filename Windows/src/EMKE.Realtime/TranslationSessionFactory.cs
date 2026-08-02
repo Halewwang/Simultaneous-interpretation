@@ -22,6 +22,8 @@ public sealed class TranslationSessionFactory : ITranslationSessionFactory
         _socketFactory = socketFactory ?? throw new ArgumentNullException(nameof(socketFactory));
     }
 
+    internal ISecretStore SecretStore => _secretStore;
+
     public async ValueTask<ITranslationSession> CreateAsync(
         TranslationSessionRequest request,
         CancellationToken cancellationToken)
