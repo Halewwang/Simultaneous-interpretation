@@ -5,6 +5,14 @@
   "driverAbiVersion": 1,
   "minimumDriverVersion": "1.0.0.2",
   "recommendedDriverVersion": "1.0.0.2",
+  "driverHardwareId": "ROOT\\EMKEVIRTUALAUDIO",
+  "driverKmdfLibraryVersion": "1.31",
+  "driverEndpointRoles": [
+    "emke.meeting-speaker.render",
+    "emke.app-speaker.capture",
+    "emke.app-microphone.render",
+    "emke.meeting-microphone.capture"
+  ],
   "driverPackageAvailable": false,
   "channel": "internal",
   "minimumWindowsBuild": 19045

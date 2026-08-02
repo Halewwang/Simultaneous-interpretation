@@ -4,7 +4,16 @@
   "expectedTag": "windows-v0.2.0",
   "contractVersion": 1,
   "settingsSchemaVersion": 1,
+  "driverPackageVersion": "1.0.0.2",
   "driverAbiVersion": 1,
+  "driverHardwareId": "ROOT\\EMKEVIRTUALAUDIO",
+  "driverKmdfLibraryVersion": "1.31",
+  "driverEndpointRoles": [
+    "emke.meeting-speaker.render",
+    "emke.app-speaker.capture",
+    "emke.app-microphone.render",
+    "emke.meeting-microphone.capture"
+  ],
   "minimumWindowsBuild": 19045,
   "minimumWindowsApiContract": "10.0.19041.0",
   "maximumVersionTested": "10.0.26200.0",
