@@ -353,7 +353,7 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 "gpt-realtime-translate",
                 StringComparison.Ordinal))
         {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
             return;
         }
 
