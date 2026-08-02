@@ -44,6 +44,9 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         _connectionWaiters = new();
     private readonly ConcurrentDictionary<LanguageCode, Channel<MockClientAudioMessage>>
         _clientAudio = new();
+    private readonly ConcurrentDictionary<LanguageCode, ConcurrentQueue<string>>
+        _clientEventTypes = new();
+    private readonly ConcurrentQueue<LanguageCode> _handshakeTargets = new();
     private readonly TaskCompletionSource _closeRequestReceived =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _delayedCloseRelease =
@@ -73,6 +76,17 @@ internal sealed class MockTranslationServer : IAsyncDisposable
 
     public int ClientAudioBackpressureCount =>
         Volatile.Read(ref _clientAudioBackpressureCount);
+
+    public LanguageCode[] HandshakeTargets => _handshakeTargets.ToArray();
+
+    public string[] ClientEventTypes(LanguageCode targetLanguage)
+    {
+        return _clientEventTypes.TryGetValue(
+            targetLanguage,
+            out ConcurrentQueue<string>? events)
+            ? events.ToArray()
+            : [];
+    }
 
     public void ReleaseDelayedClose()
     {
@@ -204,6 +218,21 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         await connection.SendTextAsync(payload).ConfigureAwait(false);
     }
 
+    public async Task SendTranslatedTranscriptAsync(
+        LanguageCode targetLanguage,
+        string transcript)
+    {
+        ArgumentNullException.ThrowIfNull(transcript);
+        Connection connection = await WaitForConnectionAsync(targetLanguage)
+            .ConfigureAwait(false);
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            type = "session.output_transcript.delta",
+            delta = transcript,
+        });
+        await connection.SendTextAsync(payload).ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _application.StopAsync().ConfigureAwait(false);
@@ -241,6 +270,14 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 FullMode = BoundedChannelFullMode.Wait,
                 AllowSynchronousContinuations = false,
             });
+    }
+
+    private void RecordClientEvent(LanguageCode targetLanguage, string type)
+    {
+        ConcurrentQueue<string> events = _clientEventTypes.GetOrAdd(
+            targetLanguage,
+            static _ => new ConcurrentQueue<string>());
+        events.Enqueue(type);
     }
 
     private void ResetConnectionWaiter(
@@ -322,6 +359,8 @@ internal sealed class MockTranslationServer : IAsyncDisposable
         }
 
         LanguageCode targetLanguage = ReadTargetLanguage(update);
+        _handshakeTargets.Enqueue(targetLanguage);
+        RecordClientEvent(targetLanguage, "session.update");
         if (!_connections.TryAdd(targetLanguage, connection))
         {
             throw new InvalidOperationException(
@@ -354,6 +393,10 @@ internal sealed class MockTranslationServer : IAsyncDisposable
                 string? type = document.RootElement
                     .GetProperty("type")
                     .GetString();
+                if (type is not null)
+                {
+                    RecordClientEvent(targetLanguage, type);
+                }
                 if (string.Equals(
                         type,
                         "session.input_audio_buffer.append",

@@ -219,6 +219,70 @@ public sealed class TranslationRuntimeIntegrationTests
     }
 
     [TestMethod]
+    public async Task LoopbackUsesFrozenTranslationEventsAndRejectsUnregisteredAliases()
+    {
+        await using MockTranslationServer server =
+            await MockTranslationServer.StartAsync().ConfigureAwait(false);
+        TestAudioEngine audio = new();
+        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+        byte[] capturedPcm16 = Enumerable.Repeat((byte)7, 9_600).ToArray();
+        byte[] inboundPcm16 = [1, 0, 2, 0];
+
+        audio.EmitCaptured(AudioDirection.Outbound, capturedPcm16);
+        await server.WaitForClientAudioAsync(LanguageCode.En)
+            .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await server.SendAudioDeltaAsync(LanguageCode.Zh, inboundPcm16)
+            .ConfigureAwait(false);
+        byte[] voicedFrame = [0x00, 0x40];
+        audio.EmitCaptured(AudioDirection.Inbound, voicedFrame);
+        byte[] silentFrame = [0x00, 0x00];
+        for (int index = 0; index < 30; index++)
+        {
+            audio.EmitCaptured(AudioDirection.Inbound, silentFrame);
+            await Task.Delay(2).ConfigureAwait(false);
+        }
+
+        await WaitUntilAsync(() => audio.InboundTranslations.Count == 1)
+            .ConfigureAwait(false);
+        await server.SendTranscriptAsync(LanguageCode.Zh, "source-caption")
+            .ConfigureAwait(false);
+        await server.SendTranslatedTranscriptAsync(
+            LanguageCode.Zh,
+            "translated-caption").ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.SourceCaption == "source-caption")
+            .ConfigureAwait(false);
+        await WaitUntilAsync(
+            () => runtime.CurrentSnapshot.TranslatedCaption == "translated-caption")
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(2, server.TotalConnectionCount);
+        CollectionAssert.Contains(server.HandshakeTargets, LanguageCode.Zh);
+        CollectionAssert.Contains(server.HandshakeTargets, LanguageCode.En);
+        CollectionAssert.Contains(
+            server.ClientEventTypes(LanguageCode.En),
+            "session.input_audio_buffer.append");
+        CollectionAssert.AreEqual(inboundPcm16, audio.InboundTranslations[0]);
+        TranslationDecodeResult completed = TranslationEventCodec.Decode(
+            """{"type":"session.completed"}"""u8.ToArray());
+        TranslationDecodeResult invented = TranslationEventCodec.Decode(
+            """{"type":"session.audio.delta"}"""u8.ToArray());
+        Assert.IsFalse(completed.IsSuccess);
+        Assert.IsNotNull(completed.Error);
+        RuntimeError completedError = completed.Error;
+        Assert.AreEqual("translationEvent.unknownType", completedError.Code);
+        Assert.IsFalse(invented.IsSuccess);
+        Assert.IsNotNull(invented.Error);
+        RuntimeError inventedError = invented.Error;
+        Assert.AreEqual("translationEvent.unknownType", inventedError.Code);
+
+        Assert.IsNull(await runtime.StopAsync().ConfigureAwait(false));
+        CollectionAssert.Contains(server.ClientEventTypes(LanguageCode.Zh), "session.close");
+        CollectionAssert.Contains(server.ClientEventTypes(LanguageCode.En), "session.close");
+    }
+
+    [TestMethod]
     public async Task TranslatedOutputReachesDirectionSpecificNativeQueues()
     {
         await using MockTranslationServer server =
