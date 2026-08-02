@@ -993,6 +993,69 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
+    public async Task StartCreatesIndependentPublicRequestsAfterDriverAndEndpointPrerequisites()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        Uri baseUri = new("https://translation.example.test/v1", UriKind.Absolute);
+        harness.Settings = new RuntimeSettings(
+            baseUri,
+            LanguageCode.Zh,
+            LanguageCode.En,
+            "gpt-realtime-translate",
+            inboundBypass: false,
+            outboundBypass: false);
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
+
+        Assert.AreEqual(2, harness.Factory.Requests.Count);
+        Assert.AreNotSame(
+            harness.Factory.Requests[0],
+            harness.Factory.Requests[1]);
+        Assert.AreEqual(baseUri, harness.Factory.Requests[0].BaseAddress);
+        Assert.AreEqual(baseUri, harness.Factory.Requests[1].BaseAddress);
+        Assert.AreEqual(
+            "gpt-realtime-translate",
+            harness.Factory.Requests[0].Configuration.Model);
+        Assert.AreEqual(
+            "gpt-realtime-translate",
+            harness.Factory.Requests[1].Configuration.Model);
+        CollectionAssert.AreEqual(
+            ["os", "settings", "driver", "devices", "audio.start"],
+            harness.Trace.Take(5).ToArray());
+    }
+
+    [TestMethod]
+    public async Task MissingDriverOrEndpointsDoNotReachTheSessionFactory()
+    {
+        RuntimeHarness missingDriver = RuntimeHarness.Create();
+        missingDriver.DriverCompatibility = new DriverCompatibility(false, "missing");
+        await using (TranslationRuntime runtime = missingDriver.CreateRuntime())
+        {
+            RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
+
+            Assert.AreEqual(ErrorCategory.Driver, error?.Category);
+            Assert.AreEqual(0, missingDriver.SessionCreateCount);
+            CollectionAssert.AreEqual(
+                ["os", "settings", "driver"],
+                missingDriver.Trace.ToArray());
+        }
+
+        RuntimeHarness missingEndpoints = RuntimeHarness.Create();
+        missingEndpoints.DevicesAvailable = false;
+        await using (TranslationRuntime runtime = missingEndpoints.CreateRuntime())
+        {
+            RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
+
+            Assert.AreEqual(ErrorCategory.Device, error?.Category);
+            Assert.AreEqual(0, missingEndpoints.SessionCreateCount);
+            CollectionAssert.AreEqual(
+                ["os", "settings", "driver", "devices"],
+                missingEndpoints.Trace.ToArray());
+        }
+    }
+
+    [TestMethod]
     public async Task StartCompletesWithPrimaryErrorWhenRollbackCleanupThrows()
     {
         RuntimeHarness harness = RuntimeHarness.Create();

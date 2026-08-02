@@ -151,6 +151,35 @@ public sealed class TranslationConnectionProbeTests
             report.Stage("safeClose").FailureCode);
     }
 
+    [TestMethod]
+    public async Task ProbeCreatesEachSessionFromItsOwnPublicRequest()
+    {
+        EvidenceSession inbound = new();
+        EvidenceSession outbound = new();
+        QueueSessionFactory factory = new(inbound, outbound);
+        TranslationConnectionProbe probe = new(
+            factory,
+            TimeSpan.FromMilliseconds(250));
+        TranslationSessionRequest inboundRequest = new(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
+            Inbound);
+        TranslationSessionRequest outboundRequest = new(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
+            Outbound);
+
+        TranslationCompatibilityReport report = await probe.RunAsync(
+            inboundRequest,
+            outboundRequest,
+            CancellationToken.None);
+
+        Assert.AreEqual(
+            TranslationCapabilityOutcome.Passed,
+            report.Stage("dualSessionConcurrency").Outcome);
+        Assert.AreEqual(2, factory.Requests.Count);
+        Assert.AreSame(inboundRequest, factory.Requests[0]);
+        Assert.AreSame(outboundRequest, factory.Requests[1]);
+    }
+
     private sealed class QueueSessionFactory(
         params ITranslationSession[] sessions) : ITranslationSessionFactory
     {
