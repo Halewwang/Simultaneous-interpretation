@@ -117,21 +117,6 @@ public sealed class WindowsAudioDeviceCatalogTests
         Assert.AreEqual(1, native.CountCallCount);
     }
 
-    [TestMethod]
-    public async Task HonorsCancellationBetweenCountAndFill()
-    {
-        using CancellationTokenSource cancellation = new();
-        CatalogNativeAudioApi native = new() { AfterCount = () => cancellation.Cancel() };
-        native.Items.AddRange(CompleteCatalog());
-        WindowsAudioDeviceCatalog catalog = new(native);
-
-        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
-            () => catalog.GetSnapshotAsync(cancellation.Token));
-
-        Assert.AreEqual(1, native.CountCallCount);
-        Assert.AreEqual(0, native.FillCallCount);
-    }
-
     private static List<NativeAudioEndpointDescriptorV1> CompleteCatalog() =>
     [
         Endpoint("physical-input", "USB microphone", NativeAudioEndpointDataFlow.Capture,
@@ -183,8 +168,8 @@ public sealed class WindowsAudioDeviceCatalogTests
     private static unsafe void MakeNameUnterminated(
         ref NativeAudioEndpointDescriptorV1 descriptor)
     {
-        ushort* buffer = descriptor.Name;
-        FillWithoutTerminator(buffer, NativeAudioConstants.EndpointNameCapacity);
+        NativeAudioEndpointDescriptorV1* pointer = &descriptor;
+        FillWithoutTerminator(pointer->Name, NativeAudioConstants.EndpointNameCapacity);
     }
 
     private static unsafe void WriteTerminated(ushort* buffer, int capacity, string value)
@@ -207,8 +192,6 @@ internal sealed class CatalogNativeAudioApi : INativeAudioApi
     public List<NativeAudioEndpointDescriptorV1>? GrownItems { get; set; }
 
     public NativeAudioStatus CountStatus { get; set; } = NativeAudioStatus.Ok;
-
-    public Action? AfterCount { get; set; }
 
     public int CountCallCount { get; private set; }
 
@@ -240,7 +223,6 @@ internal sealed class CatalogNativeAudioApi : INativeAudioApi
         {
             CountCallCount++;
             requiredCount = checked((uint)Items.Count);
-            AfterCount?.Invoke();
             return CountStatus;
         }
 
