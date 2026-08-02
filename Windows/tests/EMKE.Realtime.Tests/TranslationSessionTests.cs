@@ -1039,6 +1039,10 @@ public sealed class TranslationSessionTests
         public TaskCompletionSource AudioCancellationObserved { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public void SetRequestHeader(string name, string value)
+        {
+        }
+
         public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
             return Task.CompletedTask;

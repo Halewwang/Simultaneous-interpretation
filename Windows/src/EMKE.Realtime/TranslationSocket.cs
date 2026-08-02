@@ -56,6 +56,8 @@ public sealed record TranslationReceiveResult
 
 internal interface IClientWebSocket : IDisposable
 {
+    void SetRequestHeader(string name, string value);
+
     Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken);
 
     ValueTask SendAsync(
@@ -123,6 +125,34 @@ public sealed class TranslationSocket : ITranslationTransport
 
         _adapter = adapter;
         _receiveBuffer = GC.AllocateUninitializedArray<byte>(receiveLimit);
+    }
+
+    internal void ConfigureAuthorizationHeader(ReadOnlySpan<char> secret)
+    {
+        if (secret.IsEmpty || secret.IndexOfAny('\r', '\n') >= 0)
+        {
+            throw new ArgumentException(
+                "Translation credentials must not be empty or contain line breaks.",
+                nameof(secret));
+        }
+
+        char[] copy = secret.ToArray();
+        try
+        {
+            string header = string.Create(
+                "Bearer ".Length + copy.Length,
+                copy,
+                static (destination, value) =>
+                {
+                    "Bearer ".AsSpan().CopyTo(destination);
+                    value.AsSpan().CopyTo(destination["Bearer ".Length..]);
+                });
+            _adapter.SetRequestHeader("Authorization", header);
+        }
+        finally
+        {
+            Array.Clear(copy);
+        }
     }
 
     public async Task<RuntimeError?> ConnectAsync(
@@ -369,38 +399,44 @@ public sealed class TranslationSocket : ITranslationTransport
             RecoveryAction.Retry);
     }
 
-    private sealed class ClientWebSocketAdapter : IClientWebSocket
+}
+
+internal sealed class ClientWebSocketAdapter : IClientWebSocket
+{
+    private readonly ClientWebSocket _socket = new();
+
+    public void SetRequestHeader(string name, string value)
     {
-        private readonly ClientWebSocket _socket = new();
+        _socket.Options.SetRequestHeader(name, value);
+    }
 
-        public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
-        {
-            return _socket.ConnectAsync(endpoint, cancellationToken);
-        }
+    public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
+    {
+        return _socket.ConnectAsync(endpoint, cancellationToken);
+    }
 
-        public ValueTask SendAsync(
-            ReadOnlyMemory<byte> payload,
-            WebSocketMessageType messageType,
-            bool endOfMessage,
-            CancellationToken cancellationToken)
-        {
-            return _socket.SendAsync(
-                payload,
-                messageType,
-                endOfMessage,
-                cancellationToken);
-        }
+    public ValueTask SendAsync(
+        ReadOnlyMemory<byte> payload,
+        WebSocketMessageType messageType,
+        bool endOfMessage,
+        CancellationToken cancellationToken)
+    {
+        return _socket.SendAsync(
+            payload,
+            messageType,
+            endOfMessage,
+            cancellationToken);
+    }
 
-        public ValueTask<ValueWebSocketReceiveResult> ReceiveAsync(
-            Memory<byte> buffer,
-            CancellationToken cancellationToken)
-        {
-            return _socket.ReceiveAsync(buffer, cancellationToken);
-        }
+    public ValueTask<ValueWebSocketReceiveResult> ReceiveAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken)
+    {
+        return _socket.ReceiveAsync(buffer, cancellationToken);
+    }
 
-        public void Dispose()
-        {
-            _socket.Dispose();
-        }
+    public void Dispose()
+    {
+        _socket.Dispose();
     }
 }

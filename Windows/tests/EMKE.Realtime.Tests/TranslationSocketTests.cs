@@ -357,6 +357,10 @@ public sealed class TranslationSocketTests
 
         public int MaxConcurrentSendCount => Volatile.Read(ref _maxConcurrentSendCount);
 
+        public void SetRequestHeader(string name, string value)
+        {
+        }
+
         public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
             return Task.CompletedTask;

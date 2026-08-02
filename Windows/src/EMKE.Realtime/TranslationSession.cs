@@ -125,6 +125,20 @@ public sealed class TranslationSession :
     internal TranslationSession(
         ITranslationTransport transport,
         Uri endpoint,
+        TranslationSessionConfiguration configuration)
+        : this(
+            transport,
+            endpoint,
+            configuration,
+            new SystemClock(),
+            DefaultEventCapacity,
+            ArrayPool<byte>.Shared)
+    {
+    }
+
+    internal TranslationSession(
+        ITranslationTransport transport,
+        Uri endpoint,
         TranslationSessionConfiguration configuration,
         IClock clock,
         int eventCapacity,

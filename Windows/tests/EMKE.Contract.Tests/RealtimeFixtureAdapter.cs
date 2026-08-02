@@ -707,6 +707,10 @@ internal static class RealtimeFixtureAdapter
 
         public List<(WebSocketMessageType MessageType, bool EndOfMessage)> Sends { get; } = [];
 
+        public void SetRequestHeader(string name, string value)
+        {
+        }
+
         public Task ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
         {
             return Task.CompletedTask;

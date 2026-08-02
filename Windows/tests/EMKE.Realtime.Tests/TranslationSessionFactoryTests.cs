@@ -121,7 +121,10 @@ public sealed class TranslationSessionFactoryTests
         Assert.AreEqual(ErrorCategory.Authentication, exception.Error.Category);
         Assert.AreEqual("translationSessionFactory.invalidApiKey", exception.Error.Code);
         Assert.HasCount(0, exception.Error.Parameters);
-        Assert.IsFalse(exception.ToString().Contains(value ?? "missing", StringComparison.Ordinal));
+        if (!string.IsNullOrEmpty(value))
+        {
+            Assert.IsFalse(exception.ToString().Contains(value, StringComparison.Ordinal));
+        }
         Assert.AreEqual(0, socketFactoryCalls);
         if (value is not null)
         {
