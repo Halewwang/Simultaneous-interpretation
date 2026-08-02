@@ -1,5 +1,6 @@
 using EMKE.Core;
 using EMKE.Platform.Driver;
+using System.Security.Cryptography.X509Certificates;
 
 namespace EMKE.Integration.Tests;
 
@@ -228,6 +229,89 @@ public sealed class WindowsDriverManagerTests
         CollectionAssert.AreEqual(
             new[] { InfPath, DriverBinaryPath },
             native.MemberPaths);
+    }
+
+    [TestMethod]
+    [DataRow(
+        "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, C=US",
+        true,
+        true,
+        true)]
+    [DataRow(
+        "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, C=US",
+        false,
+        true,
+        false)]
+    [DataRow(
+        "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation, C=US",
+        true,
+        false,
+        false)]
+    [DataRow("CN=EMKE Internal Test", true, true, false)]
+    [DataRow(
+        "CN=Microsoft Windows Hardware Compatibility Publisher, O=Other Publisher, C=US",
+        true,
+        true,
+        false)]
+    public void MicrosoftCatalogPolicyRequiresPublisherKernelAndMembers(
+        string signerSubject,
+        bool kernelPolicyValid,
+        bool catalogMembersValid,
+        bool expectedAllowed)
+    {
+        DriverCatalogTrustDecision decision =
+            MicrosoftDriverCatalogTrustPolicy.Instance.Evaluate(
+                signerSubject,
+                kernelPolicyValid,
+                catalogMembersValid);
+
+        Assert.AreEqual(expectedAllowed, decision.Allowed);
+    }
+
+    [TestMethod]
+    public void CatalogVerifierDelegatesFinalDecisionToInjectedPolicy()
+    {
+        RecordingCatalogTrustNativeApi native = new();
+        RecordingDriverCatalogTrustPolicy policy = new(
+            new DriverCatalogTrustDecision(
+                Allowed: true,
+                Reason: "synthetic-test-policy"));
+        WindowsCatalogTrustVerifier verifier = new(native, policy);
+
+        WindowsCatalogEvidence evidence = verifier.Verify(
+            CatalogPath,
+            InfPath,
+            DriverBinaryPath);
+
+        Assert.IsTrue(evidence.ChainValid);
+        Assert.AreEqual(native.Signer.Subject, policy.SignerSubject);
+        Assert.IsTrue(policy.KernelPolicyValid);
+        Assert.IsTrue(policy.CatalogMembersValid);
+        Assert.AreEqual(1, policy.EvaluationCount);
+    }
+
+    [TestMethod]
+    public void ProductionCatalogVerifierCannotComposeATestPolicy()
+    {
+        Assert.IsInstanceOfType<MicrosoftDriverCatalogTrustPolicy>(
+            WindowsCatalogTrustVerifier.Instance.TrustPolicy);
+    }
+
+    [TestMethod]
+    public void ProductionCatalogTrustChecksOnlineRevocationForWholeChain()
+    {
+        WindowsCatalogRevocationConfiguration configuration =
+            WindowsCatalogTrustNativeApi.RevocationConfiguration;
+
+        Assert.AreEqual(
+            X509RevocationMode.Online,
+            configuration.ChainRevocationMode);
+        Assert.AreEqual(
+            X509RevocationFlag.EntireChain,
+            configuration.ChainRevocationFlag);
+        Assert.AreEqual(1U, configuration.WinTrustRevocationChecks);
+        Assert.AreEqual(0x00000040U, configuration.WinTrustProviderFlags);
+        Assert.IsTrue(configuration.CertificateDownloadsEnabled);
     }
 
     [TestMethod]
@@ -493,6 +577,31 @@ public sealed class WindowsDriverManagerTests
                     StringComparison.Ordinal)
                 ? InfMemberStatus
                 : DriverMemberStatus;
+        }
+    }
+
+    private sealed class RecordingDriverCatalogTrustPolicy(
+        DriverCatalogTrustDecision decision)
+        : IDriverCatalogTrustPolicy
+    {
+        public int EvaluationCount { get; private set; }
+
+        public string? SignerSubject { get; private set; }
+
+        public bool KernelPolicyValid { get; private set; }
+
+        public bool CatalogMembersValid { get; private set; }
+
+        public DriverCatalogTrustDecision Evaluate(
+            string signerSubject,
+            bool kernelPolicyValid,
+            bool catalogMembersValid)
+        {
+            EvaluationCount++;
+            SignerSubject = signerSubject;
+            KernelPolicyValid = kernelPolicyValid;
+            CatalogMembersValid = catalogMembersValid;
+            return decision;
         }
     }
 }
