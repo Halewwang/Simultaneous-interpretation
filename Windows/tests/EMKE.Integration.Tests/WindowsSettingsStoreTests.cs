@@ -243,6 +243,7 @@ public sealed class WindowsSettingsStoreTests
 
         await store.SaveAsync(
             new RuntimeSettings(
+                new Uri("https://example.test/realtime"),
                 LanguageCode.De,
                 LanguageCode.Zh,
                 "new-model",

@@ -260,7 +260,13 @@ public sealed class AppSnapshotTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(
             () => new TranslationSessionConfiguration((LanguageCode)int.MaxValue, LanguageCode.En, "model"));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(
-            () => new RuntimeSettings(LanguageCode.Zh, (LanguageCode)int.MaxValue, "model", false, false));
+            () => new RuntimeSettings(
+                new Uri("https://translation.example.test/v1", UriKind.Absolute),
+                LanguageCode.Zh,
+                (LanguageCode)int.MaxValue,
+                "model",
+                false,
+                false));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(
             () => new AudioDeviceDescriptor("id", "label", (AudioDeviceDirection)int.MaxValue, false, true));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(

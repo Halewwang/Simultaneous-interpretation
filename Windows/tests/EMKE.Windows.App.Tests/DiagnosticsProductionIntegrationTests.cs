@@ -29,12 +29,15 @@ public sealed class DiagnosticsProductionIntegrationTests
         await tester.TestConnectionAsync(CancellationToken.None);
 
         Assert.AreEqual(1, probe.CallCount);
-        Assert.AreEqual(LanguageCode.En, probe.Inbound!.SourceLanguage);
-        Assert.AreEqual(LanguageCode.De, probe.Inbound.TargetLanguage);
-        Assert.AreEqual("latest-model", probe.Inbound.Model);
-        Assert.AreEqual(LanguageCode.De, probe.Outbound!.SourceLanguage);
-        Assert.AreEqual(LanguageCode.En, probe.Outbound.TargetLanguage);
-        Assert.AreEqual("latest-model", probe.Outbound.Model);
+        Assert.AreEqual(
+            "https://example.invalid/v1",
+            probe.Inbound!.BaseAddress.AbsoluteUri);
+        Assert.AreEqual(LanguageCode.En, probe.Inbound.Configuration.SourceLanguage);
+        Assert.AreEqual(LanguageCode.De, probe.Inbound.Configuration.TargetLanguage);
+        Assert.AreEqual("latest-model", probe.Inbound.Configuration.Model);
+        Assert.AreEqual(LanguageCode.De, probe.Outbound!.Configuration.SourceLanguage);
+        Assert.AreEqual(LanguageCode.En, probe.Outbound.Configuration.TargetLanguage);
+        Assert.AreEqual("latest-model", probe.Outbound.Configuration.Model);
     }
 
     [TestMethod]
@@ -144,13 +147,13 @@ public sealed class DiagnosticsProductionIntegrationTests
     {
         public int CallCount { get; private set; }
 
-        public TranslationSessionConfiguration? Inbound { get; private set; }
+        public TranslationSessionRequest? Inbound { get; private set; }
 
-        public TranslationSessionConfiguration? Outbound { get; private set; }
+        public TranslationSessionRequest? Outbound { get; private set; }
 
         public Task<TranslationCompatibilityReport> RunAsync(
-            TranslationSessionConfiguration inbound,
-            TranslationSessionConfiguration outbound,
+            TranslationSessionRequest inbound,
+            TranslationSessionRequest outbound,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

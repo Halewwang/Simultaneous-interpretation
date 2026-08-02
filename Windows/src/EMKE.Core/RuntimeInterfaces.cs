@@ -486,12 +486,22 @@ public sealed record AudioDeviceSnapshot
 public sealed record RuntimeSettings
 {
     public RuntimeSettings(
+        Uri baseUri,
         LanguageCode sourceLanguage,
         LanguageCode targetLanguage,
         string model,
         bool inboundBypass,
         bool outboundBypass)
     {
+        ArgumentNullException.ThrowIfNull(baseUri);
+        if (!baseUri.IsAbsoluteUri
+            || baseUri.Scheme is not ("https" or "http"))
+        {
+            throw new ArgumentException(
+                "Base URI must be an absolute HTTP or HTTPS URI.",
+                nameof(baseUri));
+        }
+
         DomainEnum.ThrowIfUndefined(sourceLanguage, nameof(sourceLanguage));
         DomainEnum.ThrowIfUndefined(targetLanguage, nameof(targetLanguage));
         if (string.IsNullOrWhiteSpace(model))
@@ -499,12 +509,15 @@ public sealed record RuntimeSettings
             throw new ArgumentException("Model must not be empty.", nameof(model));
         }
 
+        BaseUri = new Uri(baseUri.AbsoluteUri.TrimEnd('/'), UriKind.Absolute);
         SourceLanguage = sourceLanguage;
         TargetLanguage = targetLanguage;
         Model = model;
         InboundBypass = inboundBypass;
         OutboundBypass = outboundBypass;
     }
+
+    public Uri BaseUri { get; }
 
     public LanguageCode SourceLanguage { get; }
 
@@ -552,10 +565,14 @@ public interface ITranslationProtocolSessionEvidence
     TranslationProtocolEvidence ProtocolEvidence { get; }
 }
 
+public sealed record TranslationSessionRequest(
+    Uri BaseAddress,
+    TranslationSessionConfiguration Configuration);
+
 public interface ITranslationSessionFactory
 {
     ValueTask<ITranslationSession> CreateAsync(
-        TranslationSessionConfiguration configuration,
+        TranslationSessionRequest request,
         CancellationToken cancellationToken);
 }
 

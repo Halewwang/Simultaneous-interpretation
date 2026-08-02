@@ -5,8 +5,8 @@ namespace EMKE.Application;
 public interface ITranslationConnectionProbe
 {
     Task<TranslationCompatibilityReport> RunAsync(
-        TranslationSessionConfiguration inbound,
-        TranslationSessionConfiguration outbound,
+        TranslationSessionRequest inbound,
+        TranslationSessionRequest outbound,
         CancellationToken cancellationToken);
 }
 
@@ -29,8 +29,8 @@ public sealed class TranslationConnectionProbe : ITranslationConnectionProbe
     }
 
     public async Task<TranslationCompatibilityReport> RunAsync(
-        TranslationSessionConfiguration inbound,
-        TranslationSessionConfiguration outbound,
+        TranslationSessionRequest inbound,
+        TranslationSessionRequest outbound,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(inbound);

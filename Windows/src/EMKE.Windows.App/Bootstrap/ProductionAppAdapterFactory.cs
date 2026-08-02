@@ -106,7 +106,6 @@ internal static class ProductionCoreAdapters
                 compatibilityManifest,
                 new WindowsHostCompatibilityProbe()),
             settingsStore,
-            secretStore,
             driverManager,
             new PendingAudioDeviceCatalog(),
             audio,
@@ -137,10 +136,10 @@ internal static class ProductionCoreAdapters
         ITranslationSessionFactory
     {
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(configuration);
+            ArgumentNullException.ThrowIfNull(request);
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromException<ITranslationSession>(
                 new InvalidOperationException(

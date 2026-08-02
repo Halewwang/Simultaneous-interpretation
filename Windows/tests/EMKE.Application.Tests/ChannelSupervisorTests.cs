@@ -206,6 +206,9 @@ public sealed class ChannelSupervisorTests
             ExpectedReconnectMilliseconds,
             clock.Delays.Select(static delay => delay.TotalMilliseconds).ToArray());
         Assert.AreEqual(6, factory.CreateCount);
+        Assert.HasCount(6, factory.Requests);
+        Assert.IsTrue(factory.Requests.All(
+            request => ReferenceEquals(factory.Requests[0], request)));
     }
 
     [TestMethod]
@@ -362,10 +365,12 @@ public sealed class ChannelSupervisorTests
             AudioDirection.Inbound,
             generation: 7,
             factory,
-            new TranslationSessionConfiguration(
-                LanguageCode.En,
-                LanguageCode.Zh,
-                "gpt-realtime-translate"),
+            new TranslationSessionRequest(
+                new Uri("https://translation.example.test/v1", UriKind.Absolute),
+                new TranslationSessionConfiguration(
+                    LanguageCode.En,
+                    LanguageCode.Zh,
+                    "gpt-realtime-translate")),
             clock,
             notify);
     }
@@ -464,15 +469,20 @@ public sealed class ChannelSupervisorTests
     {
         private readonly ConcurrentQueue<FakeSupervisorSession> _sessions =
             new(sessions);
+        private readonly ConcurrentQueue<TranslationSessionRequest> _requests = new();
         private int _createCount;
 
         public int CreateCount => Volatile.Read(ref _createCount);
 
+        public TranslationSessionRequest[] Requests => _requests.ToArray();
+
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(request);
             Interlocked.Increment(ref _createCount);
+            _requests.Enqueue(request);
             if (!_sessions.TryDequeue(out FakeSupervisorSession? session))
             {
                 throw new InvalidOperationException("No fake session remains.");

@@ -348,9 +348,11 @@ public sealed class FailureSafetyTests
         FaultPlan faults) : ITranslationSessionFactory
     {
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(request);
+            TranslationSessionConfiguration configuration = request.Configuration;
 #pragma warning disable CA2000 // Ownership transfers to ChannelSupervisor.
             TranslationSession inner = new(
                 server.ResolveUri(configuration.Model),

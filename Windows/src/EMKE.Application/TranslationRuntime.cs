@@ -15,7 +15,6 @@ public sealed class TranslationRuntimeDependencies
     public TranslationRuntimeDependencies(
         IWindowsBuildGate windowsBuildGate,
         ISettingsStore settingsStore,
-        ISecretStore secretStore,
         IDriverManager driverManager,
         IAudioDeviceCatalog deviceCatalog,
         ITranslationAudioEngine audioEngine,
@@ -28,8 +27,6 @@ public sealed class TranslationRuntimeDependencies
             windowsBuildGate ?? throw new ArgumentNullException(nameof(windowsBuildGate));
         SettingsStore =
             settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
-        SecretStore =
-            secretStore ?? throw new ArgumentNullException(nameof(secretStore));
         DriverManager =
             driverManager ?? throw new ArgumentNullException(nameof(driverManager));
         DeviceCatalog =
@@ -47,8 +44,6 @@ public sealed class TranslationRuntimeDependencies
     public IWindowsBuildGate WindowsBuildGate { get; }
 
     public ISettingsStore SettingsStore { get; }
-
-    public ISecretStore SecretStore { get; }
 
     public IDriverManager DriverManager { get; }
 
@@ -722,20 +717,6 @@ public sealed class TranslationRuntime :
                     RecoveryAction.EditSettings));
             }
 
-            using (ISecretBuffer? secret =
-                   await _dependencies.SecretStore.LoadAsync(
-                       "translationApiKey",
-                       cancellationToken).ConfigureAwait(false))
-            {
-                if (secret is null || IsWhiteSpace(secret.Memory.Span))
-                {
-                    return StartOutcome.Failed(Error(
-                        ErrorCategory.Authentication,
-                        "translationRuntime.secretMissing",
-                        RecoveryAction.UpdateApiKey));
-                }
-            }
-
             DriverCompatibility driver =
                 await _dependencies.DriverManager.CheckCompatibilityAsync(
                     cancellationToken).ConfigureAwait(false);
@@ -763,24 +744,16 @@ public sealed class TranslationRuntime :
                     RecoveryAction.SelectDevice));
             }
 
-            await _dependencies.AudioEngine.StartAsync(
-                new AudioEngineConfiguration(
-                    selection.Input.Id,
-                    selection.Output.Id,
-                    sampleRate: 24_000,
-                    channelCount: 1),
-                cancellationToken).ConfigureAwait(false);
-            audioStarted = true;
-            cancellationToken.ThrowIfCancellationRequested();
-
 #pragma warning disable CA2000 // Ownership transfers into StartOutcome or rollback.
             inbound = CreateSupervisor(
                 AudioDirection.Inbound,
                 generation,
-                new TranslationSessionConfiguration(
-                    settings.TargetLanguage,
-                    settings.SourceLanguage,
-                    settings.Model));
+                new TranslationSessionRequest(
+                    settings.BaseUri,
+                    new TranslationSessionConfiguration(
+                        settings.TargetLanguage,
+                        settings.SourceLanguage,
+                        settings.Model)));
 #pragma warning restore CA2000
             RuntimeError? inboundError =
                 await inbound.ConnectAsync(cancellationToken)
@@ -805,10 +778,12 @@ public sealed class TranslationRuntime :
                 outbound = CreateSupervisor(
                     AudioDirection.Outbound,
                     generation,
-                    new TranslationSessionConfiguration(
-                        settings.SourceLanguage,
-                        settings.TargetLanguage,
-                        settings.Model));
+                    new TranslationSessionRequest(
+                        settings.BaseUri,
+                        new TranslationSessionConfiguration(
+                            settings.SourceLanguage,
+                            settings.TargetLanguage,
+                            settings.Model)));
 #pragma warning restore CA2000
                 outboundError = await outbound.ConnectAsync(cancellationToken)
                     .ConfigureAwait(false);
@@ -821,6 +796,14 @@ public sealed class TranslationRuntime :
                 }
             }
 
+            await _dependencies.AudioEngine.StartAsync(
+                new AudioEngineConfiguration(
+                    selection.Input.Id,
+                    selection.Output.Id,
+                    sampleRate: 24_000,
+                    channelCount: 1),
+                cancellationToken).ConfigureAwait(false);
+            audioStarted = true;
             cancellationToken.ThrowIfCancellationRequested();
             return new StartOutcome(
                 settings,
@@ -1975,13 +1958,13 @@ public sealed class TranslationRuntime :
     private ChannelSupervisor CreateSupervisor(
         AudioDirection direction,
         long generation,
-        TranslationSessionConfiguration configuration)
+        TranslationSessionRequest request)
     {
         return new ChannelSupervisor(
             direction,
             generation,
             _dependencies.SessionFactory,
-            configuration,
+            request,
             _dependencies.Clock,
             PostSupervisorAsync);
     }
@@ -2397,24 +2380,6 @@ public sealed class TranslationRuntime :
 #pragma warning restore CA1031
         {
         }
-    }
-
-    private static bool IsWhiteSpace(ReadOnlySpan<char> secret)
-    {
-        if (secret.IsEmpty)
-        {
-            return true;
-        }
-
-        foreach (char character in secret)
-        {
-            if (!char.IsWhiteSpace(character))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static DeviceSelection? SelectDevices(

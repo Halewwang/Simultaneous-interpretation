@@ -152,13 +152,10 @@ public sealed class ProductionCompositionTests
             Assert.IsInstanceOfType<WindowsSettingsStore>(
                 bundle.RuntimeDependencies.SettingsStore);
             Assert.IsInstanceOfType<CredentialManagerSecretStore>(
-                bundle.RuntimeDependencies.SecretStore);
+                bundle.SecretStore);
             Assert.AreSame(
                 (object)bundle.RuntimeDependencies.SettingsStore,
                 (object?)bundle.ProductSettings);
-            Assert.AreSame(
-                bundle.RuntimeDependencies.SecretStore,
-                bundle.SecretStore);
         }
         finally
         {
@@ -271,7 +268,6 @@ public sealed class ProductionCompositionTests
         return new TranslationRuntimeDependencies(
             new PassingBuildGate(),
             new MissingSettingsStore(),
-            new MissingSecretStore(),
             new CompatibleDriverManager(),
             new EmptyDeviceCatalog(),
             new NoOpAudioEngine(),
@@ -289,7 +285,6 @@ public sealed class ProductionCompositionTests
         return new TranslationRuntimeDependencies(
             new PassingBuildGate(),
             new MissingSettingsStore(),
-            new MissingSecretStore(),
             driverManager,
             new EmptyDeviceCatalog(),
             audioEngine,
@@ -449,31 +444,6 @@ public sealed class ProductionCompositionTests
         }
     }
 
-    private sealed class MissingSecretStore : ISecretStore
-    {
-        public ValueTask<ISecretBuffer?> LoadAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.FromResult<ISecretBuffer?>(null);
-        }
-
-        public ValueTask SaveAsync(
-            string name,
-            ReadOnlyMemory<char> secret,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask DeleteAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-    }
-
     private sealed class CompatibleDriverManager : IDriverManager
     {
         public Task<DriverCompatibility> CheckCompatibilityAsync(
@@ -614,7 +584,7 @@ public sealed class ProductionCompositionTests
         ITranslationSessionFactory
     {
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
             return ValueTask.FromException<ITranslationSession>(
@@ -629,7 +599,7 @@ public sealed class ProductionCompositionTests
         public int CreateCount { get; private set; }
 
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
             CreateCount++;

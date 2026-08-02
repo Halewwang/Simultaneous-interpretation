@@ -467,6 +467,7 @@ public sealed class WindowsSettingsStore :
         WindowsSettingsDocument current = Volatile.Read(ref _currentDocument);
         WindowsSettingsDocument updated = current with
         {
+            BaseUrl = settings.BaseUri.AbsoluteUri,
             ModelId = settings.Model,
             NativeLanguage =
                 WindowsProductSettings.SerializeLanguage(settings.SourceLanguage),
@@ -541,6 +542,7 @@ public sealed class WindowsSettingsStore :
         WindowsSettingsDocument settings)
     {
         return new RuntimeSettings(
+            new Uri(settings.BaseUrl, UriKind.Absolute),
             WindowsProductSettings.ParseLanguage(settings.NativeLanguage),
             WindowsProductSettings.ParseLanguage(settings.MeetingLanguage),
             settings.ModelId,

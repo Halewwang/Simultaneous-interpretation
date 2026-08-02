@@ -17,18 +17,15 @@ public sealed class TranslationRuntimeTests
     [
         "os",
         "settings",
-        "secret",
         "driver",
         "devices",
-        "audio.start",
         "session.inbound.create",
         "session.inbound.connect",
         "session.inbound.close",
-        "audio.stop",
     ];
 
     [TestMethod]
-    public async Task StartUsesRequiredOrderAndInboundFailureRollsBackAudio()
+    public async Task StartUsesRequiredOrderAndInboundFailureDoesNotStartAudio()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
         harness.InboundSession.ConnectError = Error(
@@ -354,6 +351,7 @@ public sealed class TranslationRuntimeTests
     {
         RuntimeHarness harness = RuntimeHarness.Create();
         harness.Settings = new RuntimeSettings(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
             LanguageCode.Zh,
             LanguageCode.Zh,
             "gpt-realtime-translate",
@@ -538,6 +536,7 @@ public sealed class TranslationRuntimeTests
     {
         RuntimeHarness harness = RuntimeHarness.Create();
         harness.Settings = new RuntimeSettings(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
             LanguageCode.Zh,
             LanguageCode.Zh,
             "gpt-realtime-translate",
@@ -970,25 +969,14 @@ public sealed class TranslationRuntimeTests
             ErrorCategory.Configuration,
             ["os", "settings"]).ConfigureAwait(false);
         await AssertStartFailureAsync(
-            harness => harness.SecretAvailable = false,
-            ErrorCategory.Authentication,
-            ["os", "settings", "secret"]).ConfigureAwait(false);
-        await AssertStartFailureAsync(
             harness => harness.DriverCompatibility =
                 new DriverCompatibility(false, "incompatible"),
             ErrorCategory.Driver,
-            ["os", "settings", "secret", "driver"]).ConfigureAwait(false);
+            ["os", "settings", "driver"]).ConfigureAwait(false);
         await AssertStartFailureAsync(
             harness => harness.DevicesAvailable = false,
             ErrorCategory.Device,
-            ["os", "settings", "secret", "driver", "devices"])
-            .ConfigureAwait(false);
-        await AssertStartFailureAsync(
-            harness => harness.AudioStartError = Error(
-                ErrorCategory.Device,
-                "test.audioStart"),
-            ErrorCategory.Device,
-            ["os", "settings", "secret", "driver", "devices", "audio.start"])
+            ["os", "settings", "driver", "devices"])
             .ConfigureAwait(false);
     }
 
@@ -1008,7 +996,7 @@ public sealed class TranslationRuntimeTests
 
         Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
 
-        Assert.AreEqual(2, harness.Factory.Requests.Count);
+        Assert.HasCount(2, harness.Factory.Requests);
         Assert.AreNotSame(
             harness.Factory.Requests[0],
             harness.Factory.Requests[1]);
@@ -1021,8 +1009,19 @@ public sealed class TranslationRuntimeTests
             "gpt-realtime-translate",
             harness.Factory.Requests[1].Configuration.Model);
         CollectionAssert.AreEqual(
-            ["os", "settings", "driver", "devices", "audio.start"],
-            harness.Trace.Take(5).ToArray());
+            new[]
+            {
+                "os",
+                "settings",
+                "driver",
+                "devices",
+                "session.inbound.create",
+                "session.inbound.connect",
+                "session.outbound.create",
+                "session.outbound.connect",
+                "audio.start",
+            },
+            harness.Trace.Take(9).ToArray());
     }
 
     [TestMethod]
@@ -1037,7 +1036,7 @@ public sealed class TranslationRuntimeTests
             Assert.AreEqual(ErrorCategory.Driver, error?.Category);
             Assert.AreEqual(0, missingDriver.SessionCreateCount);
             CollectionAssert.AreEqual(
-                ["os", "settings", "driver"],
+                new[] { "os", "settings", "driver" },
                 missingDriver.Trace.ToArray());
         }
 
@@ -1050,9 +1049,28 @@ public sealed class TranslationRuntimeTests
             Assert.AreEqual(ErrorCategory.Device, error?.Category);
             Assert.AreEqual(0, missingEndpoints.SessionCreateCount);
             CollectionAssert.AreEqual(
-                ["os", "settings", "driver", "devices"],
+                new[] { "os", "settings", "driver", "devices" },
                 missingEndpoints.Trace.ToArray());
         }
+    }
+
+    [TestMethod]
+    public async Task FactoryAuthenticationFailureUsesTheStableRuntimeCategory()
+    {
+        RuntimeHarness harness = RuntimeHarness.Create();
+        harness.Factory.CreateError = Error(
+            ErrorCategory.Authentication,
+            "translationSessionFactory.apiKeyMissing");
+        await using TranslationRuntime runtime = harness.CreateRuntime();
+
+        RuntimeError? error = await runtime.StartAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(ErrorCategory.Authentication, error?.Category);
+        Assert.AreEqual("translationSessionFactory.apiKeyMissing", error?.Code);
+        CollectionAssert.AreEqual(
+            new[] { "os", "settings", "driver", "devices", "session.inbound.create" },
+            harness.Trace.ToArray());
+        Assert.AreEqual(0, harness.AudioStartCount);
     }
 
     [TestMethod]
@@ -1064,8 +1082,6 @@ public sealed class TranslationRuntimeTests
             "test.inboundAuthentication");
         harness.InboundSession.CloseException =
             new NotSupportedException("close probe");
-        harness.Audio.StopException =
-            new NotSupportedException("rollback audio stop probe");
         TranslationRuntime runtime = harness.CreateRuntime();
         try
         {
@@ -1074,7 +1090,7 @@ public sealed class TranslationRuntimeTests
 
             Assert.AreEqual(ErrorCategory.Authentication, error?.Category);
             Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
-            Assert.AreEqual(1, harness.AudioStopCount);
+            Assert.AreEqual(0, harness.AudioStopCount);
         }
         finally
         {
@@ -1131,27 +1147,6 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
-    public async Task RollbackAudioStopFailureQuarantinesRetryWithoutAnotherNativeStart()
-    {
-        RuntimeHarness harness = RuntimeHarness.Create();
-        harness.InboundSession.ConnectError = Error(
-            ErrorCategory.Authentication,
-            "test.inboundAuthentication");
-        harness.Audio.StopException =
-            new NotSupportedException("rollback audio stop probe");
-        await using TranslationRuntime runtime = harness.CreateRuntime();
-
-        RuntimeError? first = await runtime.StartAsync().ConfigureAwait(false);
-        RuntimeError? retry = await runtime.StartAsync().ConfigureAwait(false);
-
-        Assert.AreEqual(ErrorCategory.Authentication, first?.Category);
-        Assert.AreEqual(
-            "translationRuntime.nativeCleanupQuarantined",
-            retry?.Code);
-        Assert.AreEqual(1, harness.AudioStartCount);
-    }
-
-    [TestMethod]
     public async Task StopCompletesWithStableErrorWhenSessionCloseThrows()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
@@ -1171,16 +1166,12 @@ public sealed class TranslationRuntimeTests
     }
 
     [TestMethod]
-    public async Task SecretIsDisposedBeforeDriverAndCapturedPcmOwnersReleaseAfterSend()
+    public async Task CapturedPcmOwnersReleaseAfterSend()
     {
         RuntimeHarness harness = RuntimeHarness.Create();
         await using TranslationRuntime runtime = harness.CreateRuntime();
 
         Assert.IsNull(await runtime.StartAsync().ConfigureAwait(false));
-        Assert.AreEqual(1, harness.SecretDisposeCount);
-        Assert.IsGreaterThan(
-            Array.IndexOf(harness.Trace.ToArray(), "secret"),
-            Array.IndexOf(harness.Trace.ToArray(), "driver"));
         TrackingPcmLease inboundLease = new([1, 0, 2, 0]);
         TrackingPcmLease outboundLease = new([3, 0, 4, 0]);
         harness.Audio.Emit(AudioEngineEvent.CreatePcm(
@@ -1651,6 +1642,7 @@ internal sealed class RuntimeHarness
     public ControlledAsyncGate DeviceRefreshGate { get; } = new();
 
     public RuntimeSettings? Settings { get; set; } = new(
+        new Uri("https://translation.example.test/v1", UriKind.Absolute),
         LanguageCode.Zh,
         LanguageCode.En,
         "gpt-realtime-translate",
@@ -1658,8 +1650,6 @@ internal sealed class RuntimeHarness
         outboundBypass: false);
 
     public RuntimeError? OsError { get; set; }
-
-    public bool SecretAvailable { get; set; } = true;
 
     public DriverCompatibility DriverCompatibility { get; set; } =
         new(true, "compatible");
@@ -1671,9 +1661,6 @@ internal sealed class RuntimeHarness
         get => Audio.StartError;
         set => Audio.StartError = value;
     }
-
-    public int SecretDisposeCount =>
-        Volatile.Read(ref _secretDisposeCount);
 
     public int SettingsLoadCount { get; private set; }
 
@@ -1695,8 +1682,6 @@ internal sealed class RuntimeHarness
 
     public IRuntimeLog RuntimeLog { get; set; } = new NullRuntimeLog();
 
-    private int _secretDisposeCount;
-
     public static RuntimeHarness Create()
     {
         return new RuntimeHarness();
@@ -1710,7 +1695,6 @@ internal sealed class RuntimeHarness
         TranslationRuntimeDependencies dependencies = new(
             new FakeWindowsBuildGate(this),
             new FakeSettingsStore(this),
-            new FakeSecretStore(this),
             new FakeDriverManager(this),
             new FakeDeviceCatalog(this),
             Audio,
@@ -1761,58 +1745,6 @@ internal sealed class RuntimeHarness
             CancellationToken cancellationToken)
         {
             return ValueTask.CompletedTask;
-        }
-    }
-
-    internal sealed class FakeSecretStore(
-        RuntimeHarness owner) : ISecretStore
-    {
-        public ValueTask<ISecretBuffer?> LoadAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            owner.Trace.Enqueue("secret");
-            if (!owner.SecretAvailable)
-            {
-                return ValueTask.FromResult<ISecretBuffer?>(null);
-            }
-#pragma warning disable CA2000 // Ownership transfers to the runtime through ISecretBuffer.
-            FakeSecretBuffer secret = new(owner);
-#pragma warning restore CA2000
-            return ValueTask.FromResult<ISecretBuffer?>(secret);
-        }
-
-        public ValueTask SaveAsync(
-            string name,
-            ReadOnlyMemory<char> secret,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask DeleteAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    internal sealed class FakeSecretBuffer(RuntimeHarness owner) : ISecretBuffer
-    {
-        private char[]? _secret = "test-secret".ToCharArray();
-
-        public ReadOnlyMemory<char> Memory =>
-            _secret ?? throw new ObjectDisposedException(nameof(FakeSecretBuffer));
-
-        public void Dispose()
-        {
-            char[]? secret = Interlocked.Exchange(ref _secret, null);
-            if (secret is not null)
-            {
-                Array.Clear(secret);
-                Interlocked.Increment(ref owner._secretDisposeCount);
-            }
         }
     }
 
@@ -2092,9 +2024,14 @@ internal sealed class RuntimeHarness
     {
         private readonly ConcurrentQueue<FakeTranslationSession> _sessions =
             new([owner.InboundSession, owner.OutboundSession]);
+        private readonly ConcurrentQueue<TranslationSessionRequest> _requests = new();
         private int _count;
 
         public int CreateCount => Volatile.Read(ref _count);
+
+        public TranslationSessionRequest[] Requests => _requests.ToArray();
+
+        public RuntimeError? CreateError { get; set; }
 
         public void Queue(params FakeTranslationSession[] sessions)
         {
@@ -2105,12 +2042,18 @@ internal sealed class RuntimeHarness
         }
 
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(request);
             int count = Interlocked.Increment(ref _count);
             string direction = (count & 1) == 1 ? "inbound" : "outbound";
             owner.Trace.Enqueue($"session.{direction}.create");
+            _requests.Enqueue(request);
+            if (CreateError is not null)
+            {
+                throw new RuntimeOperationException(CreateError);
+            }
 #pragma warning disable CA2000 // Ownership transfers from the fake queue into the runtime supervisor.
             if (!_sessions.TryDequeue(out FakeTranslationSession? session))
 #pragma warning restore CA2000

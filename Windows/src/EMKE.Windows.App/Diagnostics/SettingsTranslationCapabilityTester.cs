@@ -42,23 +42,27 @@ internal sealed class SettingsTranslationCapabilityTester
         }
     }
 
-    internal static TranslationSessionConfiguration Inbound(
+    internal static TranslationSessionRequest Inbound(
         WindowsProductSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        return new TranslationSessionConfiguration(
-            settings.MeetingLanguage,
-            settings.NativeLanguage,
-            settings.ModelId);
+        return new TranslationSessionRequest(
+            settings.BaseUri,
+            new TranslationSessionConfiguration(
+                settings.MeetingLanguage,
+                settings.NativeLanguage,
+                settings.ModelId));
     }
 
-    internal static TranslationSessionConfiguration Outbound(
+    internal static TranslationSessionRequest Outbound(
         WindowsProductSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        return new TranslationSessionConfiguration(
-            settings.NativeLanguage,
-            settings.MeetingLanguage,
-            settings.ModelId);
+        return new TranslationSessionRequest(
+            settings.BaseUri,
+            new TranslationSessionConfiguration(
+                settings.NativeLanguage,
+                settings.MeetingLanguage,
+                settings.ModelId));
     }
 }

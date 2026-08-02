@@ -93,7 +93,7 @@ internal sealed class AppCoreAdapterBundle : IAsyncDisposable
             ?? throw new ArgumentNullException(nameof(ownedAdapters));
         ProductSettings = productSettings
             ?? runtimeDependencies.SettingsStore as IWindowsProductSettingsStore;
-        SecretStore = secretStore ?? runtimeDependencies.SecretStore;
+        SecretStore = secretStore;
     }
 
     public TranslationRuntimeDependencies RuntimeDependencies { get; }
@@ -102,7 +102,7 @@ internal sealed class AppCoreAdapterBundle : IAsyncDisposable
 
     public IWindowsProductSettingsStore? ProductSettings { get; }
 
-    public ISecretStore SecretStore { get; }
+    public ISecretStore? SecretStore { get; }
 
     public ValueTask DisposeAsync()
     {

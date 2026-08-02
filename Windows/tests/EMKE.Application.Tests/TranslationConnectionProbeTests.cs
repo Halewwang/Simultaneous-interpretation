@@ -27,7 +27,7 @@ public sealed class TranslationConnectionProbeTests
             TimeSpan.FromMilliseconds(250));
 
         TranslationCompatibilityReport report =
-            await probe.RunAsync(Inbound, Outbound, CancellationToken.None);
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
 
         CollectionAssert.AreEqual(
             new[]
@@ -70,7 +70,7 @@ public sealed class TranslationConnectionProbeTests
             TimeSpan.FromMilliseconds(250));
 
         TranslationCompatibilityReport report =
-            await probe.RunAsync(Inbound, Outbound, CancellationToken.None);
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
 
         Assert.AreEqual(
             TranslationCapabilityOutcome.Passed,
@@ -97,7 +97,7 @@ public sealed class TranslationConnectionProbeTests
             TimeSpan.FromMilliseconds(250));
 
         Task<TranslationCompatibilityReport> running =
-            probe.RunAsync(Inbound, Outbound, CancellationToken.None);
+            probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
         await gate.BothEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
         gate.Release.TrySetResult();
         TranslationCompatibilityReport report = await running;
@@ -119,7 +119,7 @@ public sealed class TranslationConnectionProbeTests
             TimeSpan.FromMilliseconds(40));
 
         TranslationCompatibilityReport report =
-            await probe.RunAsync(Inbound, Outbound, CancellationToken.None);
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
 
         Assert.AreEqual(
             TranslationCapabilityOutcome.Failed,
@@ -141,7 +141,7 @@ public sealed class TranslationConnectionProbeTests
             TimeSpan.FromMilliseconds(250));
 
         TranslationCompatibilityReport report =
-            await probe.RunAsync(Inbound, Outbound, CancellationToken.None);
+            await probe.RunAsync(Request(Inbound), Request(Outbound), CancellationToken.None);
 
         Assert.AreEqual(
             TranslationCapabilityOutcome.Failed,
@@ -175,9 +175,17 @@ public sealed class TranslationConnectionProbeTests
         Assert.AreEqual(
             TranslationCapabilityOutcome.Passed,
             report.Stage("dualSessionConcurrency").Outcome);
-        Assert.AreEqual(2, factory.Requests.Count);
+        Assert.HasCount(2, factory.Requests);
         Assert.AreSame(inboundRequest, factory.Requests[0]);
         Assert.AreSame(outboundRequest, factory.Requests[1]);
+    }
+
+    private static TranslationSessionRequest Request(
+        TranslationSessionConfiguration configuration)
+    {
+        return new TranslationSessionRequest(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
+            configuration);
     }
 
     private sealed class QueueSessionFactory(
@@ -185,12 +193,17 @@ public sealed class TranslationConnectionProbeTests
     {
         private readonly ConcurrentQueue<ITranslationSession> _sessions =
             new(sessions);
+        private readonly ConcurrentQueue<TranslationSessionRequest> _requests = new();
+
+        public TranslationSessionRequest[] Requests => _requests.ToArray();
 
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(request);
             cancellationToken.ThrowIfCancellationRequested();
+            _requests.Enqueue(request);
             if (!_sessions.TryDequeue(out ITranslationSession? session))
             {
                 throw new InvalidOperationException("No probe session remains.");

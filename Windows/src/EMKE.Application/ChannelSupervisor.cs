@@ -156,7 +156,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
     private readonly AudioDirection _direction;
     private readonly long _generation;
     private readonly ITranslationSessionFactory _factory;
-    private readonly TranslationSessionConfiguration _configuration;
+    private readonly TranslationSessionRequest _request;
     private readonly IClock _clock;
     private readonly Func<ChannelSupervisorNotification, ValueTask> _notify;
     private readonly CancellationTokenSource _lifetime = new();
@@ -179,7 +179,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
         AudioDirection direction,
         long generation,
         ITranslationSessionFactory factory,
-        TranslationSessionConfiguration configuration,
+        TranslationSessionRequest request,
         IClock clock,
         Func<ChannelSupervisorNotification, ValueTask> notify)
     {
@@ -191,8 +191,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
         _direction = direction;
         _generation = generation;
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
-        _configuration =
-            configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _request = request ?? throw new ArgumentNullException(nameof(request));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _notify = notify ?? throw new ArgumentNullException(nameof(notify));
     }
@@ -359,7 +358,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
         try
         {
             created = await _factory.CreateAsync(
-                _configuration,
+                _request,
                 _lifetime.Token).ConfigureAwait(false);
             await created.ConnectAsync(_lifetime.Token).ConfigureAwait(false);
             if (!TryInstallSession(created))
@@ -560,7 +559,7 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
             try
             {
                 created = await _factory.CreateAsync(
-                    _configuration,
+                    _request,
                     _reconnectCancellation.Token).ConfigureAwait(false);
                 await created.ConnectAsync(_reconnectCancellation.Token)
                     .ConfigureAwait(false);

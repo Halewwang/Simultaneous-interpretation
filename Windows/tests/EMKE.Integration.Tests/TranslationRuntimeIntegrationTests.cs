@@ -19,6 +19,7 @@ public sealed class TranslationRuntimeIntegrationTests
             await MockTranslationServer.StartAsync().ConfigureAwait(false);
         TestAudioEngine audio = new();
         RuntimeSettings bypassSettings = new(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
             LanguageCode.Zh,
             LanguageCode.En,
             "gpt-realtime-translate",
@@ -175,6 +176,7 @@ public sealed class TranslationRuntimeIntegrationTests
         await using MockTranslationServer server =
             await MockTranslationServer.StartAsync().ConfigureAwait(false);
         RuntimeSettings settings = new(
+            new Uri("https://translation.example.test/v1", UriKind.Absolute),
             LanguageCode.Zh,
             LanguageCode.Zh,
             "gpt-realtime-translate",
@@ -496,7 +498,6 @@ public sealed class TranslationRuntimeIntegrationTests
         TranslationRuntimeDependencies dependencies = new(
             new PassingWindowsBuildGate(),
             new FixedSettingsStore(settings),
-            new PlaceholderSecretStore(),
             new CompatibleDriverManager(),
             new PhysicalDeviceCatalog(),
             audio,
@@ -554,6 +555,7 @@ public sealed class TranslationRuntimeIntegrationTests
         public FixedSettingsStore(RuntimeSettings? settings)
         {
             _settings = settings ?? new RuntimeSettings(
+                new Uri("https://translation.example.test/v1", UriKind.Absolute),
                 LanguageCode.Zh,
                 LanguageCode.En,
                 "gpt-realtime-translate",
@@ -572,53 +574,6 @@ public sealed class TranslationRuntimeIntegrationTests
             CancellationToken cancellationToken)
         {
             return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class PlaceholderSecretStore : ISecretStore
-    {
-        public ValueTask<ISecretBuffer?> LoadAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-#pragma warning disable CA2000 // Ownership transfers to the runtime.
-            ISecretBuffer placeholder = new PlaceholderSecretBuffer();
-#pragma warning restore CA2000
-            return ValueTask.FromResult<ISecretBuffer?>(placeholder);
-        }
-
-        public ValueTask SaveAsync(
-            string name,
-            ReadOnlyMemory<char> secret,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask DeleteAsync(
-            string name,
-            CancellationToken cancellationToken)
-        {
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class PlaceholderSecretBuffer : ISecretBuffer
-    {
-        private char[]? _placeholder = "local-test-placeholder".ToCharArray();
-
-        public ReadOnlyMemory<char> Memory =>
-            _placeholder
-            ?? throw new ObjectDisposedException(nameof(PlaceholderSecretBuffer));
-
-        public void Dispose()
-        {
-            char[]? placeholder =
-                Interlocked.Exchange(ref _placeholder, null);
-            if (placeholder is not null)
-            {
-                Array.Clear(placeholder);
-            }
         }
     }
 
@@ -661,9 +616,11 @@ public sealed class TranslationRuntimeIntegrationTests
         : ITranslationSessionFactory
     {
         public ValueTask<ITranslationSession> CreateAsync(
-            TranslationSessionConfiguration configuration,
+            TranslationSessionRequest request,
             CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(request);
+            TranslationSessionConfiguration configuration = request.Configuration;
 #pragma warning disable CA2000 // Ownership transfers to ChannelSupervisor.
             ITranslationSession session = new TranslationSession(
                 server.ResolveUri(configuration.Model),

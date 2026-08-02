@@ -33,8 +33,8 @@ internal sealed class DiagnosticsViewModel :
 {
     private readonly IWindowsAudioDiagnostics _audio;
     private readonly ITranslationConnectionProbe _connectionProbe;
-    private readonly TranslationSessionConfiguration _inbound;
-    private readonly TranslationSessionConfiguration _outbound;
+    private readonly TranslationSessionRequest _inbound;
+    private readonly TranslationSessionRequest _outbound;
     private readonly LocalizationService? _localization;
     private readonly CancellationTokenSource _lifetime = new();
     private IReadOnlyList<DiagnosticEndpointRow> _endpoints = [];
@@ -51,8 +51,8 @@ internal sealed class DiagnosticsViewModel :
     public DiagnosticsViewModel(
         IWindowsAudioDiagnostics audio,
         ITranslationConnectionProbe connectionProbe,
-        TranslationSessionConfiguration inbound,
-        TranslationSessionConfiguration outbound,
+        TranslationSessionRequest inbound,
+        TranslationSessionRequest outbound,
         LocalizationService? localization = null)
     {
         _audio = audio ?? throw new ArgumentNullException(nameof(audio));

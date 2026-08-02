@@ -15,11 +15,19 @@ namespace EMKE.Windows.App.Tests;
 [TestClass]
 public sealed class DiagnosticsViewModelTests
 {
-    private static readonly TranslationSessionConfiguration Inbound =
-        new(LanguageCode.En, LanguageCode.Zh, "translation-model");
+    private static readonly TranslationSessionRequest Inbound = new(
+        new Uri("https://translation.example.test/v1", UriKind.Absolute),
+        new TranslationSessionConfiguration(
+            LanguageCode.En,
+            LanguageCode.Zh,
+            "translation-model"));
 
-    private static readonly TranslationSessionConfiguration Outbound =
-        new(LanguageCode.Zh, LanguageCode.En, "translation-model");
+    private static readonly TranslationSessionRequest Outbound = new(
+        new Uri("https://translation.example.test/v1", UriKind.Absolute),
+        new TranslationSessionConfiguration(
+            LanguageCode.Zh,
+            LanguageCode.En,
+            "translation-model"));
 
     [TestMethod]
     public async Task EndpointRowsExposeFriendlyNameFormatRoleAndOnlyEightCharacterHash()
@@ -170,13 +178,13 @@ public sealed class DiagnosticsViewModelTests
     {
         public int CallCount { get; private set; }
 
-        public TranslationSessionConfiguration? Inbound { get; private set; }
+        public TranslationSessionRequest? Inbound { get; private set; }
 
-        public TranslationSessionConfiguration? Outbound { get; private set; }
+        public TranslationSessionRequest? Outbound { get; private set; }
 
         public Task<TranslationCompatibilityReport> RunAsync(
-            TranslationSessionConfiguration inbound,
-            TranslationSessionConfiguration outbound,
+            TranslationSessionRequest inbound,
+            TranslationSessionRequest outbound,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
