@@ -4,6 +4,10 @@ using EMKE.Platform.Native;
 
 namespace EMKE.Integration.Tests;
 
+#pragma warning disable CA1515 // MSTest requires a discoverable public test class.
+#pragma warning disable CA2007 // MSTest owns the test synchronization context.
+#pragma warning disable MSTEST0037 // These assertions intentionally verify scalar counts.
+
 [TestClass]
 public sealed class WindowsAudioDeviceCatalogTests
 {
@@ -99,7 +103,7 @@ public sealed class WindowsAudioDeviceCatalogTests
     [TestMethod]
     public async Task PropagatesNativeFailureAsTypedExceptionAndHonorsPreCancelledToken()
     {
-        CatalogNativeAudioApi native = new { CountStatus = NativeAudioStatus.DeviceMissing };
+        CatalogNativeAudioApi native = new() { CountStatus = NativeAudioStatus.DeviceMissing };
         WindowsAudioDeviceCatalog catalog = new(native);
 
         NativeAudioException exception = await Assert.ThrowsExactlyAsync<NativeAudioException>(
@@ -117,7 +121,7 @@ public sealed class WindowsAudioDeviceCatalogTests
     public async Task HonorsCancellationBetweenCountAndFill()
     {
         using CancellationTokenSource cancellation = new();
-        CatalogNativeAudioApi native = new { AfterCount = cancellation.Cancel };
+        CatalogNativeAudioApi native = new() { AfterCount = () => cancellation.Cancel() };
         native.Items.AddRange(CompleteCatalog());
         WindowsAudioDeviceCatalog catalog = new(native);
 
@@ -159,18 +163,12 @@ public sealed class WindowsAudioDeviceCatalogTests
         result.Size = checked((uint)Marshal.SizeOf<NativeAudioEndpointDescriptorV1>());
         result.Direction = (uint)direction;
         result.Flags = (uint)flags;
-        fixed (ushort* buffer = result.Id)
-        {
-            WriteTerminated(buffer, NativeAudioConstants.EndpointIdCapacity, id);
-        }
-        fixed (ushort* buffer = result.Name)
-        {
-            WriteTerminated(buffer, NativeAudioConstants.EndpointNameCapacity, name);
-        }
-        fixed (ushort* buffer = result.Role)
-        {
-            WriteTerminated(buffer, NativeAudioConstants.EndpointRoleCapacity, role);
-        }
+        ushort* idBuffer = result.Id;
+        WriteTerminated(idBuffer, NativeAudioConstants.EndpointIdCapacity, id);
+        ushort* nameBuffer = result.Name;
+        WriteTerminated(nameBuffer, NativeAudioConstants.EndpointNameCapacity, name);
+        ushort* roleBuffer = result.Role;
+        WriteTerminated(roleBuffer, NativeAudioConstants.EndpointRoleCapacity, role);
         return result;
     }
 
@@ -185,10 +183,8 @@ public sealed class WindowsAudioDeviceCatalogTests
     private static unsafe void MakeNameUnterminated(
         ref NativeAudioEndpointDescriptorV1 descriptor)
     {
-        fixed (ushort* buffer = descriptor.Name)
-        {
-            FillWithoutTerminator(buffer, NativeAudioConstants.EndpointNameCapacity);
-        }
+        ushort* buffer = descriptor.Name;
+        FillWithoutTerminator(buffer, NativeAudioConstants.EndpointNameCapacity);
     }
 
     private static unsafe void WriteTerminated(ushort* buffer, int capacity, string value)
