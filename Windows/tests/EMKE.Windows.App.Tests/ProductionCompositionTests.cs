@@ -196,10 +196,18 @@ public sealed class ProductionCompositionTests
                 "Bootstrap",
                 "ProductionAppAdapterFactory.cs")));
 
-        StringAssert.DoesNotContain(source, "PendingAudioDeviceCatalog");
-        StringAssert.DoesNotContain(source, "PendingTranslationSessionFactory");
-        StringAssert.DoesNotContain(source, "PendingLanguageClassifier");
-        StringAssert.DoesNotContain(source, "composition is not available");
+        Assert.IsFalse(source.Contains(
+            "PendingAudioDeviceCatalog",
+            StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains(
+            "PendingTranslationSessionFactory",
+            StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains(
+            "PendingLanguageClassifier",
+            StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains(
+            "composition is not available",
+            StringComparison.Ordinal));
     }
 
     [TestMethod]
