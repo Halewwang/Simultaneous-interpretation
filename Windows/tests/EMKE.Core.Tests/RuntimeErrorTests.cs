@@ -69,6 +69,60 @@ public sealed class RuntimeErrorTests
     }
 
     [TestMethod]
+    public void ConstructorAdmitsOnlyStructuredDiagnosticFields()
+    {
+        Dictionary<string, string> safe = new()
+        {
+            ["build"] = "26200",
+            ["driverVersion"] = "1.2.3.4",
+            ["endpointRole"] = "meetingMicrophoneCapture",
+            ["retryCount"] = "5",
+            ["duration"] = "250",
+        };
+
+        RuntimeError error = new(
+            ErrorCategory.Driver,
+            "translationRuntime.driverIncompatible",
+            safe,
+            RecoveryAction.InstallDriver);
+
+        Assert.HasCount(5, error.Parameters);
+        CollectionAssert.AreEquivalent(
+            new[]
+            {
+                "build",
+                "driverVersion",
+                "endpointRole",
+                "retryCount",
+                "duration",
+            },
+            error.Parameters.Keys.ToArray());
+    }
+
+    [TestMethod]
+    [DataRow("detail", "Bearer opaque-token-that-is-not-an-sk-key")]
+    [DataRow("endpointId", "{0.0.0.00000000}.{physical-device-identifier}")]
+    [DataRow("endpointRole", "meetingMicrophoneCapture?transcript=private words")]
+    [DataRow("driverVersion", "1.2.3?authorization=opaque-value")]
+    [DataRow("retryCount", "five")]
+    public void ConstructorRejectsUnstructuredOrUnapprovedDiagnosticValues(
+        string key,
+        string value)
+    {
+        Dictionary<string, string> parameters = new()
+        {
+            [key] = value,
+        };
+
+        Assert.ThrowsExactly<ArgumentException>(
+            () => new RuntimeError(
+                ErrorCategory.Network,
+                "translationRuntime.networkFailure",
+                parameters,
+                RecoveryAction.Retry));
+    }
+
+    [TestMethod]
     public void ConstructorRejectsEmptyCodeKeysAndNullValues()
     {
         Assert.ThrowsExactly<ArgumentException>(
