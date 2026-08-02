@@ -161,6 +161,27 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
+    public void VerifiedOutputAllowsReadOnlyVerificationWithFullSharing()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        using FileStream verificationReader = new(
+            result.OutputPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using StreamReader reader = new(verificationReader, Encoding.UTF8);
+
+        Assert.AreEqual("payload", reader.ReadToEnd());
+    }
+
+    [TestMethod]
     public void DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles()
     {
         using TemporaryDirectory temporary = new();

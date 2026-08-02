@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using EMKE.Setup;
 
@@ -252,6 +254,95 @@ public sealed class SetupPayloadVerifierTests
         string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(msixPath);
 
         Assert.AreEqual("CN=EMKE Internal Test", publisher);
+    }
+
+    [TestMethod]
+    public void MsixPublisherCanBeReadWhileExtractionOwnerLeaseIsHeld()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        byte[] msix = CreateMinimalMsix();
+        SetupPayload payload = PayloadForBytes(
+            "application-msix",
+            "fixture.msix",
+            msix,
+            SetupPayloadKind.Msix);
+        using MemoryStream msixSource = new(msix);
+        SetupExtractionResult extracted = extraction.CopyVerified(
+            payload.FileName,
+            msixSource,
+            payload);
+
+        string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(
+            extracted.OutputPath);
+
+        Assert.AreEqual("CN=EMKE Internal Test", publisher);
+    }
+
+    [TestMethod]
+    public void CertificateCanBeReadWhileExtractionOwnerLeaseIsHeld()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        using RSA key = RSA.Create(2048);
+        CertificateRequest request = new(
+            "CN=EMKE Internal Test",
+            key,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        using X509Certificate2 certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.UtcNow.AddMinutes(5));
+        byte[] certificateBytes = certificate.Export(X509ContentType.Cert);
+        SetupPayload payload = PayloadForBytes(
+            "application-certificate",
+            "fixture.cer",
+            certificateBytes,
+            SetupPayloadKind.Certificate);
+        using MemoryStream certificateSource = new(certificateBytes);
+        SetupExtractionResult extracted = extraction.CopyVerified(
+            payload.FileName,
+            certificateSource,
+            payload);
+
+        SetupCertificateEvidence evidence = WindowsSetupSignatureProbe.Instance
+            .ReadCertificate(extracted.OutputPath);
+
+        Assert.AreEqual("CN=EMKE Internal Test", evidence.Subject);
+        Assert.IsTrue(evidence.ValidityValid);
+    }
+
+    private static byte[] CreateMinimalMsix()
+    {
+        using MemoryStream bytes = new();
+        using (ZipArchive archive = new(bytes, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry entry = archive.CreateEntry("AppxManifest.xml");
+            using StreamWriter writer = new(entry.Open(), Encoding.UTF8);
+            writer.Write(
+                "<Package xmlns=\"http://schemas.microsoft.com/appx/manifest/foundation/windows10\">"
+                + "<Identity Name=\"EMKE.Translation.Internal\" "
+                + "Publisher=\"CN=EMKE Internal Test\" Version=\"0.2.0.0\" "
+                + "ProcessorArchitecture=\"x64\" />"
+                + "</Package>");
+        }
+        return bytes.ToArray();
+    }
+
+    private static SetupPayload PayloadForBytes(
+        string logicalName,
+        string fileName,
+        byte[] bytes,
+        SetupPayloadKind kind)
+    {
+        return new SetupPayload(
+            logicalName,
+            fileName,
+            bytes.LongLength,
+            Convert.ToHexStringLower(SHA256.HashData(bytes)),
+            kind);
     }
 
     private static ISetupPayloadSignatureVerifier TrustedSignatures()

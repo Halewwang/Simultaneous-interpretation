@@ -129,10 +129,10 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private SetupExtractionDirectory(string rootPath)
     {
         RootPath = rootPath;
-        SafeFileHandle? rootHandle = null;
+        SafeFileHandle rootHandle = OpenRootHandle(rootPath);
+        bool ownershipTransferred = false;
         try
         {
-            rootHandle = OpenRootHandle(rootPath);
             if (!TryReadIdentity(rootHandle, out FileIdentity identity)
                 || (identity.FileAttributes & FileAttributeReparsePoint) != 0
                 || !IsFinalResolvedPathEqual(rootHandle, rootPath))
@@ -142,19 +142,15 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
             _rootIdentity = identity;
             _rootHandle = rootHandle;
-            rootHandle = null;
-        }
-        catch
-        {
-            if (rootHandle is not null && !rootHandle.IsInvalid)
-            {
-                _ = TrySetDeleteDisposition(rootHandle);
-            }
-            throw;
+            ownershipTransferred = true;
         }
         finally
         {
-            rootHandle?.Dispose();
+            if (!ownershipTransferred)
+            {
+                _ = TrySetDeleteDisposition(rootHandle);
+                rootHandle.Dispose();
+            }
         }
     }
 

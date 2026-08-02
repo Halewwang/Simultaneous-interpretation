@@ -588,8 +588,23 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
         ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
         try
         {
+            byte[] certificateBytes;
+            using (FileStream certificateFile = new(
+                certificatePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (certificateFile.Length > int.MaxValue)
+                {
+                    throw new InvalidDataException("Certificate payload is too large.");
+                }
+
+                certificateBytes = new byte[checked((int)certificateFile.Length)];
+                certificateFile.ReadExactly(certificateBytes);
+            }
             using X509Certificate2 certificate = X509CertificateLoader
-                .LoadCertificateFromFile(certificatePath);
+                .LoadCertificate(certificateBytes);
             DateTimeOffset now = DateTimeOffset.UtcNow;
             return new SetupCertificateEvidence(
                 certificate.Subject,
@@ -618,7 +633,11 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
 
     internal static string ReadMsixPublisher(string msixPath)
     {
-        using FileStream file = File.OpenRead(msixPath);
+        using FileStream file = new(
+            msixPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
         using ZipArchive archive = new(file, ZipArchiveMode.Read, leaveOpen: false);
         ZipArchiveEntry entry = archive.GetEntry("AppxManifest.xml")
             ?? throw new InvalidDataException("MSIX identity manifest is missing.");
