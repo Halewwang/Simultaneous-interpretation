@@ -168,8 +168,12 @@ public sealed class WindowsAudioDeviceCatalogTests
     private static unsafe void MakeNameUnterminated(
         ref NativeAudioEndpointDescriptorV1 descriptor)
     {
-        NativeAudioEndpointDescriptorV1* pointer = &descriptor;
-        FillWithoutTerminator(pointer->Name, NativeAudioConstants.EndpointNameCapacity);
+        fixed (NativeAudioEndpointDescriptorV1* pointer = &descriptor)
+        {
+            FillWithoutTerminator(
+                pointer->Name,
+                NativeAudioConstants.EndpointNameCapacity);
+        }
     }
 
     private static unsafe void WriteTerminated(ushort* buffer, int capacity, string value)
