@@ -8,6 +8,15 @@ namespace EMKE.Core.Tests;
 [TestClass]
 public sealed class RuntimeErrorTests
 {
+    private static readonly string[] StructuredDiagnosticFieldNames =
+    [
+        "build",
+        "driverVersion",
+        "endpointRole",
+        "retryCount",
+        "duration",
+    ];
+
     [TestMethod]
     public void StableEnumsMatchSharedSchemaAndRoundTripExactly()
     {
@@ -88,14 +97,7 @@ public sealed class RuntimeErrorTests
 
         Assert.HasCount(5, error.Parameters);
         CollectionAssert.AreEquivalent(
-            new[]
-            {
-                "build",
-                "driverVersion",
-                "endpointRole",
-                "retryCount",
-                "duration",
-            },
+            StructuredDiagnosticFieldNames,
             error.Parameters.Keys.ToArray());
     }
 
