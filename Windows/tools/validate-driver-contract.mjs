@@ -166,6 +166,91 @@ function readXmlValue(project, name) {
   );
 }
 
+function readXmlAttributes(source, description) {
+  const attributes = new Map();
+  let offset = 0;
+  while (offset < source.length) {
+    const remaining = source.slice(offset);
+    const whitespace = remaining.match(/^\s+/);
+    if (whitespace !== null) {
+      offset += whitespace[0].length;
+      continue;
+    }
+    const attribute = remaining.match(
+      /^([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/,
+    );
+    if (attribute === null) {
+      throw new Error(`${description} contains malformed XML attributes.`);
+    }
+    const name = attribute[1].toLowerCase();
+    if (attributes.has(name)) {
+      throw new Error(`${description} repeats XML attribute ${attribute[1]}.`);
+    }
+    attributes.set(name, attribute[2] ?? attribute[3]);
+    offset += attribute[0].length;
+  }
+  return attributes;
+}
+
+function readDriverInfStamp(project) {
+  const activeProject = project.replace(/<!--[\s\S]*?-->/g, "");
+  if (activeProject.includes("<!--") || activeProject.includes("-->")) {
+    throw new Error("Driver project contains a malformed XML comment.");
+  }
+  const infItems = [];
+  const itemGroupPattern = /<ItemGroup\b([^>]*)>([\s\S]*?)<\/ItemGroup\s*>/gi;
+  for (const itemGroup of activeProject.matchAll(itemGroupPattern)) {
+    const groupAttributes = readXmlAttributes(
+      itemGroup[1],
+      "driver project ItemGroup",
+    );
+    const infPattern =
+      /<Inf\b([^>]*?)(?:\/\s*>|>([\s\S]*?)<\/Inf\s*>)/gi;
+    for (const infItem of itemGroup[2].matchAll(infPattern)) {
+      const attributes = readXmlAttributes(
+        infItem[1],
+        "driver project Inf item",
+      );
+      infItems.push({
+        include: attributes.get("include"),
+        condition: attributes.get("condition"),
+        parentCondition: groupAttributes.get("condition"),
+        body: infItem[2] ?? "",
+      });
+    }
+  }
+
+  const targetItems = infItems.filter(
+    (item) => item.include === "EMKE.VirtualAudio.inf",
+  );
+  if (targetItems.length !== 1) {
+    throw new Error(
+      "Driver project must contain exactly one Inf item whose Include is " +
+        `EMKE.VirtualAudio.inf; found ${targetItems.length}.`,
+    );
+  }
+  const target = targetItems[0];
+  if (target.parentCondition !== undefined || target.condition !== undefined) {
+    throw new Error(
+      "Driver project Inf stamp item and parent must be unconditional so the " +
+        "metadata is effective for Release|x64.",
+    );
+  }
+
+  const values = {};
+  for (const name of ["DateStamp", "TimeStamp", "KmdfVersionNumber"]) {
+    const projectValue = readXmlValue(activeProject, name);
+    const itemValue = readXmlValue(target.body, name);
+    if (projectValue !== itemValue) {
+      throw new Error(
+        `Driver project ${name} must belong to the EMKE.VirtualAudio.inf item.`,
+      );
+    }
+    values[name] = itemValue;
+  }
+  return values;
+}
+
 function parseActiveInfSections(inf) {
   const sections = new Map();
   let currentSection = null;
@@ -541,6 +626,8 @@ async function main() {
   }
   requireEqual(infKmdf, versionKmdf, "INF KMDF library version");
 
+  const driverInfStamp = readDriverInfStamp(project);
+
   requireEqual(
     readXmlValue(project, "EMKETargetOS"),
     "Windows10",
@@ -557,17 +644,17 @@ async function main() {
     "driver project KMDF minor version",
   );
   requireEqual(
-    readXmlValue(project, "DateStamp"),
+    driverInfStamp.DateStamp,
     "08/01/2026",
     "driver project INF date stamp",
   );
   requireEqual(
-    readXmlValue(project, "TimeStamp"),
+    driverInfStamp.TimeStamp,
     versionDriverVersion,
     "driver project INF version stamp",
   );
   requireEqual(
-    readXmlValue(project, "KmdfVersionNumber"),
+    driverInfStamp.KmdfVersionNumber,
     versionKmdf,
     "driver project INF KMDF stamp input",
   );
