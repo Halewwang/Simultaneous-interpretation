@@ -11,7 +11,7 @@ $installScript = Join-Path $toolsDirectory "install-test-driver.ps1"
 $uninstallScript = Join-Path $toolsDirectory "uninstall-test-driver.ps1"
 $script:failures = [System.Collections.Generic.List[string]]::new()
 $script:TargetHardwareId = "ROOT\EMKEVIRTUALAUDIO"
-$script:MinimumWindowsBuild = 26200
+$script:MinimumWindowsBuild = 19045
 
 function Import-LifecycleFunctions {
     param(
@@ -112,6 +112,30 @@ function Invoke-Case {
     }
 }
 
+function New-TestReleaseMetadata {
+    return [pscustomobject]@{
+        MinimumWindowsBuild = 19045
+        Architecture = "x64"
+        DriverPackageVersion = "1.0.0.2"
+        DriverAbiVersion = 1
+        DriverHardwareId = "ROOT\EMKEVIRTUALAUDIO"
+        DriverModelSection = "EMKE.NTamd64.10.0...19045"
+    }
+}
+
+function New-TestHostInfo {
+    param(
+        [int]$Build = 19045,
+        [string]$Architecture = "x64",
+        [int]$ProductType = 1
+    )
+    return [pscustomobject]@{
+        Build = $Build
+        Architecture = $Architecture
+        ProductType = $ProductType
+    }
+}
+
 function New-InstallPackageRecord {
     $directory = "C:\EMKE lab package; Write-Output INJECTED"
     return [pscustomobject]@{
@@ -184,10 +208,10 @@ function Set-SafeInstallDefaults {
     }
     Set-TestFunction -Name Get-DriverInfMetadata -Body {
         [pscustomobject]@{
-            DriverVer = "07/26/2026,1.0.0.1"
-            DriverVersion = "1.0.0.1"
+            DriverVer = "08/01/2026,1.0.0.2"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
-            ModelSection = "EMKE.NTamd64.10.0...26200"
+            ModelSection = "EMKE.NTamd64.10.0...19045"
             InstallSection = "EMKE_Install"
             HardwareId = "ROOT\EMKEVIRTUALAUDIO"
         }
@@ -201,7 +225,7 @@ function Set-SafeInstallDefaults {
         )
         [pscustomobject]@{
             InfName = "oem42.inf"
-            DriverVersion = "1.0.0.1"
+            DriverVersion = "1.0.0.2"
             ProviderName = "EMKE"
             PackageSha256 = "A" * 64
         }
@@ -242,6 +266,7 @@ function Invoke-InstallWithDefaults {
         -ExpectedPackageSha256 $Digest `
         -SmokePath "C:\Smoke Tools\EMKE.AudioSmoke.exe" `
         -ExpectedSmokeSha256 ("E" * 64) `
+        -ReleaseMetadata (New-TestReleaseMetadata) `
         -ConfirmInstall:$Confirm
 }
 
@@ -293,9 +318,9 @@ Invoke-Case -Name "invalid or unsigned catalog" -Action {
 Invoke-Case -Name "unsupported OS build" -Action {
     Import-LifecycleFunctions -Path $installScript
     Set-SafeInstallDefaults -UseRealPrerequisites
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 26199 }
+    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19044 }
     Set-TestFunction -Name Test-IsAdministrator -Body { $true }
-    Assert-Throws -Pattern "26200" -Action {
+    Assert-Throws -Pattern "19045" -Action {
         Invoke-InstallWithDefaults
     }
     if ($script:pnpCalls.Count -ne 0) {
@@ -303,10 +328,42 @@ Invoke-Case -Name "unsupported OS build" -Action {
     }
 }
 
+Invoke-Case -Name "Windows 10 workstation x64 floor matrix" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Set-TestFunction -Name Test-IsAdministrator -Body { $true }
+    $release = New-TestReleaseMetadata
+    Assert-Throws -Pattern "19045|build" -Action {
+        Assert-LabMachinePrerequisites `
+            -ReleaseMetadata $release `
+            -HostInfo (New-TestHostInfo -Build 19044)
+    }
+    Assert-LabMachinePrerequisites `
+        -ReleaseMetadata $release `
+        -HostInfo (New-TestHostInfo -Build 19045)
+}
+
+Invoke-Case -Name "non-workstation and non-x64 hosts" -Action {
+    Import-LifecycleFunctions -Path $installScript
+    Set-TestFunction -Name Test-IsAdministrator -Body { $true }
+    $release = New-TestReleaseMetadata
+    foreach ($hostInfo in @(
+        (New-TestHostInfo -Architecture "x86"),
+        (New-TestHostInfo -Architecture "ARM64"),
+        (New-TestHostInfo -ProductType 2),
+        (New-TestHostInfo -ProductType 3)
+    )) {
+        Assert-Throws -Pattern "x64|workstation|host" -Action {
+            Assert-LabMachinePrerequisites `
+                -ReleaseMetadata $release `
+                -HostInfo $hostInfo
+        }
+    }
+}
+
 Invoke-Case -Name "non-administrator" -Action {
     Import-LifecycleFunctions -Path $installScript
     Set-SafeInstallDefaults -UseRealPrerequisites
-    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 26200 }
+    Set-TestFunction -Name Get-WindowsBuildNumber -Body { 19045 }
     Set-TestFunction -Name Test-IsAdministrator -Body { $false }
     Assert-Throws -Pattern "administrator|elevat" -Action {
         Invoke-InstallWithDefaults

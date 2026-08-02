@@ -343,6 +343,17 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
     assert.match(result.stderr, mutation.error);
   }
 
+  const debugOnlyInfParent = desiredProject.replace(
+    /  <ItemGroup>\r?\n    <Inf Include="EMKE\.VirtualAudio\.inf">/,
+    '  <ItemGroup Condition="\'$(Configuration)|$(Platform)\'==' +
+      '\'Debug|x64\'">\n    <Inf Include="EMKE.VirtualAudio.inf">',
+  );
+  assert.notEqual(
+    debugOnlyInfParent,
+    desiredProject,
+    "Debug-only INF parent mutation must change LF and CRLF fixtures",
+  );
+
   const projectMutations = [
     {
       name: "commented-only KMDF stamp input",
@@ -377,11 +388,7 @@ test("resolved package validator rejects version, floor, and KMDF drift", async 
     },
     {
       name: "Debug-only INF stamp parent",
-      project: desiredProject.replace(
-        '  <ItemGroup>\n    <Inf Include="EMKE.VirtualAudio.inf">',
-        '  <ItemGroup Condition="\'$(Configuration)|$(Platform)\'==' +
-          '\'Debug|x64\'">\n    <Inf Include="EMKE.VirtualAudio.inf">',
-      ),
+      project: debugOnlyInfParent,
     },
     {
       name: "wrong INF stamp include",

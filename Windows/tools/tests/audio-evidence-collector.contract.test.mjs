@@ -42,7 +42,14 @@ test("collector rejects dot-source before changing caller state", async () => {
   );
   assert.match(source, /\$PSVersionTable\.PSVersion\.Major\s+-ne\s+7/);
   assert.match(source, /\$IsWindows/);
-  assert.match(source, /26200/);
+  assert.match(source, /resolve-version\.ps1/);
+  assert.match(source, /MinimumWindowsBuild/);
+  assert.match(source, /DriverPackageVersion/);
+  assert.match(source, /DriverAbiVersion/);
+  assert.match(source, /DriverHardwareId/);
+  assert.match(source, /ProductType/);
+  assert.doesNotMatch(source, /\b26200\b|\b1\.0\.0\.1\b/);
+  assert.doesNotMatch(source, /\$script:CollectorMinimumWindowsBuild\b/);
   assert.match(source, /OSArchitecture/);
   assert.match(source, /Architecture\]::X64/);
 
@@ -154,6 +161,9 @@ test("collector output is new atomic UTF-8 without mutation capability", async (
     /\bsigntool(?:\.exe)?\b/i,
     /\bbcdedit(?:\.exe)?\b/i,
     /\btestsigning\b/i,
+    /\bDisable-ComputerRestore\b/i,
+    /\b(?:Secure\s*Boot|SecureBoot)\b[^\n]*(?:disable|off)/i,
+    /\bMemory\s+Integrity\b[^\n]*(?:disable|off)/i,
     /\bSetupDi\w*\b/i,
     /\bGet-PnpDevice\b/i,
     /\bGet-CimInstance\b/i,
@@ -167,6 +177,17 @@ test("collector output is new atomic UTF-8 without mutation capability", async (
 
 test("Windows CI runs collector tests only as independent gates", async () => {
   const workflow = await readRequired(workflowPath);
+  assert.doesNotMatch(workflow, /\$windowsBuild\s+-ge\s+26200/);
+  assert.match(workflow, /verify-toolchain\.ps1/);
+  for (const pattern of [
+    /\bbcdedit(?:\.exe)?\b/i,
+    /\btestsigning\b/i,
+    /\bDisable-ComputerRestore\b/i,
+    /\b(?:Secure\s*Boot|SecureBoot)\b[^\n]*(?:disable|off)/i,
+    /\bMemory\s+Integrity\b[^\n]*(?:disable|off)/i,
+  ]) {
+    assert.doesNotMatch(workflow, pattern);
+  }
   const validationStep = workflow.match(
     /- name: Validate driver source and package rules(?<body>[^]*?)(?=\n      - name: Build unsigned driver package)/,
   );
