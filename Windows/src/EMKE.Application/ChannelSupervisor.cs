@@ -594,7 +594,13 @@ internal sealed class ChannelSupervisor : IAsyncDisposable, IDisposable
             }
         }
 
-        return new ReconnectResult(false, false, last);
+        return new ReconnectResult(
+            false,
+            false,
+            Error(
+                ErrorCategory.Network,
+                "translationRuntime.reconnectExhausted",
+                RecoveryAction.Retry));
     }
 
     private async Task HandleSendFailureAsync(RuntimeError error)
