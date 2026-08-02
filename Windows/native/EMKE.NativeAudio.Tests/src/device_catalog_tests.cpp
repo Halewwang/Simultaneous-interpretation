@@ -990,6 +990,26 @@ void test_concurrent_notification_callbacks_remain_ordered(
           total_attempts);
 }
 
+void test_catalog_rejects_duplicate_endpoint_ids(TestContext& context) {
+  FakeDeviceSource source;
+  source.next_endpoints = complete_virtual_endpoints();
+  source.next_endpoints.push_back(endpoint(
+      u"{physical-output}", DeviceDataFlow::render));
+  source.next_endpoints.push_back(endpoint(
+      u"{physical-output}", DeviceDataFlow::render));
+
+  emke::audio::DeviceCatalog catalog(source);
+  const auto refresh = catalog.refresh();
+
+  EXPECT(context, !refresh.ok);
+  EXPECT(context, refresh.error.has_value());
+  EXPECT(
+      context,
+      refresh.error.has_value() &&
+          refresh.error->operation ==
+              emke::audio::DeviceCatalogOperation::enumerateEndpoints);
+}
+
 }  // namespace
 
 int run_device_catalog_tests() {
@@ -1026,5 +1046,6 @@ int run_device_catalog_tests() {
 #endif
   test_registration_destructor_retains_state_after_unregister_failure(context);
   test_concurrent_notification_callbacks_remain_ordered(context);
+  test_catalog_rejects_duplicate_endpoint_ids(context);
   return context.failures();
 }
