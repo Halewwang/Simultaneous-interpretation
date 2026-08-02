@@ -9,6 +9,9 @@
 - Current permanent-workflow fix: `0c4eb23` (`ci: verify hosted MSIX after
   certificate trust`), retained locally on `codex/windows-internal-msix`.
   The product branch was not pushed.
+- Current lifecycle-bundle correction source:
+  `222382c49425f66709715e4c25fd827b3da33b99`, retained locally on the same
+  product branch. The product branch was not pushed.
 - Package contract: `EMKE.Translation.Internal`, `0.2.0.0`, x64,
   `CN=EMKE Internal Test`.
 
@@ -91,6 +94,79 @@ completed the permanent build/sign path for evidence source
   WPF application has no supported `--hosted-driver-missing-smoke` contract;
   no runtime change was made in Task 4.
 
+Artifact `8820627964` is **withdrawn as a user handoff**. Although its hosted
+helper proved the signed MSIX install/query/uninstall and certificate-cleanup
+facts above, the artifact's bundled lifecycle scripts independently hard-coded
+expected version `0.1.0.0` and old `0.1.0` MSIX/CER names. They therefore
+rejected the artifact's own signed `0.2.0` package. The hosted helper evidence
+remains valid only for the operations it directly performed; it did not make
+those stale bundled scripts usable.
+
+## Lifecycle-bundle correction and replacement artifact
+
+The lifecycle correction was developed RED-first and keeps the existing
+install, uninstall, TrustedPeople, non-elevated-parent, rollback, and cleanup
+safety behavior intact.
+
+- RED run [30727638046](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30727638046),
+  build job `91442179223`, failed because the rendered bundle still carried
+  `0.1.0` metadata and malformed lifecycle placeholders were accepted.
+- After the renderer correction, RED run
+  [30728045398](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30728045398),
+  build job `91443290639`, proved that the permanent workflow did not yet run
+  the rendered-bundle behavior harness and that the harness still used an old
+  independent fixture.
+- Product source scripts now use strict lifecycle placeholders. The bundle
+  builder resolves `Windows/version.json`, requires exact placeholder counts,
+  rejects missing, duplicate, unexpected, or residual placeholders, writes
+  the rendered scripts before hashing, and records those final bytes in the
+  checksum and provenance files. The permanent portable gate runs the behavior
+  harness against a real rendered bundle.
+- Run [30728341177](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30728341177)
+  passed build job `91444046367` and protected signing job `91444381743` for
+  the corrected source. Hosted job `91444675018` again proved exact temporary
+  trust, Authenticode `Valid`, package install/query/uninstall, and certificate
+  cleanup. It then failed only at the same unsupported WPF smoke contract with
+  exit `-532462766`; no smoke success is claimed.
+- Final replacement run
+  [30728655901](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30728655901)
+  is overall **SUCCESS** for source
+  `222382c49425f66709715e4c25fd827b3da33b99`: build job `91444861771` passed
+  all portable contracts (including the rendered lifecycle behavior suite),
+  native Release tests, and managed Release build; protected signing/bundle job
+  `91445225554` passed; hosted job `91445500466` was explicitly skipped by the
+  dispatch input.
+
+The current user handoff is artifact `8827292982`, named
+`emke-translation-windows-0.2.0-internal-x64-222382c49425f66709715e4c25fd827b3da33b99`,
+`161272661` bytes, service digest SHA-256
+`f6e6755620e873900414f296fcd622dacdcacb699f823a8ff7cb88686a49ae9a`,
+expiring `2026-08-16T02:27:31Z`. Artifact `8820627964` is superseded by this
+artifact and must not be distributed.
+
+Independent download and extraction of artifact `8827292982` verified exactly
+five files in the inner handoff ZIP. Both lifecycle scripts contain
+`0.2.0.0`, `x64`, and the current `0.2.0` MSIX/CER names; neither contains a
+residual lifecycle placeholder nor `0.1.0`; and their bytes match the copies
+inside the ZIP. The provenance records source commit `222382c49425f66709715e4c25fd827b3da33b99`,
+workflow run `30728655901`, identity `EMKE.Translation.Internal`, and certificate
+thumbprint `33E9992B08919BA6522F8A16B95CC2AA5DA6BB98`.
+
+- MSIX SHA-256:
+  `EF9B5C1D06690363A65B20B515A3432255F90DB85659E7D2B62CF41845C1AA85`.
+- Certificate SHA-256:
+  `05BE411CEE43528C7B8CCC216EEEC6A904A8940DDA7B669BC8A00197CAF0CA1C`.
+- Install script SHA-256:
+  `E6DEE404E6FC9AF2D8DF5C50A8A7EFCB872A9CFBF262CE8E7CD08E9F6E7E82EF`.
+- Uninstall script SHA-256:
+  `3A37C7462ED3241B91F4DD1135155A29E9B4D7CC3E2FC88208209253DA951A17`.
+- `SHA256SUMS.txt` SHA-256:
+  `12E1A2647458778AA069D4294A5689D302E5557511E1501EA32CA5F04EC44057`.
+- Inner handoff ZIP SHA-256:
+  `782832FFB2781B7FF9F49A49F70376B95821F058BEE0853AF8F41D7CB8C861AA`.
+- Provenance JSON SHA-256:
+  `2C0C04675597F59A7F3228045E321C6EE08EE21290F924EEC3FF59ACE331139D`.
+
 ## Local and contract checks
 
 - `git diff --check` passed before committing `84ff725`.
@@ -103,6 +179,15 @@ completed the permanent build/sign path for evidence source
 - The permanent workflows now resolve
   `Windows/tools/resolve-version.ps1` rather than independently carrying
   `26200`, `0.1.0`, package-name, or architecture floors.
+- Final Windows run `30728655901` executed the complete portable contract and
+  rendered lifecycle behavior suites; this supersedes the earlier local-only
+  static-check limitation for the corrected workflow source.
+- For the final correction source, `node --check` passed for both modified
+  contract files; the focused lifecycle mutation-boundary tests passed `2/2`;
+  the focused permanent-workflow gate passed `1/1`; the behavior harness has no
+  independent `0.1.0` fixture; and `git diff --check` passed. `pwsh` remains
+  unavailable on this macOS host, so rendered PowerShell execution evidence is
+  the successful Windows job `91444861771`.
 
 ## Acceptance boundary
 

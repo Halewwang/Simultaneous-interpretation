@@ -7,7 +7,9 @@ install evidence are complete. The signed MSIX installed, its exact identity
 was validated, and cleanup succeeded; the WPF smoke process failed because the
 package has no supported `--hosted-driver-missing-smoke` contract. No runtime
 change was made in Task 4, and no smoke/live/driver/four-endpoint acceptance is
-claimed.
+claimed. Artifact `8820627964` is withdrawn from user handoff because its
+bundled lifecycle scripts were stale; corrected artifact `8827292982`
+supersedes it.
 
 ## Changes
 
@@ -72,6 +74,13 @@ or product branch remote state was changed.
   failed at `test-hosted-msix-install.ps1:237` with exit `-532462766` because
   the WPF package lacks a supported `--hosted-driver-missing-smoke` contract.
 
+The hosted helper did not execute the artifact's bundled lifecycle scripts.
+Whole-plan review later found those scripts hard-coded `0.1.0.0` and old
+`0.1.0` MSIX/CER names, so artifact `8820627964` rejected its own signed
+`0.2.0` package and is not a usable user lifecycle handoff. Its direct
+install/query/uninstall and cleanup observations remain evidence only for the
+helper operations described above.
+
 Local `git diff --check` and the static workflow gate passed. PowerShell
 execution tests are not runnable on the macOS checkout (`pwsh` absent), so the
 remote Windows gate is the relevant execution proof.
@@ -87,6 +96,43 @@ remote Windows gate is the relevant execution proof.
 - Verification: the new static assertion passes locally; PowerShell-dependent
   tests remain intentionally unproven locally and rely on the completed
   Windows CI evidence above.
+
+## Whole-plan lifecycle correction
+
+- RED run `30727638046`, build `91442179223`, exposed stale rendered metadata
+  and missing strict placeholder rejection. RED run `30728045398`, build
+  `91443290639`, exposed the missing permanent rendered-behavior gate and stale
+  behavior fixture.
+- Commits `3ca5438` through `222382c` render lifecycle metadata from the
+  checked-in resolver, reject malformed or residual placeholders, hash the
+  final rendered bytes, run behavior tests on a real rendered bundle, and
+  cover the protected elevation request's write lock and tamper detection.
+  Existing install/uninstall/TrustedPeople/elevation/rollback/cleanup safety
+  remains under the behavior suite.
+- Corrected hosted run `30728341177` passed build `91444046367` and protected
+  signing `91444381743`. Hosted job `91444675018` proved temporary trust,
+  Authenticode `Valid`, install/query/uninstall, and certificate cleanup, then
+  retained the known smoke-only failure `-532462766`.
+- Final run `30728655901` is overall SUCCESS for
+  `222382c49425f66709715e4c25fd827b3da33b99`: build `91444861771` and
+  protected signing/bundle `91445225554` succeeded; hosted `91445500466` was
+  explicitly skipped. This separation leaves actual hosted package lifecycle
+  evidence in `30728341177` and a clean overall-success deliverable in
+  `30728655901`.
+- Replacement artifact `8827292982`, name
+  `emke-translation-windows-0.2.0-internal-x64-222382c49425f66709715e4c25fd827b3da33b99`,
+  size `161272661`, service digest
+  `f6e6755620e873900414f296fcd622dacdcacb699f823a8ff7cb88686a49ae9a`,
+  expires `2026-08-16T02:27:31Z`. Independent extraction verified exactly five
+  inner files, current lifecycle metadata, no placeholder/`0.1.0`, matching
+  inner/outer script bytes, and provenance for the exact source/run/identity/
+  thumbprint. MSIX SHA-256 is
+  `EF9B5C1D06690363A65B20B515A3432255F90DB85659E7D2B62CF41845C1AA85`;
+  inner ZIP SHA-256 is
+  `782832FFB2781B7FF9F49A49F70376B95821F058BEE0853AF8F41D7CB8C861AA`.
+
+Artifact `8827292982` supersedes withdrawn artifact `8820627964` for user
+handoff. No product branch was pushed.
 
 ## Self-review and acceptance boundary
 
