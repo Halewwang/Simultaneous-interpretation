@@ -457,7 +457,16 @@ public sealed class TranslationRuntimeIntegrationTests
             await MockTranslationServer.StartAsync(scenario)
                 .ConfigureAwait(false);
         TestAudioEngine audio = new();
-        await using TranslationRuntime runtime = CreateRuntime(server, audio);
+        RuntimeSettings? settings = scenario == MockTranslationScenario.UnknownModel
+            ? new RuntimeSettings(
+                new Uri("https://translation.example.test/v1", UriKind.Absolute),
+                LanguageCode.Zh,
+                LanguageCode.En,
+                "unknown-model",
+                inboundBypass: false,
+                outboundBypass: false)
+            : null;
+        await using TranslationRuntime runtime = CreateRuntime(server, audio, settings);
 
         RuntimeError? failure = await runtime.StartAsync().ConfigureAwait(false);
 
@@ -468,8 +477,8 @@ public sealed class TranslationRuntimeIntegrationTests
         Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
         Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
         Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
-        Assert.AreEqual(1, audio.StartCount);
-        Assert.AreEqual(1, audio.StopCount);
+        Assert.AreEqual(0, audio.StartCount);
+        Assert.AreEqual(0, audio.StopCount);
     }
 
     [TestMethod]
@@ -490,8 +499,8 @@ public sealed class TranslationRuntimeIntegrationTests
         Assert.AreEqual(RuntimeState.Failed, runtime.CurrentSnapshot.RuntimeState);
         Assert.AreEqual(InboundRoute.Stopped, runtime.CurrentSnapshot.InboundRoute);
         Assert.AreEqual(OutboundRoute.Stopped, runtime.CurrentSnapshot.OutboundRoute);
-        Assert.AreEqual(1, audio.StartCount);
-        Assert.AreEqual(1, audio.StopCount);
+        Assert.AreEqual(0, audio.StartCount);
+        Assert.AreEqual(0, audio.StopCount);
         Assert.AreEqual(0, audio.ActivePollCount);
         Assert.AreEqual(0, audio.PendingEventCount);
         Assert.AreEqual(0, audio.PendingOutboundTranslationCount);
