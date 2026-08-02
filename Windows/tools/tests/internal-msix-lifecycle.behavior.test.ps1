@@ -1013,15 +1013,15 @@ try {
             }
             [pscustomobject]@{ ExitCode = 0 }
         }
-        $lockedResult = Invoke-ElevatedCertificateOperation `
-            -Operation "Import" `
-            -CertificatePath $certificate `
-            -ExpectedCertificateSha256 $evidence.Sha256 `
-            -ExpectedCertificateThumbprint $evidence.Thumbprint
-        Assert-Equal `
-            $lockedResult `
-            "Added" `
-            "A write-locked trust request did not complete exactly."
+        Assert-Throws `
+            -Pattern "request.*changed" `
+            -Action {
+                Invoke-ElevatedCertificateOperation `
+                    -Operation "Import" `
+                    -CertificatePath $certificate `
+                    -ExpectedCertificateSha256 $evidence.Sha256 `
+                    -ExpectedCertificateThumbprint $evidence.Thumbprint
+            }
         Assert-True `
             $script:launchTamperBlocked `
             "The protected launch request allowed a concurrent write."
