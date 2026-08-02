@@ -64,6 +64,40 @@
   those tests had completed.
   Product branch has not been pushed.
 
+## Independent review remediation
+
+- The review found two P1 holes: an OK count of zero returned an empty success
+  before role validation, and the managed fake did not export the new
+  descriptor-size or count/fill functions. The P2 asked for direct native C
+  export verification rather than only the managed `INativeAudioApi` fake.
+- Review RED is `fdfa2ae`. Its Runtime/MSIX evidence (`30733697890` /
+  `91458364071` and `30733697862` / `91458371479`) compiled the catalog tests
+  and failed only `EmptyNativeCatalogFailsClosedAsDeviceMissing`: the adapter
+  returned success instead of a typed `DeviceMissing`. Audio Foundation
+  `30733697868` / `91458364054` also ran the seven prior native-fake tests and
+  then failed with `EntryPointNotFoundException` for
+  `emke_audio_sizeof_endpoint_descriptor_v1`. The preceding `7c8705f` run is
+  excluded as RED behavior proof because an MSTest collection-analyzer error
+  prevented execution.
+- GREEN is `02f973f`, with final test-only count-growth coverage at
+  `b90fcdb`. The adapter now reaches `Map` for zero descriptors, so the exact
+  virtual-role check raises `NativeAudioException(DeviceMissing)`. The fake
+  exports a deterministic two-physical-default plus four-exact-role catalog
+  through the production P/Invoke path. Existing test hooks gained only a
+  test-build fixture setter; the production MMDevice/MTA path is unchanged.
+  Direct C ABI coverage verifies count, NULL/capacity/required-count rejection,
+  insufficient-capacity and count-growth guard bytes without partial writes,
+  fresh required counts, and valid descriptor fill.
+- Final evidence-only PR #10 head `b90fcdb` is closed unmerged. Runtime
+  `30734111484` / `91459533731` passed native CTest 18/18 and Integration 100
+  passed + 1 intentional non-Windows skip (101 total), then only failed the
+  existing owned-PCM fixture-path subgate. Internal MSIX
+  `30734111501` / `91459533825` succeeded with the same native 18/18 and
+  Integration 100 + 1 skip result. Audio Foundation `30734111497` /
+  `91459533755` passed native CTest 18/18, managed seam 18/18, and native fake
+  8/8 before its existing output-directory evidence guard. Review RED PR #9
+  is also closed unmerged. Product branch remains unpushed.
+
 ## Remaining boundary
 
 Hosted CI proves ABI/fake/contract and managed mapping behavior only. No
