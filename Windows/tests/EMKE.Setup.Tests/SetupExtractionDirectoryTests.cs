@@ -1,0 +1,147 @@
+using System.Text;
+using EMKE.Setup;
+
+namespace EMKE.Setup.Tests;
+
+#pragma warning disable CA1515 // MSTest requires discoverable public test classes.
+
+[TestClass]
+public sealed class SetupExtractionDirectoryTests
+{
+    [TestMethod]
+    public void NewRootsAreVersionScopedUniqueAndContainedBySetupBase()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory first = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        using SetupExtractionDirectory second = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+
+        Assert.IsTrue(Path.IsPathFullyQualified(first.RootPath));
+        Assert.IsTrue(first.RootPath.StartsWith(
+            Path.GetFullPath(temporary.Path) + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal));
+        StringAssert.Contains(Path.GetFileName(first.RootPath), "0.2.0");
+        Assert.AreNotEqual(first.RootPath, second.RootPath);
+    }
+
+    [DataTestMethod]
+    [DataRow("..")]
+    [DataRow("../outside.bin")]
+    [DataRow("C:\\outside.bin")]
+    [DataRow("\\\\server\\share\\outside.bin")]
+    public void UnsafeOrRootedOutputPathIsRejected(string outputName)
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+
+        SetupExtractionResult result = extraction.CopyVerified(
+            outputName,
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("unsafeOutputPath", result.FailureCode);
+    }
+
+    [TestMethod]
+    public void ExistingExtractionDirectoryIsNeverReused()
+    {
+        using TemporaryDirectory temporary = new();
+        string name = "0.2.0-existing";
+        _ = Directory.CreateDirectory(Path.Combine(temporary.Path, name));
+
+        SetupExtractionResult result = SetupExtractionDirectory.CreateNamedForTest(
+            temporary.Path, name, new Version(0, 2, 0, 0));
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("extractionRootAlreadyExists", result.FailureCode);
+    }
+
+    [TestMethod]
+    public void ReparsePointAtAnyOutputPathComponentIsRejected()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        string linkedDirectory = Path.Combine(extraction.RootPath, "linked");
+        Directory.CreateSymbolicLink(linkedDirectory, temporary.Path);
+
+        SetupExtractionResult result = extraction.CopyVerified(
+            Path.Combine("linked", "payload.bin"),
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("reparsePointDetected", result.FailureCode);
+    }
+
+    [TestMethod]
+    public void HardLinkSubstitutionIsRejectedAndCannotReplaceVerifiedOutput()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        string protectedFile = Path.Combine(temporary.Path, "protected.bin");
+        File.WriteAllText(protectedFile, "protected");
+        string outputPath = Path.Combine(extraction.RootPath, "payload.bin");
+        File.CreateHardLink(outputPath, protectedFile);
+
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("existingOutputRejected", result.FailureCode);
+        Assert.AreEqual("protected", File.ReadAllText(protectedFile));
+    }
+
+    [TestMethod]
+    public void VerifiedOutputIsReadOnlyAndFinalPathRemainsInsideCreatedRoot()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+
+        SetupExtractionResult result = extraction.CopyVerified(
+            "payload.bin",
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.OutputPath.StartsWith(
+            extraction.RootPath + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal));
+        Assert.IsTrue((File.GetAttributes(result.OutputPath) & FileAttributes.ReadOnly) != 0);
+    }
+
+    private static SetupPayload ExpectedPayload() => new(
+        "payload", "payload.bin", 7,
+        "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426955f9b852d5a935e5",
+        SetupPayloadKind.Msix);
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        public TemporaryDirectory()
+        {
+            Path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "EMKE.Setup.Tests", Guid.NewGuid().ToString("N"));
+            _ = Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+}
+
+#pragma warning restore CA1515
