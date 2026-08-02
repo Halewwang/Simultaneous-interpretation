@@ -152,17 +152,17 @@ public sealed class RuntimeErrorTests
     {
         Dictionary<string, string> source = new(StringComparer.Ordinal)
         {
-            ["Detail"] = "first",
-            ["detail"] = "second",
+            ["build"] = "26200",
+            ["retryCount"] = "1",
         };
         RuntimeError error = new(ErrorCategory.Protocol, "protocol.failed", source, RecoveryAction.Retry);
 
-        source["Detail"] = "mutated";
+        source["build"] = "26201";
         source.Clear();
 
         Assert.HasCount(2, error.Parameters);
-        Assert.AreEqual("first", error.Parameters["Detail"]);
-        Assert.AreEqual("second", error.Parameters["detail"]);
+        Assert.AreEqual("26200", error.Parameters["build"]);
+        Assert.AreEqual("1", error.Parameters["retryCount"]);
         Assert.ThrowsExactly<NotSupportedException>(
             () => ((IDictionary<string, string>)error.Parameters)["new"] = "value");
     }
@@ -192,8 +192,8 @@ public sealed class RuntimeErrorTests
             "protocol.failed",
             new Dictionary<string, string>
             {
-                ["first"] = "1",
-                ["second"] = "2",
+                ["build"] = "26200",
+                ["retryCount"] = "1",
             },
             RecoveryAction.Retry);
         RuntimeError same = new(
@@ -201,8 +201,8 @@ public sealed class RuntimeErrorTests
             "protocol.failed",
             new Dictionary<string, string>
             {
-                ["second"] = "2",
-                ["first"] = "1",
+                ["retryCount"] = "1",
+                ["build"] = "26200",
             },
             RecoveryAction.Retry);
         RuntimeError different = new(
@@ -210,8 +210,8 @@ public sealed class RuntimeErrorTests
             "protocol.failed",
             new Dictionary<string, string>
             {
-                ["first"] = "1",
-                ["second"] = "different",
+                ["build"] = "26200",
+                ["retryCount"] = "2",
             },
             RecoveryAction.Retry);
 
@@ -225,10 +225,10 @@ public sealed class RuntimeErrorTests
     {
         Dictionary<string, string> source = new()
         {
-            ["reason"] = "expired",
+            ["retryCount"] = "0",
         };
         RuntimeError error = new(ErrorCategory.Authentication, "auth.failed", source, RecoveryAction.UpdateApiKey);
-        source["reason"] = "sk-1234567890abcdef";
+        source["retryCount"] = "sk-1234567890abcdef";
 
         string serialized = JsonSerializer.Serialize(error);
         JsonNode? actual = JsonNode.Parse(serialized);
@@ -238,7 +238,7 @@ public sealed class RuntimeErrorTests
               "category": "authentication",
               "code": "auth.failed",
               "parameters": {
-                "reason": "expired"
+                "retryCount": "0"
               },
               "recoveryAction": "updateApiKey"
             }

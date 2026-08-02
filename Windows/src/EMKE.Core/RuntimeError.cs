@@ -87,17 +87,17 @@ public sealed class RuntimeError : IEquatable<RuntimeError>
                 throw new ArgumentException("Parameter keys must not be empty.", nameof(parameters));
             }
 
+            if (value is null)
+            {
+                throw new ArgumentNullException(nameof(parameters), "Parameter values must not be null.");
+            }
+
             if (ReservedParameterKeys.Contains(key)
                 || !IsStructuredDiagnosticParameter(key, value))
             {
                 throw new ArgumentException(
                     "Only structured diagnostic parameters are allowed.",
                     nameof(parameters));
-            }
-
-            if (value is null)
-            {
-                throw new ArgumentNullException(nameof(parameters), "Parameter values must not be null.");
             }
 
             if (ApiKeyPattern.IsMatch(value))
