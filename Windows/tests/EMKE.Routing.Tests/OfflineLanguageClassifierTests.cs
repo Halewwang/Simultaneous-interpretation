@@ -170,6 +170,23 @@ public sealed class OfflineLanguageClassifierTests
     }
 
     [TestMethod]
+    public void SchemaInvalidProfileResourceFailsClosedWithoutLeakingProfileContent()
+    {
+        TargetInvocationException failure =
+            Assert.ThrowsExactly<TargetInvocationException>(
+                () => CreateClassifier(static () => new MemoryStream(
+                    """{"version":"type-error-profile-content"}"""u8.ToArray())));
+
+        InvalidDataException inner =
+            Assert.IsInstanceOfType<InvalidDataException>(failure.InnerException);
+        Assert.AreEqual("The embedded language profile is invalid.", inner.Message);
+        Assert.IsInstanceOfType<JsonException>(inner.InnerException);
+        Assert.IsFalse(inner.Message.Contains(
+            "type-error-profile-content",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task ClassifierIsImmutableAndSafeForConcurrentCalls()
     {
         OfflineLanguageClassifier classifier = new();

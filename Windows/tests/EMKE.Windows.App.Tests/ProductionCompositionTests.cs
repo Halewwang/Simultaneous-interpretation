@@ -201,23 +201,29 @@ public sealed class ProductionCompositionTests
     [TestMethod]
     public void ProductionCompositionContainsNoPendingRuntimeAdapters()
     {
-        string source = File.ReadAllText(TestSourceLocator.Find(
-            Path.Combine(
-                "Bootstrap",
-                "ProductionAppAdapterFactory.cs")));
+        string sourceRoot = TestSourceLocator.FindWindowsSourceRoot();
+        string[] productionSources = Directory
+            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => IsControlledProductionSource(sourceRoot, path))
+            .ToArray();
 
-        Assert.IsFalse(source.Contains(
-            "PendingAudioDeviceCatalog",
-            StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains(
-            "PendingTranslationSessionFactory",
-            StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains(
-            "PendingLanguageClassifier",
-            StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains(
-            "composition is not available",
-            StringComparison.Ordinal));
+        Assert.IsNotEmpty(productionSources);
+        foreach (string path in productionSources)
+        {
+            string source = File.ReadAllText(path);
+            Assert.IsFalse(source.Contains(
+                "PendingAudioDeviceCatalog",
+                StringComparison.Ordinal), path);
+            Assert.IsFalse(source.Contains(
+                "PendingTranslationSessionFactory",
+                StringComparison.Ordinal), path);
+            Assert.IsFalse(source.Contains(
+                "PendingLanguageClassifier",
+                StringComparison.Ordinal), path);
+            Assert.IsFalse(source.Contains(
+                "composition is not available",
+                StringComparison.Ordinal), path);
+        }
     }
 
     [TestMethod]
@@ -313,6 +319,18 @@ public sealed class ProductionCompositionTests
 
         Assert.AreEqual(1, uiDiagnostics.StopCount);
         Assert.AreEqual(0, coreDiagnostics.StopCount);
+    }
+
+    private static bool IsControlledProductionSource(
+        string sourceRoot,
+        string path)
+    {
+        string relativePath = Path.GetRelativePath(sourceRoot, path);
+        return relativePath.Split(Path.DirectorySeparatorChar)
+            .All(static segment => segment is not "bin"
+                and not "obj"
+                and not "artifacts"
+                and not "out");
     }
 
     private static async Task AssertStartupPreflightAsync(
