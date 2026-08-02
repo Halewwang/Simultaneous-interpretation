@@ -911,7 +911,7 @@ try {
         }
     }
 
-    Invoke-Case "encoded elevation keeps path data out of argv and detects launch tamper" {
+    Invoke-Case "encoded elevation keeps path data out of argv and locks launch request" {
         Reset-InstallFunctions
         $quotedDirectory = Join-Path $testRoot "encoded space ' quote"
         [IO.Directory]::CreateDirectory($quotedDirectory) | Out-Null
@@ -923,6 +923,8 @@ try {
         }
         $script:capturedArgumentList = $null
         $script:capturedRequestPath = $null
+        $script:launchTamperBlocked = $false
+        $script:launchTamperRequestPath = $null
         Set-TestFunction -Name Start-Process -Body {
             param(
                 $FilePath,
@@ -998,22 +1000,34 @@ try {
                 "EMKE_ELEVATED_REQUEST_PATH",
                 [EnvironmentVariableTarget]::Process
             )
-            [IO.File]::SetAttributes(
-                $requestPath,
-                [IO.FileAttributes]::Normal
-            )
-            [IO.File]::AppendAllText($requestPath, " ")
+            $script:launchTamperRequestPath = $requestPath
+            try {
+                [IO.File]::SetAttributes(
+                    $requestPath,
+                    [IO.FileAttributes]::Normal
+                )
+                [IO.File]::AppendAllText($requestPath, " ")
+                throw "Launch tamper unexpectedly changed the request."
+            } catch [IO.IOException] {
+                $script:launchTamperBlocked = $true
+            }
             [pscustomobject]@{ ExitCode = 0 }
         }
-        Assert-Throws `
-            -Pattern "request.*changed|digest mismatch" `
-            -Action {
-                Invoke-ElevatedCertificateOperation `
-                    -Operation "Import" `
-                    -CertificatePath $certificate `
-                    -ExpectedCertificateSha256 $evidence.Sha256 `
-                    -ExpectedCertificateThumbprint $evidence.Thumbprint
-            }
+        $lockedResult = Invoke-ElevatedCertificateOperation `
+            -Operation "Import" `
+            -CertificatePath $certificate `
+            -ExpectedCertificateSha256 $evidence.Sha256 `
+            -ExpectedCertificateThumbprint $evidence.Thumbprint
+        Assert-Equal `
+            $lockedResult `
+            "Added" `
+            "A write-locked trust request did not complete exactly."
+        Assert-True `
+            $script:launchTamperBlocked `
+            "The protected launch request allowed a concurrent write."
+        Assert-True `
+            (-not (Test-Path -LiteralPath $script:launchTamperRequestPath)) `
+            "The write-locked request was not cleaned after elevation."
     }
 
     Invoke-Case "fixed encoded child source parses independently" {
