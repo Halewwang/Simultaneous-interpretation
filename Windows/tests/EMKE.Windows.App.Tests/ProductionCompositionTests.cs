@@ -1,8 +1,11 @@
 using EMKE.Application;
 using EMKE.Core;
 using EMKE.Platform.Driver;
+using EMKE.Platform.Native;
 using EMKE.Platform.Security;
 using EMKE.Platform.Settings;
+using EMKE.Realtime;
+using EMKE.Routing;
 using EMKE.Windows.App.Bootstrap;
 using EMKE.Windows.App.Commands;
 using EMKE.Windows.App.Presentation;
@@ -156,6 +159,28 @@ public sealed class ProductionCompositionTests
             Assert.AreSame(
                 (object)bundle.RuntimeDependencies.SettingsStore,
                 (object?)bundle.ProductSettings);
+        }
+        finally
+        {
+            await bundle.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ProductionCoreComposesConcreteRuntimeAdapters()
+    {
+        AppCoreAdapterBundle bundle =
+            await ProductionCoreAdapters.CreateAsync(CancellationToken.None);
+        try
+        {
+            Assert.IsInstanceOfType<WindowsAudioDeviceCatalog>(
+                bundle.RuntimeDependencies.DeviceCatalog);
+            Assert.IsInstanceOfType<TranslationSessionFactory>(
+                bundle.RuntimeDependencies.SessionFactory);
+            Assert.IsInstanceOfType<OfflineLanguageClassifier>(
+                bundle.RuntimeDependencies.LanguageClassifier);
+            Assert.IsInstanceOfType<NativeAudioEngine>(
+                bundle.RuntimeDependencies.AudioEngine);
         }
         finally
         {
