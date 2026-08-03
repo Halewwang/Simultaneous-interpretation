@@ -300,6 +300,29 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
+    public void CleanupReturnsTheSameCompletedOutcomeInstance()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        string rootPath = extraction.RootPath;
+
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
+        SetupCleanupOutcome first = extraction.Cleanup();
+        SetupCleanupOutcome second = extraction.Cleanup();
+
+        Assert.AreSame(first, second);
+        Assert.IsTrue(first.Completed);
+        Assert.IsFalse(first.ResidualRetained);
+        Assert.IsNull(first.FailureCode);
+        Assert.IsEmpty(first.RetainedLogicalNames);
+        Assert.IsFalse(Directory.Exists(rootPath));
+    }
+
+    [TestMethod]
     public void DisposeLeavesUnexpectedChildAndReportsStructuredRecoveryState()
     {
         using TemporaryDirectory temporary = new();
@@ -323,6 +346,35 @@ public sealed class SetupExtractionDirectoryTests
         Assert.AreEqual(
             "unexpectedExtractionEntriesRetained",
             extraction.CleanupState.FailureCode);
+    }
+
+    [TestMethod]
+    public void CleanupRetainsUnexpectedChildWithBoundedLogicalName()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
+        string unexpectedPath = Path.Combine(
+            extraction.RootPath,
+            "sensitive-user-chosen-name.bin");
+        File.WriteAllText(unexpectedPath, "do not delete");
+
+        SetupCleanupOutcome outcome = extraction.Cleanup();
+
+        Assert.IsFalse(outcome.Completed);
+        Assert.IsTrue(outcome.ResidualRetained);
+        Assert.AreEqual(
+            "unexpectedExtractionEntriesRetained",
+            outcome.FailureCode);
+        CollectionAssert.AreEquivalent(
+            new[] { "unexpected-entry" },
+            outcome.RetainedLogicalNames.ToArray());
+        Assert.IsTrue(File.Exists(unexpectedPath));
+        Assert.IsTrue(Directory.Exists(extraction.RootPath));
     }
 
     [TestMethod]

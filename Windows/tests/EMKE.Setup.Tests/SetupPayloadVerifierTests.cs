@@ -243,6 +243,66 @@ public sealed class SetupPayloadVerifierTests
     }
 
     [TestMethod]
+    public void SignatureRejectionAfterAllExtractionsExposesCompletedCleanup()
+    {
+        using TemporaryDirectory temporary = new();
+        CountingSignatureVerifier signatures = new(
+            SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid"));
+        string? extractionRoot = null;
+        SetupPayloadVerifier verifier = new(
+            signatures,
+            version =>
+            {
+                SetupExtractionDirectory extraction =
+                    SetupExtractionDirectory.Create(temporary.Path, version);
+                extractionRoot = extraction.RootPath;
+                return extraction;
+            });
+
+        using SetupPayloadVerificationResult result = verifier.VerifyAndExtract(
+            Manifest(),
+            EmbeddedPayloads());
+
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual("msixAuthenticodeInvalid", result.FailureCode);
+        Assert.AreEqual(5, signatures.ObservedPayloadCount);
+        Assert.IsNotNull(extractionRoot);
+        Assert.IsFalse(Directory.Exists(extractionRoot));
+        Assert.IsTrue(result.LastCleanupOutcome.Completed);
+        Assert.IsFalse(result.LastCleanupOutcome.ResidualRetained);
+        Assert.IsEmpty(result.LastCleanupOutcome.RetainedLogicalNames);
+    }
+
+    [TestMethod]
+    public void SuccessfulAttemptCleanupIsTheResultCleanupOutcomeInstance()
+    {
+        using TemporaryDirectory temporary = new();
+        string? extractionRoot = null;
+        SetupPayloadVerifier verifier = new(
+            TrustedSignatures(),
+            version =>
+            {
+                SetupExtractionDirectory extraction =
+                    SetupExtractionDirectory.Create(temporary.Path, version);
+                extractionRoot = extraction.RootPath;
+                return extraction;
+            });
+        using SetupPayloadVerificationResult result = verifier.VerifyAndExtract(
+            Manifest(),
+            EmbeddedPayloads());
+        Assert.IsTrue(result.IsValid, result.FailureCode);
+
+        SetupCleanupOutcome outcome = result.Attempt!.Cleanup();
+
+        Assert.AreSame(outcome, result.LastCleanupOutcome);
+        Assert.IsTrue(outcome.Completed);
+        Assert.IsFalse(outcome.ResidualRetained);
+        Assert.IsEmpty(outcome.RetainedLogicalNames);
+        Assert.IsNotNull(extractionRoot);
+        Assert.IsFalse(Directory.Exists(extractionRoot));
+    }
+
+    [TestMethod]
     public void MsixPublisherIsReadFromTheNamespacedIdentityElement()
     {
         using TemporaryDirectory temporary = new();
@@ -413,6 +473,20 @@ public sealed class SetupPayloadVerifierTests
         public SetupPayloadSignatureEvidence Verify(
             SetupManifest manifest,
             IReadOnlyList<VerifiedSetupPayload> payloads) => evidence;
+    }
+
+    private sealed class CountingSignatureVerifier(
+        SetupPayloadSignatureEvidence evidence) : ISetupPayloadSignatureVerifier
+    {
+        public int ObservedPayloadCount { get; private set; }
+
+        public SetupPayloadSignatureEvidence Verify(
+            SetupManifest manifest,
+            IReadOnlyList<VerifiedSetupPayload> payloads)
+        {
+            ObservedPayloadCount = payloads.Count;
+            return evidence;
+        }
     }
 
     private sealed class RecordingSignatureProbe(
