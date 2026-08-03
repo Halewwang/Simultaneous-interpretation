@@ -148,8 +148,21 @@ dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj --configurati
 ```
 
 Expected: build succeeds with zero warnings/errors; every Setup test executes
-with zero failures. Windows-native cases must also execute in the Windows
-workflow before approval.
+on Windows with zero skipped tests. The three test-fixture branches changed in
+this task must pass. These five old production failures are accepted only as
+the recorded RED baseline for Tasks 2-3 and do not block Task 1:
+
+```text
+VerifiedOutputAllowsReadOnlyVerificationWithFullSharing
+VerifiedOutputRejectsWriteAndDeleteSharingUntilVerificationLeaseIsReleased
+VerifiedOutputIsReadOnlyAndFinalPathRemainsInsideCreatedRoot
+DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles
+HeldPayloadHandleRejectsReplacementAndCleanupNeverDeletesReplacementSource
+```
+
+Any additional Setup failure, any skipped Setup test, or any build warning/error
+blocks Task 1. Tasks 2-3 must turn all five recorded RED cases green before Task
+3 can complete.
 
 - [ ] **Step 5: Commit the baseline repair**
 
@@ -307,7 +320,10 @@ dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj `
 ```
 
 Expected: collision content survives; returned root cannot be moved/deleted;
-reparse ancestors reject; all Setup tests pass.
+reparse ancestors reject; all Task 2 root-ownership tests pass. The full Setup
+suite must not add any failure beyond the five Task 1 RED cases named above.
+Those five cases remain the binding RED baseline for Task 3, which must make the
+complete Setup suite green.
 
 - [ ] **Step 5: Commit atomic root ownership**
 
