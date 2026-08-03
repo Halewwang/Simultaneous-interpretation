@@ -10,44 +10,63 @@ namespace EMKE.Setup;
 internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
 {
     private const int MaximumCertificateBytes = 1024 * 1024;
+    private readonly Func<
+        VerifiedSetupPayload,
+        SetupMsixSignatureEvidence> _verifyMsixSignature;
+    private readonly Func<Stream, string> _readMsixPublisher;
 
     public static WindowsSetupSignatureProbe Instance { get; } = new();
 
     private WindowsSetupSignatureProbe()
+        : this(VerifyMsixSignature, ReadMsixPublisher)
     {
+    }
+
+    internal WindowsSetupSignatureProbe(
+        Func<VerifiedSetupPayload, SetupMsixSignatureEvidence>
+            verifyMsixSignature,
+        Func<Stream, string> readMsixPublisher)
+    {
+        _verifyMsixSignature = verifyMsixSignature
+            ?? throw new ArgumentNullException(nameof(verifyMsixSignature));
+        _readMsixPublisher = readMsixPublisher
+            ?? throw new ArgumentNullException(nameof(readMsixPublisher));
     }
 
 #pragma warning disable CA1031 // Malformed signed containers and certificates fail closed.
     public SetupMsixSignatureEvidence VerifyMsix(VerifiedSetupPayload msix)
     {
         ArgumentNullException.ThrowIfNull(msix);
+        SetupMsixSignatureEvidence signatureEvidence;
         try
         {
-            WindowsHandleTrustEvidence trust = msix.Lease.UseHandle(
-                handle => WindowsHandleAuthenticodeTrust.Verify(
-                    handle,
-                    msix.DisplayPath,
-                    WindowsHandleAuthenticodeTrust.GenericVerifyV2));
-            if (trust.Status is not (
-                    WindowsHandleTrustStatus.Trusted
-                    or WindowsHandleTrustStatus.ChainOnly)
-                || trust.SignerCertificate is null)
-            {
-                return new SetupMsixSignatureEvidence(false, null, null);
-            }
-
-            string signerSha256 = Convert.ToHexStringLower(
-                SHA256.HashData(trust.SignerCertificate));
-            using Stream msixView = msix.Lease.OpenReadView();
-            string publisher = ReadMsixPublisher(msixView);
-            return new SetupMsixSignatureEvidence(
-                signatureValid: true,
-                signerSha256,
-                publisher);
+            signatureEvidence = _verifyMsixSignature(msix);
         }
         catch (Exception)
         {
             return new SetupMsixSignatureEvidence(false, null, null);
+        }
+        if (!signatureEvidence.SignatureValid
+            || signatureEvidence.SignerSha256 is null)
+        {
+            return new SetupMsixSignatureEvidence(false, null, null);
+        }
+
+        try
+        {
+            using Stream msixView = msix.Lease.OpenReadView();
+            string publisher = _readMsixPublisher(msixView);
+            return new SetupMsixSignatureEvidence(
+                signatureValid: true,
+                signatureEvidence.SignerSha256,
+                publisher);
+        }
+        catch (Exception)
+        {
+            return new SetupMsixSignatureEvidence(
+                signatureValid: true,
+                signatureEvidence.SignerSha256,
+                identityPublisher: null);
         }
     }
 
@@ -105,6 +124,30 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
         return new SetupDriverCatalogEvidence(evidence.ChainValid);
     }
 #pragma warning restore CA1031
+
+    private static SetupMsixSignatureEvidence VerifyMsixSignature(
+        VerifiedSetupPayload msix)
+    {
+        WindowsHandleTrustEvidence trust = msix.Lease.UseHandle(
+            handle => WindowsHandleAuthenticodeTrust.Verify(
+                handle,
+                msix.DisplayPath,
+                WindowsHandleAuthenticodeTrust.GenericVerifyV2));
+        if (trust.Status is not (
+                WindowsHandleTrustStatus.Trusted
+                or WindowsHandleTrustStatus.ChainOnly)
+            || trust.SignerCertificate is null)
+        {
+            return new SetupMsixSignatureEvidence(false, null, null);
+        }
+
+        string signerSha256 = Convert.ToHexStringLower(
+            SHA256.HashData(trust.SignerCertificate));
+        return new SetupMsixSignatureEvidence(
+            signatureValid: true,
+            signerSha256,
+            identityPublisher: null);
+    }
 
     internal static string ReadMsixPublisher(Stream msixStream)
     {

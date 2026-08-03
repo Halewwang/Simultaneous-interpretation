@@ -480,6 +480,72 @@ public sealed class SetupPayloadVerifierTests
     }
 
     [TestMethod]
+    public void TrustedMsixWithUnreadablePublisherPreservesSignatureEvidence()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        byte[] msix = CreateMsixWithoutManifest();
+        SetupPayload expected = PayloadForBytes(
+            "application-msix",
+            "fixture.msix",
+            msix,
+            SetupPayloadKind.Msix);
+        using MemoryStream source = new(msix);
+        SetupExtractionResult extracted = extraction.CopyVerified(source, expected);
+        WindowsSetupSignatureProbe probe = new(
+            _ => new SetupMsixSignatureEvidence(
+                signatureValid: true,
+                CertificateHash,
+                identityPublisher: null),
+            WindowsSetupSignatureProbe.ReadMsixPublisher);
+
+        SetupMsixSignatureEvidence evidence = probe.VerifyMsix(
+            extracted.Payload!);
+
+        Assert.IsTrue(evidence.SignatureValid);
+        Assert.AreEqual(CertificateHash, evidence.SignerSha256);
+        Assert.IsNull(evidence.IdentityPublisher);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void ProductionProbeRejectsUnsignedOrMalformedMsix(bool malformed)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        byte[] msix = malformed
+            ? "not-an-msix"u8.ToArray()
+            : CreateMinimalMsix();
+        SetupPayload expected = PayloadForBytes(
+            "application-msix",
+            "fixture.msix",
+            msix,
+            SetupPayloadKind.Msix);
+        using MemoryStream source = new(msix);
+        SetupExtractionResult extracted = extraction.CopyVerified(source, expected);
+
+        SetupMsixSignatureEvidence evidence = WindowsSetupSignatureProbe.Instance
+            .VerifyMsix(extracted.Payload!);
+
+        Assert.IsFalse(evidence.SignatureValid);
+        Assert.IsNull(evidence.SignerSha256);
+        Assert.IsNull(evidence.IdentityPublisher);
+    }
+
+    [TestMethod]
     public void CertificateCanBeReadWhileExtractionOwnerLeaseIsHeld()
     {
         using TemporaryDirectory temporary = new();
@@ -525,6 +591,18 @@ public sealed class SetupPayloadVerifierTests
                 + "Publisher=\"CN=EMKE Internal Test\" Version=\"0.2.0.0\" "
                 + "ProcessorArchitecture=\"x64\" />"
                 + "</Package>");
+        }
+        return bytes.ToArray();
+    }
+
+    private static byte[] CreateMsixWithoutManifest()
+    {
+        using MemoryStream bytes = new();
+        using (ZipArchive archive = new(bytes, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            ZipArchiveEntry entry = archive.CreateEntry("not-manifest.txt");
+            using StreamWriter writer = new(entry.Open(), Encoding.UTF8);
+            writer.Write("missing AppxManifest.xml");
         }
         return bytes.ToArray();
     }
