@@ -16,6 +16,7 @@ public sealed class WindowsHandleCatalogTrustTests
     private const string UnsignedSysFixtureVariable =
         "EMKE_SETUP_UNSIGNED_SYS_FIXTURE";
     private const int CatalogInfoPathCharacters = 260;
+    private const int MaximumFallbackInboxMembers = 512;
     private static readonly Guid DriverActionVerify = new(
         "F750E6C3-38EE-11D1-85E5-00C04FC295EE");
     private static readonly string[] InboxMemberCandidates =
@@ -61,12 +62,12 @@ public sealed class WindowsHandleCatalogTrustTests
         Assert.IsTrue(
             OperatingSystem.IsWindows(),
             "Inbox catalog trust evidence requires Windows.");
-        InboxCatalogFixture fixture = ResolveInboxCatalogFixture();
+        InboxCatalogMember fixture = ResolveSingleInboxCatalogMember();
         using SafeFileHandle catalogHandle = OpenRestrictive(fixture.CatalogPath);
         using SafeFileHandle infMemberHandle = OpenRestrictive(
-            fixture.InfMemberPath);
+            fixture.MemberPath);
         using SafeFileHandle sysMemberHandle = OpenRestrictive(
-            fixture.InfMemberPath);
+            fixture.MemberPath);
 
         WindowsHandleCatalogEvidence evidence =
             WindowsHandleCatalogTrustVerifier.Instance.Verify(
@@ -75,11 +76,11 @@ public sealed class WindowsHandleCatalogTrustTests
                 [
                     new WindowsCatalogHandleMember(
                         "driver-inf",
-                        fixture.InfMemberPath,
+                        fixture.MemberPath,
                         infMemberHandle),
                     new WindowsCatalogHandleMember(
                         "driver-sys",
-                        fixture.InfMemberPath,
+                        fixture.MemberPath,
                         sysMemberHandle),
                 ]);
 
@@ -125,71 +126,143 @@ public sealed class WindowsHandleCatalogTrustTests
 
     private static InboxCatalogFixture ResolveInboxCatalogFixture()
     {
+        string driversDirectory = ResolveDriversDirectory();
+        List<InboxCatalogMember> resolvedMembers = [];
+        HashSet<string> visitedPaths = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string memberPath in PreferredInboxMemberPaths(driversDirectory))
+        {
+            _ = visitedPaths.Add(memberPath);
+            InboxCatalogFixture? fixture = TryAddResolvedInboxMember(
+                memberPath,
+                resolvedMembers);
+            if (fixture is not null)
+            {
+                return fixture;
+            }
+        }
+
+        string[] fallbackPaths = Directory
+            .EnumerateFiles(
+                driversDirectory,
+                "*.sys",
+                SearchOption.TopDirectoryOnly)
+            .Where(path => !visitedPaths.Contains(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Take(MaximumFallbackInboxMembers)
+            .ToArray();
+        foreach (string memberPath in fallbackPaths)
+        {
+            _ = visitedPaths.Add(memberPath);
+            InboxCatalogFixture? fixture = TryAddResolvedInboxMember(
+                memberPath,
+                resolvedMembers);
+            if (fixture is not null)
+            {
+                return fixture;
+            }
+        }
+
+        Assert.Fail(
+            "No registered Microsoft inbox catalog contained two distinct "
+            + "member hashes within the bounded inbox driver fixture set.");
+        throw new InvalidOperationException("Assert.Fail should have thrown.");
+    }
+
+    private static InboxCatalogMember ResolveSingleInboxCatalogMember()
+    {
+        string driversDirectory = ResolveDriversDirectory();
+        foreach (string memberPath in PreferredInboxMemberPaths(driversDirectory))
+        {
+            InboxCatalogMember? member = TryResolveInboxMember(memberPath);
+            if (member is not null)
+            {
+                return member;
+            }
+        }
+
+        Assert.Fail(
+            "No registered Microsoft inbox catalog was found for null.sys, "
+            + "cng.sys, disk.sys, or partmgr.sys.");
+        throw new InvalidOperationException("Assert.Fail should have thrown.");
+    }
+
+    private static InboxCatalogFixture? TryAddResolvedInboxMember(
+        string memberPath,
+        List<InboxCatalogMember> resolvedMembers)
+    {
+        InboxCatalogMember? currentMember = TryResolveInboxMember(memberPath);
+        if (currentMember is null)
+        {
+            return null;
+        }
+
+        foreach (InboxCatalogMember previousMember in resolvedMembers)
+        {
+            if (string.Equals(
+                    previousMember.CatalogPath,
+                    currentMember.CatalogPath,
+                    StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(
+                    previousMember.MemberPath,
+                    currentMember.MemberPath,
+                    StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(
+                    previousMember.MemberHash,
+                    currentMember.MemberHash,
+                    StringComparison.Ordinal))
+            {
+                return new InboxCatalogFixture(
+                    currentMember.CatalogPath,
+                    previousMember.MemberPath,
+                    currentMember.MemberPath);
+            }
+        }
+
+        resolvedMembers.Add(currentMember);
+        return null;
+    }
+
+    private static InboxCatalogMember? TryResolveInboxMember(string memberPath)
+    {
+        if (!File.Exists(memberPath))
+        {
+            return null;
+        }
+
+        using SafeFileHandle memberHandle = OpenRestrictive(memberPath);
+        return TryResolveRegisteredCatalog(
+            memberHandle,
+            out string catalogPath,
+            out string memberHash)
+            ? new InboxCatalogMember(catalogPath, memberPath, memberHash)
+            : null;
+    }
+
+    private static string[] PreferredInboxMemberPaths(string driversDirectory)
+    {
+        return InboxMemberCandidates
+            .Select(candidate => Path.Combine(driversDirectory, candidate))
+            .Where(File.Exists)
+            .ToArray();
+    }
+
+    private static string ResolveDriversDirectory()
+    {
         string? systemRoot = Environment.GetEnvironmentVariable("SystemRoot");
         if (string.IsNullOrWhiteSpace(systemRoot))
         {
             Assert.Fail("SystemRoot is required to resolve an inbox catalog.");
         }
 
-        List<InboxCatalogMember> resolvedMembers = [];
-        foreach (string candidateName in InboxMemberCandidates)
-        {
-            string memberPath = Path.Combine(
-                systemRoot,
-                "System32",
-                "drivers",
-                candidateName);
-            if (!File.Exists(memberPath))
-            {
-                continue;
-            }
-
-            using SafeFileHandle memberHandle = OpenRestrictive(memberPath);
-            if (TryResolveRegisteredCatalog(
-                    memberHandle,
-                    out string catalogPath,
-                    out string memberHash))
-            {
-                resolvedMembers.Add(new InboxCatalogMember(
-                    catalogPath,
-                    memberPath,
-                    memberHash));
-            }
-        }
-
-        for (int first = 0; first < resolvedMembers.Count; first++)
-        {
-            for (int second = first + 1;
-                second < resolvedMembers.Count;
-                second++)
-            {
-                InboxCatalogMember firstMember = resolvedMembers[first];
-                InboxCatalogMember secondMember = resolvedMembers[second];
-                if (string.Equals(
-                        firstMember.CatalogPath,
-                        secondMember.CatalogPath,
-                        StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(
-                        firstMember.MemberPath,
-                        secondMember.MemberPath,
-                        StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(
-                        firstMember.MemberHash,
-                        secondMember.MemberHash,
-                        StringComparison.Ordinal))
-                {
-                    return new InboxCatalogFixture(
-                        firstMember.CatalogPath,
-                        firstMember.MemberPath,
-                        secondMember.MemberPath);
-                }
-            }
-        }
-
-        Assert.Fail(
-            "No registered Microsoft inbox catalog contained two distinct "
-            + "hashes from null.sys, cng.sys, disk.sys, or partmgr.sys.");
-        throw new InvalidOperationException("Assert.Fail should have thrown.");
+        string driversDirectory = Path.Combine(
+            systemRoot,
+            "System32",
+            "drivers");
+        Assert.IsTrue(
+            Directory.Exists(driversDirectory),
+            "The Windows inbox drivers directory is required.");
+        return driversDirectory;
     }
 
     private static bool TryResolveRegisteredCatalog(
