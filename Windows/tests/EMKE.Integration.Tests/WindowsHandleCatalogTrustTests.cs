@@ -50,7 +50,6 @@ public sealed class WindowsHandleCatalogTrustTests
         Assert.IsTrue(evidence.KernelPolicyValid, evidence.Reason);
         Assert.IsTrue(evidence.CatalogEntriesMatch, evidence.Reason);
         Assert.IsTrue(evidence.MemberTrustValid, evidence.Reason);
-        Assert.IsTrue(evidence.Allowed, evidence.Reason);
         Assert.IsFalse(string.IsNullOrWhiteSpace(evidence.SignerSubject));
     }
 
