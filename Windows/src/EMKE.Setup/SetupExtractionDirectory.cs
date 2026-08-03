@@ -103,7 +103,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
 {
     private const int ErrorFileExists = 80;
     private const int ErrorAlreadyExists = 183;
-    private const int MaximumCreateAttempts = 8;
     private const int CopyBufferSize = 81920;
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
@@ -122,36 +121,15 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const uint FileAttributeReparsePoint = 0x00000400;
     private readonly List<PayloadLease> _payloadLeases = [];
     private readonly SafeFileHandle _rootHandle;
-    private readonly FileIdentity _rootIdentity;
+    private readonly SetupFileIdentity _rootIdentity;
     private bool _disposed;
     private string? _cleanupUncertaintyCode;
 
-    private SetupExtractionDirectory(string rootPath)
+    private SetupExtractionDirectory(AtomicSetupDirectory root)
     {
-        RootPath = rootPath;
-        SafeFileHandle? rootHandle = null;
-        try
-        {
-            rootHandle = OpenRootHandle(rootPath);
-            if (!TryReadIdentity(rootHandle, out FileIdentity identity)
-                || (identity.FileAttributes & FileAttributeReparsePoint) != 0
-                || !IsFinalResolvedPathEqual(rootHandle, rootPath))
-            {
-                throw new SetupExtractionException("rootIdentityUnavailable");
-            }
-
-            _rootIdentity = identity;
-            _rootHandle = rootHandle;
-            rootHandle = null;
-        }
-        finally
-        {
-            if (rootHandle is not null)
-            {
-                _ = TrySetDeleteDisposition(rootHandle);
-            }
-            rootHandle?.Dispose();
-        }
+        RootPath = root.FullPath;
+        _rootHandle = root.Handle;
+        _rootIdentity = root.Identity;
     }
 
     public string RootPath { get; }
@@ -167,19 +145,25 @@ internal sealed class SetupExtractionDirectory : IDisposable
         ArgumentNullException.ThrowIfNull(productVersion);
 
         string basePath = EnsureSafeBase(setupOwnedBase);
-        for (int attempt = 0; attempt < MaximumCreateAttempts; attempt++)
+        WindowsAtomicSetupDirectoryFactory factory = new();
+        for (int attempt = 0;
+            attempt < WindowsAtomicSetupDirectoryFactory.MaximumCreateAttempts;
+            attempt++)
         {
             byte[] random = RandomNumberGenerator.GetBytes(16);
             string rootName = string.Concat(
                 productVersion.ToString(3), "-", Convert.ToHexStringLower(random));
-            string candidate = Path.Combine(basePath, rootName);
-            if (TryCreateNewDirectory(candidate))
+            try
             {
-                return new SetupExtractionDirectory(candidate);
+                return new SetupExtractionDirectory(factory.Create(basePath, rootName));
+            }
+            catch (SetupExtractionException exception)
+                when (exception.FailureCode == "extractionRootAlreadyExists")
+            {
             }
         }
 
-        throw new SetupExtractionException("extractionRootAlreadyExists");
+        throw new SetupExtractionException("extractionRootCollisionLimit");
     }
 
     public static SetupExtractionDirectory CreateForCurrentUser(
@@ -199,7 +183,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
     // This deterministic entrypoint is intentionally internal and only visible to
     // the Setup test assembly; production always uses cryptographic random bytes.
-    internal static SetupExtractionResult CreateNamedForTest(
+    internal static SetupExtractionDirectory CreateNamedForTest(
         string setupOwnedBase,
         string rootName,
         Version productVersion)
@@ -208,23 +192,14 @@ internal sealed class SetupExtractionDirectory : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(rootName);
         ArgumentNullException.ThrowIfNull(productVersion);
 
-        try
+        string basePath = EnsureSafeBase(setupOwnedBase);
+        if (!IsSafeRootName(rootName, productVersion))
         {
-            string basePath = EnsureSafeBase(setupOwnedBase);
-            if (!IsSafeRootName(rootName, productVersion))
-            {
-                return SetupExtractionResult.Rejected("unsafeOutputPath");
-            }
+            throw new SetupExtractionException("unsafeOutputPath");
+        }
 
-            string candidate = Path.Combine(basePath, rootName);
-            return TryCreateNewDirectory(candidate)
-                ? SetupExtractionResult.Success(candidate)
-                : SetupExtractionResult.Rejected("extractionRootAlreadyExists");
-        }
-        catch (SetupExtractionException exception)
-        {
-            return SetupExtractionResult.Rejected(exception.FailureCode);
-        }
+        WindowsAtomicSetupDirectoryFactory factory = new();
+        return new SetupExtractionDirectory(factory.Create(basePath, rootName));
     }
 
     public SetupExtractionResult CopyVerified(
@@ -356,19 +331,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
         return fullBasePath;
     }
 
-    private static bool TryCreateNewDirectory(string candidate)
-    {
-        EnsureNoReparsePointAtAnyExistingComponent(Path.GetDirectoryName(candidate)!);
-        bool created = CreateDirectory(candidate, nint.Zero);
-        if (created)
-        {
-            return true;
-        }
-
-        int error = Marshal.GetLastPInvokeError();
-        return error == ErrorAlreadyExists ? false : throw new Win32Exception(error);
-    }
-
     private PayloadLease CreateTrackedPayloadLease(string outputPath)
     {
         PayloadLease lease = CreatePayloadLease(outputPath);
@@ -498,7 +460,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 FileFlagBackupSemantics | FileFlagOpenReparsePoint,
                 nint.Zero);
             return !pathHandle.IsInvalid
-                && TryReadIdentity(pathHandle, out FileIdentity currentIdentity)
+                && TryReadIdentity(pathHandle, out SetupFileIdentity currentIdentity)
                 && currentIdentity.Equals(_rootIdentity)
                 && (currentIdentity.FileAttributes & FileAttributeReparsePoint) == 0;
         }
@@ -525,33 +487,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
         {
             inspectionSucceeded = false;
             return true;
-        }
-    }
-
-    private static SafeFileHandle OpenRootHandle(string rootPath)
-    {
-        SafeFileHandle? handle = CreateFile(
-                rootPath,
-                FileReadAttributes | DeleteAccess,
-                FileShareRead | FileShareWrite,
-                nint.Zero,
-                OpenExisting,
-                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
-                nint.Zero);
-        try
-        {
-            if (handle.IsInvalid)
-            {
-                throw new SetupExtractionException("rootIdentityUnavailable");
-            }
-
-            SafeFileHandle ownedHandle = handle;
-            handle = null;
-            return ownedHandle;
-        }
-        finally
-        {
-            handle?.Dispose();
         }
     }
 
@@ -618,19 +553,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
             && IsContainedByRoot(finalOutput, root);
     }
 
-    private static bool IsFinalResolvedPathEqual(SafeFileHandle handle, string expectedPath)
-    {
-        return TryGetFinalPath(handle, out string finalPath)
-            && string.Equals(
-                Path.GetFullPath(finalPath).TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(expectedPath).TrimEnd(
-                    Path.DirectorySeparatorChar,
-                    Path.AltDirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool TryGetFinalPath(
         SafeFileHandle handle,
         out string finalPath)
@@ -664,7 +586,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
     private static bool TryReadIdentity(
         SafeFileHandle handle,
-        out FileIdentity identity)
+        out SetupFileIdentity identity)
     {
         if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information))
         {
@@ -672,7 +594,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
             return false;
         }
 
-        identity = new FileIdentity(
+        identity = new SetupFileIdentity(
             information.VolumeSerialNumber,
             information.FileIndexHigh,
             information.FileIndexLow,
@@ -735,12 +657,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
     }
 
-    private readonly record struct FileIdentity(
-        uint VolumeSerialNumber,
-        uint FileIndexHigh,
-        uint FileIndexLow,
-        uint FileAttributes);
-
     [StructLayout(LayoutKind.Sequential)]
     private struct ByHandleFileInformation
     {
@@ -781,16 +697,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
         FileRenameInfo,
         FileDispositionInfo,
     }
-
-    [DllImport(
-        "kernel32.dll",
-        EntryPoint = "CreateDirectoryW",
-        SetLastError = true,
-        CharSet = CharSet.Unicode,
-        ExactSpelling = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateDirectory(string path, nint securityAttributes);
 
     [DllImport(
         "kernel32.dll",
