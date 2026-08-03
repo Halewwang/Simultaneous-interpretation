@@ -84,7 +84,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const uint FileAttributeReadOnly = 0x00000001;
     private const uint FileAttributeNormal = 0x00000080;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
-    private const uint FileAttributeReparsePoint = 0x00000400;
     private readonly object _cleanupGate = new();
     private readonly List<VerifiedPayloadLease> _payloadLeases = [];
     private readonly SafeFileHandle _rootHandle;
