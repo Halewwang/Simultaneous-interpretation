@@ -4,6 +4,7 @@ namespace EMKE.Setup;
 
 internal sealed class VerifiedPayloadLease : IDisposable
 {
+    private readonly object _gate = new();
     private readonly SafeFileHandle _handle;
     private bool _closed;
 
@@ -31,35 +32,131 @@ internal sealed class VerifiedPayloadLease : IDisposable
 
     public string DisplayPath { get; }
 
-    internal bool Closed => _closed;
+    internal bool Closed
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _closed;
+            }
+        }
+    }
 
     public T UseHandle<T>(Func<SafeFileHandle, T> action)
     {
-        ObjectDisposedException.ThrowIf(_closed, this);
-        ArgumentNullException.ThrowIfNull(action);
-        return action(_handle);
+        HandleBorrow borrow;
+        lock (_gate)
+        {
+            ThrowIfClosedWithoutLock();
+            ArgumentNullException.ThrowIfNull(action);
+            borrow = new HandleBorrow(_handle);
+        }
+
+        using (borrow)
+        {
+            return action(borrow.Handle);
+        }
     }
 
     public Stream OpenReadView()
     {
-        ObjectDisposedException.ThrowIf(_closed, this);
-        return new HandleReadView(this);
+        lock (_gate)
+        {
+            ThrowIfClosedWithoutLock();
+            return new HandleReadView(this);
+        }
     }
 
     public void Dispose()
     {
-        if (_closed)
+        lock (_gate)
         {
-            return;
-        }
+            if (_closed)
+            {
+                return;
+            }
 
-        _closed = true;
-        _handle.Dispose();
+            _closed = true;
+            _handle.Dispose();
+        }
     }
 
     private void ThrowIfClosed()
     {
+        lock (_gate)
+        {
+            ThrowIfClosedWithoutLock();
+        }
+    }
+
+    private void ThrowIfClosedWithoutLock()
+    {
         ObjectDisposedException.ThrowIf(_closed, this);
+    }
+
+    private int Read(Span<byte> buffer, long fileOffset)
+    {
+        HandleBorrow borrow;
+        lock (_gate)
+        {
+            ThrowIfClosedWithoutLock();
+            borrow = new HandleBorrow(_handle);
+        }
+
+        using (borrow)
+        {
+            return RandomAccess.Read(borrow.Handle, buffer, fileOffset);
+        }
+    }
+
+    private sealed class HandleBorrow : IDisposable
+    {
+        private readonly SafeFileHandle _handle;
+        private Action? _releaseOwnerReference;
+
+        public HandleBorrow(SafeFileHandle owner)
+        {
+            bool referenceAdded = false;
+            try
+            {
+                owner.DangerousAddRef(ref referenceAdded);
+                _handle = new SafeFileHandle(
+                    owner.DangerousGetHandle(),
+                    ownsHandle: false);
+                _releaseOwnerReference = owner.DangerousRelease;
+            }
+            catch
+            {
+                if (referenceAdded)
+                {
+                    owner.DangerousRelease();
+                }
+                throw;
+            }
+        }
+
+        public SafeFileHandle Handle => _handle;
+
+        public void Dispose()
+        {
+            Action? releaseOwnerReference = Interlocked.Exchange(
+                ref _releaseOwnerReference,
+                null);
+            if (releaseOwnerReference is null)
+            {
+                return;
+            }
+
+            try
+            {
+                _handle.Dispose();
+            }
+            finally
+            {
+                releaseOwnerReference();
+            }
+        }
     }
 
     private sealed class HandleReadView : Stream
@@ -114,7 +211,7 @@ internal sealed class VerifiedPayloadLease : IDisposable
         public override int Read(Span<byte> buffer)
         {
             ThrowIfUnavailable();
-            int read = RandomAccess.Read(_lease._handle, buffer, _position);
+            int read = _lease.Read(buffer, _position);
             _position += read;
             return read;
         }
