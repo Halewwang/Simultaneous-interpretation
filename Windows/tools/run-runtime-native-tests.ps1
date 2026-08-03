@@ -57,7 +57,7 @@ if ([string]::IsNullOrWhiteSpace($NativeRealLibrary)) {
 if ([string]::IsNullOrWhiteSpace($ManagedTestOutput)) {
   $ManagedTestOutput = Join-Path `
     $RepositoryRoot `
-    "Windows/tests/EMKE.Integration.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64"
+    "Windows/tests/EMKE.Integration.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64"
 }
 if ([string]::IsNullOrWhiteSpace($ResultsRoot)) {
   $ResultsRoot = Join-Path `
@@ -165,7 +165,7 @@ try {
     -Filter "TestCategory=NativeAudioNativeFake" `
     -LogFileName "native-audio-native-fake.trx" `
     -ResultsDirectory (Join-Path $ResultsRoot "native-fake") `
-    -Expected 7 `
+    -Expected 8 `
     -Label "Native-fake P/Invoke integration test"
 
   Copy-Item `
