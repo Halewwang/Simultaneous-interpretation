@@ -32,6 +32,7 @@ internal static class NativePcmFixtureAdapter
             "out",
             "native",
             "x64-release",
+            "EMKE.NativeAudio.Tests",
             "integration",
             "Release",
             TestExecutableName);
