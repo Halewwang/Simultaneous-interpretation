@@ -1,12 +1,15 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace EMKE.Setup;
 
 internal sealed class VerifiedPayloadLease : IDisposable
 {
+    private const uint FileAttributeNormal = 0x00000080;
     private readonly object _gate = new();
     private readonly SafeFileHandle _handle;
     private bool _closed;
+    private bool? _cleanupSucceeded;
 
     public VerifiedPayloadLease(
         SafeFileHandle handle,
@@ -68,18 +71,90 @@ internal sealed class VerifiedPayloadLease : IDisposable
         }
     }
 
-    public void Dispose()
+    internal bool Cleanup()
     {
         lock (_gate)
         {
-            if (_closed)
+            if (_cleanupSucceeded.HasValue)
             {
-                return;
+                return _cleanupSucceeded.Value;
             }
 
-            _closed = true;
-            _handle.Dispose();
+            if (_closed)
+            {
+                _cleanupSucceeded = false;
+                return false;
+            }
+
+            bool deleteMarked = SetFileAttributesByHandle(
+                    _handle,
+                    FileAttributeNormal)
+                && TrySetDeleteDisposition(_handle);
+            _cleanupSucceeded = deleteMarked;
+            if (deleteMarked)
+            {
+                CloseOwnerHandleWithoutLock();
+            }
+
+            return deleteMarked;
         }
+    }
+
+    internal void CloseAfterResidual()
+    {
+        lock (_gate)
+        {
+            CloseOwnerHandleWithoutLock();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Cleanup())
+        {
+            return;
+        }
+
+        CloseAfterResidual();
+    }
+
+    private void CloseOwnerHandleWithoutLock()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        _closed = true;
+        _handle.Dispose();
+    }
+
+    private static bool SetFileAttributesByHandle(
+        SafeFileHandle handle,
+        uint attributes)
+    {
+        FileBasicInformation information = new()
+        {
+            FileAttributes = attributes,
+        };
+        return SetFileBasicInformationByHandle(
+            handle,
+            FileInformationClass.FileBasicInfo,
+            ref information,
+            checked((uint)Marshal.SizeOf<FileBasicInformation>()));
+    }
+
+    private static bool TrySetDeleteDisposition(SafeFileHandle handle)
+    {
+        FileDispositionInformation information = new()
+        {
+            DeleteFile = true,
+        };
+        return SetFileDispositionByHandle(
+            handle,
+            FileInformationClass.FileDispositionInfo,
+            ref information,
+            checked((uint)Marshal.SizeOf<FileDispositionInformation>()));
     }
 
     private void ThrowIfClosed()
@@ -276,4 +351,56 @@ internal sealed class VerifiedPayloadLease : IDisposable
             _lease.ThrowIfClosed();
         }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileBasicInformation
+    {
+        public long CreationTime;
+        public long LastAccessTime;
+        public long LastWriteTime;
+        public long ChangeTime;
+        public uint FileAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInformation
+    {
+        [MarshalAs(UnmanagedType.U1)]
+        public bool DeleteFile;
+    }
+
+    private enum FileInformationClass
+    {
+        FileBasicInfo,
+        FileStandardInfo,
+        FileNameInfo,
+        FileRenameInfo,
+        FileDispositionInfo,
+    }
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "SetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileBasicInformationByHandle(
+        SafeFileHandle file,
+        FileInformationClass fileInformationClass,
+        ref FileBasicInformation fileInformation,
+        uint bufferSize);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "SetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileDispositionByHandle(
+        SafeFileHandle file,
+        FileInformationClass fileInformationClass,
+        ref FileDispositionInformation fileInformation,
+        uint bufferSize);
 }

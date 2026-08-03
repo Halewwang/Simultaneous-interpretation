@@ -166,18 +166,20 @@ internal interface ISetupSignatureProbe
 
 internal sealed class SetupPayloadVerificationResult : IDisposable
 {
-    private readonly IDisposable? _attemptLifetime;
+    private SetupCleanupOutcome _lastCleanupOutcome;
 
     private SetupPayloadVerificationResult(
         bool isValid,
         string? failureCode,
         string displayDetail,
-        IDisposable? attemptLifetime = null)
+        SetupPayloadVerificationAttempt? attempt = null,
+        SetupCleanupOutcome? cleanupOutcome = null)
     {
         IsValid = isValid;
         FailureCode = failureCode;
         DisplayDetail = displayDetail;
-        _attemptLifetime = attemptLifetime;
+        Attempt = attempt;
+        _lastCleanupOutcome = cleanupOutcome ?? SetupCleanupOutcome.NotAttempted;
     }
 
     public bool IsValid { get; }
@@ -186,16 +188,27 @@ internal sealed class SetupPayloadVerificationResult : IDisposable
 
     public string DisplayDetail { get; }
 
+    public SetupPayloadVerificationAttempt? Attempt { get; }
+
+    public SetupCleanupOutcome LastCleanupOutcome
+    {
+        get => Attempt?.LastCleanupOutcome ?? _lastCleanupOutcome;
+        private set => _lastCleanupOutcome = value;
+    }
+
     public static SetupPayloadVerificationResult Valid { get; } = new(
         true, null, "Setup payload verification succeeded.");
 
-    public static SetupPayloadVerificationResult Rejected(string failureCode)
+    public static SetupPayloadVerificationResult Rejected(
+        string failureCode,
+        SetupCleanupOutcome? cleanupOutcome = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
         return new SetupPayloadVerificationResult(
             false,
             failureCode,
-            "Setup payload verification failed.");
+            "Setup payload verification failed.",
+            cleanupOutcome: cleanupOutcome);
     }
 
     internal static SetupPayloadVerificationResult VerifiedAttempt(
@@ -205,10 +218,13 @@ internal sealed class SetupPayloadVerificationResult : IDisposable
             "Setup payload verification succeeded.",
             attempt);
 
-    public void Dispose()
+    public SetupCleanupOutcome Cleanup()
     {
-        _attemptLifetime?.Dispose();
+        LastCleanupOutcome = Attempt?.Cleanup() ?? LastCleanupOutcome;
+        return LastCleanupOutcome;
     }
+
+    public void Dispose() => _ = Cleanup();
 }
 
 internal sealed class SetupPayloadVerificationAttempt : IDisposable
@@ -221,10 +237,16 @@ internal sealed class SetupPayloadVerificationAttempt : IDisposable
             ?? throw new ArgumentNullException(nameof(extractionDirectory));
     }
 
-    public void Dispose()
+    public SetupCleanupOutcome LastCleanupOutcome { get; private set; } =
+        SetupCleanupOutcome.NotAttempted;
+
+    public SetupCleanupOutcome Cleanup()
     {
-        _extractionDirectory.Dispose();
+        LastCleanupOutcome = _extractionDirectory.Cleanup();
+        return LastCleanupOutcome;
     }
+
+    public void Dispose() => _ = Cleanup();
 }
 
 internal sealed class SetupPayloadVerifier
@@ -295,7 +317,9 @@ internal sealed class SetupPayloadVerifier
             embeddedPayloads);
         return extracted.IsValid
             ? SetupPayloadVerificationResult.Valid
-            : SetupPayloadVerificationResult.Rejected(extracted.FailureCode!);
+            : SetupPayloadVerificationResult.Rejected(
+                extracted.FailureCode!,
+                extracted.LastCleanupOutcome);
     }
 
 #pragma warning disable CA1031 // Payload and signature faults must fail closed and clean up.
@@ -330,8 +354,9 @@ internal sealed class SetupPayloadVerifier
                         StringComparison.OrdinalIgnoreCase));
                 if (embedded is null || embedded.DeclaredLength != expected.Length)
                 {
-                    return SetupPayloadVerificationResult.Rejected(
-                        "tamperedPayloadLength");
+                    return RejectAfterCleanup(
+                        "tamperedPayloadLength",
+                        extraction);
                 }
 
                 using Stream source = embedded.OpenRead();
@@ -340,8 +365,9 @@ internal sealed class SetupPayloadVerifier
                     expected);
                 if (!extracted.Succeeded)
                 {
-                    return SetupPayloadVerificationResult.Rejected(
-                        extracted.FailureCode!);
+                    return RejectAfterCleanup(
+                        extracted.FailureCode!,
+                        extraction);
                 }
 
                 verified.Add(extracted.Payload!);
@@ -352,16 +378,16 @@ internal sealed class SetupPayloadVerifier
                 verified.AsReadOnly());
             if (!signature.Trusted)
             {
-                return SetupPayloadVerificationResult.Rejected(signature.FailureCode!);
+                return RejectAfterCleanup(signature.FailureCode!, extraction);
             }
 
             SetupPayloadVerificationAttempt? attempt = null;
             try
             {
                 attempt = new SetupPayloadVerificationAttempt(extraction);
-                extraction = null;
                 SetupPayloadVerificationResult result =
                     SetupPayloadVerificationResult.VerifiedAttempt(attempt);
+                extraction = null;
                 attempt = null;
                 return result;
             }
@@ -372,7 +398,7 @@ internal sealed class SetupPayloadVerifier
         }
         catch (Exception)
         {
-            return SetupPayloadVerificationResult.Rejected("embeddedPayloadUnreadable");
+            return RejectAfterCleanup("embeddedPayloadUnreadable", extraction);
         }
         finally
         {
@@ -380,6 +406,15 @@ internal sealed class SetupPayloadVerifier
         }
     }
 #pragma warning restore CA1031
+
+    private static SetupPayloadVerificationResult RejectAfterCleanup(
+        string failureCode,
+        SetupExtractionDirectory? extraction)
+    {
+        SetupCleanupOutcome outcome = extraction?.Cleanup()
+            ?? SetupCleanupOutcome.NotAttempted;
+        return SetupPayloadVerificationResult.Rejected(failureCode, outcome);
+    }
 
 }
 

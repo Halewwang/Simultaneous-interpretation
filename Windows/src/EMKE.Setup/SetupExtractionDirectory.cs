@@ -1,6 +1,8 @@
+using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace EMKE.Setup;
@@ -30,44 +32,6 @@ internal sealed class SetupExtractionException : Exception
     }
 
     public string FailureCode { get; }
-}
-
-internal sealed class SetupExtractionCleanupState
-{
-    private SetupExtractionCleanupState(
-        bool completed,
-        bool residualRetained,
-        string? failureCode)
-    {
-        Completed = completed;
-        ResidualRetained = residualRetained;
-        FailureCode = failureCode;
-    }
-
-    public bool Completed { get; }
-
-    public bool ResidualRetained { get; }
-
-    public string? FailureCode { get; }
-
-    public static SetupExtractionCleanupState NotAttempted { get; } = new(
-        completed: false,
-        residualRetained: false,
-        failureCode: null);
-
-    public static SetupExtractionCleanupState Cleaned { get; } = new(
-        completed: true,
-        residualRetained: false,
-        failureCode: null);
-
-    public static SetupExtractionCleanupState Residual(string failureCode)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
-        return new SetupExtractionCleanupState(
-            completed: false,
-            residualRetained: true,
-            failureCode);
-    }
 }
 
 internal sealed class SetupExtractionResult
@@ -104,6 +68,11 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const int ErrorFileExists = 80;
     private const int ErrorAlreadyExists = 183;
     private const int CopyBufferSize = 81920;
+    private const int DirectoryQueryBufferSize = 65536;
+    private const int FileNamesInformation = 12;
+    private const int FileNamesInformationHeaderSize = 12;
+    private const int StatusSuccess = 0;
+    private const int StatusNoMoreFiles = unchecked((int)0x80000006);
     private const uint GenericRead = 0x80000000;
     private const uint GenericWrite = 0x40000000;
     private const uint DeleteAccess = 0x00010000;
@@ -111,32 +80,35 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const uint FileWriteAttributes = 0x00000100;
     private const uint SynchronizeAccess = 0x00100000;
     private const uint FileShareRead = 0x00000001;
-    private const uint FileShareWrite = 0x00000002;
-    private const uint FileShareDelete = 0x00000004;
     private const uint CreateNew = 1;
-    private const uint OpenExisting = 3;
     private const uint FileAttributeReadOnly = 0x00000001;
     private const uint FileAttributeNormal = 0x00000080;
-    private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileAttributeReparsePoint = 0x00000400;
+    private readonly object _cleanupGate = new();
     private readonly List<VerifiedPayloadLease> _payloadLeases = [];
     private readonly SafeFileHandle _rootHandle;
-    private readonly SetupFileIdentity _rootIdentity;
     private bool _disposed;
-    private string? _cleanupUncertaintyCode;
+    private SetupCleanupOutcome? _cleanupOutcome;
 
     private SetupExtractionDirectory(AtomicSetupDirectory root)
     {
         RootPath = root.FullPath;
         _rootHandle = root.Handle;
-        _rootIdentity = root.Identity;
     }
 
     public string RootPath { get; }
 
-    public SetupExtractionCleanupState CleanupState { get; private set; } =
-        SetupExtractionCleanupState.NotAttempted;
+    public SetupCleanupOutcome CleanupState
+    {
+        get
+        {
+            lock (_cleanupGate)
+            {
+                return _cleanupOutcome ?? SetupCleanupOutcome.NotAttempted;
+            }
+        }
+    }
 
     public static SetupExtractionDirectory Create(
         string setupOwnedBase,
@@ -257,7 +229,7 @@ internal sealed class SetupExtractionDirectory : IDisposable
         {
             if (lease is not null)
             {
-                _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+                _ = TryCleanupPayloadLease(lease);
             }
             return SetupExtractionResult.Rejected(exception.FailureCode);
         }
@@ -265,63 +237,87 @@ internal sealed class SetupExtractionDirectory : IDisposable
         {
             if (lease is not null)
             {
-                _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+                _ = TryCleanupPayloadLease(lease);
             }
             return SetupExtractionResult.Rejected("payloadWriteFailed");
         }
     }
 
-    public void Dispose()
+    public SetupCleanupOutcome Cleanup()
     {
-        if (_disposed)
+        lock (_cleanupGate)
         {
-            return;
-        }
+            if (_cleanupOutcome is not null)
+            {
+                return _cleanupOutcome;
+            }
 
-        _disposed = true;
-        bool payloadCleanupCertain = true;
-        foreach (VerifiedPayloadLease lease in
-            _payloadLeases.AsEnumerable().Reverse().ToArray())
-        {
-            payloadCleanupCertain &= TryDeletePayloadLease(lease, closeOnFailure: true);
-        }
+            _disposed = true;
+            List<string> retainedPayloads = [];
+            foreach (VerifiedPayloadLease lease in
+                _payloadLeases.AsEnumerable().Reverse().ToArray())
+            {
+                if (!lease.Cleanup())
+                {
+                    retainedPayloads.Add(lease.LogicalName);
+                }
+            }
 
-        if (!payloadCleanupCertain || _cleanupUncertaintyCode is not null)
-        {
-            _rootHandle.Dispose();
-            CleanupState = SetupExtractionCleanupState.Residual(
-                _cleanupUncertaintyCode ?? "payloadCleanupUncertain");
-            return;
-        }
+            if (retainedPayloads.Count > 0)
+            {
+                return FreezeResidual(
+                    "payloadCleanupUncertain",
+                    retainedPayloads);
+            }
 
-        if (!IsRootPathStillBoundToHeldHandle())
-        {
-            _rootHandle.Dispose();
-            CleanupState = SetupExtractionCleanupState.Residual("rootIdentityChanged");
-            return;
-        }
+            if (!TryRootHasUnexpectedEntries(out bool hasUnexpectedEntries))
+            {
+                return FreezeResidual(
+                    "rootCleanupUncertain",
+                    Array.Empty<string>());
+            }
 
-        bool rootInspectionSucceeded;
-        bool rootHasEntries = TryRootHasEntries(out rootInspectionSucceeded);
-        if (!rootInspectionSucceeded)
-        {
-            _rootHandle.Dispose();
-            CleanupState = SetupExtractionCleanupState.Residual("rootInspectionFailed");
-            return;
-        }
-        if (rootHasEntries)
-        {
-            _rootHandle.Dispose();
-            CleanupState = SetupExtractionCleanupState.Residual(
-                "unexpectedExtractionEntriesRetained");
-            return;
-        }
+            if (hasUnexpectedEntries)
+            {
+                return FreezeResidual(
+                    "unexpectedExtractionEntriesRetained",
+                    ["unexpected-entry"]);
+            }
 
-        bool rootDeleteMarked = TrySetDeleteDisposition(_rootHandle);
+            if (!TrySetDeleteDisposition(_rootHandle))
+            {
+                return FreezeResidual(
+                    "rootCleanupUncertain",
+                    Array.Empty<string>());
+            }
+
+            _cleanupOutcome = SetupCleanupOutcome.Cleaned;
+            CloseOwnedHandlesAfterOutcome();
+            return _cleanupOutcome;
+        }
+    }
+
+    public void Dispose() => _ = Cleanup();
+
+    private SetupCleanupOutcome FreezeResidual(
+        string failureCode,
+        IEnumerable<string> retainedLogicalNames)
+    {
+        _cleanupOutcome = SetupCleanupOutcome.Residual(
+            failureCode,
+            retainedLogicalNames);
+        CloseOwnedHandlesAfterOutcome();
+        return _cleanupOutcome;
+    }
+
+    private void CloseOwnedHandlesAfterOutcome()
+    {
+        foreach (VerifiedPayloadLease lease in _payloadLeases)
+        {
+            lease.CloseAfterResidual();
+        }
+        _payloadLeases.Clear();
         _rootHandle.Dispose();
-        CleanupState = rootDeleteMarked
-            ? SetupExtractionCleanupState.Cleaned
-            : SetupExtractionCleanupState.Residual("rootCleanupUncertain");
     }
 
     private static string EnsureSafeBase(string setupOwnedBase)
@@ -345,10 +341,8 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
         catch
         {
-            _ = lease.UseHandle(handle =>
-                SetFileAttributesByHandle(handle, FileAttributeNormal)
-                    && TrySetDeleteDisposition(handle));
-            lease.Dispose();
+            _ = lease.Cleanup();
+            lease.CloseAfterResidual();
             throw;
         }
     }
@@ -425,77 +419,121 @@ internal sealed class SetupExtractionDirectory : IDisposable
         VerifiedPayloadLease lease,
         string failureCode)
     {
-        _ = TryDeletePayloadLease(lease, closeOnFailure: false);
+        _ = TryCleanupPayloadLease(lease);
         return SetupExtractionResult.Rejected(failureCode);
     }
 
-    private bool TryDeletePayloadLease(
-        VerifiedPayloadLease lease,
-        bool closeOnFailure)
+    private bool TryCleanupPayloadLease(VerifiedPayloadLease lease)
     {
-        if (lease.Closed)
+        bool cleaned = lease.Cleanup();
+        if (cleaned)
         {
             _ = _payloadLeases.Remove(lease);
-            return true;
         }
-
-        bool deleteMarked = lease.UseHandle(handle =>
-            SetFileAttributesByHandle(handle, FileAttributeNormal)
-                && TrySetDeleteDisposition(handle));
-        if (deleteMarked || closeOnFailure)
-        {
-            lease.Dispose();
-            _ = _payloadLeases.Remove(lease);
-        }
-        if (!deleteMarked && closeOnFailure)
-        {
-            _cleanupUncertaintyCode ??= "payloadCleanupUncertain";
-        }
-        return deleteMarked;
+        return cleaned;
     }
 
-    private bool IsRootPathStillBoundToHeldHandle()
+    private bool TryRootHasUnexpectedEntries(out bool hasUnexpectedEntries)
     {
-        SafeFileHandle? pathHandle = null;
-        try
+        byte[] buffer = new byte[DirectoryQueryBufferSize];
+        bool restartScan = true;
+        hasUnexpectedEntries = false;
+        while (true)
         {
-            pathHandle = CreateFile(
-                RootPath,
-                FileReadAttributes,
-                FileShareRead | FileShareWrite | FileShareDelete,
+            int status = NtQueryDirectoryFile(
+                _rootHandle,
                 nint.Zero,
-                OpenExisting,
-                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
-                nint.Zero);
-            return !pathHandle.IsInvalid
-                && TryReadIdentity(pathHandle, out SetupFileIdentity currentIdentity)
-                && currentIdentity.Equals(_rootIdentity)
-                && (currentIdentity.FileAttributes & FileAttributeReparsePoint) == 0;
-        }
-        finally
-        {
-            pathHandle?.Dispose();
+                nint.Zero,
+                nint.Zero,
+                out IoStatusBlock ioStatusBlock,
+                buffer,
+                checked((uint)buffer.Length),
+                FileNamesInformation,
+                returnSingleEntry: false,
+                nint.Zero,
+                restartScan);
+            restartScan = false;
+
+            if (status == StatusNoMoreFiles)
+            {
+                return true;
+            }
+            if (status != StatusSuccess
+                || ioStatusBlock.Information == 0
+                || ioStatusBlock.Information > (nuint)buffer.Length)
+            {
+                return false;
+            }
+
+            int returnedLength = checked((int)ioStatusBlock.Information);
+            if (!TryParseDirectoryNames(
+                buffer.AsSpan(0, returnedLength),
+                ref hasUnexpectedEntries))
+            {
+                return false;
+            }
         }
     }
 
-    private bool TryRootHasEntries(out bool inspectionSucceeded)
+    private static bool TryParseDirectoryNames(
+        ReadOnlySpan<byte> buffer,
+        ref bool hasUnexpectedEntries)
     {
-        try
+        int offset = 0;
+        while (offset < buffer.Length)
         {
-            bool hasEntries = Directory.EnumerateFileSystemEntries(RootPath).Any();
-            inspectionSucceeded = true;
-            return hasEntries;
+            ReadOnlySpan<byte> remaining = buffer[offset..];
+            if (remaining.Length < FileNamesInformationHeaderSize)
+            {
+                return false;
+            }
+
+            uint nextEntryOffset = BinaryPrimitives.ReadUInt32LittleEndian(remaining);
+            uint fileNameLength = BinaryPrimitives.ReadUInt32LittleEndian(
+                remaining[8..]);
+            if (fileNameLength == 0 || fileNameLength % sizeof(char) != 0)
+            {
+                return false;
+            }
+
+            int entryLength;
+            if (nextEntryOffset == 0)
+            {
+                entryLength = remaining.Length;
+            }
+            else
+            {
+                if (nextEntryOffset < FileNamesInformationHeaderSize
+                    || nextEntryOffset > (uint)remaining.Length
+                    || nextEntryOffset % sizeof(uint) != 0)
+                {
+                    return false;
+                }
+                entryLength = checked((int)nextEntryOffset);
+            }
+
+            if (fileNameLength
+                > (uint)(entryLength - FileNamesInformationHeaderSize))
+            {
+                return false;
+            }
+
+            string fileName = Encoding.Unicode.GetString(remaining.Slice(
+                FileNamesInformationHeaderSize,
+                checked((int)fileNameLength)));
+            if (fileName is not "." and not "..")
+            {
+                hasUnexpectedEntries = true;
+            }
+
+            if (nextEntryOffset == 0)
+            {
+                return true;
+            }
+            offset = checked(offset + entryLength);
         }
-        catch (IOException)
-        {
-            inspectionSucceeded = false;
-            return true;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            inspectionSucceeded = false;
-            return true;
-        }
+
+        return false;
     }
 
     private static void EnsureNoReparsePointAtAnyExistingComponent(string fullPath)
@@ -592,24 +630,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 : path;
     }
 
-    private static bool TryReadIdentity(
-        SafeFileHandle handle,
-        out SetupFileIdentity identity)
-    {
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information))
-        {
-            identity = default;
-            return false;
-        }
-
-        identity = new SetupFileIdentity(
-            information.VolumeSerialNumber,
-            information.FileIndexHigh,
-            information.FileIndexLow,
-            information.FileAttributes);
-        return true;
-    }
-
     private static bool SetFileAttributesByHandle(
         SafeFileHandle handle,
         uint attributes)
@@ -644,18 +664,10 @@ internal sealed class SetupExtractionDirectory : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
+    private struct IoStatusBlock
     {
-        public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
+        public nint StatusOrPointer;
+        public nuint Information;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -685,6 +697,24 @@ internal sealed class SetupExtractionDirectory : IDisposable
     }
 
     [DllImport(
+        "ntdll.dll",
+        EntryPoint = "NtQueryDirectoryFile",
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern int NtQueryDirectoryFile(
+        SafeFileHandle fileHandle,
+        nint eventHandle,
+        nint apcRoutine,
+        nint apcContext,
+        out IoStatusBlock ioStatusBlock,
+        [Out] byte[] fileInformation,
+        uint length,
+        int fileInformationClass,
+        [MarshalAs(UnmanagedType.U1)] bool returnSingleEntry,
+        nint fileName,
+        [MarshalAs(UnmanagedType.U1)] bool restartScan);
+
+    [DllImport(
         "kernel32.dll",
         EntryPoint = "CreateFileW",
         SetLastError = true,
@@ -712,17 +742,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
         [Out] char[] path,
         uint pathLength,
         uint flags);
-
-    [DllImport(
-        "kernel32.dll",
-        EntryPoint = "GetFileInformationByHandle",
-        SetLastError = true,
-        ExactSpelling = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle file,
-        out ByHandleFileInformation fileInformation);
 
     [DllImport(
         "kernel32.dll",
