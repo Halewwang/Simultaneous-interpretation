@@ -27,6 +27,20 @@ Microsoft-signed result, kernel-policy validation, installation, Secure Boot
 acceptance, endpoint validation, and release approval are external gates
 outside this build workflow.
 
+The exact Task 2R snapshot for source commit
+`44c7f8770f11e211301301338135e9ca2c6f9c20` is recorded in
+[`windows-setup-task2r-evidence.md`](windows-setup-task2r-evidence.md). Windows
+Audio Foundation run
+[`30800833454`](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30800833454)
+completed successfully: `driver-build-proof` job
+[`91644745497`](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30800833454/job/91644745497)
+passed the unsigned EMKE catalog strict fixture 1/1, and
+`hosted-toolchain-proof` job
+[`91644745589`](https://github.com/Halewwang/Simultaneous-interpretation/actions/runs/30800833454/job/91644745589)
+passed the managed seam 19/19, NativeFake 8/8, and RealDll 1/1. The managed
+output used target framework `net10.0-windows10.0.19041.0`; that target does
+not turn the hosted Windows Server runner into Windows 10 client evidence.
+
 ## Setup Task 2R hosted evidence
 
 The Windows Internal MSIX workflow records three independent Task 2R results:
