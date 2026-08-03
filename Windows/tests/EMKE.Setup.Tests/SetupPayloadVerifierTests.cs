@@ -104,12 +104,9 @@ public sealed class SetupPayloadVerifierTests
     }
 
     [TestMethod]
-    [DataRow("msixAuthenticodeInvalid")]
+    [DataRow("msixSignatureInvalid")]
     [DataRow("msixPublisherMismatch")]
-    [DataRow("certificateHashMismatch")]
-    [DataRow("certificateSubjectMismatch")]
-    [DataRow("certificateValidityInvalid")]
-    [DataRow("certificateThumbprintMismatch")]
+    [DataRow("certificateEvidenceMismatch")]
     [DataRow("driverInfSubmissionHashMismatch")]
     [DataRow("driverSysSubmissionHashMismatch")]
     [DataRow("driverCatalogKernelTrustInvalid")]
@@ -150,7 +147,7 @@ public sealed class SetupPayloadVerifierTests
             "setup-private", "certificate-secret.cer");
         SetupPayloadVerifier verifier = new(new StaticSignatureVerifier(
             SetupPayloadSignatureEvidence.Rejected(
-                "certificateThumbprintMismatch",
+                "certificateEvidenceMismatch",
                 privatePath,
                 "certificate-secret")));
 
@@ -158,9 +155,76 @@ public sealed class SetupPayloadVerifierTests
             Manifest(),
             EmbeddedPayloads());
 
-        Assert.AreEqual("certificateThumbprintMismatch", result.FailureCode);
+        Assert.AreEqual("certificateEvidenceMismatch", result.FailureCode);
         Assert.IsFalse(result.DisplayDetail.Contains(privatePath, StringComparison.Ordinal));
         Assert.IsFalse(result.DisplayDetail.Contains("certificate-secret", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow(
+        false,
+        CertificateHash,
+        "CN=EMKE Internal Test",
+        true,
+        CertificateHash,
+        "msixSignatureInvalid")]
+    [DataRow(
+        true,
+        DifferentCertificateHash,
+        "CN=EMKE Internal Test",
+        true,
+        CertificateHash,
+        "msixSignerMismatch")]
+    [DataRow(
+        true,
+        CertificateHash,
+        "CN=Other Publisher",
+        true,
+        CertificateHash,
+        "certificateEvidenceMismatch")]
+    [DataRow(
+        true,
+        CertificateHash,
+        "CN=EMKE Internal Test",
+        false,
+        CertificateHash,
+        "certificateEvidenceMismatch")]
+    [DataRow(
+        true,
+        CertificateHash,
+        "CN=EMKE Internal Test",
+        true,
+        DifferentCertificateHash,
+        "certificateEvidenceMismatch")]
+    public void ProductionSignatureVerifierUsesStableMsixAndCertificateFailures(
+        bool signatureValid,
+        string signerSha256,
+        string certificateSubject,
+        bool certificateValidityValid,
+        string certificateSha256,
+        string expectedFailure)
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        RecordingSignatureProbe probe = new(
+            new SetupMsixSignatureEvidence(
+                signatureValid,
+                signerSha256,
+                "CN=EMKE Internal Test"),
+            new SetupCertificateEvidence(
+                certificateSubject,
+                certificateValidityValid,
+                certificateSha256),
+            new SetupDriverCatalogEvidence(trusted: true));
+        WindowsSetupPayloadSignatureVerifier verifier = new(probe);
+
+        SetupPayloadSignatureEvidence result = verifier.Verify(
+            Manifest(),
+            ExtractPayloads(extraction));
+
+        Assert.IsFalse(result.Trusted);
+        Assert.AreEqual(expectedFailure, result.FailureCode);
     }
 
     [TestMethod]
@@ -180,16 +244,23 @@ public sealed class SetupPayloadVerifierTests
                 sha256Thumbprint: CertificateHash),
             new SetupDriverCatalogEvidence(trusted: true));
         WindowsSetupPayloadSignatureVerifier verifier = new(probe);
+        VerifiedSetupPayload[] payloads = ExtractPayloads(extraction);
 
         SetupPayloadSignatureEvidence result = verifier.Verify(
             Manifest(),
-            ExtractPayloads(extraction));
+            payloads);
 
         Assert.IsFalse(result.Trusted);
         Assert.AreEqual("msixPublisherMismatch", result.FailureCode);
-        Assert.IsTrue(probe.MsixVerified);
-        Assert.IsTrue(probe.CertificateRead);
-        Assert.IsFalse(probe.CatalogVerified);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.Msix),
+            probe.MsixPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.Certificate),
+            probe.CertificatePayload);
+        Assert.IsNull(probe.CatalogPayload);
+        Assert.IsNull(probe.InfPayload);
+        Assert.IsNull(probe.SysPayload);
     }
 
     [TestMethod]
@@ -209,15 +280,28 @@ public sealed class SetupPayloadVerifierTests
                 sha256Thumbprint: CertificateHash),
             new SetupDriverCatalogEvidence(trusted: true));
         WindowsSetupPayloadSignatureVerifier verifier = new(probe);
+        VerifiedSetupPayload[] payloads = ExtractPayloads(extraction);
 
         SetupPayloadSignatureEvidence result = verifier.Verify(
             Manifest(),
-            ExtractPayloads(extraction));
+            payloads);
 
         Assert.IsTrue(result.Trusted);
-        Assert.IsTrue(probe.MsixVerified);
-        Assert.IsTrue(probe.CertificateRead);
-        Assert.IsTrue(probe.CatalogVerified);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.Msix),
+            probe.MsixPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.Certificate),
+            probe.CertificatePayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverCatalog),
+            probe.CatalogPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverInf),
+            probe.InfPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverSys),
+            probe.SysPayload);
     }
 
     [TestMethod]
@@ -237,9 +321,11 @@ public sealed class SetupPayloadVerifierTests
             EmbeddedPayloads());
 
         Assert.IsTrue(result.IsValid);
-        Assert.IsTrue(probe.MsixVerified);
-        Assert.IsTrue(probe.CertificateRead);
-        Assert.IsTrue(probe.CatalogVerified);
+        Assert.IsNotNull(probe.MsixPayload);
+        Assert.IsNotNull(probe.CertificatePayload);
+        Assert.IsNotNull(probe.CatalogPayload);
+        Assert.IsNotNull(probe.InfPayload);
+        Assert.IsNotNull(probe.SysPayload);
     }
 
     [TestMethod]
@@ -247,7 +333,7 @@ public sealed class SetupPayloadVerifierTests
     {
         using TemporaryDirectory temporary = new();
         CountingSignatureVerifier signatures = new(
-            SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid"));
+            SetupPayloadSignatureEvidence.Rejected("msixSignatureInvalid"));
         string? extractionRoot = null;
         SetupExtractionDirectory? capturedExtraction = null;
         SetupPayloadVerifier verifier = new(
@@ -266,7 +352,7 @@ public sealed class SetupPayloadVerifierTests
             EmbeddedPayloads());
 
         Assert.IsFalse(result.IsValid);
-        Assert.AreEqual("msixAuthenticodeInvalid", result.FailureCode);
+        Assert.AreEqual("msixSignatureInvalid", result.FailureCode);
         Assert.AreEqual(5, signatures.ObservedPayloadCount);
         Assert.IsNotNull(extractionRoot);
         Assert.IsFalse(Directory.Exists(extractionRoot));
@@ -351,10 +437,8 @@ public sealed class SetupPayloadVerifierTests
     [TestMethod]
     public void MsixPublisherIsReadFromTheNamespacedIdentityElement()
     {
-        using TemporaryDirectory temporary = new();
-        string msixPath = Path.Combine(temporary.Path, "fixture.msix");
-        using (FileStream file = File.Create(msixPath))
-        using (ZipArchive archive = new(file, ZipArchiveMode.Create))
+        using MemoryStream msix = new();
+        using (ZipArchive archive = new(msix, ZipArchiveMode.Create, leaveOpen: true))
         {
             ZipArchiveEntry entry = archive.CreateEntry("AppxManifest.xml");
             using StreamWriter writer = new(entry.Open(), Encoding.UTF8);
@@ -364,8 +448,9 @@ public sealed class SetupPayloadVerifierTests
                 + "Version=\"0.2.0.0\" ProcessorArchitecture=\"x64\" />"
                 + "</Package>");
         }
+        msix.Position = 0;
 
-        string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(msixPath);
+        string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(msix);
 
         Assert.AreEqual("CN=EMKE Internal Test", publisher);
     }
@@ -387,8 +472,9 @@ public sealed class SetupPayloadVerifierTests
             msixSource,
             payload);
 
+        using Stream heldReadView = extracted.Payload!.Lease.OpenReadView();
         string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(
-            extracted.Payload!.DisplayPath);
+            heldReadView);
 
         Assert.AreEqual("CN=EMKE Internal Test", publisher);
     }
@@ -420,7 +506,7 @@ public sealed class SetupPayloadVerifierTests
             payload);
 
         SetupCertificateEvidence evidence = WindowsSetupSignatureProbe.Instance
-            .ReadCertificate(extracted.Payload!.DisplayPath);
+            .ReadCertificate(extracted.Payload!);
 
         Assert.AreEqual("CN=EMKE Internal Test", evidence.Subject);
         Assert.IsTrue(evidence.ValidityValid);
@@ -483,6 +569,8 @@ public sealed class SetupPayloadVerifierTests
 
     private const string CertificateHash =
         "de6d47c98e8cc925adb5c33c64ce76321978ba7b1ba2ded1eef0d9417d01ef85";
+    private const string DifferentCertificateHash =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     private static VerifiedSetupPayload[] ExtractPayloads(
         SetupExtractionDirectory extraction)
@@ -496,6 +584,11 @@ public sealed class SetupPayloadVerifierTests
                 $"Failed to extract test payload '{payload.LogicalName}'.");
         }).ToArray();
     }
+
+    private static VerifiedSetupPayload PayloadOfKind(
+        IReadOnlyList<VerifiedSetupPayload> payloads,
+        SetupPayloadKind kind) => payloads.Single(
+            payload => payload.ManifestPayload.Kind == kind);
 
     private static List<SetupEmbeddedPayload> EmbeddedPayloads(
         string? changedLogicalName = null,
@@ -540,30 +633,37 @@ public sealed class SetupPayloadVerifierTests
         SetupCertificateEvidence certificate,
         SetupDriverCatalogEvidence catalog) : ISetupSignatureProbe
     {
-        public bool MsixVerified { get; private set; }
+        public VerifiedSetupPayload? MsixPayload { get; private set; }
 
-        public bool CertificateRead { get; private set; }
+        public VerifiedSetupPayload? CertificatePayload { get; private set; }
 
-        public bool CatalogVerified { get; private set; }
+        public VerifiedSetupPayload? CatalogPayload { get; private set; }
 
-        public SetupMsixSignatureEvidence VerifyMsix(string msixPath)
+        public VerifiedSetupPayload? InfPayload { get; private set; }
+
+        public VerifiedSetupPayload? SysPayload { get; private set; }
+
+        public SetupMsixSignatureEvidence VerifyMsix(VerifiedSetupPayload payload)
         {
-            MsixVerified = true;
+            MsixPayload = payload;
             return msix;
         }
 
-        public SetupCertificateEvidence ReadCertificate(string certificatePath)
+        public SetupCertificateEvidence ReadCertificate(
+            VerifiedSetupPayload payload)
         {
-            CertificateRead = true;
+            CertificatePayload = payload;
             return certificate;
         }
 
         public SetupDriverCatalogEvidence VerifyDriverCatalog(
-            string catalogPath,
-            string infPath,
-            string sysPath)
+            VerifiedSetupPayload catalogPayload,
+            VerifiedSetupPayload infPayload,
+            VerifiedSetupPayload sysPayload)
         {
-            CatalogVerified = true;
+            CatalogPayload = catalogPayload;
+            InfPayload = infPayload;
+            SysPayload = sysPayload;
             return catalog;
         }
     }
