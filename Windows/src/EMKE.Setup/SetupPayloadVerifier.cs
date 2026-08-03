@@ -1,10 +1,3 @@
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
-using System.Runtime.InteropServices;
-using System.IO.Compression;
-using System.Xml.Linq;
-using EMKE.Platform.Driver;
-
 namespace EMKE.Setup;
 
 internal sealed class SetupEmbeddedPayload
@@ -154,14 +147,14 @@ internal sealed class SetupDriverCatalogEvidence
 
 internal interface ISetupSignatureProbe
 {
-    SetupMsixSignatureEvidence VerifyMsix(string msixPath);
+    SetupMsixSignatureEvidence VerifyMsix(VerifiedSetupPayload msix);
 
-    SetupCertificateEvidence ReadCertificate(string certificatePath);
+    SetupCertificateEvidence ReadCertificate(VerifiedSetupPayload certificate);
 
     SetupDriverCatalogEvidence VerifyDriverCatalog(
-        string catalogPath,
-        string infPath,
-        string sysPath);
+        VerifiedSetupPayload catalog,
+        VerifiedSetupPayload inf,
+        VerifiedSetupPayload sys);
 }
 
 internal sealed class SetupPayloadVerificationResult : IDisposable
@@ -449,13 +442,13 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
             return SetupPayloadSignatureEvidence.Rejected("signatureEvidenceUnavailable");
         }
 
-        SetupMsixSignatureEvidence msixEvidence = _probe.VerifyMsix(msix.DisplayPath);
+        SetupMsixSignatureEvidence msixEvidence = _probe.VerifyMsix(msix);
         if (!msixEvidence.SignatureValid)
         {
-            return SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid");
+            return SetupPayloadSignatureEvidence.Rejected("msixSignatureInvalid");
         }
         SetupCertificateEvidence certificateEvidence = _probe.ReadCertificate(
-            certificate.DisplayPath);
+            certificate);
         SetupPayloadSignatureEvidence? certificateFailure = VerifyCertificate(
             certificateEvidence,
             certificate.ManifestPayload,
@@ -480,9 +473,9 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
         }
 
         SetupDriverCatalogEvidence driverEvidence = _probe.VerifyDriverCatalog(
-            catalog.DisplayPath,
-            inf.DisplayPath,
-            sys.DisplayPath);
+            catalog,
+            inf,
+            sys);
         return driverEvidence.Trusted
             ? SetupPayloadSignatureEvidence.TrustedEvidence
             : SetupPayloadSignatureEvidence.Rejected("driverCatalogKernelTrustInvalid");
@@ -505,12 +498,12 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
                 StringComparison.Ordinal))
         {
             return SetupPayloadSignatureEvidence.Rejected(
-                "certificateSubjectMismatch");
+                "certificateEvidenceMismatch");
         }
         if (!certificate.ValidityValid)
         {
             return SetupPayloadSignatureEvidence.Rejected(
-                "certificateValidityInvalid");
+                "certificateEvidenceMismatch");
         }
         return string.Equals(
                 certificate.Sha256Thumbprint,
@@ -518,194 +511,7 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
                 StringComparison.Ordinal)
             ? null
             : SetupPayloadSignatureEvidence.Rejected(
-                "certificateThumbprintMismatch");
+                "certificateEvidenceMismatch");
     }
 #pragma warning restore CA1031
-}
-
-internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
-{
-    public static WindowsSetupSignatureProbe Instance { get; } = new();
-
-    private WindowsSetupSignatureProbe()
-    {
-    }
-
-#pragma warning disable CA1031 // Malformed signed containers and certificates fail closed.
-    public SetupMsixSignatureEvidence VerifyMsix(string msixPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(msixPath);
-        try
-        {
-            string signerSha256 = WindowsAuthenticodeVerifier.ReadSignerSha256(msixPath);
-            string publisher = ReadMsixPublisher(msixPath);
-            return new SetupMsixSignatureEvidence(
-                WindowsAuthenticodeVerifier.IsSignatureIntact(msixPath),
-                signerSha256,
-                publisher);
-        }
-        catch (Exception)
-        {
-            return new SetupMsixSignatureEvidence(false, null, null);
-        }
-    }
-
-    public SetupCertificateEvidence ReadCertificate(string certificatePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
-        try
-        {
-            byte[] certificateBytes;
-            using (FileStream certificateFile = new(
-                certificatePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete))
-            {
-                if (certificateFile.Length > int.MaxValue)
-                {
-                    throw new InvalidDataException("Certificate payload is too large.");
-                }
-
-                certificateBytes = new byte[checked((int)certificateFile.Length)];
-                certificateFile.ReadExactly(certificateBytes);
-            }
-            using X509Certificate2 certificate = X509CertificateLoader
-                .LoadCertificate(certificateBytes);
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            return new SetupCertificateEvidence(
-                certificate.Subject,
-                certificate.NotBefore <= now && certificate.NotAfter >= now,
-                Convert.ToHexStringLower(
-                    certificate.GetCertHash(HashAlgorithmName.SHA256)));
-        }
-        catch (Exception)
-        {
-            return new SetupCertificateEvidence(null, false, null);
-        }
-    }
-
-    public SetupDriverCatalogEvidence VerifyDriverCatalog(
-        string catalogPath,
-        string infPath,
-        string sysPath)
-    {
-        WindowsCatalogEvidence evidence = WindowsCatalogTrustVerifier.Instance.Verify(
-            catalogPath,
-            infPath,
-            sysPath);
-        return new SetupDriverCatalogEvidence(evidence.ChainValid);
-    }
-#pragma warning restore CA1031
-
-    internal static string ReadMsixPublisher(string msixPath)
-    {
-        using FileStream file = new(
-            msixPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete);
-        using ZipArchive archive = new(file, ZipArchiveMode.Read, leaveOpen: false);
-        ZipArchiveEntry entry = archive.GetEntry("AppxManifest.xml")
-            ?? throw new InvalidDataException("MSIX identity manifest is missing.");
-        using Stream manifestStream = entry.Open();
-        XDocument document = XDocument.Load(manifestStream, LoadOptions.None);
-        XElement root = document.Root
-            ?? throw new InvalidDataException("MSIX identity manifest is missing.");
-        XElement? identity = root.Element(root.Name.Namespace + "Identity");
-        return identity?.Attribute("Publisher")?.Value
-            ?? throw new InvalidDataException("MSIX publisher is missing.");
-    }
-}
-
-internal static class WindowsAuthenticodeVerifier
-{
-    private const int TrustSuccess = 0;
-    private const int CertEUntrustedRoot = unchecked((int)0x800B0109);
-    private const int CertEChaining = unchecked((int)0x800B010A);
-    private const uint WtdUiNone = 2;
-    private const uint WtdChoiceFile = 1;
-    private const uint WtdStateActionIgnore = 0;
-    private static readonly nint InvalidHandleValue = new(-1);
-    private static readonly Guid GenericVerifyV2 = new(
-        "00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
-
-#pragma warning disable CA1031, CA1416 // This is reached only by the Windows Setup executable.
-    public static bool IsSignatureIntact(string filePath)
-    {
-        if (!OperatingSystem.IsWindows() || !File.Exists(filePath))
-        {
-            return false;
-        }
-
-        try
-        {
-            int result = VerifyFileTrust(Path.GetFullPath(filePath));
-            return result is TrustSuccess or CertEUntrustedRoot or CertEChaining;
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-#pragma warning restore CA1031, CA1416
-
-#pragma warning disable SYSLIB0057 // Signed-file extraction has no loader replacement.
-    public static string ReadSignerSha256(string filePath)
-    {
-        using X509Certificate signer = X509Certificate.CreateFromSignedFile(filePath);
-        using X509Certificate2 signerCertificate = X509CertificateLoader
-            .LoadCertificate(signer.GetRawCertData());
-        return Convert.ToHexStringLower(
-            signerCertificate.GetCertHash(HashAlgorithmName.SHA256));
-    }
-#pragma warning restore SYSLIB0057
-
-    private static int VerifyFileTrust(string fullPath)
-    {
-        nint path = Marshal.StringToCoTaskMemUni(fullPath);
-        try
-        {
-            WindowsCatalogNativeMethods.WinTrustFileInfo fileInfo = new()
-            {
-                Size = checked((uint)Marshal.SizeOf<
-                    WindowsCatalogNativeMethods.WinTrustFileInfo>()),
-                FilePath = path,
-            };
-            WindowsCatalogRevocationConfiguration configuration =
-                WindowsCatalogTrustNativeApi.RevocationConfiguration;
-            nint fileInfoPointer = Marshal.AllocCoTaskMem(
-                Marshal.SizeOf<WindowsCatalogNativeMethods.WinTrustFileInfo>());
-            try
-            {
-                Marshal.StructureToPtr(fileInfo, fileInfoPointer, fDeleteOld: false);
-                WindowsCatalogNativeMethods.WinTrustData trustData = new()
-                {
-                    Size = checked((uint)Marshal.SizeOf<
-                        WindowsCatalogNativeMethods.WinTrustData>()),
-                    UiChoice = WtdUiNone,
-                    RevocationChecks = configuration.WinTrustRevocationChecks,
-                    UnionChoice = WtdChoiceFile,
-                    UnionInfo = fileInfoPointer,
-                    StateAction = WtdStateActionIgnore,
-                    ProviderFlags = configuration.WinTrustProviderFlags,
-                };
-                Guid action = GenericVerifyV2;
-                return WindowsCatalogNativeMethods.WinVerifyTrust(
-                    InvalidHandleValue,
-                    ref action,
-                    ref trustData);
-            }
-            finally
-            {
-                Marshal.DestroyStructure<
-                    WindowsCatalogNativeMethods.WinTrustFileInfo>(fileInfoPointer);
-                Marshal.FreeCoTaskMem(fileInfoPointer);
-            }
-        }
-        finally
-        {
-            Marshal.FreeCoTaskMem(path);
-        }
-    }
 }
