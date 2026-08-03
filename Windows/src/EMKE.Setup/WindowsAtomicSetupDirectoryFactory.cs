@@ -38,6 +38,7 @@ internal sealed class WindowsAtomicSetupDirectoryFactory
 
     internal const int MaximumCreateAttempts = 8;
 
+#pragma warning disable CA1822 // The task contract requires an instance factory operation.
     public AtomicSetupDirectory Create(string basePath, string leafName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
@@ -48,6 +49,7 @@ internal sealed class WindowsAtomicSetupDirectoryFactory
         using SafeFileHandle baseHandle = OpenVerifiedBase(fullBasePath);
         return CreateRelative(baseHandle, fullPath, leafName);
     }
+#pragma warning restore CA1822
 
     private static SafeFileHandle OpenVerifiedBase(string basePath)
     {
