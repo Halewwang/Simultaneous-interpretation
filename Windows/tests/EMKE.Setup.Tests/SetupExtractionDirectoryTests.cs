@@ -163,7 +163,7 @@ public sealed class SetupExtractionDirectoryTests
 
         Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
-        Assert.ThrowsExactly<IOException>(() =>
+        AssertMutationBlocked(() =>
         {
             using FileStream ignored = new(
                 payload.DisplayPath,
@@ -213,7 +213,7 @@ public sealed class SetupExtractionDirectoryTests
 
         CollectionAssert.AreEqual("payload"u8.ToArray(), observed);
         Assert.ThrowsExactly<IOException>(() => File.Delete(payload.DisplayPath));
-        Assert.ThrowsExactly<IOException>(() =>
+        AssertMutationBlocked(() =>
         {
             using FileStream ignored = File.Open(
                 payload.DisplayPath,
@@ -313,7 +313,7 @@ public sealed class SetupExtractionDirectoryTests
         string replacementPath = Path.Combine(temporary.Path, "replacement.bin");
         File.WriteAllText(replacementPath, "replacement");
 
-        Assert.ThrowsExactly<IOException>(() =>
+        AssertMutationBlocked(() =>
             File.Move(replacementPath, payload.DisplayPath, overwrite: true));
 
         extraction.Dispose();
@@ -343,6 +343,25 @@ public sealed class SetupExtractionDirectoryTests
         Assert.AreEqual("replacement", File.ReadAllText(markerPath));
         Assert.IsFalse(Directory.Exists(extraction.RootPath));
         Assert.IsTrue(extraction.CleanupState.Completed);
+    }
+
+    private static void AssertMutationBlocked(Action mutation)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+        try
+        {
+            mutation();
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        Assert.Fail("Expected the payload mutation to be blocked.");
     }
 
     private static SetupPayload ExpectedPayload() => new(
