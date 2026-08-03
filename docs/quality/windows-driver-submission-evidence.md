@@ -26,3 +26,58 @@ Microsoft Hardware Dev Center, Attestation or WHQL processing, download of the
 Microsoft-signed result, kernel-policy validation, installation, Secure Boot
 acceptance, endpoint validation, and release approval are external gates
 outside this build workflow.
+
+## Setup Task 2R hosted evidence
+
+The Windows Internal MSIX workflow records three independent Task 2R results:
+
+- `task2r-setup-managed.trx` runs ordinary Setup tests while excluding the
+  signed-payload and unsigned-EMKE fixture categories;
+- `task2r-inbox-catalog.trx` exercises the handle-bound catalog path against a
+  dynamically resolved Microsoft-signed inbox catalog and members;
+- `task2r-signed-payload.trx` runs only after the workflow has generated and
+  verified the exact internal MSIX and CER. Those two paths are scoped to the
+  strict test process and cleared in `finally`.
+
+The Windows Audio workflow records
+`task2r-unsigned-emke-catalog.trx` against the exact Release CAT, INF, and SYS
+created by the driver build. The selected test requires the CAT member hashes
+to match while member trust, kernel-policy trust, and the final allow decision
+remain false. The three fixture variables are cleared in `finally`.
+
+Every Task 2R TRX gate requires a nonempty selection with
+`total = executed = passed`, `failed = 0`, and `notExecuted = 0`. Hosted runner
+success proves compilation and native Windows trust behavior for the exact
+workflow artifacts. It does not prove client installation, meeting endpoint
+behavior, or Microsoft Hardware Dev Center acceptance of the EMKE driver.
+
+## Windows workstation evidence
+
+`Windows/tools/test-setup-task2r-client.ps1` is the non-mutating workstation
+gate. It requires Windows workstation `ProductType = 1`, build 19045 or newer,
+and AMD64. The signed MSIX/CER and unsigned CAT/INF/SYS are mandatory inputs.
+The output directory must already exist.
+
+```powershell
+pwsh -NoProfile -File Windows/tools/test-setup-task2r-client.ps1 `
+  -SignedMsixPath C:\EMKE-Evidence\EMKE-Translation-Windows-0.2.0-internal-x64.msix `
+  -SigningCerPath C:\EMKE-Evidence\EMKE-Translation-Windows-0.2.0-internal-x64.cer `
+  -UnsignedCatPath C:\EMKE-Evidence\EMKE.VirtualAudio.cat `
+  -UnsignedInfPath C:\EMKE-Evidence\EMKE.VirtualAudio.inf `
+  -UnsignedSysPath C:\EMKE-Evidence\EMKE.VirtualAudio.sys `
+  -SourceCommit 0123456789abcdef0123456789abcdef01234567 `
+  -OutputPath C:\EMKE-Evidence\setup-task2r-client.json
+```
+
+The script executes ordinary Setup, inbox catalog, signed payload, and unsigned
+catalog tests in four isolated TRX runs. Its JSON contains only schema version,
+bounded OS metadata, the five TRX counters for each gate, and the source commit;
+fixture paths are not included. It does not install an MSIX, import a
+certificate, install or mutate a driver, request elevation, or change boot
+policy.
+
+Windows 10 22H2 and Windows 11 client acceptance remain pending until the JSON
+from each required workstation is attached to the release evidence. A
+Microsoft-signed EMKE CAT and final driver release acceptance remain pending
+until the exact Hardware Dev Center-returned bytes pass the separate release
+gate.

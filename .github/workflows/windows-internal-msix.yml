@@ -77,6 +77,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Internal MSIX lifecycle behavior tests failed."
           }
+          pwsh -NoProfile -File Windows/tools/tests/setup-task2r-client.validation.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R client evidence validation tests failed."
+          }
           dotnet restore Windows/EMKE.Windows.slnx --locked-mode
           if ($LASTEXITCODE -ne 0) {
             throw "Windows locked restore failed."
@@ -110,6 +114,31 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
+
+          function Assert-CompleteTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -le 0 -or
+              [int]$counters.executed -ne [int]$counters.total -or
+              [int]$counters.passed -ne [int]$counters.total -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass every selected test without failures or skips."
+            }
+          }
+
           dotnet build Windows/EMKE.Windows.slnx `
             --configuration Release `
             --no-restore
@@ -119,10 +148,41 @@ jobs:
           dotnet test Windows/EMKE.Windows.slnx `
             --configuration Release `
             --no-build `
+            --filter "TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog&TestCategory!=NativeAudioNativeFake&TestCategory!=NativeAudioRealDll&TestCategory!=NativeAudioOwnedAdapter" `
             --logger "trx;LogFileName=windows-internal-msix.trx"
           if ($LASTEXITCODE -ne 0) {
             throw "Windows managed test gate failed."
           }
+
+          $setupResults = "Windows/out/test-results/task2r-setup-managed"
+          New-Item -ItemType Directory -Path $setupResults -Force | Out-Null
+          dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog" `
+            --logger "trx;LogFileName=task2r-setup-managed.trx" `
+            --results-directory $setupResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R ordinary Setup test gate failed."
+          }
+          Assert-CompleteTestEvidence `
+            -Path (Join-Path $setupResults "task2r-setup-managed.trx") `
+            -Label "Task 2R ordinary Setup test gate"
+
+          $inboxResults = "Windows/out/test-results/task2r-inbox-catalog"
+          New-Item -ItemType Directory -Path $inboxResults -Force | Out-Null
+          dotnet test Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "FullyQualifiedName~WindowsHandleCatalogTrustTests&TestCategory!=WindowsSetupUnsignedEmkeCatalog" `
+            --logger "trx;LogFileName=task2r-inbox-catalog.trx" `
+            --results-directory $inboxResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R inbox catalog test gate failed."
+          }
+          Assert-CompleteTestEvidence `
+            -Path (Join-Path $inboxResults "task2r-inbox-catalog.trx") `
+            -Label "Task 2R inbox catalog test gate"
 
   sign-package-bundle:
     if: ${{ github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/windows-internal-msix' }}
@@ -202,6 +262,31 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = "Stop"
+
+          function Assert-CompleteTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -le 0 -or
+              [int]$counters.executed -ne [int]$counters.total -or
+              [int]$counters.passed -ne [int]$counters.total -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass every selected test without failures or skips."
+            }
+          }
+
           $signingRoot = Join-Path `
             $env:RUNNER_TEMP `
             ("emke-msix-signing-" + [Guid]::NewGuid().ToString("N"))
@@ -261,7 +346,31 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Internal MSIX verification failed."
             }
+
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
+            $env:EMKE_SETUP_SIGNED_MSIX_FIXTURE = $packagePath
+            $env:EMKE_SETUP_SIGNING_CER_FIXTURE = $certificatePath
+            $signedResults = "Windows/out/test-results/task2r-signed-payload"
+            New-Item `
+              -ItemType Directory `
+              -Path $signedResults `
+              -Force | Out-Null
+            dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj `
+              --configuration Release `
+              --no-restore `
+              --filter "TestCategory=WindowsSetupSignedPayload" `
+              --logger "trx;LogFileName=task2r-signed-payload.trx" `
+              --results-directory $signedResults
+            if ($LASTEXITCODE -ne 0) {
+              throw "Task 2R signed payload test gate failed."
+            }
+            Assert-CompleteTestEvidence `
+              -Path (Join-Path $signedResults "task2r-signed-payload.trx") `
+              -Label "Task 2R signed payload test gate"
           } finally {
+            $env:EMKE_SETUP_SIGNED_MSIX_FIXTURE = $null
+            $env:EMKE_SETUP_SIGNING_CER_FIXTURE = $null
             $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
             $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
             if ($null -ne $pfxBytes) {

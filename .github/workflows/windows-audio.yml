@@ -270,6 +270,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
       - name: Validate driver source and package rules
         shell: pwsh
         run: |
@@ -377,6 +382,75 @@ jobs:
             -PackageDirectory Windows/artifacts/driver/x64/Release
           if ($LASTEXITCODE -ne 0) {
             throw "Microsoft-signed driver import mutation validation failed."
+          }
+
+      - name: Verify unsigned EMKE catalog handle evidence
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          function Assert-CompleteTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -le 0 -or
+              [int]$counters.executed -ne [int]$counters.total -or
+              [int]$counters.passed -ne [int]$counters.total -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass every selected test without failures or skips."
+            }
+          }
+
+          $integrationProject = "Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj"
+          dotnet restore $integrationProject --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R unsigned catalog locked restore failed."
+          }
+          dotnet build $integrationProject `
+            --configuration Release `
+            --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R unsigned catalog managed build failed."
+          }
+
+          try {
+            $env:EMKE_SETUP_UNSIGNED_CAT_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.cat").Path
+            $env:EMKE_SETUP_UNSIGNED_INF_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.inf").Path
+            $env:EMKE_SETUP_UNSIGNED_SYS_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.sys").Path
+            $unsignedResults = "Windows/out/test-results/task2r-unsigned-emke-catalog"
+            New-Item `
+              -ItemType Directory `
+              -Path $unsignedResults `
+              -Force | Out-Null
+            dotnet test $integrationProject `
+              --configuration Release `
+              --no-build `
+              --filter "TestCategory=WindowsSetupUnsignedEmkeCatalog" `
+              --logger "trx;LogFileName=task2r-unsigned-emke-catalog.trx" `
+              --results-directory $unsignedResults
+            if ($LASTEXITCODE -ne 0) {
+              throw "Task 2R unsigned EMKE catalog test gate failed."
+            }
+            Assert-CompleteTestEvidence `
+              -Path (Join-Path $unsignedResults "task2r-unsigned-emke-catalog.trx") `
+              -Label "Task 2R unsigned EMKE catalog test gate"
+          } finally {
+            $env:EMKE_SETUP_UNSIGNED_CAT_FIXTURE = $null
+            $env:EMKE_SETUP_UNSIGNED_INF_FIXTURE = $null
+            $env:EMKE_SETUP_UNSIGNED_SYS_FIXTURE = $null
           }
 
       - name: Upload portal-ready driver submission

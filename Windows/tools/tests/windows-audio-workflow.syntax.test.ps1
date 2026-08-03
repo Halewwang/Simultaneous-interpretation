@@ -147,17 +147,39 @@ function Get-RunBlockContaining {
     [string]$Marker
   )
 
-  $matches = @([regex]::Matches(
-      $Job,
-      "(?ms)^ {8}run:\s*\|\r?\n(?<body>(?:^ {10}.*(?:\r?\n|$))*)"
-    ) | Where-Object { $_.Groups["body"].Value.Contains($Marker) })
+  $lines = $Job -split "\r?\n"
+  $matches = [Collections.Generic.List[string]]::new()
+  for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex += 1) {
+    if ($lines[$lineIndex] -notmatch "^ {8}run:\s*\|\s*$") {
+      continue
+    }
+
+    $block = [Collections.Generic.List[string]]::new()
+    for ($lineIndex += 1; $lineIndex -lt $lines.Count; $lineIndex += 1) {
+      $line = $lines[$lineIndex]
+      if (-not [string]::IsNullOrEmpty($line) -and
+          -not $line.StartsWith("          ", [StringComparison]::Ordinal)) {
+        $lineIndex -= 1
+        break
+      }
+      if ([string]::IsNullOrEmpty($line)) {
+        $block.Add("")
+      } else {
+        $block.Add($line.Substring(10))
+      }
+    }
+    $blockText = $block -join [Environment]::NewLine
+    if ($blockText.Contains($Marker, [StringComparison]::Ordinal)) {
+      $matches.Add($blockText)
+    }
+  }
   if ($matches.Count -ne 1) {
     throw (
       "Marker '$Marker' must appear in exactly one workflow run block; " +
       "found $($matches.Count)."
     )
   }
-  return ($matches[0].Groups["body"].Value -replace "(?m)^ {10}", "")
+  return $matches[0]
 }
 
 function Assert-ContainsPattern {
