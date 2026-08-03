@@ -8,6 +8,9 @@ namespace EMKE.Setup.Tests;
 [TestClass]
 public sealed class SetupExtractionDirectoryTests
 {
+    private static readonly string[] UnexpectedLogicalNames =
+        ["unexpected-entry"];
+
     [TestMethod]
     public void NewRootsAreVersionScopedUniqueAndContainedBySetupBase()
     {
@@ -371,7 +374,7 @@ public sealed class SetupExtractionDirectoryTests
             "unexpectedExtractionEntriesRetained",
             outcome.FailureCode);
         CollectionAssert.AreEquivalent(
-            new[] { "unexpected-entry" },
+            UnexpectedLogicalNames,
             outcome.RetainedLogicalNames.ToArray());
         Assert.IsTrue(File.Exists(unexpectedPath));
         Assert.IsTrue(Directory.Exists(extraction.RootPath));
