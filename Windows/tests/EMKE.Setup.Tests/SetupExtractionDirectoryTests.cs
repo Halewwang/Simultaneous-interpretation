@@ -202,6 +202,60 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
+    public void ReadViewUsesTheOwnedFileWhileMutationStaysBlocked()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction =
+            SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream("payload"u8.ToArray()), ExpectedPayload());
+        Assert.IsTrue(result.Succeeded);
+        VerifiedSetupPayload payload = result.Payload!;
+
+        using Stream view = payload.Lease.OpenReadView();
+        byte[] observed = new byte[7];
+        view.ReadExactly(observed);
+
+        CollectionAssert.AreEqual("payload"u8.ToArray(), observed);
+        Assert.ThrowsExactly<IOException>(() => File.Delete(payload.DisplayPath));
+        Assert.ThrowsExactly<IOException>(() =>
+        {
+            using FileStream ignored = File.Open(
+                payload.DisplayPath,
+                FileMode.Open,
+                FileAccess.Write,
+                FileShare.Read);
+        });
+    }
+
+    [TestMethod]
+    public void ReadViewsMaintainIndependentPositions()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction =
+            SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream("payload"u8.ToArray()), ExpectedPayload());
+        Assert.IsTrue(result.Succeeded);
+        VerifiedSetupPayload payload = result.Payload!;
+
+        using Stream first = payload.Lease.OpenReadView();
+        using Stream second = payload.Lease.OpenReadView();
+        _ = first.Seek(1, SeekOrigin.Begin);
+        _ = second.Seek(5, SeekOrigin.Begin);
+        byte[] firstObserved = new byte[2];
+        byte[] secondObserved = new byte[2];
+
+        first.ReadExactly(firstObserved);
+        second.ReadExactly(secondObserved);
+
+        CollectionAssert.AreEqual("ay"u8.ToArray(), firstObserved);
+        CollectionAssert.AreEqual("ad"u8.ToArray(), secondObserved);
+        Assert.AreEqual(3L, first.Position);
+        Assert.AreEqual(7L, second.Position);
+    }
+
+    [TestMethod]
     public void DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles()
     {
         using TemporaryDirectory temporary = new();
