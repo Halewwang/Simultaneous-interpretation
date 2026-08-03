@@ -235,6 +235,62 @@ function workflowRunBlocks(source) {
   return blocks;
 }
 
+function onlyRunBlockContaining(source, marker, label) {
+  const matches = workflowRunBlocks(source).filter((block) =>
+    block.includes(marker),
+  );
+  assert.equal(
+    matches.length,
+    1,
+    `${label} must appear in exactly one PowerShell run block`,
+  );
+  return matches[0];
+}
+
+function assertCompleteTrxEvidence(block, label) {
+  assert.match(
+    block,
+    /\[int\]\$counters\.total\s+-le\s+0/,
+    `${label} must reject an empty selection`,
+  );
+  assert.match(
+    block,
+    /\[int\]\$counters\.executed\s+-ne\s+\[int\]\$counters\.total|\[int\]\$counters\.total\s+-ne\s+\[int\]\$counters\.executed/,
+    `${label} must require every selected test to execute`,
+  );
+  assert.match(
+    block,
+    /\[int\]\$counters\.passed\s+-ne\s+\[int\]\$counters\.total|\[int\]\$counters\.total\s+-ne\s+\[int\]\$counters\.passed/,
+    `${label} must require every selected test to pass`,
+  );
+  assert.match(
+    block,
+    /\[int\]\$counters\.failed\s+-ne\s+0/,
+    `${label} must reject failed tests`,
+  );
+  assert.match(
+    block,
+    /\[int\]\$counters\.notExecuted\s+-ne\s+0/,
+    `${label} must reject skipped or otherwise unexecuted tests`,
+  );
+}
+
+function assertClearedInFinally(block, variableNames, label) {
+  const finallyIndex = block.lastIndexOf('finally {');
+  assert.notEqual(finallyIndex, -1, `${label} must clear fixtures in finally`);
+  const cleanup = block.slice(finallyIndex);
+  for (const variableName of variableNames) {
+    const escapedName = variableName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(
+      cleanup,
+      new RegExp(
+        `(?:Remove-Item\\s+Env:${escapedName}|\\$env:${escapedName}\\s*=\\s*\\$null)`,
+      ),
+      `${label} must clear ${variableName} in finally`,
+    );
+  }
+}
+
 test('workflow gates the Windows build, exact install smoke, cleanup, and upload', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   const runtimeWorkflow = await readFile(runtimeWorkflowPath, 'utf8');
@@ -397,6 +453,109 @@ test('workflow gates the Windows build, exact install smoke, cleanup, and upload
     workflow,
     /(?:install-test-driver|uninstall-test-driver|pnputil|build-driver)\.ps1/i,
   );
+});
+
+test('workflow emits isolated complete Task 2R managed, inbox, and signed evidence', async () => {
+  const workflow = await readFile(workflowPath, 'utf8');
+  const buildJob = workflowJob(workflow, 'build-test');
+  const signingJob = workflowJob(workflow, 'sign-package-bundle');
+  const ordinaryFilter =
+    'TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog';
+  const inboxFilter =
+    'FullyQualifiedName~WindowsHandleCatalogTrustTests&TestCategory!=WindowsSetupUnsignedEmkeCatalog';
+  const signedFilter = 'TestCategory=WindowsSetupSignedPayload';
+  const signedVariables = [
+    'EMKE_SETUP_SIGNED_MSIX_FIXTURE',
+    'EMKE_SETUP_SIGNING_CER_FIXTURE',
+  ];
+
+  const solutionBlock = onlyRunBlockContaining(
+    buildJob,
+    'dotnet test Windows/EMKE.Windows.slnx',
+    'ordinary solution regression gate',
+  );
+  assert.ok(
+    solutionBlock.includes(ordinaryFilter),
+    'the solution regression run must exclude both environment fixture categories',
+  );
+
+  const setupBlock = onlyRunBlockContaining(
+    buildJob,
+    'task2r-setup-managed.trx',
+    'ordinary Setup gate',
+  );
+  assert.match(
+    setupBlock,
+    /dotnet test Windows\/tests\/EMKE\.Setup\.Tests\/EMKE\.Setup\.Tests\.csproj/,
+  );
+  assert.ok(
+    setupBlock.includes(`--filter "${ordinaryFilter}"`),
+    'ordinary Setup must exclude both strict fixture categories',
+  );
+  assert.ok(
+    setupBlock.includes(
+      '--logger "trx;LogFileName=task2r-setup-managed.trx"',
+    ),
+  );
+  assertCompleteTrxEvidence(setupBlock, 'ordinary Setup gate');
+
+  const inboxBlock = onlyRunBlockContaining(
+    buildJob,
+    'task2r-inbox-catalog.trx',
+    'inbox catalog gate',
+  );
+  assert.match(
+    inboxBlock,
+    /dotnet test Windows\/tests\/EMKE\.Integration\.Tests\/EMKE\.Integration\.Tests\.csproj/,
+  );
+  assert.ok(
+    inboxBlock.includes(`--filter "${inboxFilter}"`),
+    'inbox evidence must exclude the environment-backed unsigned EMKE case',
+  );
+  assert.ok(
+    inboxBlock.includes(
+      '--logger "trx;LogFileName=task2r-inbox-catalog.trx"',
+    ),
+  );
+  assertCompleteTrxEvidence(inboxBlock, 'inbox catalog gate');
+
+  for (const variableName of signedVariables) {
+    assert.doesNotMatch(
+      buildJob,
+      new RegExp(variableName),
+      `${variableName} must not leak into the ordinary build job`,
+    );
+  }
+
+  const signedBlock = onlyRunBlockContaining(
+    signingJob,
+    'task2r-signed-payload.trx',
+    'signed payload gate',
+  );
+  assert.ok(
+    signingJob.indexOf('verify-msix.ps1') <
+      signingJob.indexOf('task2r-signed-payload.trx'),
+    'signed payload evidence must run after exact MSIX verification',
+  );
+  assert.match(
+    signedBlock,
+    /\$env:EMKE_SETUP_SIGNED_MSIX_FIXTURE\s*=\s*\$packagePath/,
+  );
+  assert.match(
+    signedBlock,
+    /\$env:EMKE_SETUP_SIGNING_CER_FIXTURE\s*=\s*\$certificatePath/,
+  );
+  assert.ok(
+    signedBlock.includes(`--filter "${signedFilter}"`),
+    'the signed job must run only the strict signed fixture category',
+  );
+  assert.ok(
+    signedBlock.includes(
+      '--logger "trx;LogFileName=task2r-signed-payload.trx"',
+    ),
+  );
+  assertCompleteTrxEvidence(signedBlock, 'signed payload gate');
+  assertClearedInFinally(signedBlock, signedVariables, 'signed payload gate');
 });
 
 test('every PowerShell workflow block parses after expression substitution', async () => {
