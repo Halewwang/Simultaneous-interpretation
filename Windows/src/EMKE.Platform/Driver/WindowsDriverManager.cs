@@ -946,7 +946,7 @@ internal sealed class WindowsCatalogTrustNativeApi
                 fullMemberPath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
+                FileShare.Read | FileShare.Delete);
             uint hashSize = 0;
             if (!WindowsCatalogNativeMethods
                     .CryptCATAdminCalcHashFromFileHandle2(

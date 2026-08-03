@@ -137,12 +137,25 @@ internal sealed class SetupCertificateEvidence
 
 internal sealed class SetupDriverCatalogEvidence
 {
-    public SetupDriverCatalogEvidence(bool trusted)
+    public SetupDriverCatalogEvidence(
+        bool kernelPolicyValid,
+        bool catalogEntriesMatch,
+        bool memberTrustValid,
+        bool allowed)
     {
-        Trusted = trusted;
+        KernelPolicyValid = kernelPolicyValid;
+        CatalogEntriesMatch = catalogEntriesMatch;
+        MemberTrustValid = memberTrustValid;
+        Allowed = allowed;
     }
 
-    public bool Trusted { get; }
+    public bool KernelPolicyValid { get; }
+
+    public bool CatalogEntriesMatch { get; }
+
+    public bool MemberTrustValid { get; }
+
+    public bool Allowed { get; }
 }
 
 internal interface ISetupSignatureProbe
@@ -476,9 +489,20 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
             catalog,
             inf,
             sys);
-        return driverEvidence.Trusted
-            ? SetupPayloadSignatureEvidence.TrustedEvidence
-            : SetupPayloadSignatureEvidence.Rejected("driverCatalogKernelTrustInvalid");
+        if (!driverEvidence.CatalogEntriesMatch)
+        {
+            return SetupPayloadSignatureEvidence.Rejected(
+                "catalogMemberMismatch");
+        }
+        if (!driverEvidence.KernelPolicyValid
+            || !driverEvidence.MemberTrustValid
+            || !driverEvidence.Allowed)
+        {
+            return SetupPayloadSignatureEvidence.Rejected(
+                "catalogKernelTrustInvalid");
+        }
+
+        return SetupPayloadSignatureEvidence.TrustedEvidence;
     }
 
     private static VerifiedSetupPayload? Find(

@@ -117,11 +117,27 @@ internal sealed class WindowsSetupSignatureProbe : ISetupSignatureProbe
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(inf);
         ArgumentNullException.ThrowIfNull(sys);
-        WindowsCatalogEvidence evidence = WindowsCatalogTrustVerifier.Instance.Verify(
-            catalog.DisplayPath,
-            inf.DisplayPath,
-            sys.DisplayPath);
-        return new SetupDriverCatalogEvidence(evidence.ChainValid);
+        WindowsHandleCatalogEvidence evidence = catalog.Lease.UseHandle(
+            catalogHandle => inf.Lease.UseHandle(
+                infHandle => sys.Lease.UseHandle(
+                    sysHandle => WindowsHandleCatalogTrustVerifier.Instance.Verify(
+                        catalog.DisplayPath,
+                        catalogHandle,
+                        [
+                            new WindowsCatalogHandleMember(
+                                inf.ManifestPayload.LogicalName,
+                                inf.DisplayPath,
+                                infHandle),
+                            new WindowsCatalogHandleMember(
+                                sys.ManifestPayload.LogicalName,
+                                sys.DisplayPath,
+                                sysHandle),
+                        ]))));
+        return new SetupDriverCatalogEvidence(
+            evidence.KernelPolicyValid,
+            evidence.CatalogEntriesMatch,
+            evidence.MemberTrustValid,
+            evidence.Allowed);
     }
 #pragma warning restore CA1031
 
