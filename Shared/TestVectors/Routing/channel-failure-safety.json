@@ -1,0 +1,37 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "routing.channel-failure-safety.v1",
+  "category": "routing",
+  "cases": [
+    {
+      "name": "inbound network failure routes original fail open",
+      "input": { "event": "inbound.networkFailure" },
+      "expected": { "inboundChannelState": "failed", "inboundRoute": "originalFailOpen", "errorCategory": "network" }
+    },
+    {
+      "name": "outbound network failure routes muted fail closed",
+      "input": { "event": "outbound.networkFailure" },
+      "expected": { "outboundChannelState": "failed", "outboundRoute": "mutedFailClosed", "errorCategory": "network" }
+    },
+    {
+      "name": "outbound underrun outputs zeros and forbids physical microphone",
+      "input": { "event": "outbound.underrun" },
+      "expected": { "outboundChannelState": "degraded", "outboundRoute": "mutedFailClosed", "errorCategory": "backpressure", "outputSamples": "zeros", "physicalMicrophone": "forbidden" }
+    },
+    {
+      "name": "explicit outbound bypass routes original bypass",
+      "input": { "event": "outbound.bypassEnabled" },
+      "expected": { "outboundChannelState": "bypassed", "outboundRoute": "originalBypass" }
+    },
+    {
+      "name": "explicit bypass persists through disconnect and reconnect",
+      "input": { "initialOutboundRoute": "originalBypass", "events": ["disconnect", "reconnect"] },
+      "expected": { "outboundChannelState": "bypassed", "outboundRoute": "originalBypass", "bypassPersisted": true }
+    },
+    {
+      "name": "stop stops both routes",
+      "input": { "event": "stop" },
+      "expected": { "inboundChannelState": "inactive", "outboundChannelState": "inactive", "inboundRoute": "stopped", "outboundRoute": "stopped" }
+    }
+  ]
+}

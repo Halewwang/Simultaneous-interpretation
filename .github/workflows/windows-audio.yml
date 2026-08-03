@@ -1,0 +1,505 @@
+name: Windows Audio Foundation
+
+on:
+  push:
+    branches:
+      - codex/windows-audio-foundation
+  pull_request:
+    paths:
+      - "Windows/**"
+      - "Shared/TestVectors/Audio/**"
+      - ".github/workflows/windows-audio.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hosted-toolchain-proof:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate Windows audio workflow PowerShell syntax
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File Windows/tools/tests/windows-audio-workflow.syntax.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows audio workflow PowerShell syntax test failed."
+          }
+
+      - name: Validate shared contract and build native audio scaffold
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          function Assert-ExactTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [int]$Expected,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -ne $Expected -or
+              [int]$counters.executed -ne $Expected -or
+              [int]$counters.passed -ne $Expected -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass exactly $Expected tests without failures or skips."
+            }
+          }
+
+          node Scripts/validate-shared-contracts.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Shared contract validator failed."
+          }
+
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "Hosted runner architecture must be AMD64."
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+            throw "vswhere is unavailable on the hosted runner."
+          }
+          $vsInstallationPath = & $vswhere -latest -products * -version "[18.0,19.0)" -property installationPath 2>$null
+          if ([string]::IsNullOrWhiteSpace($vsInstallationPath)) {
+            throw "vswhere did not resolve a Visual Studio 18 installation."
+          }
+          $visualStudioVersion = (& $vswhere -latest -products * -version "[18.0,19.0)" -property installationVersion 2>$null).Trim()
+          if ([string]::IsNullOrWhiteSpace($visualStudioVersion)) {
+            throw "vswhere did not resolve a Visual Studio installation with major version 18."
+          }
+          if ($visualStudioVersion -notmatch "^(?<visualStudioMajor>[0-9]+)(?:\.|$)") {
+            throw "vswhere did not resolve a Visual Studio installation with major version 18."
+          }
+          if ([int]$Matches["visualStudioMajor"] -ne 18) {
+            throw "vswhere did not resolve a Visual Studio installation with major version 18."
+          }
+
+          $cmakeVersionLine = (cmake --version | Select-Object -First 1).Trim()
+          if ($cmakeVersionLine -notmatch "^cmake version ([0-9]+(?:\.[0-9]+){1,3})$") {
+            throw "CMake did not report a parseable version."
+          }
+          $cmakeVersion = [version]$Matches[1]
+          if ($cmakeVersion -lt [version]"4.2") {
+            throw "CMake must be at least 4.2."
+          }
+
+          $toolchainOutput = @(pwsh -NoProfile -File Windows/tools/verify-toolchain.ps1)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows toolchain verifier failed."
+          }
+          try {
+            $toolchain = ($toolchainOutput -join "`n") | ConvertFrom-Json
+          } catch {
+            throw "Windows toolchain verifier returned invalid JSON."
+          }
+
+          Push-Location Windows/native
+          try {
+            cmake --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake configuration failed."
+            }
+
+            cmake --build --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake build failed."
+            }
+
+            ctest --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CTest run failed."
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $integrationProject = "Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj"
+          dotnet restore $integrationProject --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed native-audio integration restore failed."
+          }
+          dotnet build $integrationProject --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed native-audio integration build failed."
+          }
+
+          Remove-Item Env:EMKE_NATIVE_AUDIO_TEST_MODE -ErrorAction SilentlyContinue
+          Remove-Item Env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY -ErrorAction SilentlyContinue
+          $managedSeamResults = "Windows/out/test-results/native-audio-managed-seam"
+          New-Item -ItemType Directory -Path $managedSeamResults -Force | Out-Null
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioManagedSeam" `
+            --logger "trx;LogFileName=native-audio-managed-seam.trx" `
+            --results-directory $managedSeamResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed seam native-audio integration tests failed."
+          }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $managedSeamResults "native-audio-managed-seam.trx") `
+            -Expected 19 `
+            -Label "Managed seam native-audio integration test"
+
+          $nativeFakeDll = "Windows/artifacts/native-test/x64/Release/EMKE.NativeAudio.ManagedFake.dll"
+          if (-not (Test-Path -LiteralPath $nativeFakeDll -PathType Leaf)) {
+            throw "Independent managed native-fake DLL was not built at the expected x64 Release path."
+          }
+          $env:EMKE_NATIVE_AUDIO_TEST_MODE = "native-fake"
+          $env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY = (Resolve-Path -LiteralPath $nativeFakeDll).Path
+          $nativeFakeResults = "Windows/out/test-results/native-audio-native-fake"
+          New-Item -ItemType Directory -Path $nativeFakeResults -Force | Out-Null
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioNativeFake" `
+            --logger "trx;LogFileName=native-audio-native-fake.trx" `
+            --results-directory $nativeFakeResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native-fake P/Invoke integration tests failed."
+          }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $nativeFakeResults "native-audio-native-fake.trx") `
+            -Expected 8 `
+            -Label "Native-fake P/Invoke integration test"
+
+          $nativeDll = "Windows/artifacts/native/x64/Release/EMKE.NativeAudio.dll"
+          if (-not (Test-Path -LiteralPath $nativeDll -PathType Leaf)) {
+            throw "Production EMKE.NativeAudio.dll was not built at the expected x64 Release path."
+          }
+          $managedTestOutput = "Windows/tests/EMKE.Integration.Tests/bin/Release/net10.0-windows10.0.19041.0/win-x64"
+          if (-not (Test-Path -LiteralPath $managedTestOutput -PathType Container)) {
+            throw "Managed native-audio integration output directory is missing."
+          }
+          Copy-Item -LiteralPath $nativeDll -Destination $managedTestOutput -Force
+          $env:EMKE_NATIVE_AUDIO_TEST_MODE = "real-dll"
+          Remove-Item Env:EMKE_NATIVE_AUDIO_FAKE_LIBRARY -ErrorAction SilentlyContinue
+          $managedAbiResults = "Windows/out/test-results/native-audio-real-dll"
+          New-Item -ItemType Directory -Path $managedAbiResults -Force | Out-Null
+          dotnet test $integrationProject `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioRealDll" `
+            --logger "trx;LogFileName=native-audio-real-dll.trx" `
+            --results-directory $managedAbiResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Managed real-DLL ABI/load test failed."
+          }
+          Assert-ExactTestEvidence `
+            -Path (Join-Path $managedAbiResults "native-audio-real-dll.trx") `
+            -Expected 1 `
+            -Label "Managed real-DLL ABI/load test"
+
+          $windowsBuild = [int]$toolchain.windowsBuild
+          $productType = [int]$toolchain.productType
+          $targetOsEligible = [bool]$toolchain.targetOsEligible
+          $targetOsEligibleValue = $targetOsEligible.ToString().ToLowerInvariant()
+          $runnerImage = if ([string]::IsNullOrWhiteSpace($env:ImageOS)) { "unavailable" } else { $env:ImageOS }
+          $runnerImageVersion = if ([string]::IsNullOrWhiteSpace($env:ImageVersion)) { "unavailable" } else { $env:ImageVersion }
+
+          $summary = @"
+          ## EMKE Windows hosted toolchain proof
+
+          - Runner image: $runnerImage
+          - Runner image version: $runnerImageVersion
+          - Windows build: $windowsBuild
+          - Product type: $productType
+          - Architecture: $env:PROCESSOR_ARCHITECTURE
+          - Visual Studio version: $visualStudioVersion
+          - CMake version: $cmakeVersion
+          - Source commit: $env:GITHUB_SHA
+
+          ## Proof boundary
+
+          targetOsEligible = $targetOsEligibleValue
+          installedWdkProof = pending
+          nativeBuild = passed
+          managedNativeSeamTests = passed
+          managedNativeFakePInvoke = passed
+          managedNativeAbiLoad = passed
+          driverBuild = pending
+          driverInstall = pending
+          liveEndpoints = pending
+          "@
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+
+  driver-build-proof:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate driver source and package rules
+        shell: pwsh
+        run: |
+          node --test Windows/driver/tests/driver-contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver contract tests failed."
+          }
+
+          node --test Windows/driver/tests/package-boundary.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver executable package-boundary tests failed."
+          }
+
+          node --test Windows/tools/tests/driver-submission.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission contract tests failed."
+          }
+
+          node --test Windows/tools/tests/microsoft-signed-driver.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft-signed driver import contract tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/driver/tests/catalog-reference-set.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Catalog reference-set tests failed."
+          }
+
+          node --test Windows/tools/tests/lab-driver-lifecycle.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle contract tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.validation.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle validation tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.behavior.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle behavior tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/lab-driver-lifecycle.integration.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Lifecycle integration tests failed."
+          }
+
+          node --test Windows/tools/tests/audio-evidence-collector.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Audio evidence collector contract tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/audio-evidence-collector.validation.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Audio evidence collector validation tests failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/audio-evidence-collector.behavior.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Audio evidence collector behavior tests failed."
+          }
+
+      - name: Build unsigned driver package
+        id: driver-submission
+        shell: pwsh
+        run: |
+          pwsh Windows/tools/build-driver.ps1 -Configuration Release -Platform x64
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver build failed."
+          }
+
+          pwsh Windows/tools/verify-driver-package.ps1 Windows/artifacts/driver/x64/Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver package verification failed."
+          }
+
+          pwsh Windows/driver/tests/package-verifier.integration.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release `
+            -Verifier Windows/tools/verify-driver-package.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver package verifier integration tests failed."
+          }
+
+          $sourceCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+          pwsh -NoProfile -File Windows/tools/create-driver-submission.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release `
+            -OutputDirectory artifacts/windows-driver-submission `
+            -SourceCommit $sourceCommit `
+            -ArchivePath artifacts/windows-driver-submission.zip `
+            -EvidencePath artifacts/driver-submission-evidence.json `
+            -WorkflowRunId "${{ github.run_id }}" `
+            -WdkVersion "10.0.28000.2526"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission creation failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/driver-submission.validation.test.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Driver submission mutation validation failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/microsoft-signed-driver.validation.test.ps1 `
+            -PackageDirectory Windows/artifacts/driver/x64/Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft-signed driver import mutation validation failed."
+          }
+
+      - name: Verify unsigned EMKE catalog handle evidence
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          function Assert-CompleteTestEvidence {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+              throw "$Label did not write TRX evidence."
+            }
+            [xml]$evidence = Get-Content -LiteralPath $Path -Raw
+            $counters = $evidence.TestRun.ResultSummary.Counters
+            if (
+              [int]$counters.total -le 0 -or
+              [int]$counters.executed -ne [int]$counters.total -or
+              [int]$counters.passed -ne [int]$counters.total -or
+              [int]$counters.failed -ne 0 -or
+              [int]$counters.notExecuted -ne 0
+            ) {
+              throw "$Label must execute and pass every selected test without failures or skips."
+            }
+          }
+
+          $integrationProject = "Windows/tests/EMKE.Integration.Tests/EMKE.Integration.Tests.csproj"
+          dotnet restore $integrationProject --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R unsigned catalog locked restore failed."
+          }
+          dotnet build $integrationProject `
+            --configuration Release `
+            --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Task 2R unsigned catalog managed build failed."
+          }
+
+          try {
+            $env:EMKE_SETUP_UNSIGNED_CAT_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.cat").Path
+            $env:EMKE_SETUP_UNSIGNED_INF_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.inf").Path
+            $env:EMKE_SETUP_UNSIGNED_SYS_FIXTURE = (Resolve-Path -LiteralPath "Windows/artifacts/driver/x64/Release/EMKE.VirtualAudio.sys").Path
+            $unsignedResults = "Windows/out/test-results/task2r-unsigned-emke-catalog"
+            New-Item `
+              -ItemType Directory `
+              -Path $unsignedResults `
+              -Force | Out-Null
+            dotnet test $integrationProject `
+              --configuration Release `
+              --no-build `
+              --filter "TestCategory=WindowsSetupUnsignedEmkeCatalog" `
+              --logger "trx;LogFileName=task2r-unsigned-emke-catalog.trx" `
+              --results-directory $unsignedResults
+            if ($LASTEXITCODE -ne 0) {
+              throw "Task 2R unsigned EMKE catalog test gate failed."
+            }
+            Assert-CompleteTestEvidence `
+              -Path (Join-Path $unsignedResults "task2r-unsigned-emke-catalog.trx") `
+              -Label "Task 2R unsigned EMKE catalog test gate"
+          } finally {
+            $env:EMKE_SETUP_UNSIGNED_CAT_FIXTURE = $null
+            $env:EMKE_SETUP_UNSIGNED_INF_FIXTURE = $null
+            $env:EMKE_SETUP_UNSIGNED_SYS_FIXTURE = $null
+          }
+
+      - name: Upload portal-ready driver submission
+        uses: actions/upload-artifact@v4
+        with:
+          name: emke-virtual-audio-submission-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            artifacts/windows-driver-submission.zip
+            artifacts/driver-submission-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Record driver build boundary
+        if: always()
+        shell: pwsh
+        run: |
+          $driverBuild = "${{ steps.driver-submission.outcome }}"
+          $archiveHash = "unavailable"
+          $sourceCommit = "${{ github.event.pull_request.head.sha || github.sha }}"
+          $wdkVersion = "10.0.28000.2526"
+          $evidencePath = "artifacts/driver-submission-evidence.json"
+          if (Test-Path -LiteralPath $evidencePath -PathType Leaf) {
+            $submissionEvidence = Get-Content -LiteralPath $evidencePath -Raw |
+              ConvertFrom-Json
+            $archiveHash = [string]$submissionEvidence.archive.sha256
+            $sourceCommit = [string]$submissionEvidence.sourceCommit
+            $wdkVersion = [string]$submissionEvidence.wdkVersion
+          }
+          $summary = @"
+          ## EMKE virtual audio driver submission proof
+
+          ```text
+          driverBuild = $driverBuild
+          packageVerification = $driverBuild
+          submissionCreation = $driverBuild
+          catalogGenerated = $driverBuild
+          catalogSigned = false
+          sourceCommit = $sourceCommit
+          wdkVersion = $wdkVersion
+          archiveSha256 = $archiveHash
+          hardwareDevCenterSigning = external
+          driverInstall = pending
+          liveEndpoints = pending
+          ```
+
+          The uploaded artifact contains a deterministic portal-ready archive
+          and its runtime evidence JSON. It is unsigned. Microsoft Hardware Dev
+          Center signing, administrator action, driver installation, endpoint
+          validation, and public release remain external gates.
+          "@
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary

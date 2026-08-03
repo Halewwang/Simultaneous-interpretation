@@ -1,0 +1,1 @@
+#error "kernel bridge compilation must not include the user-mode C++ cstdint header"

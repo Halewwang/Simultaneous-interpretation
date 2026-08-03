@@ -1,0 +1,89 @@
+<Window
+    x:Class="EMKE.Windows.App.Floating.FloatingStatusWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:ClassModifier="internal"
+    Width="420"
+    Height="132"
+    AllowsTransparency="True"
+    Background="Transparent"
+    ResizeMode="NoResize"
+    ShowActivated="False"
+    ShowInTaskbar="False"
+    Topmost="True"
+    WindowStyle="None">
+    <Border
+        Padding="12"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+        BorderThickness="1"
+        CornerRadius="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <DockPanel>
+                <Button
+                    MinWidth="72"
+                    DockPanel.Dock="Right"
+                    Command="{Binding StopCommand}"
+                    Content="{Binding StopLabel}">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding IsStopVisible}"
+                                    Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontWeight="SemiBold"
+                    Text="{Binding RuntimeStatus}" />
+            </DockPanel>
+            <Grid Grid.Row="1" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="{Binding InboundStatus}" />
+                    <ProgressBar
+                        Height="5"
+                        Maximum="1"
+                        Value="{Binding InboundLevel}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="{Binding OutboundStatus}" />
+                    <ProgressBar
+                        Height="5"
+                        Maximum="1"
+                        Value="{Binding OutboundLevel}" />
+                </StackPanel>
+            </Grid>
+            <Grid Grid.Row="2" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    Grid.Column="0"
+                    Text="{Binding SourceCaption}"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    Grid.Column="2"
+                    Text="{Binding TranslatedCaption}"
+                    TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

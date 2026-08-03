@@ -1,0 +1,30 @@
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,2
+ PRODUCTVERSION 1,0,0,2
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_DRV
+ FILESUBTYPE VFT2_DRV_SOUND
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "EMKE\0"
+            VALUE "FileDescription", "EMKE Virtual Audio Bridge Driver\0"
+            VALUE "FileVersion", "1.0.0.2\0"
+            VALUE "InternalName", "EMKE.VirtualAudio.sys\0"
+            VALUE "LegalCopyright", "Copyright (c) EMKE\0"
+            VALUE "OriginalFilename", "EMKE.VirtualAudio.sys\0"
+            VALUE "ProductName", "EMKE Translation\0"
+            VALUE "ProductVersion", "1.0.0.2\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

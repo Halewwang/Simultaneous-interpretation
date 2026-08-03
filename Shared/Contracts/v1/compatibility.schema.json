@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:emke:contracts:v1:compatibility",
+  "title": "EMKE Compatibility v1",
+  "type": "object",
+  "required": [
+    "appVersion",
+    "contractVersion",
+    "settingsSchemaVersion",
+    "driverAbiVersion",
+    "minimumDriverVersion",
+    "recommendedDriverVersion",
+    "driverPackageVersion",
+    "driverPackageSha256",
+    "channel"
+  ],
+  "properties": {
+    "appVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "contractVersion": { "const": 1 },
+    "settingsSchemaVersion": { "type": "integer", "minimum": 1 },
+    "driverAbiVersion": { "type": "integer", "minimum": 1 },
+    "minimumDriverVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "recommendedDriverVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "driverPackageVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "driverPackageSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "channel": { "enum": ["internal", "beta", "stable"] }
+  },
+  "additionalProperties": false
+}

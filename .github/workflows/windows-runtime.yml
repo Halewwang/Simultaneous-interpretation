@@ -1,0 +1,139 @@
+name: Windows Translation Runtime
+
+on:
+  pull_request:
+    paths:
+      - "Windows/src/EMKE.Core/**"
+      - "Windows/src/EMKE.Realtime/**"
+      - "Windows/src/EMKE.Routing/**"
+      - "Windows/src/EMKE.Application/**"
+      - "Windows/src/EMKE.Platform/**"
+      - "Windows/tests/**"
+      - "Shared/**"
+      - "Windows/Directory.Build.props"
+      - "Windows/EMKE.Windows.slnx"
+  push:
+    branches: [main]
+    paths:
+      - "Windows/src/EMKE.Core/**"
+      - "Windows/src/EMKE.Realtime/**"
+      - "Windows/src/EMKE.Routing/**"
+      - "Windows/src/EMKE.Application/**"
+      - "Windows/src/EMKE.Platform/**"
+      - "Windows/tests/**"
+      - "Shared/**"
+      - "Windows/Directory.Build.props"
+      - "Windows/EMKE.Windows.slnx"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Gate Windows runtime and isolated native adapters
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $release = & pwsh -NoProfile -Command "& 'Windows/tools/resolve-version.ps1' | ConvertTo-Json -Compress" |
+            ConvertFrom-Json
+          $expectedProcessorArchitecture = switch ($release.Architecture) {
+            "x64" { "AMD64" }
+            default { throw "Unsupported release architecture '$($release.Architecture)'." }
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -cne $expectedProcessorArchitecture) {
+            throw "Windows runtime CI requires an x64 hosted process."
+          }
+
+          pwsh -NoProfile -File Windows/tools/tests/windows-runtime-native-launcher.behavior.test.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows runtime native launcher behavior test failed."
+          }
+
+          node Scripts/validate-shared-contracts.mjs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Shared contract validator failed."
+          }
+
+          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows runtime locked restore failed."
+          }
+
+          Push-Location Windows/native
+          try {
+            cmake --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake configuration failed."
+            }
+
+            cmake --build --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CMake build failed."
+            }
+
+            ctest --preset windows-x64-release
+            if ($LASTEXITCODE -ne 0) {
+              throw "Native CTest run failed."
+            }
+          } finally {
+            Pop-Location
+          }
+
+          dotnet build Windows/EMKE.Windows.slnx --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows runtime Release build failed."
+          }
+
+          dotnet test Windows/EMKE.Windows.slnx --configuration Release --no-build `
+            --filter "TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog&TestCategory!=NativeAudioNativeFake&TestCategory!=NativeAudioRealDll&TestCategory!=NativeAudioOwnedAdapter" `
+            --logger "trx;LogFileName=windows-runtime.trx"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows runtime managed test gate failed."
+          }
+
+          $contractResults = "Windows/out/test-results/windows-runtime-contract-native"
+          dotnet test Windows/tests/EMKE.Contract.Tests/EMKE.Contract.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory=NativeAudioOwnedAdapter" `
+            --logger "trx;LogFileName=windows-runtime-contract-native.trx" `
+            --results-directory $contractResults
+          if ($LASTEXITCODE -ne 0) {
+            throw "Owned native PCM contract adapter failed."
+          }
+
+          pwsh -NoProfile -File Windows/tools/run-runtime-native-tests.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows runtime isolated native test gate failed."
+          }
+
+      - name: Upload Windows runtime TRX
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-trx
+          path: |
+            Windows/**/TestResults/**/*.trx
+            Windows/out/test-results/**/*.trx
+          if-no-files-found: error

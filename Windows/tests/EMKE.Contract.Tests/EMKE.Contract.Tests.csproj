@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>EMKE.Contract.Tests</RootNamespace>
+    <VSTestTestCaseFilter
+      Condition="'$(VSTestTestCaseFilter)' == ''">TestCategory!=NativeAudioOwnedAdapter</VSTestTestCaseFilter>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.0.2" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/EMKE.Core/EMKE.Core.csproj" />
+    <ProjectReference Include="../../src/EMKE.Platform/EMKE.Platform.csproj" />
+    <ProjectReference Include="../../src/EMKE.Realtime/EMKE.Realtime.csproj" />
+    <ProjectReference Include="../../src/EMKE.Routing/EMKE.Routing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+</Project>

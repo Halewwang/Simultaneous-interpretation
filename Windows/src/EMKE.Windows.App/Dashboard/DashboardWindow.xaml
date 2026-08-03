@@ -1,0 +1,264 @@
+<Window
+    x:Class="EMKE.Windows.App.Dashboard.DashboardWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:ClassModifier="internal"
+    Title="{Binding WindowTitle}"
+    Width="640"
+    Height="360"
+    MinWidth="600"
+    MinHeight="320"
+    WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button
+                    Margin="8,0,0,0"
+                    Command="{Binding OpenDiagnosticsCommand}"
+                    Content="{Binding DiagnosticsLabel}" />
+                <Button
+                    Margin="8,0,0,0"
+                    Command="{Binding OpenSettingsCommand}"
+                    Content="{Binding SettingsLabel}" />
+            </StackPanel>
+            <StackPanel>
+                <TextBlock
+                    FontSize="20"
+                    FontWeight="SemiBold"
+                    Text="{Binding RuntimeStatus}" />
+                <ProgressBar
+                    Width="160"
+                    Height="3"
+                    Margin="0,4,0,0"
+                    IsIndeterminate="True">
+                    <ProgressBar.Style>
+                        <Style TargetType="ProgressBar">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding IsProgressVisible}"
+                                    Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ProgressBar.Style>
+                </ProgressBar>
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1" Margin="0,12,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="{Binding NativeLanguageLabel}" />
+                <ComboBox
+                    IsEnabled="{Binding AreLanguageSelectorsEnabled}"
+                    ItemsSource="{Binding TranslationLanguageOptions}"
+                    SelectedIndex="{Binding SelectedNativeLanguageIndex}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="{Binding MeetingLanguageLabel}" />
+                <ComboBox
+                    IsEnabled="{Binding AreLanguageSelectorsEnabled}"
+                    ItemsSource="{Binding TranslationLanguageOptions}"
+                    SelectedIndex="{Binding SelectedMeetingLanguageIndex}" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border
+                Grid.Column="0"
+                Padding="10"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel>
+                        <TextBlock
+                            DockPanel.Dock="Right"
+                            Text="{Binding InboundStatus}" />
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            Text="{Binding InboundHeading}" />
+                    </DockPanel>
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="0,4,0,0"
+                        Text="{Binding InboundRoute}" />
+                    <ProgressBar
+                        Grid.Row="2"
+                        Height="6"
+                        Margin="0,6,0,0"
+                        Maximum="1"
+                        Value="{Binding InboundLevel}" />
+                    <CheckBox
+                        Grid.Row="4"
+                        Margin="0,6,0,0"
+                        Command="{Binding InboundBypassCommand}"
+                        Content="{Binding InboundBypassLabel}"
+                        IsChecked="{Binding IsInboundBypassActive, Mode=OneWay}"
+                        IsHitTestVisible="True" />
+                    <TextBlock
+                        Grid.Row="3"
+                        MaxHeight="34"
+                        Margin="0,4,0,0"
+                        Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                        Text="{Binding InboundSafetyMessage}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap" />
+                </Grid>
+            </Border>
+
+            <Border
+                Grid.Column="2"
+                Padding="10"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel>
+                        <TextBlock
+                            DockPanel.Dock="Right"
+                            Text="{Binding OutboundStatus}" />
+                        <TextBlock
+                            FontWeight="SemiBold"
+                            Text="{Binding OutboundHeading}" />
+                    </DockPanel>
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="0,4,0,0"
+                        Text="{Binding OutboundRoute}" />
+                    <ProgressBar
+                        Grid.Row="2"
+                        Height="6"
+                        Margin="0,6,0,0"
+                        Maximum="1"
+                        Value="{Binding OutboundLevel}" />
+                    <CheckBox
+                        Grid.Row="4"
+                        Margin="0,6,0,0"
+                        Command="{Binding OutboundBypassCommand}"
+                        Content="{Binding OutboundBypassLabel}"
+                        IsChecked="{Binding IsOutboundBypassActive, Mode=OneWay}"
+                        IsHitTestVisible="True" />
+                    <TextBlock
+                        Grid.Row="3"
+                        MaxHeight="34"
+                        Margin="0,4,0,0"
+                        Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                        Text="{Binding OutboundSafetyMessage}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap" />
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock
+                    FontWeight="SemiBold"
+                    Text="{Binding SourceCaptionLabel}" />
+                <TextBlock
+                    MaxHeight="36"
+                    Text="{Binding SourceCaption}"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock
+                    FontWeight="SemiBold"
+                    Text="{Binding TranslatedCaptionLabel}" />
+                <TextBlock
+                    MaxHeight="36"
+                    Text="{Binding TranslatedCaption}"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+
+        <DockPanel
+            Grid.Row="4"
+            Margin="0,10,0,0"
+            LastChildFill="False">
+            <TextBlock
+                DockPanel.Dock="Left"
+                VerticalAlignment="Center"
+                Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                Text="{Binding ErrorMessage}"
+                TextTrimming="CharacterEllipsis" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button
+                    MinWidth="96"
+                    Command="{Binding StartCommand}"
+                    Content="{Binding StartLabel}">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding IsStartVisible}"
+                                    Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button
+                    MinWidth="96"
+                    Command="{Binding StopCommand}"
+                    Content="{Binding StopLabel}">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger
+                                    Binding="{Binding IsStopVisible}"
+                                    Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

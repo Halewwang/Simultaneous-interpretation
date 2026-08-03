@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../EMKE.Core/EMKE.Core.csproj" />
+    <ProjectReference Include="../EMKE.Realtime/EMKE.Realtime.csproj" />
+    <ProjectReference Include="../EMKE.Routing/EMKE.Routing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EMKE.Application.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+{
+  "appVersion": "0.2.0",
+  "contractVersion": 1,
+  "settingsSchemaVersion": 1,
+  "driverAbiVersion": 1,
+  "minimumDriverVersion": "1.0.0.2",
+  "recommendedDriverVersion": "1.0.0.2",
+  "driverPackageAvailable": false,
+  "channel": "internal",
+  "minimumWindowsBuild": 19045
+}

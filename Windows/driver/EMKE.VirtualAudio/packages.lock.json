@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "dependencies": {
+    "native,Version=v0.0": {
+      "Microsoft.Windows.SDK.cpp.x64": {
+        "type": "Direct",
+        "requested": "[10.0.28000.2526, )",
+        "resolved": "10.0.28000.2526",
+        "contentHash": "rMIUohVAehjlNuvAHzE50Brgi4zjU2yQ5+7+6D/i0117jtrzqAm2OCr0rnTVZcffAxBUygXF1JLUEK0+opttnA=="
+      },
+      "Microsoft.Windows.WDK.x64": {
+        "type": "Direct",
+        "requested": "[10.0.28000.2526, )",
+        "resolved": "10.0.28000.2526",
+        "contentHash": "dAGSbkjTr4lFX6hVncyctBDSg87O7x3QSUr8Yf9dFLZ0T3TWuo+i4WrXdviSW77Bdmzn2iu1pA83wGe1V/1akg==",
+        "dependencies": {
+          "Microsoft.Windows.SDK.cpp.x64": "[10.0.28000, 10.0.28001)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,246 @@
+<Window
+    x:Class="EMKE.Windows.App.Settings.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:ClassModifier="internal"
+    Title="{Binding WindowTitle}"
+    Width="760"
+    Height="700"
+    MinWidth="620"
+    MinHeight="520"
+    WindowStartupLocation="CenterScreen">
+    <DockPanel Margin="16">
+        <StackPanel
+            DockPanel.Dock="Bottom"
+            Margin="0,12,0,0"
+            HorizontalAlignment="Right"
+            Orientation="Horizontal">
+            <Button
+                MinWidth="88"
+                Margin="0,0,8,0"
+                Click="OnCloseClicked"
+                Content="{Binding CloseLabel}" />
+            <Button
+                MinWidth="88"
+                Margin="0,0,8,0"
+                Command="{Binding SaveCommand}"
+                Content="{Binding SaveLabel}" />
+            <Button
+                MinWidth="88"
+                Command="{Binding StartCommand}"
+                Content="{Binding StartLabel}" />
+        </StackPanel>
+
+        <TextBlock
+            DockPanel.Dock="Bottom"
+            Margin="0,8,0,0"
+            AutomationProperties.Name="{Binding ResultAutomationDescription}"
+            Text="{Binding ResultMessage}"
+            TextWrapping="Wrap" />
+
+        <ScrollViewer
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <GroupBox Header="{Binding ServiceSectionLabel}">
+                    <Grid Margin="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding BaseAddressLabel}" />
+                        <TextBox
+                            Grid.Column="1"
+                            Grid.ColumnSpan="2"
+                            Margin="8,2,0,2"
+                            Text="{Binding BaseAddress, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Grid.Row="1"
+                            VerticalAlignment="Center"
+                            Text="{Binding ModelLabel}" />
+                        <TextBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Grid.ColumnSpan="2"
+                            Margin="8,2,0,2"
+                            Text="{Binding ModelId, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock
+                            Grid.Row="2"
+                            VerticalAlignment="Center"
+                            Text="{Binding ApiKeyLabel}" />
+                        <PasswordBox
+                            x:Name="ApiKeyPasswordBox"
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            Margin="8,2,8,2"
+                            PasswordChanged="OnApiKeyPasswordChanged" />
+                        <Button
+                            Grid.Row="2"
+                            Grid.Column="2"
+                            Command="{Binding TestConnectionCommand}"
+                            Content="{Binding TestConnectionLabel}" />
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox
+                    Margin="0,10,0,0"
+                    Header="{Binding TranslationSectionLabel}">
+                    <Grid Margin="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding NativeLanguageLabel}" />
+                        <ComboBox
+                            Grid.Column="1"
+                            Margin="8,2,0,2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{Binding TranslationLanguageOptions}"
+                            SelectedValue="{Binding NativeLanguage}"
+                            SelectedValuePath="Value" />
+                        <TextBlock
+                            Grid.Row="1"
+                            VerticalAlignment="Center"
+                            Text="{Binding MeetingLanguageLabel}" />
+                        <ComboBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Margin="8,2,0,2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{Binding TranslationLanguageOptions}"
+                            SelectedValue="{Binding MeetingLanguage}"
+                            SelectedValuePath="Value" />
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox
+                    Margin="0,10,0,0"
+                    Header="{Binding AudioSectionLabel}">
+                    <Grid Margin="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding InputDeviceLabel}" />
+                        <ComboBox
+                            Grid.Column="1"
+                            Margin="8,2,0,2"
+                            DisplayMemberPath="Label"
+                            IsEditable="True"
+                            ItemsSource="{Binding InputEndpointOptions}"
+                            SelectedValue="{Binding InputEndpointId}"
+                            SelectedValuePath="Value" />
+                        <CheckBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Margin="8,4,0,2"
+                            Content="{Binding FollowDefaultInputLabel}"
+                            IsChecked="{Binding FollowDefaultInput}" />
+                        <TextBlock
+                            Grid.Row="2"
+                            VerticalAlignment="Center"
+                            Text="{Binding OutputDeviceLabel}" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            Margin="8,2,0,2"
+                            DisplayMemberPath="Label"
+                            IsEditable="True"
+                            ItemsSource="{Binding OutputEndpointOptions}"
+                            SelectedValue="{Binding OutputEndpointId}"
+                            SelectedValuePath="Value" />
+                        <CheckBox
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            Margin="8,4,0,2"
+                            Content="{Binding FollowDefaultOutputLabel}"
+                            IsChecked="{Binding FollowDefaultOutput}" />
+                        <Button
+                            Grid.Row="4"
+                            Grid.Column="1"
+                            Margin="8,6,0,0"
+                            HorizontalAlignment="Left"
+                            Command="{Binding RunLocalDiagnosticsCommand}"
+                            Content="{Binding LocalDiagnosticsLabel}" />
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox
+                    Margin="0,10,0,0"
+                    Header="{Binding AppearanceSectionLabel}">
+                    <Grid Margin="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Text="{Binding InterfaceLanguageLabel}" />
+                        <ComboBox
+                            Grid.Column="1"
+                            Margin="8,2,0,2"
+                            DisplayMemberPath="Label"
+                            ItemsSource="{Binding InterfaceLanguageOptions}"
+                            SelectedValue="{Binding InterfaceLanguage}"
+                            SelectedValuePath="Value" />
+                        <CheckBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Margin="8,4,0,2"
+                            Content="{Binding FloatingStatusLabel}"
+                            IsChecked="{Binding FloatingStatusEnabled}" />
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox
+                    Margin="0,10,0,0"
+                    Header="{Binding SystemSectionLabel}">
+                    <WrapPanel Margin="12">
+                        <TextBlock
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Center"
+                            Text="{Binding DriverStatusLabel}" />
+                        <Button
+                            Margin="0,0,8,0"
+                            Command="{Binding CheckForUpdatesCommand}"
+                            Content="{Binding CheckForUpdatesLabel}" />
+                        <Button
+                            Margin="0,0,8,0"
+                            Command="{Binding ReopenOnboardingCommand}"
+                            Content="{Binding ReopenOnboardingLabel}" />
+                        <Button
+                            Command="{Binding ExportDiagnosticsCommand}"
+                            Content="{Binding ExportDiagnosticsLabel}" />
+                    </WrapPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

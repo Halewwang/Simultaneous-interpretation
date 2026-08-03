@@ -1,0 +1,139 @@
+{
+  "contractVersion": 1,
+  "fixtureId": "audio.pcm-conversion.v1",
+  "category": "audio",
+  "metadata": {
+    "localNormalizedFormat": {
+      "sampleRateHz": 48000,
+      "channels": 2,
+      "sampleType": "float32"
+    },
+    "networkFormat": {
+      "sampleRateHz": 24000,
+      "channels": 1,
+      "sampleType": "pcm16",
+      "signed": true,
+      "byteOrder": "littleEndian"
+    },
+    "conversion": {
+      "encodeOperation": "downmixStereoThenAverageAdjacentFramesThenClampAndPackPCM16",
+      "decodeOperation": "unpackSignedLittleEndianPCM16Then127TapInterpolateToStereo",
+      "decoderFIRTaps": 127,
+      "maximumInputSamplesPerVector": 256,
+      "numericArrays": "decimalOnly"
+    }
+  },
+  "cases": [
+    {
+      "name": "encoder clamps Float32 endpoints exactly",
+      "operation": "encode48kStereoFloat32To24kMonoPCM16",
+      "input": { "interleavedStereoFloat32": [-1.5, -1.5, -1.5, -1.5, 0.0, 0.0, 0.0, 0.0, 1.5, 1.5, 1.5, 1.5] },
+      "expected": { "pcm16SignedSamples": [-32768, 0, 32767], "pcm16LittleEndianBytes": [0, 128, 0, 0, 255, 127] },
+      "assertion": "exact",
+      "tolerance": 0.0
+    },
+    {
+      "name": "encoder downmixes stereo before averaging two frames",
+      "operation": "encode48kStereoFloat32To24kMonoPCM16",
+      "input": { "interleavedStereoFloat32": [1.0, -1.0, 0.5, 0.5] },
+      "expected": { "downmixedMonoFrames": [0.0, 0.5], "averagedMonoFrames": [0.25], "pcm16SignedSamples": [8192], "pcm16LittleEndianBytes": [0, 32] },
+      "assertion": "exact",
+      "tolerance": 0.0
+    },
+    {
+      "name": "encoder packs signed PCM16 in little endian byte order",
+      "operation": "encode48kStereoFloat32To24kMonoPCM16",
+      "input": { "interleavedStereoFloat32": [1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0] },
+      "expected": { "pcm16SignedSamples": [32767, -32768], "pcm16LittleEndianBytes": [255, 127, 0, 128] },
+      "assertion": "exact",
+      "tolerance": 0.0
+    },
+    {
+      "name": "decoder duplicates each interpolated sample to left and right",
+      "operation": "decode24kMonoPCM16To48kStereoFloat32",
+      "input": { "pcm16LittleEndianBytes": [0, 0, 255, 127] },
+      "expected": { "outputFramesPerInputSample": 2, "outputSampleCount": 8, "channelPairEquality": true },
+      "assertion": "frameCountAndChannelPairs",
+      "tolerance": 0.0
+    },
+    {
+      "name": "decoder rejects an odd PCM16 byte count",
+      "operation": "decode24kMonoPCM16To48kStereoFloat32",
+      "input": { "pcm16LittleEndianBytes": [0] },
+      "expected": { "errorCode": "misalignedPCM16" },
+      "assertion": "errorCode",
+      "tolerance": 0.0
+    },
+    {
+      "name": "chunked FIR decode matches contiguous decode across aligned chunks",
+      "operation": "decode24kMonoPCM16To48kStereoFloat32",
+      "input": { "pcm16LittleEndianBytes": [0, 32, 0, 64, 0, 96], "alignedChunkByteCounts": [2, 4] },
+      "expected": { "contiguousAndChunkedOutputEqual": true, "outputFramesPerInputSample": 2 },
+      "assertion": "absoluteDifferenceAtMostTolerance",
+      "tolerance": 0.000001
+    },
+    {
+      "name": "decoder FIR history resets only after explicit reset or stop",
+      "operation": "decode24kMonoPCM16To48kStereoFloat32WithExplicitLifecycle",
+      "ownerDomain": {
+        "domain": "platformAdapterLifecycle",
+        "owner": "NetworkPCMDecoderAdapterOwner",
+        "internalDecoder": "NetworkPCMDecoder",
+        "lifecycleSemantics": "Owner-level replaceDecoder and stop followed by start create a new internal decoder; this contract does not require a public decoder reset API."
+      },
+      "actionVocabulary": {
+        "decode": { "domain": "platformAdapterLifecycle", "requires": "startedInternalDecoder", "inputRef": "one named PCM16 input", "resultId": "unique per decode action" },
+        "replaceDecoder": { "domain": "platformAdapterLifecycle", "effect": "replace the internal decoder with a new decoder" },
+        "stop": { "domain": "platformAdapterLifecycle", "effect": "discard the internal decoder and enter stopped state" },
+        "start": { "domain": "platformAdapterLifecycle", "effect": "create a new internal decoder and enter started state" }
+      },
+      "input": {
+        "warmupPCM16LittleEndianBytes": [255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127, 255, 127],
+        "probePCM16LittleEndianBytes": [0, 0]
+      },
+      "runs": [
+        {
+          "runId": "fresh",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "freshProbe" }
+          ]
+        },
+        {
+          "runId": "warmedWithoutReset",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "warmedWarmup", "discardResult": true },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "warmedProbe" }
+          ]
+        },
+        {
+          "runId": "afterOwnerReplacement",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "replacementWarmup", "discardResult": true },
+            { "action": "replaceDecoder" },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "replacementProbe" }
+          ]
+        },
+        {
+          "runId": "afterStopRestart",
+          "initialOwnerState": "startedWithNewInternalDecoder",
+          "steps": [
+            { "action": "decode", "inputRef": "warmupPCM16LittleEndianBytes", "resultId": "stopRestartWarmup", "discardResult": true },
+            { "action": "stop" },
+            { "action": "start" },
+            { "action": "decode", "inputRef": "probePCM16LittleEndianBytes", "resultId": "stopRestartProbe" }
+          ]
+        }
+      ],
+      "comparisons": [
+        { "leftResultId": "warmedProbe", "operator": "notEquals", "rightResultId": "freshProbe", "tolerance": 0.0 },
+        { "leftResultId": "replacementProbe", "operator": "equals", "rightResultId": "freshProbe", "tolerance": 0.0 },
+        { "leftResultId": "stopRestartProbe", "operator": "equals", "rightResultId": "freshProbe", "tolerance": 0.0 }
+      ],
+      "assertion": "exactSequenceEquivalence",
+      "tolerance": 0.0
+    }
+  ]
+}

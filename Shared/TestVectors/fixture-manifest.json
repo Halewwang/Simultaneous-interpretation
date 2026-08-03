@@ -1,0 +1,13 @@
+{
+  "contractVersion": 1,
+  "fixtures": [
+    "Realtime/text-frame-handshake.json",
+    "Realtime/close-deadline.json",
+    "Routing/inbound-language-gate.json",
+    "Routing/channel-failure-safety.json",
+    "Audio/pcm-batching.json",
+    "Audio/pcm-conversion.json",
+    "Settings/v1-migration.json",
+    "Settings/compatibility-gate.json"
+  ]
+}

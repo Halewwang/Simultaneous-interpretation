@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>EMKE.SafeHandle.FinalizerProbe</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/EMKE.Platform/EMKE.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

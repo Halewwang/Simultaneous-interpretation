@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="AppName" xml:space="preserve"><value>EMKE Translation</value></data>
+  <data name="ActionDismiss" xml:space="preserve"><value>Dismiss</value></data>
+  <data name="ActionEditApiKey" xml:space="preserve"><value>Edit API Key</value></data>
+  <data name="ActionEditSettings" xml:space="preserve"><value>Edit Settings</value></data>
+  <data name="ActionInstallOrRepairDriver" xml:space="preserve"><value>Install or Repair Driver</value></data>
+  <data name="ActionOpenPrivacySettings" xml:space="preserve"><value>Open Privacy Settings</value></data>
+  <data name="ActionReportCompatibility" xml:space="preserve"><value>View Compatibility Report</value></data>
+  <data name="ActionRetry" xml:space="preserve"><value>Retry</value></data>
+  <data name="ActionSelectDevice" xml:space="preserve"><value>Select Audio Device</value></data>
+  <data name="ActionStart" xml:space="preserve"><value>Start</value></data>
+  <data name="ActionStop" xml:space="preserve"><value>Stop</value></data>
+  <data name="DashboardDiagnostics" xml:space="preserve"><value>Diagnostics</value></data>
+  <data name="DashboardInbound" xml:space="preserve"><value>Meeting audio</value></data>
+  <data name="DashboardInboundBypass" xml:space="preserve"><value>Use original meeting audio</value></data>
+  <data name="DashboardLevel" xml:space="preserve"><value>Level</value></data>
+  <data name="DashboardMeetingLanguage" xml:space="preserve"><value>Meeting language</value></data>
+  <data name="DashboardNativeLanguage" xml:space="preserve"><value>My language</value></data>
+  <data name="DashboardOutbound" xml:space="preserve"><value>My microphone</value></data>
+  <data name="DashboardOutboundBypass" xml:space="preserve"><value>Use my original microphone</value></data>
+  <data name="DashboardSettings" xml:space="preserve"><value>Settings</value></data>
+  <data name="DashboardSourceCaption" xml:space="preserve"><value>Source caption</value></data>
+  <data name="DashboardTranslatedCaption" xml:space="preserve"><value>Translated caption</value></data>
+  <data name="DashboardTitle" xml:space="preserve"><value>Translation Dashboard</value></data>
+  <data name="DiagnosticsAvailable" xml:space="preserve"><value>Available</value></data>
+  <data name="DiagnosticsClose" xml:space="preserve"><value>Close</value></data>
+  <data name="DiagnosticsConnectionStages" xml:space="preserve"><value>Translation capability stages</value></data>
+  <data name="DiagnosticsDroppedFrames" xml:space="preserve"><value>Dropped frames</value></data>
+  <data name="DiagnosticsEndpointFormat" xml:space="preserve"><value>Current format</value></data>
+  <data name="DiagnosticsEndpointIdentifier" xml:space="preserve"><value>Identifier hash</value></data>
+  <data name="DiagnosticsEndpointName" xml:space="preserve"><value>Friendly name</value></data>
+  <data name="DiagnosticsEndpointRole" xml:space="preserve"><value>Role</value></data>
+  <data name="DiagnosticsEndpoints" xml:space="preserve"><value>Audio endpoints</value></data>
+  <data name="DiagnosticsLastHResult" xml:space="preserve"><value>Last HRESULT category</value></data>
+  <data name="DiagnosticsOutcomeFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="DiagnosticsOutcomeNotRun" xml:space="preserve"><value>Not run</value></data>
+  <data name="DiagnosticsOutcomePassed" xml:space="preserve"><value>Passed</value></data>
+  <data name="DiagnosticsOutcomeRequiresAudio" xml:space="preserve"><value>Requires interactive audio</value></data>
+  <data name="DiagnosticsOutcome" xml:space="preserve"><value>Outcome</value></data>
+  <data name="DiagnosticsOverflows" xml:space="preserve"><value>Overflows</value></data>
+  <data name="DiagnosticsRefresh" xml:space="preserve"><value>Refresh local audio</value></data>
+  <data name="DiagnosticsRoleAppMicrophoneRender" xml:space="preserve"><value>Application microphone render</value></data>
+  <data name="DiagnosticsRoleAppSpeakerCapture" xml:space="preserve"><value>Application speaker capture</value></data>
+  <data name="DiagnosticsRoleMeetingMicrophoneCapture" xml:space="preserve"><value>Meeting microphone capture</value></data>
+  <data name="DiagnosticsRoleMeetingSpeakerRender" xml:space="preserve"><value>Meeting speaker render</value></data>
+  <data name="DiagnosticsRolePhysicalInput" xml:space="preserve"><value>Physical input</value></data>
+  <data name="DiagnosticsRolePhysicalOutput" xml:space="preserve"><value>Physical output</value></data>
+  <data name="DiagnosticsStage" xml:space="preserve"><value>Stage</value></data>
+  <data name="DiagnosticsTestConnection" xml:space="preserve"><value>Test Translation connection</value></data>
+  <data name="DiagnosticsTitle" xml:space="preserve"><value>Diagnostics</value></data>
+  <data name="DiagnosticsUnavailable" xml:space="preserve"><value>Unavailable</value></data>
+  <data name="DiagnosticsUnderruns" xml:space="preserve"><value>Underruns</value></data>
+  <data name="LanguageEnglish" xml:space="preserve"><value>English</value></data>
+  <data name="LanguageGerman" xml:space="preserve"><value>German</value></data>
+  <data name="LanguageSimplifiedChinese" xml:space="preserve"><value>Simplified Chinese</value></data>
+  <data name="PlaceholderClose" xml:space="preserve"><value>Close</value></data>
+  <data name="PlaceholderDiagnosticsBody" xml:space="preserve"><value>Audio diagnostics are not yet available in this Internal build.</value></data>
+  <data name="PlaceholderDiagnosticsTitle" xml:space="preserve"><value>Diagnostics unavailable</value></data>
+  <data name="PlaceholderOnboardingBody" xml:space="preserve"><value>The guided setup flow is not yet available in this Internal build.</value></data>
+  <data name="PlaceholderOnboardingTitle" xml:space="preserve"><value>Setup unavailable</value></data>
+  <data name="PlaceholderSettingsBody" xml:space="preserve"><value>Settings editing is not yet available in this Internal build. Translation will remain stopped.</value></data>
+  <data name="PlaceholderSettingsTitle" xml:space="preserve"><value>Settings unavailable</value></data>
+  <data name="PlaceholderUpdateBody" xml:space="preserve"><value>Update checking is not yet available in this Internal build.</value></data>
+  <data name="PlaceholderUpdateTitle" xml:space="preserve"><value>Updates unavailable</value></data>
+  <data name="BypassBadge" xml:space="preserve"><value>Bypass on</value></data>
+  <data name="ChannelBypassed" xml:space="preserve"><value>Bypassed</value></data>
+  <data name="ChannelConnected" xml:space="preserve"><value>Connected</value></data>
+  <data name="ChannelConnecting" xml:space="preserve"><value>Connecting</value></data>
+  <data name="ChannelDegraded" xml:space="preserve"><value>Degraded</value></data>
+  <data name="ChannelFailed" xml:space="preserve"><value>Failed</value></data>
+  <data name="ChannelInactive" xml:space="preserve"><value>Inactive</value></data>
+  <data name="ChannelReconnecting" xml:space="preserve"><value>Reconnecting</value></data>
+  <data name="ErrorAuthentication" xml:space="preserve"><value>Authentication failed. Check the API key.</value></data>
+  <data name="ErrorBackpressure" xml:space="preserve"><value>Audio processing could not keep up safely.</value></data>
+  <data name="ErrorCloseTimeout" xml:space="preserve"><value>Translation did not close within the safe deadline.</value></data>
+  <data name="ErrorConfiguration" xml:space="preserve"><value>Translation settings need attention.</value></data>
+  <data name="ErrorDefaultDeviceMissing" xml:space="preserve"><value>A physical input or output device is unavailable.</value></data>
+  <data name="ErrorDevice" xml:space="preserve"><value>An audio device is unavailable.</value></data>
+  <data name="ErrorDriver" xml:space="preserve"><value>The EMKE virtual audio driver needs attention.</value></data>
+  <data name="ErrorDriverIncompatible" xml:space="preserve"><value>The EMKE virtual audio driver is missing or incompatible.</value></data>
+  <data name="ErrorEndpointModel" xml:space="preserve"><value>The Translation endpoint or model is incompatible.</value></data>
+  <data name="ErrorNetwork" xml:space="preserve"><value>The Translation service connection was interrupted.</value></data>
+  <data name="ErrorPermission" xml:space="preserve"><value>Windows privacy settings are blocking microphone access.</value></data>
+  <data name="ErrorProtocol" xml:space="preserve"><value>The Translation service returned an incompatible response.</value></data>
+  <data name="ErrorSecretMissing" xml:space="preserve"><value>Add an API key before starting translation.</value></data>
+  <data name="ErrorSettingsMissing" xml:space="preserve"><value>Complete the Translation settings before starting.</value></data>
+  <data name="InboundFailOpenExplanation" xml:space="preserve"><value>Original audio remains audible while inbound translation recovers.</value></data>
+  <data name="OutboundFailClosedWarning" xml:space="preserve"><value>Your meeting microphone is muted while outbound translation recovers.</value></data>
+  <data name="RouteOriginalBypass" xml:space="preserve"><value>Original audio bypass</value></data>
+  <data name="RouteOriginalFailOpen" xml:space="preserve"><value>Original audio fail-open</value></data>
+  <data name="RouteStopped" xml:space="preserve"><value>Stopped</value></data>
+  <data name="RouteTranslated" xml:space="preserve"><value>Translated audio</value></data>
+  <data name="RouteMutedFailClosed" xml:space="preserve"><value>Muted fail-closed</value></data>
+  <data name="RuntimeDegraded" xml:space="preserve"><value>Translation degraded</value></data>
+  <data name="RuntimeFailed" xml:space="preserve"><value>Translation failed</value></data>
+  <data name="RuntimeRunning" xml:space="preserve"><value>Translation running</value></data>
+  <data name="RuntimeStarting" xml:space="preserve"><value>Translation starting</value></data>
+  <data name="RuntimeStopped" xml:space="preserve"><value>Translation stopped</value></data>
+  <data name="RuntimeStopping" xml:space="preserve"><value>Translation stopping</value></data>
+  <data name="SettingsApiKey" xml:space="preserve"><value>API key</value></data>
+  <data name="SettingsAppearanceSection" xml:space="preserve"><value>Appearance</value></data>
+  <data name="SettingsAudioSection" xml:space="preserve"><value>Audio</value></data>
+  <data name="SettingsBaseUrl" xml:space="preserve"><value>Base URL</value></data>
+  <data name="SettingsDriverStatus" xml:space="preserve"><value>Driver status</value></data>
+  <data name="SettingsExportDiagnostics" xml:space="preserve"><value>Export diagnostics</value></data>
+  <data name="SettingsFloatingStatus" xml:space="preserve"><value>Show floating status</value></data>
+  <data name="SettingsFollowSystem" xml:space="preserve"><value>Follow system</value></data>
+  <data name="SettingsFollowDefaultInput" xml:space="preserve"><value>Follow default input device</value></data>
+  <data name="SettingsFollowDefaultOutput" xml:space="preserve"><value>Follow default output device</value></data>
+  <data name="SettingsInputDevice" xml:space="preserve"><value>Physical input</value></data>
+  <data name="SettingsInterfaceLanguage" xml:space="preserve"><value>Interface language</value></data>
+  <data name="SettingsLocalDiagnostics" xml:space="preserve"><value>Run local audio diagnostics</value></data>
+  <data name="SettingsMeetingLanguage" xml:space="preserve"><value>Meeting language</value></data>
+  <data name="SettingsModel" xml:space="preserve"><value>Model</value></data>
+  <data name="SettingsOutputDevice" xml:space="preserve"><value>Physical output</value></data>
+  <data name="SettingsReopenOnboarding" xml:space="preserve"><value>Reopen setup</value></data>
+  <data name="SettingsSave" xml:space="preserve"><value>Save</value></data>
+  <data name="SettingsSavedResult" xml:space="preserve"><value>Settings saved.</value></data>
+  <data name="SettingsConnectionSucceededResult" xml:space="preserve"><value>Connection test succeeded.</value></data>
+  <data name="SettingsStartRequestedResult" xml:space="preserve"><value>Translation start requested.</value></data>
+  <data name="SettingsSaveFailedError" xml:space="preserve"><value>Could not save settings. Check the settings and try again.</value></data>
+  <data name="SettingsConnectionFailedError" xml:space="preserve"><value>Connection test failed. Check the service settings and try again.</value></data>
+  <data name="SettingsStartFailedError" xml:space="preserve"><value>Translation could not start. Check the settings and try again.</value></data>
+  <data name="SettingsServiceSection" xml:space="preserve"><value>Service</value></data>
+  <data name="SettingsSystemSection" xml:space="preserve"><value>System</value></data>
+  <data name="SettingsTestConnection" xml:space="preserve"><value>Test connection</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>Settings</value></data>
+  <data name="SettingsTranslationSection" xml:space="preserve"><value>Translation</value></data>
+  <data name="TrayCheckForUpdates" xml:space="preserve"><value>Check for Updates</value></data>
+  <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
+  <data name="TrayOpenDashboard" xml:space="preserve"><value>Open Dashboard</value></data>
+  <data name="TrayOpenOnboarding" xml:space="preserve"><value>Open Setup</value></data>
+  <data name="TrayOpenSettings" xml:space="preserve"><value>Settings</value></data>
+</root>

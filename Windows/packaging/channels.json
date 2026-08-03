@@ -1,0 +1,20 @@
+{
+  "channels": {
+    "internal": {
+      "packageIdentity": "EMKE.Translation.Internal",
+      "publisher": "CN=EMKE Internal Test",
+      "appId": "EMKE.Translation.Internal",
+      "credentialTarget": "EMKE.Translation.Internal.ApiKey",
+      "mutexSuffix": "Internal",
+      "pipeSuffix": "Internal",
+      "appInstallerPath": "windows/internal/EMKE.Translation.Internal.appinstaller",
+      "driverFeedPath": null
+    },
+    "beta": {
+      "packageIdentity": "EMKE.Translation.Beta"
+    },
+    "stable": {
+      "packageIdentity": "EMKE.Translation"
+    }
+  }
+}
