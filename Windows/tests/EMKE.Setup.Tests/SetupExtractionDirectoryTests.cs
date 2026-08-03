@@ -10,6 +10,7 @@ public sealed class SetupExtractionDirectoryTests
 {
     private static readonly string[] UnexpectedLogicalNames =
         ["unexpected-entry"];
+    private static readonly string[] PayloadLogicalNames = ["payload"];
 
     [TestMethod]
     public void NewRootsAreVersionScopedUniqueAndContainedBySetupBase()
@@ -367,7 +368,9 @@ public sealed class SetupExtractionDirectoryTests
         File.WriteAllText(unexpectedPath, "do not delete");
 
         SetupCleanupOutcome outcome = extraction.Cleanup();
+        SetupCleanupOutcome repeated = extraction.Cleanup();
 
+        Assert.AreSame(outcome, repeated);
         Assert.IsFalse(outcome.Completed);
         Assert.IsTrue(outcome.ResidualRetained);
         Assert.AreEqual(
@@ -378,6 +381,32 @@ public sealed class SetupExtractionDirectoryTests
             outcome.RetainedLogicalNames.ToArray());
         Assert.IsTrue(File.Exists(unexpectedPath));
         Assert.IsTrue(Directory.Exists(extraction.RootPath));
+    }
+
+    [TestMethod]
+    public void CleanupDuringActivePayloadBorrowReportsPayloadUncertainty()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
+            ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
+        VerifiedSetupPayload payload = result.Payload!;
+
+        SetupCleanupOutcome outcome = payload.Lease.UseHandle(
+            _ => extraction.Cleanup());
+
+        Assert.IsFalse(outcome.Completed);
+        Assert.IsTrue(outcome.ResidualRetained);
+        Assert.AreEqual("payloadCleanupUncertain", outcome.FailureCode);
+        Assert.AreNotEqual(
+            "unexpectedExtractionEntriesRetained",
+            outcome.FailureCode);
+        CollectionAssert.AreEquivalent(
+            PayloadLogicalNames,
+            outcome.RetainedLogicalNames.ToArray());
     }
 
     [TestMethod]

@@ -249,6 +249,7 @@ public sealed class SetupPayloadVerifierTests
         CountingSignatureVerifier signatures = new(
             SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid"));
         string? extractionRoot = null;
+        SetupExtractionDirectory? capturedExtraction = null;
         SetupPayloadVerifier verifier = new(
             signatures,
             version =>
@@ -256,6 +257,7 @@ public sealed class SetupPayloadVerifierTests
                 SetupExtractionDirectory extraction =
                     SetupExtractionDirectory.Create(temporary.Path, version);
                 extractionRoot = extraction.RootPath;
+                capturedExtraction = extraction;
                 return extraction;
             });
 
@@ -268,9 +270,53 @@ public sealed class SetupPayloadVerifierTests
         Assert.AreEqual(5, signatures.ObservedPayloadCount);
         Assert.IsNotNull(extractionRoot);
         Assert.IsFalse(Directory.Exists(extractionRoot));
+        SetupExtractionDirectory extraction = capturedExtraction
+            ?? throw new InvalidOperationException("Extraction was not created.");
+        Assert.AreSame(
+            extraction.CleanupState,
+            result.LastCleanupOutcome);
+        Assert.AreSame(result.LastCleanupOutcome, result.Cleanup());
         Assert.IsTrue(result.LastCleanupOutcome.Completed);
         Assert.IsFalse(result.LastCleanupOutcome.ResidualRetained);
         Assert.IsEmpty(result.LastCleanupOutcome.RetainedLogicalNames);
+    }
+
+    [TestMethod]
+    public void EmbeddedOpenFailurePreservesExactCatchCleanupOutcome()
+    {
+        using TemporaryDirectory temporary = new();
+        SetupExtractionDirectory? capturedExtraction = null;
+        SetupPayloadVerifier verifier = new(
+            TrustedSignatures(),
+            version =>
+            {
+                SetupExtractionDirectory extraction =
+                    SetupExtractionDirectory.Create(temporary.Path, version);
+                capturedExtraction = extraction;
+                return extraction;
+            });
+        List<SetupEmbeddedPayload> embedded = EmbeddedPayloads();
+        SetupEmbeddedPayload first = embedded[0];
+        embedded[0] = new SetupEmbeddedPayload(
+            first.LogicalName,
+            () => throw new IOException("Injected embedded stream failure."),
+            first.DeclaredLength);
+
+        using SetupPayloadVerificationResult result = verifier.VerifyAndExtract(
+            Manifest(),
+            embedded);
+
+        Assert.IsFalse(result.IsValid);
+        Assert.AreEqual("embeddedPayloadUnreadable", result.FailureCode);
+        SetupExtractionDirectory extraction = capturedExtraction
+            ?? throw new InvalidOperationException("Extraction was not created.");
+        SetupCleanupOutcome expected = extraction.CleanupState;
+        Assert.AreSame(expected, result.LastCleanupOutcome);
+        Assert.AreSame(expected, result.Cleanup());
+        Assert.IsTrue(expected.Completed);
+        Assert.IsFalse(expected.ResidualRetained);
+        Assert.IsEmpty(expected.RetainedLogicalNames);
+        Assert.IsFalse(Directory.Exists(extraction.RootPath));
     }
 
     [TestMethod]
