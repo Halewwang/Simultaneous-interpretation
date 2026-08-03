@@ -5,6 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../../.."))
+$sensitivePathSentinel = "C:\sensitive\repo\private-fixture.msix"
 $clientScript = Join-Path `
   $repositoryRoot `
   "Windows/tools/test-setup-task2r-client.ps1"
@@ -71,6 +72,29 @@ function Import-ClientFunctions {
   )
   if ($parseErrors.Count -ne 0) {
     throw "Task 2R client script did not parse: $($parseErrors[0].Message)"
+  }
+
+  $topLevelExecutionText = @(
+    $ast.EndBlock.Statements |
+      Where-Object {
+        $_ -isnot [Management.Automation.Language.FunctionDefinitionAst]
+      } |
+      ForEach-Object { $_.Extent.Text }
+  ) -join [Environment]::NewLine
+  if ($topLevelExecutionText -notmatch (
+      "\[Runtime\.InteropServices\.RuntimeInformation\]" +
+      "::OSArchitecture"
+    )) {
+    throw (
+      "Task 2R client eligibility must use the host OS architecture from " +
+      "RuntimeInformation.OSArchitecture."
+    )
+  }
+  if ($topLevelExecutionText -match "\`$env:PROCESSOR_ARCHITECTURE") {
+    throw (
+      "Task 2R client eligibility must not use the current process " +
+      "architecture environment variable."
+    )
   }
 
   $source = [IO.File]::ReadAllText($clientScript)
@@ -227,6 +251,9 @@ $trxName = $logger.Substring($loggerSeparator + 1)
   unsignedSys = $env:EMKE_SETUP_UNSIGNED_SYS_FIXTURE
 } | ConvertTo-Json -Compress | Add-Content -LiteralPath $env:EMKE_TASK2R_FAKE_LOG
 
+Write-Output "fake-dotnet stdout path=C:\sensitive\repo\private-fixture.msix"
+Write-Host "fake-dotnet host path=C:\sensitive\repo\private-fixture.msix"
+
 if (
   $env:EMKE_TASK2R_FAKE_MODE -ceq "nonzero" -and
   $filter -ceq "TestCategory=WindowsSetupSignedPayload"
@@ -264,7 +291,20 @@ Set-Content -LiteralPath (Join-Path $resultsDirectory $trxName) -Value $trx
   $env:EMKE_TASK2R_FAKE_LOG = $script:invocationLog
 
   try {
-    $outputPath = Invoke-ClientFixture -Name "success"
+    $transcriptPath = Join-Path $temporaryRoot "visible-client-output.log"
+    $visibleStreams = @()
+    $script:successfulOutputPath = $null
+    Start-Transcript -LiteralPath $transcriptPath -Force | Out-Null
+    try {
+      $visibleStreams = @(
+        & {
+          $script:successfulOutputPath = Invoke-ClientFixture -Name "success"
+        } *>&1
+      )
+    } finally {
+      Stop-Transcript | Out-Null
+    }
+    $outputPath = $script:successfulOutputPath
     $rawEvidence = Get-Content -LiteralPath $outputPath -Raw
     $evidence = $rawEvidence | ConvertFrom-Json
     $expectedFields = @(
@@ -339,6 +379,17 @@ Set-Content -LiteralPath (Join-Path $resultsDirectory $trxName) -Value $trx
       -Condition (@($records.trxName | Sort-Object -Unique).Count -eq 4) `
       -Message "Every client evidence run must use a unique TRX name."
 
+    $visibleOutput = @(
+      $visibleStreams | Out-String
+      [IO.File]::ReadAllText($transcriptPath)
+    ) -join [Environment]::NewLine
+    Assert-True `
+      -Condition (-not $visibleOutput.Contains(
+          $sensitivePathSentinel,
+          [StringComparison]::OrdinalIgnoreCase
+        )) `
+      -Message "Client evidence leaked the fake dotnet path sentinel."
+
     foreach ($index in 0, 1) {
       foreach ($property in @(
           "signedMsix",
@@ -356,7 +407,9 @@ Set-Content -LiteralPath (Join-Path $resultsDirectory $trxName) -Value $trx
       -Condition (
         $records[2].signedMsix -ceq $script:fixturePaths.SignedMsix -and
         $records[2].signingCer -ceq $script:fixturePaths.SigningCer -and
-        [string]::IsNullOrEmpty($records[2].unsignedCat)
+        [string]::IsNullOrEmpty($records[2].unsignedCat) -and
+        [string]::IsNullOrEmpty($records[2].unsignedInf) -and
+        [string]::IsNullOrEmpty($records[2].unsignedSys)
       ) `
       -Message "Signed evidence must receive only the exact signed fixtures."
     Assert-True `
@@ -364,7 +417,8 @@ Set-Content -LiteralPath (Join-Path $resultsDirectory $trxName) -Value $trx
         $records[3].unsignedCat -ceq $script:fixturePaths.UnsignedCat -and
         $records[3].unsignedInf -ceq $script:fixturePaths.UnsignedInf -and
         $records[3].unsignedSys -ceq $script:fixturePaths.UnsignedSys -and
-        [string]::IsNullOrEmpty($records[3].signedMsix)
+        [string]::IsNullOrEmpty($records[3].signedMsix) -and
+        [string]::IsNullOrEmpty($records[3].signingCer)
       ) `
       -Message "Unsigned evidence must receive only the exact unsigned fixtures."
     foreach ($variableName in $fixtureVariables) {

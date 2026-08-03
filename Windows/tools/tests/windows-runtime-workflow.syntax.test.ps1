@@ -11,6 +11,7 @@ $workflowPath = Join-Path $repositoryRoot ".github/workflows/windows-runtime.yml
 $lines = [System.IO.File]::ReadAllLines($workflowPath)
 $parsedBlockCount = 0
 $failures = @()
+$ordinarySolutionBlock = $null
 
 for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex += 1) {
   if ($lines[$lineIndex] -notmatch "^(?<indent>\s*)shell:\s*pwsh\s*$") {
@@ -80,10 +81,21 @@ for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex += 1) {
     $scriptLines += $line.Substring($contentIndent)
   }
 
+  $scriptText = $scriptLines -join [Environment]::NewLine
+  if ($scriptText.Contains(
+      "dotnet test Windows/EMKE.Windows.slnx",
+      [StringComparison]::Ordinal
+    )) {
+    if ($null -ne $ordinarySolutionBlock) {
+      throw "Ordinary solution tests appear in multiple workflow run blocks."
+    }
+    $ordinarySolutionBlock = $scriptText
+  }
+
   $tokens = $null
   $parseErrors = $null
   $null = [System.Management.Automation.Language.Parser]::ParseInput(
-    ($scriptLines -join [Environment]::NewLine),
+    $scriptText,
     [ref]$tokens,
     [ref]$parseErrors
   )
@@ -107,6 +119,28 @@ if ($failures.Count -ne 0) {
   throw (
     "Windows runtime workflow PowerShell parsing failed:`n{0}" -f
     ($failures -join [Environment]::NewLine)
+  )
+}
+
+if ($null -eq $ordinarySolutionBlock) {
+  throw "The Windows runtime ordinary solution test command is missing."
+}
+$ordinaryFilter = (
+  "TestCategory!=WindowsSetupSignedPayload&" +
+  "TestCategory!=WindowsSetupUnsignedEmkeCatalog&" +
+  "TestCategory!=NativeAudioNativeFake&" +
+  "TestCategory!=NativeAudioRealDll&" +
+  "TestCategory!=NativeAudioOwnedAdapter"
+)
+$ordinaryCommandPattern = (
+  "dotnet test Windows/EMKE\.Windows\.slnx[\s\S]*?" +
+  "--filter\s+`"$([regex]::Escape($ordinaryFilter))`"[\s\S]*?" +
+  "--logger\s+`"trx;LogFileName=windows-runtime\.trx`""
+)
+if ($ordinarySolutionBlock -notmatch $ordinaryCommandPattern) {
+  throw (
+    "The Windows runtime ordinary solution test must use the exact fixture " +
+    "isolation filter: $ordinaryFilter"
   )
 }
 

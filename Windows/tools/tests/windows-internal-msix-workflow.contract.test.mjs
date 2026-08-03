@@ -537,6 +537,65 @@ test('workflow emits isolated complete Task 2R managed, inbox, and signed eviden
       signingJob.indexOf('task2r-signed-payload.trx'),
     'signed payload evidence must run after exact MSIX verification',
   );
+  const verifyIndex = signedBlock.indexOf('verify-msix.ps1');
+  const signedFixtureIndex = signedBlock.indexOf(
+    '$env:EMKE_SETUP_SIGNED_MSIX_FIXTURE',
+  );
+  const signedTestIndex = signedBlock.indexOf(
+    'dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj',
+  );
+  assert.ok(verifyIndex >= 0, 'the signed block must verify the exact MSIX');
+  assert.ok(
+    signedFixtureIndex > verifyIndex && signedTestIndex > signedFixtureIndex,
+    'signed fixtures and tests must follow exact MSIX verification',
+  );
+  const preSignedTest = signedBlock.slice(verifyIndex, signedTestIndex);
+  const base64ClearIndex = preSignedTest.indexOf(
+    '$env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null',
+  );
+  const passwordClearIndex = preSignedTest.indexOf(
+    '$env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null',
+  );
+  const byteClearIndex = preSignedTest.indexOf(
+    '[Array]::Clear($pfxBytes, 0, $pfxBytes.Length)',
+  );
+  const byteReleaseIndex = preSignedTest.indexOf(
+    '$pfxBytes = $null',
+    byteClearIndex + 1,
+  );
+  const pfxRemoval = preSignedTest.match(
+    /Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force/,
+  );
+  for (const [label, index] of [
+    ['PFX base64 environment cleanup', base64ClearIndex],
+    ['PFX password environment cleanup', passwordClearIndex],
+    ['PFX byte clearing', byteClearIndex],
+    ['PFX byte reference release', byteReleaseIndex],
+  ]) {
+    assert.ok(index >= 0, `${label} must finish before signed dotnet test`);
+  }
+  assert.ok(pfxRemoval, 'the temporary PFX must be removed before signed tests');
+  assert.doesNotMatch(
+    preSignedTest,
+    /-ErrorAction\s+SilentlyContinue|catch\s*\{[^}]*?(?:continue|return)?\s*\}/,
+    'pre-test signing cleanup must fail closed instead of continuing',
+  );
+  assert.match(
+    signedBlock,
+    /\$ErrorActionPreference\s*=\s*"Stop"/,
+    'pre-test cleanup failures must terminate the signing step',
+  );
+  const finallyCleanup = signedBlock.slice(signedBlock.lastIndexOf('finally {'));
+  assert.match(
+    finallyCleanup,
+    /\[Array\]::Clear\(\$pfxBytes,\s*0,\s*\$pfxBytes\.Length\)/,
+    'finally must retain PFX byte cleanup for earlier failures',
+  );
+  assert.match(
+    finallyCleanup,
+    /Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force/,
+    'finally must retain temporary PFX removal for earlier failures',
+  );
   assert.match(
     signedBlock,
     /\$env:EMKE_SETUP_SIGNED_MSIX_FIXTURE\s*=\s*\$packagePath/,
