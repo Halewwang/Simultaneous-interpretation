@@ -109,9 +109,8 @@ public sealed class SetupPayloadVerifierTests
     [DataRow("certificateEvidenceMismatch")]
     [DataRow("driverInfSubmissionHashMismatch")]
     [DataRow("driverSysSubmissionHashMismatch")]
-    [DataRow("driverCatalogKernelTrustInvalid")]
-    [DataRow("driverCatalogInfMemberMissing")]
-    [DataRow("driverCatalogSysMemberMissing")]
+    [DataRow("catalogKernelTrustInvalid")]
+    [DataRow("catalogMemberMismatch")]
     public void IncompleteOrMismatchedSignatureEvidenceIsRejected(
         string failureCode)
     {
@@ -216,7 +215,7 @@ public sealed class SetupPayloadVerifierTests
                 certificateSubject,
                 certificateValidityValid,
                 certificateSha256),
-            new SetupDriverCatalogEvidence(trusted: true));
+            TrustedCatalogEvidence());
         WindowsSetupPayloadSignatureVerifier verifier = new(probe);
 
         SetupPayloadSignatureEvidence result = verifier.Verify(
@@ -242,7 +241,7 @@ public sealed class SetupPayloadVerifierTests
                 "CN=EMKE Internal Test",
                 validityValid: true,
                 sha256Thumbprint: CertificateHash),
-            new SetupDriverCatalogEvidence(trusted: true));
+            TrustedCatalogEvidence());
         WindowsSetupPayloadSignatureVerifier verifier = new(probe);
         VerifiedSetupPayload[] payloads = ExtractPayloads(extraction);
 
@@ -278,7 +277,7 @@ public sealed class SetupPayloadVerifierTests
                 "CN=EMKE Internal Test",
                 validityValid: true,
                 sha256Thumbprint: CertificateHash),
-            new SetupDriverCatalogEvidence(trusted: true));
+            TrustedCatalogEvidence());
         WindowsSetupPayloadSignatureVerifier verifier = new(probe);
         VerifiedSetupPayload[] payloads = ExtractPayloads(extraction);
 
@@ -305,13 +304,62 @@ public sealed class SetupPayloadVerifierTests
     }
 
     [TestMethod]
+    [DataRow(false, true, false, false, "catalogKernelTrustInvalid")]
+    [DataRow(true, false, false, false, "catalogMemberMismatch")]
+    [DataRow(true, true, false, false, "catalogKernelTrustInvalid")]
+    [DataRow(true, true, true, false, "catalogKernelTrustInvalid")]
+    public void ProductionSignatureVerifierMapsHandleCatalogEvidenceToStableFailure(
+        bool kernelPolicyValid,
+        bool catalogEntriesMatch,
+        bool memberTrustValid,
+        bool allowed,
+        string expectedFailure)
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
+        RecordingSignatureProbe probe = new(
+            new SetupMsixSignatureEvidence(
+                signatureValid: true,
+                signerSha256: CertificateHash,
+                identityPublisher: "CN=EMKE Internal Test"),
+            new SetupCertificateEvidence(
+                "CN=EMKE Internal Test",
+                validityValid: true,
+                sha256Thumbprint: CertificateHash),
+            new SetupDriverCatalogEvidence(
+                kernelPolicyValid,
+                catalogEntriesMatch,
+                memberTrustValid,
+                allowed));
+        WindowsSetupPayloadSignatureVerifier verifier = new(probe);
+        VerifiedSetupPayload[] payloads = ExtractPayloads(extraction);
+
+        SetupPayloadSignatureEvidence result = verifier.Verify(
+            Manifest(),
+            payloads);
+
+        Assert.IsFalse(result.Trusted);
+        Assert.AreEqual(expectedFailure, result.FailureCode);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverCatalog),
+            probe.CatalogPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverInf),
+            probe.InfPayload);
+        Assert.AreSame(
+            PayloadOfKind(payloads, SetupPayloadKind.DriverSys),
+            probe.SysPayload);
+    }
+
+    [TestMethod]
     public void VerifyAndExtractKeepsPayloadLeasesForProductionSignatureVerification()
     {
         using TemporaryDirectory temporary = new();
         RecordingSignatureProbe probe = new(
             new SetupMsixSignatureEvidence(true, CertificateHash, "CN=EMKE Internal Test"),
             new SetupCertificateEvidence("CN=EMKE Internal Test", true, CertificateHash),
-            new SetupDriverCatalogEvidence(trusted: true));
+            TrustedCatalogEvidence());
         SetupPayloadVerifier verifier = new(
             new WindowsSetupPayloadSignatureVerifier(probe),
             version => SetupExtractionDirectory.Create(temporary.Path, version));
@@ -625,6 +673,15 @@ public sealed class SetupPayloadVerifierTests
     {
         return new StaticSignatureVerifier(
             SetupPayloadSignatureEvidence.TrustedEvidence);
+    }
+
+    private static SetupDriverCatalogEvidence TrustedCatalogEvidence()
+    {
+        return new SetupDriverCatalogEvidence(
+            kernelPolicyValid: true,
+            catalogEntriesMatch: true,
+            memberTrustValid: true,
+            allowed: true);
     }
 
     private static SetupManifest Manifest()
