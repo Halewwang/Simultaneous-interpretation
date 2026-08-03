@@ -245,19 +245,19 @@ Assert-ContainsPattern `
   -Source $unsignedBlock `
   -Pattern '--logger\s+"trx;LogFileName=task2r-unsigned-emke-catalog\.trx"' `
   -Message "Unsigned evidence must write the exact Task 2R TRX."
-foreach ($counterPattern in @(
-    "\[int\]\`$counters\.total\s+-le\s+0",
-    "\[int\]\`$counters\.executed\s+-ne\s+\[int\]\`$counters\.total|" +
-      "\[int\]\`$counters\.total\s+-ne\s+\[int\]\`$counters\.executed",
-    "\[int\]\`$counters\.passed\s+-ne\s+\[int\]\`$counters\.total|" +
-      "\[int\]\`$counters\.total\s+-ne\s+\[int\]\`$counters\.passed",
-    "\[int\]\`$counters\.failed\s+-ne\s+0",
-    "\[int\]\`$counters\.notExecuted\s+-ne\s+0"
+foreach ($counterLiteral in @(
+    '[int]$counters.total -le 0',
+    '[int]$counters.executed -ne [int]$counters.total',
+    '[int]$counters.passed -ne [int]$counters.total',
+    '[int]$counters.failed -ne 0',
+    '[int]$counters.notExecuted -ne 0'
   )) {
-  Assert-ContainsPattern `
-    -Source $unsignedBlock `
-    -Pattern $counterPattern `
-    -Message "Unsigned evidence must reject empty, failed, or skipped TRX results."
+  if (-not $unsignedBlock.Contains(
+      $counterLiteral,
+      [StringComparison]::Ordinal
+    )) {
+    throw "Unsigned evidence counter contract is missing '$counterLiteral'."
+  }
 }
 
 $finallyIndex = $unsignedBlock.LastIndexOf(
