@@ -20,9 +20,11 @@ public sealed class SetupPayloadVerifierTests
         string expectedFailure)
     {
         SetupPayloadVerifier verifier = new(TrustedSignatures());
+        byte[] changedBytes = Encoding.UTF8.GetBytes(logicalName);
+        changedBytes[0] ^= 1;
         IReadOnlyList<SetupEmbeddedPayload> embedded = EmbeddedPayloads(
             logicalName,
-            Encoding.UTF8.GetBytes("substituted"));
+            changedBytes);
 
         SetupPayloadVerificationResult result = verifier.Verify(Manifest(), embedded);
 
@@ -93,7 +95,7 @@ public sealed class SetupPayloadVerifierTests
     {
         SetupPayloadVerifier verifier = new(TrustedSignatures());
         List<SetupEmbeddedPayload> embedded = EmbeddedPayloads().ToList();
-        embedded.Add(embedded[0]);
+        embedded[1] = embedded[0];
 
         SetupPayloadVerificationResult result = verifier.Verify(Manifest(), embedded);
 
