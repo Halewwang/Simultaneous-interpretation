@@ -251,6 +251,32 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
+    public void DisposedReadViewDoesNotReleaseOwnerMutationProtection()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction =
+            SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
+        SetupExtractionResult result = extraction.CopyVerified(
+            new MemoryStream("payload"u8.ToArray()), ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
+        VerifiedSetupPayload payload = result.Payload!;
+
+        using (Stream view = payload.Lease.OpenReadView())
+        {
+        }
+
+        Assert.ThrowsExactly<IOException>(() => File.Delete(payload.DisplayPath));
+        AssertMutationBlocked(() =>
+        {
+            using FileStream ignored = File.Open(
+                payload.DisplayPath,
+                FileMode.Open,
+                FileAccess.Write,
+                FileShare.Read);
+        });
+    }
+
+    [TestMethod]
     public void DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles()
     {
         using TemporaryDirectory temporary = new();
