@@ -141,7 +141,7 @@ public sealed class SetupExtractionDirectoryTests
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
-        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
         Assert.IsTrue(payload.DisplayPath.StartsWith(
             extraction.RootPath + Path.DirectorySeparatorChar,
@@ -161,7 +161,7 @@ public sealed class SetupExtractionDirectoryTests
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
-        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
         Assert.ThrowsExactly<IOException>(() =>
         {
@@ -183,6 +183,7 @@ public sealed class SetupExtractionDirectoryTests
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
 
         using FileStream verificationReader = new(
@@ -203,7 +204,7 @@ public sealed class SetupExtractionDirectoryTests
             SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream("payload"u8.ToArray()), ExpectedPayload());
-        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
 
         using Stream view = payload.Lease.OpenReadView();
@@ -230,7 +231,7 @@ public sealed class SetupExtractionDirectoryTests
             SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream("payload"u8.ToArray()), ExpectedPayload());
-        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
 
         using Stream first = payload.Lease.OpenReadView();
@@ -253,15 +254,15 @@ public sealed class SetupExtractionDirectoryTests
     public void DisposeDeletesVerifiedPayloadAndEmptyRootThroughHeldHandles()
     {
         using TemporaryDirectory temporary = new();
-        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
-        VerifiedSetupPayload payload = result.Payload!;
         string rootPath = extraction.RootPath;
 
-        Assert.IsTrue(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
+        VerifiedSetupPayload payload = result.Payload!;
 
         extraction.Dispose();
 
@@ -276,11 +277,12 @@ public sealed class SetupExtractionDirectoryTests
     public void DisposeLeavesUnexpectedChildAndReportsStructuredRecoveryState()
     {
         using TemporaryDirectory temporary = new();
-        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
         string unexpectedPath = Path.Combine(extraction.RootPath, "unexpected.bin");
         File.WriteAllText(unexpectedPath, "do not delete");
@@ -301,11 +303,12 @@ public sealed class SetupExtractionDirectoryTests
     public void HeldPayloadHandleRejectsReplacementAndCleanupNeverDeletesReplacementSource()
     {
         using TemporaryDirectory temporary = new();
-        SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        Assert.IsTrue(result.Succeeded, result.FailureCode);
         VerifiedSetupPayload payload = result.Payload!;
         string replacementPath = Path.Combine(temporary.Path, "replacement.bin");
         File.WriteAllText(replacementPath, "replacement");
