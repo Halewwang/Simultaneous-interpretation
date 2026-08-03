@@ -75,28 +75,28 @@ internal sealed class SetupExtractionResult
     private SetupExtractionResult(
         bool succeeded,
         string? failureCode,
-        string outputPath)
+        VerifiedSetupPayload? payload)
     {
         Succeeded = succeeded;
         FailureCode = failureCode;
-        OutputPath = outputPath;
+        Payload = payload;
     }
 
     public bool Succeeded { get; }
 
     public string? FailureCode { get; }
 
-    public string OutputPath { get; }
+    public VerifiedSetupPayload? Payload { get; }
 
-    public static SetupExtractionResult Success(string outputPath) => new(
+    public static SetupExtractionResult Success(VerifiedSetupPayload payload) => new(
         true,
         null,
-        outputPath);
+        payload ?? throw new ArgumentNullException(nameof(payload)));
 
     public static SetupExtractionResult Rejected(string failureCode) => new(
         false,
         failureCode,
-        string.Empty);
+        null);
 }
 
 internal sealed class SetupExtractionDirectory : IDisposable
@@ -108,6 +108,8 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const uint GenericWrite = 0x40000000;
     private const uint DeleteAccess = 0x00010000;
     private const uint FileReadAttributes = 0x00000080;
+    private const uint FileWriteAttributes = 0x00000100;
+    private const uint SynchronizeAccess = 0x00100000;
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
@@ -115,11 +117,10 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private const uint OpenExisting = 3;
     private const uint FileAttributeReadOnly = 0x00000001;
     private const uint FileAttributeNormal = 0x00000080;
-    private const uint FileFlagSequentialScan = 0x08000000;
     private const uint FileFlagBackupSemantics = 0x02000000;
     private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileAttributeReparsePoint = 0x00000400;
-    private readonly List<PayloadLease> _payloadLeases = [];
+    private readonly List<VerifiedPayloadLease> _payloadLeases = [];
     private readonly SafeFileHandle _rootHandle;
     private readonly SetupFileIdentity _rootIdentity;
     private bool _disposed;
@@ -203,26 +204,21 @@ internal sealed class SetupExtractionDirectory : IDisposable
     }
 
     public SetupExtractionResult CopyVerified(
-        string outputName,
         Stream source,
         SetupPayload expectedPayload)
     {
         ThrowIfDisposed();
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputName);
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(expectedPayload);
 
-        if (!IsSafeOutputName(outputName)
-            || !string.Equals(
-                outputName,
-                expectedPayload.FileName,
-                StringComparison.Ordinal))
+        string outputName = expectedPayload.FileName;
+        if (!IsSafeOutputName(outputName))
         {
             return SetupExtractionResult.Rejected("unsafeOutputPath");
         }
 
         string outputPath = Path.Combine(RootPath, outputName);
-        PayloadLease? lease = null;
+        VerifiedPayloadLease? lease = null;
         try
         {
             EnsureNoReparsePointAtAnyExistingComponent(outputPath);
@@ -231,11 +227,9 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 return SetupExtractionResult.Rejected("unsafeOutputPath");
             }
 
-            lease = CreateTrackedPayloadLease(outputPath);
-            (long length, string hash) = CopyAndHash(
-                source,
-                lease.Stream,
-                expectedPayload.Length);
+            lease = CreateTrackedPayloadLease(expectedPayload, outputPath);
+            (long length, string hash) = lease.UseHandle(handle =>
+                CopyAndHash(source, handle, expectedPayload.Length));
             if (length != expectedPayload.Length)
             {
                 return RejectCreatedPayload(lease, "tamperedPayloadLength");
@@ -244,13 +238,20 @@ internal sealed class SetupExtractionDirectory : IDisposable
             {
                 return RejectCreatedPayload(lease, "tamperedPayloadHash");
             }
-            if (!SetFileAttributesByHandle(lease.Stream.SafeFileHandle, FileAttributeReadOnly)
-                || !IsFinalResolvedPathContainedByRoot(lease.Stream.SafeFileHandle, RootPath))
+            if (!lease.UseHandle(handle =>
+                    IsFinalResolvedPathContainedByRoot(handle, RootPath))
+                || !lease.UseHandle(handle =>
+                    SetFileAttributesByHandle(handle, FileAttributeReadOnly)))
             {
                 return RejectCreatedPayload(lease, "unsafeOutputPath");
             }
 
-            return SetupExtractionResult.Success(outputPath);
+            VerifiedSetupPayload payload = new(
+                expectedPayload,
+                length,
+                hash,
+                lease);
+            return SetupExtractionResult.Success(payload);
         }
         catch (SetupExtractionException exception)
         {
@@ -279,7 +280,8 @@ internal sealed class SetupExtractionDirectory : IDisposable
 
         _disposed = true;
         bool payloadCleanupCertain = true;
-        foreach (PayloadLease lease in _payloadLeases.AsEnumerable().Reverse().ToArray())
+        foreach (VerifiedPayloadLease lease in
+            _payloadLeases.AsEnumerable().Reverse().ToArray())
         {
             payloadCleanupCertain &= TryDeletePayloadLease(lease, closeOnFailure: true);
         }
@@ -331,9 +333,11 @@ internal sealed class SetupExtractionDirectory : IDisposable
         return fullBasePath;
     }
 
-    private PayloadLease CreateTrackedPayloadLease(string outputPath)
+    private VerifiedPayloadLease CreateTrackedPayloadLease(
+        SetupPayload payload,
+        string outputPath)
     {
-        PayloadLease lease = CreatePayloadLease(outputPath);
+        VerifiedPayloadLease lease = CreatePayloadLease(payload, outputPath);
         try
         {
             _payloadLeases.Add(lease);
@@ -341,27 +345,33 @@ internal sealed class SetupExtractionDirectory : IDisposable
         }
         catch
         {
-            SafeFileHandle handle = lease.Stream.SafeFileHandle;
-            _ = SetFileAttributesByHandle(handle, FileAttributeNormal)
-                && TrySetDeleteDisposition(handle);
+            _ = lease.UseHandle(handle =>
+                SetFileAttributesByHandle(handle, FileAttributeNormal)
+                    && TrySetDeleteDisposition(handle));
             lease.Dispose();
             throw;
         }
     }
 
-    private static PayloadLease CreatePayloadLease(string outputPath)
+    private static VerifiedPayloadLease CreatePayloadLease(
+        SetupPayload payload,
+        string outputPath)
     {
         SafeFileHandle? handle = null;
-        FileStream? stream = null;
         try
         {
             handle = CreateFile(
                 outputPath,
-                GenericRead | GenericWrite | DeleteAccess,
+                GenericRead
+                    | GenericWrite
+                    | FileReadAttributes
+                    | FileWriteAttributes
+                    | SynchronizeAccess
+                    | DeleteAccess,
                 FileShareRead,
                 nint.Zero,
                 CreateNew,
-                FileAttributeNormal | FileFlagSequentialScan | FileFlagOpenReparsePoint,
+                FileAttributeNormal | FileFlagOpenReparsePoint,
                 nint.Zero);
             if (handle.IsInvalid)
             {
@@ -373,26 +383,22 @@ internal sealed class SetupExtractionDirectory : IDisposable
                     : new Win32Exception(error);
             }
 
-            stream = new FileStream(
+            VerifiedPayloadLease lease = new(
                 handle,
-                FileAccess.ReadWrite,
-                CopyBufferSize,
-                isAsync: false);
+                payload.LogicalName,
+                outputPath);
             handle = null;
-            PayloadLease lease = new(stream);
-            stream = null;
             return lease;
         }
         finally
         {
-            stream?.Dispose();
             handle?.Dispose();
         }
     }
 
     private static (long length, string hash) CopyAndHash(
         Stream source,
-        FileStream destination,
+        SafeFileHandle destination,
         long maximumLength)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -406,24 +412,26 @@ internal sealed class SetupExtractionDirectory : IDisposable
                 throw new SetupExtractionException("tamperedPayloadLength");
             }
 
-            destination.Write(buffer, 0, read);
+            RandomAccess.Write(destination, buffer.AsSpan(0, read), length);
             hash.AppendData(buffer, 0, read);
             length += read;
         }
 
-        destination.Flush(flushToDisk: true);
+        RandomAccess.FlushToDisk(destination);
         return (length, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
     private SetupExtractionResult RejectCreatedPayload(
-        PayloadLease lease,
+        VerifiedPayloadLease lease,
         string failureCode)
     {
         _ = TryDeletePayloadLease(lease, closeOnFailure: false);
         return SetupExtractionResult.Rejected(failureCode);
     }
 
-    private bool TryDeletePayloadLease(PayloadLease lease, bool closeOnFailure)
+    private bool TryDeletePayloadLease(
+        VerifiedPayloadLease lease,
+        bool closeOnFailure)
     {
         if (lease.Closed)
         {
@@ -431,9 +439,9 @@ internal sealed class SetupExtractionDirectory : IDisposable
             return true;
         }
 
-        SafeFileHandle handle = lease.Stream.SafeFileHandle;
-        bool deleteMarked = SetFileAttributesByHandle(handle, FileAttributeNormal)
-            && TrySetDeleteDisposition(handle);
+        bool deleteMarked = lease.UseHandle(handle =>
+            SetFileAttributesByHandle(handle, FileAttributeNormal)
+                && TrySetDeleteDisposition(handle));
         if (deleteMarked || closeOnFailure)
         {
             lease.Dispose();
@@ -633,28 +641,6 @@ internal sealed class SetupExtractionDirectory : IDisposable
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-    }
-
-    private sealed class PayloadLease : IDisposable
-    {
-        public PayloadLease(FileStream stream)
-        {
-            Stream = stream;
-        }
-
-        public FileStream Stream { get; }
-
-        public bool Closed { get; private set; }
-
-        public void Dispose()
-        {
-            if (Closed)
-            {
-                return;
-            }
-            Closed = true;
-            Stream.Dispose();
-        }
     }
 
     [StructLayout(LayoutKind.Sequential)]

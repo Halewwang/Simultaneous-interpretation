@@ -166,6 +166,9 @@ public sealed class SetupPayloadVerifierTests
     [TestMethod]
     public void ProductionSignatureVerifierRejectsMsixPublisherMismatchBeforeDriverTrust()
     {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
         RecordingSignatureProbe probe = new(
             new SetupMsixSignatureEvidence(
                 signatureValid: true,
@@ -180,7 +183,7 @@ public sealed class SetupPayloadVerifierTests
 
         SetupPayloadSignatureEvidence result = verifier.Verify(
             Manifest(),
-            VerifiedPayloads());
+            ExtractPayloads(extraction));
 
         Assert.IsFalse(result.Trusted);
         Assert.AreEqual("msixPublisherMismatch", result.FailureCode);
@@ -192,6 +195,9 @@ public sealed class SetupPayloadVerifierTests
     [TestMethod]
     public void ProductionSignatureVerifierAcceptsPinnedSignerPublisherAndCatalogEvidence()
     {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
+            temporary.Path, new Version(0, 2, 0, 0));
         RecordingSignatureProbe probe = new(
             new SetupMsixSignatureEvidence(
                 signatureValid: true,
@@ -206,7 +212,7 @@ public sealed class SetupPayloadVerifierTests
 
         SetupPayloadSignatureEvidence result = verifier.Verify(
             Manifest(),
-            VerifiedPayloads());
+            ExtractPayloads(extraction));
 
         Assert.IsTrue(result.Trusted);
         Assert.IsTrue(probe.MsixVerified);
@@ -272,12 +278,11 @@ public sealed class SetupPayloadVerifierTests
             SetupPayloadKind.Msix);
         using MemoryStream msixSource = new(msix);
         SetupExtractionResult extracted = extraction.CopyVerified(
-            payload.FileName,
             msixSource,
             payload);
 
         string publisher = WindowsSetupSignatureProbe.ReadMsixPublisher(
-            extracted.OutputPath);
+            extracted.Payload!.DisplayPath);
 
         Assert.AreEqual("CN=EMKE Internal Test", publisher);
     }
@@ -305,12 +310,11 @@ public sealed class SetupPayloadVerifierTests
             SetupPayloadKind.Certificate);
         using MemoryStream certificateSource = new(certificateBytes);
         SetupExtractionResult extracted = extraction.CopyVerified(
-            payload.FileName,
             certificateSource,
             payload);
 
         SetupCertificateEvidence evidence = WindowsSetupSignatureProbe.Instance
-            .ReadCertificate(extracted.OutputPath);
+            .ReadCertificate(extracted.Payload!.DisplayPath);
 
         Assert.AreEqual("CN=EMKE Internal Test", evidence.Subject);
         Assert.IsTrue(evidence.ValidityValid);
@@ -374,12 +378,18 @@ public sealed class SetupPayloadVerifierTests
     private const string CertificateHash =
         "de6d47c98e8cc925adb5c33c64ce76321978ba7b1ba2ded1eef0d9417d01ef85";
 
-    private static VerifiedSetupPayload[] VerifiedPayloads() =>
-        Payloads().Select(payload => new VerifiedSetupPayload(
-            payload,
-            payload.Length,
-            payload.Sha256,
-            Path.Combine("verified", payload.FileName))).ToArray();
+    private static VerifiedSetupPayload[] ExtractPayloads(
+        SetupExtractionDirectory extraction)
+    {
+        return Payloads().Select(payload =>
+        {
+            using MemoryStream source = new(
+                Encoding.UTF8.GetBytes(payload.LogicalName));
+            SetupExtractionResult result = extraction.CopyVerified(source, payload);
+            return result.Payload ?? throw new InvalidOperationException(
+                $"Failed to extract test payload '{payload.LogicalName}'.");
+        }).ToArray();
+    }
 
     private static List<SetupEmbeddedPayload> EmbeddedPayloads(
         string? changedLogicalName = null,

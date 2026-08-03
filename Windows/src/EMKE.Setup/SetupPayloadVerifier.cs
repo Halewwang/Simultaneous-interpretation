@@ -35,15 +35,16 @@ internal sealed class VerifiedSetupPayload
         SetupPayload manifestPayload,
         long length,
         string sha256,
-        string? path = null)
+        VerifiedPayloadLease lease)
     {
         ArgumentNullException.ThrowIfNull(manifestPayload);
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
+        ArgumentNullException.ThrowIfNull(lease);
         ManifestPayload = manifestPayload;
         Length = length;
         Sha256 = sha256;
-        Path = path;
+        Lease = lease;
     }
 
     public SetupPayload ManifestPayload { get; }
@@ -52,7 +53,9 @@ internal sealed class VerifiedSetupPayload
 
     public string Sha256 { get; }
 
-    public string? Path { get; }
+    public string DisplayPath => Lease.DisplayPath;
+
+    public VerifiedPayloadLease Lease { get; }
 }
 
 internal sealed class SetupPayloadSignatureEvidence
@@ -270,8 +273,6 @@ internal sealed class SetupPayloadVerifier
         {
             return SetupPayloadVerificationResult.Rejected("duplicateEmbeddedPayload");
         }
-
-        List<VerifiedSetupPayload> verified = [];
         foreach (SetupPayload expected in manifest.Payloads)
         {
             SetupEmbeddedPayload? embedded = embeddedPayloads.SingleOrDefault(
@@ -287,39 +288,14 @@ internal sealed class SetupPayloadVerifier
             {
                 return SetupPayloadVerificationResult.Rejected("tamperedPayloadLength");
             }
-
-            (long length, string hash, bool exceededLength)? observed = ReadAndHash(
-                embedded.OpenRead,
-                expected.Length);
-            if (observed is null)
-            {
-                return SetupPayloadVerificationResult.Rejected("embeddedPayloadUnreadable");
-            }
-            if (observed.Value.exceededLength
-                || observed.Value.length != expected.Length)
-            {
-                return SetupPayloadVerificationResult.Rejected("tamperedPayloadLength");
-            }
-            if (!string.Equals(
-                    observed.Value.hash,
-                    expected.Sha256,
-                    StringComparison.Ordinal))
-            {
-                return SetupPayloadVerificationResult.Rejected("tamperedPayloadHash");
-            }
-
-            verified.Add(new VerifiedSetupPayload(
-                expected,
-                observed.Value.length,
-                observed.Value.hash));
         }
 
-        SetupPayloadSignatureEvidence signature = _signatureVerifier.Verify(
+        using SetupPayloadVerificationResult extracted = VerifyAndExtract(
             manifest,
-            verified.AsReadOnly());
-        return signature.Trusted
+            embeddedPayloads);
+        return extracted.IsValid
             ? SetupPayloadVerificationResult.Valid
-            : SetupPayloadVerificationResult.Rejected(signature.FailureCode!);
+            : SetupPayloadVerificationResult.Rejected(extracted.FailureCode!);
     }
 
 #pragma warning disable CA1031 // Payload and signature faults must fail closed and clean up.
@@ -360,7 +336,6 @@ internal sealed class SetupPayloadVerifier
 
                 using Stream source = embedded.OpenRead();
                 SetupExtractionResult extracted = extraction.CopyVerified(
-                    expected.FileName,
                     source,
                     expected);
                 if (!extracted.Succeeded)
@@ -369,11 +344,7 @@ internal sealed class SetupPayloadVerifier
                         extracted.FailureCode!);
                 }
 
-                verified.Add(new VerifiedSetupPayload(
-                    expected,
-                    expected.Length,
-                    expected.Sha256,
-                    extracted.OutputPath));
+                verified.Add(extracted.Payload!);
             }
 
             SetupPayloadSignatureEvidence signature = _signatureVerifier.Verify(
@@ -410,45 +381,6 @@ internal sealed class SetupPayloadVerifier
     }
 #pragma warning restore CA1031
 
-#pragma warning disable CA1031 // Corrupt or unavailable embedded streams fail closed.
-    private static (long length, string hash, bool exceededLength)? ReadAndHash(
-        Func<Stream> openRead,
-        long maximumLength)
-    {
-        try
-        {
-            using Stream stream = openRead();
-            if (stream is null || !stream.CanRead)
-            {
-                return null;
-            }
-
-            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            byte[] buffer = new byte[81920];
-            long length = 0;
-            int read;
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                if (read > maximumLength - length)
-                {
-                    return (length, string.Empty, exceededLength: true);
-                }
-
-                length += read;
-                hash.AppendData(buffer, 0, read);
-            }
-
-            return (
-                length,
-                Convert.ToHexStringLower(hash.GetHashAndReset()),
-                exceededLength: false);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-#pragma warning restore CA1031
 }
 
 internal sealed class WindowsSetupPayloadSignatureVerifier
@@ -476,19 +408,19 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
         VerifiedSetupPayload? inf = Find(payloads, SetupPayloadKind.DriverInf);
         VerifiedSetupPayload? sys = Find(payloads, SetupPayloadKind.DriverSys);
         VerifiedSetupPayload? catalog = Find(payloads, SetupPayloadKind.DriverCatalog);
-        if (certificate?.Path is null || msix?.Path is null || inf?.Path is null
-            || sys?.Path is null || catalog?.Path is null)
+        if (certificate is null || msix is null || inf is null
+            || sys is null || catalog is null)
         {
             return SetupPayloadSignatureEvidence.Rejected("signatureEvidenceUnavailable");
         }
 
-        SetupMsixSignatureEvidence msixEvidence = _probe.VerifyMsix(msix.Path);
+        SetupMsixSignatureEvidence msixEvidence = _probe.VerifyMsix(msix.DisplayPath);
         if (!msixEvidence.SignatureValid)
         {
             return SetupPayloadSignatureEvidence.Rejected("msixAuthenticodeInvalid");
         }
         SetupCertificateEvidence certificateEvidence = _probe.ReadCertificate(
-            certificate.Path);
+            certificate.DisplayPath);
         SetupPayloadSignatureEvidence? certificateFailure = VerifyCertificate(
             certificateEvidence,
             certificate.ManifestPayload,
@@ -513,9 +445,9 @@ internal sealed class WindowsSetupPayloadSignatureVerifier
         }
 
         SetupDriverCatalogEvidence driverEvidence = _probe.VerifyDriverCatalog(
-            catalog.Path,
-            inf.Path,
-            sys.Path);
+            catalog.DisplayPath,
+            inf.DisplayPath,
+            sys.DisplayPath);
         return driverEvidence.Trusted
             ? SetupPayloadSignatureEvidence.TrustedEvidence
             : SetupPayloadSignatureEvidence.Rejected("driverCatalogKernelTrustInvalid");

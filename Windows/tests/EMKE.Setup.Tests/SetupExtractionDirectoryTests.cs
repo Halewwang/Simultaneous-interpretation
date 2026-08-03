@@ -33,19 +33,15 @@ public sealed class SetupExtractionDirectoryTests
     [DataRow("../outside.bin")]
     [DataRow("C:\\outside.bin")]
     [DataRow("\\\\server\\share\\outside.bin")]
-    public void UnsafeOrRootedOutputPathIsRejected(string outputName)
+    public void UnsafeOrRootedManifestPayloadPathIsRejectedBeforeExtraction(
+        string outputName)
     {
-        using TemporaryDirectory temporary = new();
-        using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
-            temporary.Path, new Version(0, 2, 0, 0));
-
-        SetupExtractionResult result = extraction.CopyVerified(
+        Assert.ThrowsExactly<ArgumentException>(() => new SetupPayload(
+            "payload",
             outputName,
-            new MemoryStream(Encoding.UTF8.GetBytes("payload")),
-            ExpectedPayload());
-
-        Assert.IsFalse(result.Succeeded);
-        Assert.AreEqual("unsafeOutputPath", result.FailureCode);
+            7,
+            "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426955f9b852d5a935e5",
+            SetupPayloadKind.Msix));
     }
 
     [TestMethod]
@@ -107,7 +103,6 @@ public sealed class SetupExtractionDirectoryTests
         File.CreateSymbolicLink(linkedOutput, outsideFile);
 
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
@@ -127,7 +122,6 @@ public sealed class SetupExtractionDirectoryTests
         TestNativeFileMethods.CreateHardLink(outputPath, protectedFile);
 
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
@@ -144,17 +138,17 @@ public sealed class SetupExtractionDirectoryTests
             temporary.Path, new Version(0, 2, 0, 0));
 
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
         Assert.IsTrue(result.Succeeded);
-        Assert.IsTrue(result.OutputPath.StartsWith(
+        VerifiedSetupPayload payload = result.Payload!;
+        Assert.IsTrue(payload.DisplayPath.StartsWith(
             extraction.RootPath + Path.DirectorySeparatorChar,
             StringComparison.Ordinal));
         Assert.AreNotEqual(
             FileAttributes.None,
-            File.GetAttributes(result.OutputPath) & FileAttributes.ReadOnly);
+            File.GetAttributes(payload.DisplayPath) & FileAttributes.ReadOnly);
     }
 
     [TestMethod]
@@ -164,20 +158,20 @@ public sealed class SetupExtractionDirectoryTests
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
 
         Assert.IsTrue(result.Succeeded);
+        VerifiedSetupPayload payload = result.Payload!;
         Assert.ThrowsExactly<IOException>(() =>
         {
             using FileStream ignored = new(
-                result.OutputPath,
+                payload.DisplayPath,
                 FileMode.Open,
                 FileAccess.Write,
                 FileShare.ReadWrite | FileShare.Delete);
         });
-        Assert.ThrowsExactly<IOException>(() => File.Delete(result.OutputPath));
+        Assert.ThrowsExactly<IOException>(() => File.Delete(payload.DisplayPath));
     }
 
     [TestMethod]
@@ -187,12 +181,12 @@ public sealed class SetupExtractionDirectoryTests
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        VerifiedSetupPayload payload = result.Payload!;
 
         using FileStream verificationReader = new(
-            result.OutputPath,
+            payload.DisplayPath,
             FileMode.Open,
             FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
@@ -262,16 +256,16 @@ public sealed class SetupExtractionDirectoryTests
         SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        VerifiedSetupPayload payload = result.Payload!;
         string rootPath = extraction.RootPath;
 
         Assert.IsTrue(result.Succeeded);
 
         extraction.Dispose();
 
-        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsFalse(File.Exists(payload.DisplayPath));
         Assert.IsFalse(Directory.Exists(rootPath));
         Assert.IsTrue(extraction.CleanupState.Completed);
         Assert.IsFalse(extraction.CleanupState.ResidualRetained);
@@ -285,15 +279,15 @@ public sealed class SetupExtractionDirectoryTests
         SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        VerifiedSetupPayload payload = result.Payload!;
         string unexpectedPath = Path.Combine(extraction.RootPath, "unexpected.bin");
         File.WriteAllText(unexpectedPath, "do not delete");
 
         extraction.Dispose();
 
-        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsFalse(File.Exists(payload.DisplayPath));
         Assert.IsTrue(File.Exists(unexpectedPath));
         Assert.IsTrue(Directory.Exists(extraction.RootPath));
         Assert.IsFalse(extraction.CleanupState.Completed);
@@ -310,19 +304,19 @@ public sealed class SetupExtractionDirectoryTests
         SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
             temporary.Path, new Version(0, 2, 0, 0));
         SetupExtractionResult result = extraction.CopyVerified(
-            "payload.bin",
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
             ExpectedPayload());
+        VerifiedSetupPayload payload = result.Payload!;
         string replacementPath = Path.Combine(temporary.Path, "replacement.bin");
         File.WriteAllText(replacementPath, "replacement");
 
         Assert.ThrowsExactly<IOException>(() =>
-            File.Move(replacementPath, result.OutputPath, overwrite: true));
+            File.Move(replacementPath, payload.DisplayPath, overwrite: true));
 
         extraction.Dispose();
 
         Assert.AreEqual("replacement", File.ReadAllText(replacementPath));
-        Assert.IsFalse(File.Exists(result.OutputPath));
+        Assert.IsFalse(File.Exists(payload.DisplayPath));
         Assert.IsTrue(extraction.CleanupState.Completed);
     }
 
