@@ -29,8 +29,10 @@ public sealed class WindowsHandleCatalogTrustTests
             "Inbox catalog trust evidence requires Windows.");
         InboxCatalogFixture fixture = ResolveInboxCatalogFixture();
         using SafeFileHandle catalogHandle = OpenRestrictive(fixture.CatalogPath);
-        using SafeFileHandle infMemberHandle = OpenRestrictive(fixture.MemberPath);
-        using SafeFileHandle sysMemberHandle = OpenRestrictive(fixture.MemberPath);
+        using SafeFileHandle infMemberHandle = OpenRestrictive(
+            fixture.InfMemberPath);
+        using SafeFileHandle sysMemberHandle = OpenRestrictive(
+            fixture.SysMemberPath);
 
         WindowsHandleCatalogEvidence evidence =
             WindowsHandleCatalogTrustVerifier.Instance.Verify(
@@ -39,17 +41,53 @@ public sealed class WindowsHandleCatalogTrustTests
                 [
                     new WindowsCatalogHandleMember(
                         "driver-inf",
-                        fixture.MemberPath,
+                        fixture.InfMemberPath,
                         infMemberHandle),
                     new WindowsCatalogHandleMember(
                         "driver-sys",
-                        fixture.MemberPath,
+                        fixture.SysMemberPath,
                         sysMemberHandle),
                 ]);
 
         Assert.IsTrue(evidence.KernelPolicyValid, evidence.Reason);
         Assert.IsTrue(evidence.CatalogEntriesMatch, evidence.Reason);
         Assert.IsTrue(evidence.MemberTrustValid, evidence.Reason);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(evidence.SignerSubject));
+    }
+
+    [TestMethod]
+    public void DuplicateInboxCatalogMemberCannotSatisfyBothLogicalMembers()
+    {
+        Assert.IsTrue(
+            OperatingSystem.IsWindows(),
+            "Inbox catalog trust evidence requires Windows.");
+        InboxCatalogFixture fixture = ResolveInboxCatalogFixture();
+        using SafeFileHandle catalogHandle = OpenRestrictive(fixture.CatalogPath);
+        using SafeFileHandle infMemberHandle = OpenRestrictive(
+            fixture.InfMemberPath);
+        using SafeFileHandle sysMemberHandle = OpenRestrictive(
+            fixture.InfMemberPath);
+
+        WindowsHandleCatalogEvidence evidence =
+            WindowsHandleCatalogTrustVerifier.Instance.Verify(
+                fixture.CatalogPath,
+                catalogHandle,
+                [
+                    new WindowsCatalogHandleMember(
+                        "driver-inf",
+                        fixture.InfMemberPath,
+                        infMemberHandle),
+                    new WindowsCatalogHandleMember(
+                        "driver-sys",
+                        fixture.InfMemberPath,
+                        sysMemberHandle),
+                ]);
+
+        Assert.IsTrue(evidence.KernelPolicyValid, evidence.Reason);
+        Assert.IsFalse(evidence.CatalogEntriesMatch);
+        Assert.IsFalse(evidence.MemberTrustValid);
+        Assert.IsFalse(evidence.Allowed);
+        Assert.AreEqual("catalogMemberSetInvalid", evidence.Reason);
         Assert.IsFalse(string.IsNullOrWhiteSpace(evidence.SignerSubject));
     }
 
@@ -93,6 +131,7 @@ public sealed class WindowsHandleCatalogTrustTests
             Assert.Fail("SystemRoot is required to resolve an inbox catalog.");
         }
 
+        List<InboxCatalogMember> resolvedMembers = [];
         foreach (string candidateName in InboxMemberCandidates)
         {
             string memberPath = Path.Combine(
@@ -106,23 +145,60 @@ public sealed class WindowsHandleCatalogTrustTests
             }
 
             using SafeFileHandle memberHandle = OpenRestrictive(memberPath);
-            if (TryResolveRegisteredCatalog(memberHandle, out string catalogPath))
+            if (TryResolveRegisteredCatalog(
+                    memberHandle,
+                    out string catalogPath,
+                    out string memberHash))
             {
-                return new InboxCatalogFixture(catalogPath, memberPath);
+                resolvedMembers.Add(new InboxCatalogMember(
+                    catalogPath,
+                    memberPath,
+                    memberHash));
+            }
+        }
+
+        for (int first = 0; first < resolvedMembers.Count; first++)
+        {
+            for (int second = first + 1;
+                second < resolvedMembers.Count;
+                second++)
+            {
+                InboxCatalogMember firstMember = resolvedMembers[first];
+                InboxCatalogMember secondMember = resolvedMembers[second];
+                if (string.Equals(
+                        firstMember.CatalogPath,
+                        secondMember.CatalogPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(
+                        firstMember.MemberPath,
+                        secondMember.MemberPath,
+                        StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(
+                        firstMember.MemberHash,
+                        secondMember.MemberHash,
+                        StringComparison.Ordinal))
+                {
+                    return new InboxCatalogFixture(
+                        firstMember.CatalogPath,
+                        firstMember.MemberPath,
+                        secondMember.MemberPath);
+                }
             }
         }
 
         Assert.Fail(
-            "No registered Microsoft inbox catalog was found for null.sys, "
-            + "cng.sys, disk.sys, or partmgr.sys.");
+            "No registered Microsoft inbox catalog contained two distinct "
+            + "hashes from null.sys, cng.sys, disk.sys, or partmgr.sys.");
         throw new InvalidOperationException("Assert.Fail should have thrown.");
     }
 
     private static bool TryResolveRegisteredCatalog(
         SafeFileHandle memberHandle,
-        out string catalogPath)
+        out string catalogPath,
+        out string memberHash)
     {
         catalogPath = string.Empty;
+        memberHash = string.Empty;
         Guid subsystem = DriverActionVerify;
         if (!InboxCatalogNativeMethods.CryptCATAdminAcquireContext2(
                 out nint catalogAdmin,
@@ -181,6 +257,8 @@ public sealed class WindowsHandleCatalogTrustTests
             }
 
             catalogPath = resolvedPath;
+            memberHash = Convert.ToHexString(
+                hash.AsSpan(0, checked((int)hashSize)));
             return true;
         }
         finally
@@ -249,7 +327,13 @@ public sealed class WindowsHandleCatalogTrustTests
 
     private sealed record InboxCatalogFixture(
         string CatalogPath,
-        string MemberPath);
+        string InfMemberPath,
+        string SysMemberPath);
+
+    private sealed record InboxCatalogMember(
+        string CatalogPath,
+        string MemberPath,
+        string MemberHash);
 }
 
 internal static partial class InboxCatalogNativeMethods

@@ -115,23 +115,43 @@ internal sealed class WindowsHandleCatalogTrustVerifier
                 nint rawCtlContext = ctlContext.DangerousGetHandle();
                 nint rawCatalogAdmin = catalogAdmin.DangerousGetHandle();
 
+                byte[]? firstMemberHash = CalculateMemberHash(
+                    rawCatalogAdmin,
+                    members[0].Handle);
+                byte[]? secondMemberHash = CalculateMemberHash(
+                    rawCatalogAdmin,
+                    members[1].Handle);
+                if (firstMemberHash is null
+                    || secondMemberHash is null
+                    || CryptographicOperations.FixedTimeEquals(
+                        firstMemberHash,
+                        secondMemberHash))
+                {
+                    return new WindowsHandleCatalogEvidence(
+                        signerSubject,
+                        kernelPolicyValid,
+                        CatalogEntriesMatch: false,
+                        MemberTrustValid: false,
+                        Allowed: false,
+                        Reason: "catalogMemberSetInvalid");
+                }
+
+                byte[][] memberHashes = [firstMemberHash, secondMemberHash];
                 MemberCatalogEvidence[] memberEvidence =
                     new MemberCatalogEvidence[members.Count];
                 for (int index = 0; index < members.Count; index++)
                 {
                     WindowsCatalogHandleMember member = members[index];
-                    byte[]? memberHash = CalculateMemberHash(
+                    byte[] memberHash = memberHashes[index];
+                    bool catalogEntryMatches = CatalogContainsHash(
+                        rawCtlContext,
+                        memberHash);
+                    bool memberTrustSucceeded = VerifyCatalogMember(
+                        catalogDisplayPath,
+                        rawCtlContext,
                         rawCatalogAdmin,
-                        member.Handle);
-                    bool catalogEntryMatches = memberHash is not null
-                        && CatalogContainsHash(rawCtlContext, memberHash);
-                    bool memberTrustSucceeded = memberHash is not null
-                        && VerifyCatalogMember(
-                            catalogDisplayPath,
-                            rawCtlContext,
-                            rawCatalogAdmin,
-                            member,
-                            memberHash) == TrustSuccess;
+                        member,
+                        memberHash) == TrustSuccess;
                     memberEvidence[index] = new MemberCatalogEvidence(
                         catalogEntryMatches,
                         memberTrustSucceeded);
