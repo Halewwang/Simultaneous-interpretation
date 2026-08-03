@@ -12,7 +12,7 @@ namespace EMKE.Setup.Tests;
 [TestClass]
 public sealed class SetupPayloadVerifierTests
 {
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("application-msix", "tamperedPayloadHash")]
     [DataRow("driver-inf", "tamperedPayloadHash")]
     public void ChangedEmbeddedBytesAreRejectedAgainstManifestHash(
@@ -101,7 +101,7 @@ public sealed class SetupPayloadVerifierTests
         Assert.AreEqual("duplicateEmbeddedPayload", result.FailureCode);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("msixAuthenticodeInvalid")]
     [DataRow("msixPublisherMismatch")]
     [DataRow("certificateHashMismatch")]
@@ -157,8 +157,8 @@ public sealed class SetupPayloadVerifierTests
             EmbeddedPayloads());
 
         Assert.AreEqual("certificateThumbprintMismatch", result.FailureCode);
-        StringAssert.DoesNotContain(result.DisplayDetail, privatePath);
-        StringAssert.DoesNotContain(result.DisplayDetail, "certificate-secret");
+        Assert.IsFalse(result.DisplayDetail.Contains(privatePath, StringComparison.Ordinal));
+        Assert.IsFalse(result.DisplayDetail.Contains("certificate-secret", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -345,7 +345,7 @@ public sealed class SetupPayloadVerifierTests
             kind);
     }
 
-    private static ISetupPayloadSignatureVerifier TrustedSignatures()
+    private static StaticSignatureVerifier TrustedSignatures()
     {
         return new StaticSignatureVerifier(
             SetupPayloadSignatureEvidence.TrustedEvidence);
@@ -372,7 +372,7 @@ public sealed class SetupPayloadVerifierTests
     private const string CertificateHash =
         "de6d47c98e8cc925adb5c33c64ce76321978ba7b1ba2ded1eef0d9417d01ef85";
 
-    private static IReadOnlyList<VerifiedSetupPayload> VerifiedPayloads() =>
+    private static VerifiedSetupPayload[] VerifiedPayloads() =>
         Payloads().Select(payload => new VerifiedSetupPayload(
             payload,
             payload.Length,

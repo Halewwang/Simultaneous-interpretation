@@ -9,7 +9,7 @@ namespace EMKE.Setup.Tests;
 [TestClass]
 public sealed class SetupPreflightTests
 {
-    [DataTestMethod]
+    [TestMethod]
     [DataRow(19044, Architecture.X64, false, "windowsBuildUnsupported")]
     [DataRow(19045, Architecture.Arm64, false, "architectureUnsupported")]
     [DataRow(19045, Architecture.X64, true, "windowsServerUnsupported")]

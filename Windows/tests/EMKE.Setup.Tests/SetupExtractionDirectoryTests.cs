@@ -21,11 +21,14 @@ public sealed class SetupExtractionDirectoryTests
         Assert.IsTrue(first.RootPath.StartsWith(
             Path.GetFullPath(temporary.Path) + Path.DirectorySeparatorChar,
             StringComparison.Ordinal));
-        StringAssert.Contains(Path.GetFileName(first.RootPath), "0.2.0");
+        StringAssert.Contains(
+            Path.GetFileName(first.RootPath),
+            "0.2.0",
+            StringComparison.Ordinal);
         Assert.AreNotEqual(first.RootPath, second.RootPath);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("..")]
     [DataRow("../outside.bin")]
     [DataRow("C:\\outside.bin")]
@@ -106,7 +109,7 @@ public sealed class SetupExtractionDirectoryTests
         string protectedFile = Path.Combine(temporary.Path, "protected.bin");
         File.WriteAllText(protectedFile, "protected");
         string outputPath = Path.Combine(extraction.RootPath, "payload.bin");
-        File.CreateHardLink(outputPath, protectedFile);
+        TestNativeFileMethods.CreateHardLink(outputPath, protectedFile);
 
         SetupExtractionResult result = extraction.CopyVerified(
             "payload.bin",
@@ -134,7 +137,9 @@ public sealed class SetupExtractionDirectoryTests
         Assert.IsTrue(result.OutputPath.StartsWith(
             extraction.RootPath + Path.DirectorySeparatorChar,
             StringComparison.Ordinal));
-        Assert.IsTrue((File.GetAttributes(result.OutputPath) & FileAttributes.ReadOnly) != 0);
+        Assert.AreNotEqual(
+            FileAttributes.None,
+            File.GetAttributes(result.OutputPath) & FileAttributes.ReadOnly);
     }
 
     [TestMethod]
