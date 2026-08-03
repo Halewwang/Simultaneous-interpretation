@@ -148,7 +148,7 @@ function Get-RunBlockContaining {
   )
 
   $lines = $Job -split "\r?\n"
-  $matches = [Collections.Generic.List[string]]::new()
+  $matchingBlocks = [Collections.Generic.List[string]]::new()
   for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex += 1) {
     if ($lines[$lineIndex] -notmatch "^ {8}run:\s*\|\s*$") {
       continue
@@ -162,24 +162,27 @@ function Get-RunBlockContaining {
         $lineIndex -= 1
         break
       }
-      if ([string]::IsNullOrEmpty($line)) {
-        $block.Add("")
+      if (
+        [string]::IsNullOrEmpty($line) -or
+        $line.Length -eq 10
+      ) {
+        $block.Add([string]::Empty)
       } else {
         $block.Add($line.Substring(10))
       }
     }
     $blockText = $block -join [Environment]::NewLine
     if ($blockText.Contains($Marker, [StringComparison]::Ordinal)) {
-      $matches.Add($blockText)
+      $matchingBlocks.Add($blockText)
     }
   }
-  if ($matches.Count -ne 1) {
+  if ($matchingBlocks.Count -ne 1) {
     throw (
       "Marker '$Marker' must appear in exactly one workflow run block; " +
-      "found $($matches.Count)."
+      "found $($matchingBlocks.Count)."
     )
   }
-  return $matches[0]
+  return $matchingBlocks[0]
 }
 
 function Assert-ContainsPattern {
