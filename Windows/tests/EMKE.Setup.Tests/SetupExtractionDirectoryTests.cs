@@ -347,7 +347,7 @@ public sealed class SetupExtractionDirectoryTests
 
     private static SetupPayload ExpectedPayload() => new(
         "payload", "payload.bin", 7,
-        "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426955f9b852d5a935e5",
+        "239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5",
         SetupPayloadKind.Msix);
 
     private sealed class TemporaryDirectory : IDisposable
