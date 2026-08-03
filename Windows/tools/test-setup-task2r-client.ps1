@@ -177,7 +177,7 @@ function Invoke-ExactDotnetTest {
     --configuration Release `
     --filter $Filter `
     --logger "trx;LogFileName=$trxName" `
-    --results-directory $ResultsRoot | Out-Host
+    --results-directory $ResultsRoot *> $null
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) {
     throw "$Label dotnet test exited with code $exitCode."
@@ -375,6 +375,14 @@ if (-not [OperatingSystem]::IsWindows()) {
   throw "Task 2R client evidence requires Windows."
 }
 $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+$hostOsArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+$hostArchitecture = if (
+  $hostOsArchitecture -eq [Runtime.InteropServices.Architecture]::X64
+) {
+  "AMD64"
+} else {
+  $hostOsArchitecture.ToString().ToUpperInvariant()
+}
 Invoke-SetupTask2RClientEvidence `
   -SignedMsixPath $SignedMsixPath `
   -SigningCerPath $SigningCerPath `
@@ -385,7 +393,7 @@ Invoke-SetupTask2RClientEvidence `
   -OutputPath $OutputPath `
   -OperatingSystem $operatingSystem `
   -OsBuild ([Environment]::OSVersion.Version.Build) `
-  -Architecture $env:PROCESSOR_ARCHITECTURE `
+  -Architecture $hostArchitecture `
   -DotnetCommand @("dotnet") `
   -RepositoryRoot ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))) |
   Out-Null

@@ -349,6 +349,19 @@ jobs:
 
             $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
             $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
+            if ($null -ne $pfxBytes) {
+              [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
+              $pfxBytes = $null
+            }
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction Stop
+            if (
+              Test-Path -LiteralPath $signingRoot -PathType Container
+            ) {
+              Remove-Item `
+                -LiteralPath $signingRoot `
+                -Force `
+                -ErrorAction Stop
+            }
             $env:EMKE_SETUP_SIGNED_MSIX_FIXTURE = $packagePath
             $env:EMKE_SETUP_SIGNING_CER_FIXTURE = $certificatePath
             $signedResults = "Windows/out/test-results/task2r-signed-payload"
@@ -375,14 +388,18 @@ jobs:
             $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
             if ($null -ne $pfxBytes) {
               [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
+              $pfxBytes = $null
             }
             if (Test-Path -LiteralPath $pfxPath) {
-              Remove-Item -LiteralPath $pfxPath -Force
+              Remove-Item -LiteralPath $pfxPath -Force -ErrorAction Stop
             }
             if (
               Test-Path -LiteralPath $signingRoot -PathType Container
             ) {
-              Remove-Item -LiteralPath $signingRoot -Force
+              Remove-Item `
+                -LiteralPath $signingRoot `
+                -Force `
+                -ErrorAction Stop
             }
           }
 

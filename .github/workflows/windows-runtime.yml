@@ -106,6 +106,7 @@ jobs:
           }
 
           dotnet test Windows/EMKE.Windows.slnx --configuration Release --no-build `
+            --filter "TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog&TestCategory!=NativeAudioNativeFake&TestCategory!=NativeAudioRealDll&TestCategory!=NativeAudioOwnedAdapter" `
             --logger "trx;LogFileName=windows-runtime.trx"
           if ($LASTEXITCODE -ne 0) {
             throw "Windows runtime managed test gate failed."
