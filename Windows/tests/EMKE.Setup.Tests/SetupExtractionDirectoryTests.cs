@@ -49,17 +49,32 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
-    public void ExistingExtractionDirectoryIsNeverReused()
+    public void ExistingNamedRootIsRejectedWithoutOpeningOrDeletingIt()
     {
         using TemporaryDirectory temporary = new();
-        string name = "0.2.0-existing";
-        _ = Directory.CreateDirectory(Path.Combine(temporary.Path, name));
+        string leaf = "0.2.0-existing";
+        string existing = Path.Combine(temporary.Path, leaf);
+        Directory.CreateDirectory(existing);
+        File.WriteAllText(Path.Combine(existing, "owner.txt"), "original");
 
-        SetupExtractionResult result = SetupExtractionDirectory.CreateNamedForTest(
-            temporary.Path, name, new Version(0, 2, 0, 0));
+        SetupExtractionException error = Assert.ThrowsExactly<SetupExtractionException>(
+            () => SetupExtractionDirectory.CreateNamedForTest(
+                temporary.Path, leaf, new Version(0, 2, 0, 0)));
 
-        Assert.IsFalse(result.Succeeded);
-        Assert.AreEqual("extractionRootAlreadyExists", result.FailureCode);
+        Assert.AreEqual("extractionRootAlreadyExists", error.FailureCode);
+        Assert.AreEqual("original", File.ReadAllText(Path.Combine(existing, "owner.txt")));
+    }
+
+    [TestMethod]
+    public void FactoryReturnAlreadyBlocksRootMoveAndDelete()
+    {
+        using TemporaryDirectory temporary = new();
+        using SetupExtractionDirectory extraction =
+            SetupExtractionDirectory.Create(temporary.Path, new Version(0, 2, 0, 0));
+
+        Assert.ThrowsExactly<IOException>(() =>
+            Directory.Move(extraction.RootPath, extraction.RootPath + "-moved"));
+        Assert.ThrowsExactly<IOException>(() => Directory.Delete(extraction.RootPath));
     }
 
     [TestMethod]
