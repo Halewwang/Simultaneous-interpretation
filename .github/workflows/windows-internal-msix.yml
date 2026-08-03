@@ -353,7 +353,12 @@ jobs:
               [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
               $pfxBytes = $null
             }
-            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction Stop
+            if (Test-Path -LiteralPath $pfxPath) {
+              Remove-Item -LiteralPath $pfxPath -Force -ErrorAction Stop
+            }
+            if (Test-Path -LiteralPath $pfxPath) {
+              throw "Temporary signing PFX cleanup failed."
+            }
             if (
               Test-Path -LiteralPath $signingRoot -PathType Container
             ) {

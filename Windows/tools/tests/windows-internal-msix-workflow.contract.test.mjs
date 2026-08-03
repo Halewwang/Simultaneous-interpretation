@@ -563,8 +563,16 @@ test('workflow emits isolated complete Task 2R managed, inbox, and signed eviden
     '$pfxBytes = $null',
     byteClearIndex + 1,
   );
-  const pfxRemoval = preSignedTest.match(
-    /Remove-Item\s+-LiteralPath\s+\$pfxPath\s+-Force/,
+  const pfxPathChecks = [
+    ...preSignedTest.matchAll(
+      /if\s*\(Test-Path\s+-LiteralPath\s+\$pfxPath\)\s*\{/g,
+    ),
+  ];
+  const pfxRemovalIndex = preSignedTest.indexOf(
+    'Remove-Item -LiteralPath $pfxPath -Force -ErrorAction Stop',
+  );
+  const pfxCleanupFailureIndex = preSignedTest.indexOf(
+    'throw "Temporary signing PFX cleanup failed."',
   );
   for (const [label, index] of [
     ['PFX base64 environment cleanup', base64ClearIndex],
@@ -574,7 +582,21 @@ test('workflow emits isolated complete Task 2R managed, inbox, and signed eviden
   ]) {
     assert.ok(index >= 0, `${label} must finish before signed dotnet test`);
   }
-  assert.ok(pfxRemoval, 'the temporary PFX must be removed before signed tests');
+  assert.equal(
+    pfxPathChecks.length,
+    2,
+    'pre-test cleanup must guard removal and verify the PFX is absent',
+  );
+  assert.ok(
+    base64ClearIndex < byteClearIndex &&
+      passwordClearIndex < byteClearIndex &&
+      byteClearIndex < byteReleaseIndex &&
+      byteReleaseIndex < pfxPathChecks[0].index &&
+      pfxPathChecks[0].index < pfxRemovalIndex &&
+      pfxRemovalIndex < pfxPathChecks[1].index &&
+      pfxPathChecks[1].index < pfxCleanupFailureIndex,
+    'PFX bytes must be released before guarded file cleanup and its fail-closed postcondition',
+  );
   assert.doesNotMatch(
     preSignedTest,
     /-ErrorAction\s+SilentlyContinue|catch\s*\{[^}]*?(?:continue|return)?\s*\}/,
