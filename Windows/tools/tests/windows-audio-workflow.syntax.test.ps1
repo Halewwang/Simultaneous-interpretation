@@ -200,6 +200,9 @@ function Assert-ContainsPattern {
   }
 }
 
+$hostedJob = Get-WorkflowJobBlock `
+  -Source $workflowSource `
+  -Name "hosted-toolchain-proof"
 $driverJob = Get-WorkflowJobBlock `
   -Source $workflowSource `
   -Name "driver-build-proof"
@@ -209,7 +212,7 @@ Assert-ContainsPattern `
   -Message "The driver evidence job must install .NET 10."
 
 $hostedNativeBlock = Get-RunBlockContaining `
-  -Job $driverJob `
+  -Job $hostedJob `
   -Marker '$managedTestOutput ='
 Assert-ContainsPattern `
   -Source $hostedNativeBlock `
