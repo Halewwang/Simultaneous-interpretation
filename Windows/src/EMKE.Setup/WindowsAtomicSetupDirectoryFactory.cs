@@ -16,7 +16,7 @@ internal sealed record AtomicSetupDirectory(
     SetupFileIdentity Identity);
 #pragma warning restore CA1001
 
-internal sealed partial class WindowsAtomicSetupDirectoryFactory
+internal sealed class WindowsAtomicSetupDirectoryFactory
 {
     private const int StatusObjectNameCollision = unchecked((int)0xC0000035);
     private const uint DesiredAccess = 0x00000001 | 0x00000020 | 0x00000080
@@ -312,9 +312,9 @@ internal sealed partial class WindowsAtomicSetupDirectoryFactory
         FileDispositionInfo,
     }
 
-    [LibraryImport("ntdll.dll", EntryPoint = "NtCreateFile")]
+    [DllImport("ntdll.dll", EntryPoint = "NtCreateFile", ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static partial int NtCreateFile(
+    private static extern int NtCreateFile(
         out SafeFileHandle fileHandle,
         uint desiredAccess,
         ref ObjectAttributes objectAttributes,
@@ -327,9 +327,12 @@ internal sealed partial class WindowsAtomicSetupDirectoryFactory
         nint eaBuffer,
         uint eaLength);
 
-    [LibraryImport("ntdll.dll", EntryPoint = "RtlNtStatusToDosError")]
+    [DllImport(
+        "ntdll.dll",
+        EntryPoint = "RtlNtStatusToDosError",
+        ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static partial uint RtlNtStatusToDosError(int status);
+    private static extern uint RtlNtStatusToDosError(int status);
 
     [DllImport(
         "kernel32.dll",
