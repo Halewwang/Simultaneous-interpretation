@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
 $launcherPath = Join-Path $repositoryRoot "Windows/tools/run-runtime-native-tests.ps1"
+$launcherSource = [System.IO.File]::ReadAllText($launcherPath)
 
 function Assert-True {
   param(
@@ -36,6 +37,26 @@ function Assert-ThrowsLike {
 
   throw "Expected action to fail with pattern: $Pattern"
 }
+
+$managedOutputDefault = [regex]::Match(
+  $launcherSource,
+  '(?ms)if \(\[string\]::IsNullOrWhiteSpace\(\$ManagedTestOutput\)\) \{(?<body>.*?)^\}'
+)
+Assert-True `
+  -Condition $managedOutputDefault.Success `
+  -Message "The launcher must define its default managed test output."
+Assert-True `
+  -Condition $managedOutputDefault.Groups["body"].Value.Contains(
+    "net10.0-windows10.0.19041.0/win-x64",
+    [StringComparison]::Ordinal
+  ) `
+  -Message "The launcher default managed output must target Windows 10 build 19041."
+Assert-True `
+  -Condition (-not $managedOutputDefault.Groups["body"].Value.Contains(
+    "net10.0-windows10.0.26100.0",
+    [StringComparison]::Ordinal
+  )) `
+  -Message "The launcher default managed output must not require Windows build 26100."
 
 Assert-ThrowsLike `
   -Action {
@@ -84,7 +105,7 @@ $filter = $RemainingArguments[$filterIndex + 1]
 $resultsDirectory = $RemainingArguments[$resultsIndex + 1]
 $logger = $RemainingArguments[$loggerIndex + 1]
 $fileName = $logger.Substring($logger.IndexOf("=", [StringComparison]::Ordinal) + 1)
-$expected = if ($filter -eq "TestCategory=NativeAudioNativeFake") { 7 } elseif (
+$expected = if ($filter -eq "TestCategory=NativeAudioNativeFake") { 8 } elseif (
   $filter -eq "TestCategory=NativeAudioRealDll"
 ) { 1 } else {
   throw "Unexpected test filter: $filter"

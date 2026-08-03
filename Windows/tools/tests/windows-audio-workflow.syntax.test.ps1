@@ -208,6 +208,22 @@ Assert-ContainsPattern `
   -Pattern "actions/setup-dotnet@v4[\s\S]*?dotnet-version:\s*10\.0\.x" `
   -Message "The driver evidence job must install .NET 10."
 
+$hostedNativeBlock = Get-RunBlockContaining `
+  -Job $driverJob `
+  -Marker '$managedTestOutput ='
+Assert-ContainsPattern `
+  -Source $hostedNativeBlock `
+  -Pattern ('\$managedTestOutput\s*=\s*"Windows/tests/' +
+    'EMKE\.Integration\.Tests/bin/Release/' +
+    'net10\.0-windows10\.0\.19041\.0/win-x64"') `
+  -Message "Hosted native tests must use the Windows 10 managed output path."
+if ($hostedNativeBlock.Contains(
+    "net10.0-windows10.0.26100.0",
+    [StringComparison]::Ordinal
+  )) {
+  throw "Hosted native tests must not require Windows build 26100."
+}
+
 $unsignedBlock = Get-RunBlockContaining `
   -Job $driverJob `
   -Marker "task2r-unsigned-emke-catalog.trx"
