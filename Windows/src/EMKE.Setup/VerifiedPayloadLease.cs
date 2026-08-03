@@ -8,6 +8,7 @@ internal sealed class VerifiedPayloadLease : IDisposable
     private const uint FileAttributeNormal = 0x00000080;
     private readonly object _gate = new();
     private readonly SafeFileHandle _handle;
+    private int _activeBorrowCount;
     private bool _closed;
     private bool? _cleanupSucceeded;
 
@@ -53,7 +54,7 @@ internal sealed class VerifiedPayloadLease : IDisposable
         {
             ThrowIfClosedWithoutLock();
             ArgumentNullException.ThrowIfNull(action);
-            borrow = new HandleBorrow(_handle);
+            borrow = AdmitBorrowWithoutLock();
         }
 
         using (borrow)
@@ -90,13 +91,13 @@ internal sealed class VerifiedPayloadLease : IDisposable
                     _handle,
                     FileAttributeNormal)
                 && TrySetDeleteDisposition(_handle);
-            _cleanupSucceeded = deleteMarked;
+            _cleanupSucceeded = deleteMarked && _activeBorrowCount == 0;
             if (deleteMarked)
             {
                 CloseOwnerHandleWithoutLock();
             }
 
-            return deleteMarked;
+            return _cleanupSucceeded.Value;
         }
     }
 
@@ -170,13 +171,40 @@ internal sealed class VerifiedPayloadLease : IDisposable
         ObjectDisposedException.ThrowIf(_closed, this);
     }
 
+    private HandleBorrow AdmitBorrowWithoutLock()
+    {
+        if (_activeBorrowCount == int.MaxValue)
+        {
+            throw new InvalidOperationException(
+                "The payload lease has too many active handle borrows.");
+        }
+
+        HandleBorrow borrow = new(this, _handle);
+        _activeBorrowCount++;
+        return borrow;
+    }
+
+    private void ReleaseBorrow()
+    {
+        lock (_gate)
+        {
+            if (_activeBorrowCount <= 0)
+            {
+                throw new InvalidOperationException(
+                    "The payload lease borrow count is inconsistent.");
+            }
+
+            _activeBorrowCount--;
+        }
+    }
+
     private int Read(Span<byte> buffer, long fileOffset)
     {
         HandleBorrow borrow;
         lock (_gate)
         {
             ThrowIfClosedWithoutLock();
-            borrow = new HandleBorrow(_handle);
+            borrow = AdmitBorrowWithoutLock();
         }
 
         using (borrow)
@@ -188,9 +216,9 @@ internal sealed class VerifiedPayloadLease : IDisposable
     private sealed class HandleBorrow : IDisposable
     {
         private readonly SafeFileHandle _handle;
-        private Action? _releaseOwnerReference;
+        private Action? _completeRelease;
 
-        public HandleBorrow(SafeFileHandle owner)
+        public HandleBorrow(VerifiedPayloadLease lease, SafeFileHandle owner)
         {
             bool referenceAdded = false;
             try
@@ -199,7 +227,17 @@ internal sealed class VerifiedPayloadLease : IDisposable
                 _handle = new SafeFileHandle(
                     owner.DangerousGetHandle(),
                     ownsHandle: false);
-                _releaseOwnerReference = owner.DangerousRelease;
+                _completeRelease = () =>
+                {
+                    try
+                    {
+                        owner.DangerousRelease();
+                    }
+                    finally
+                    {
+                        lease.ReleaseBorrow();
+                    }
+                };
             }
             catch
             {
@@ -215,10 +253,10 @@ internal sealed class VerifiedPayloadLease : IDisposable
 
         public void Dispose()
         {
-            Action? releaseOwnerReference = Interlocked.Exchange(
-                ref _releaseOwnerReference,
+            Action? completeRelease = Interlocked.Exchange(
+                ref _completeRelease,
                 null);
-            if (releaseOwnerReference is null)
+            if (completeRelease is null)
             {
                 return;
             }
@@ -229,7 +267,7 @@ internal sealed class VerifiedPayloadLease : IDisposable
             }
             finally
             {
-                releaseOwnerReference();
+                completeRelease();
             }
         }
     }
