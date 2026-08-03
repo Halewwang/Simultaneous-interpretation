@@ -125,7 +125,7 @@ internal sealed class WindowsHandleCatalogTrustVerifier
                         member.Handle);
                     bool catalogEntryMatches = memberHash is not null
                         && CatalogContainsHash(rawCtlContext, memberHash);
-                    bool memberTrustValid = memberHash is not null
+                    bool memberTrustSucceeded = memberHash is not null
                         && VerifyCatalogMember(
                             catalogDisplayPath,
                             rawCtlContext,
@@ -134,22 +134,22 @@ internal sealed class WindowsHandleCatalogTrustVerifier
                             memberHash) == TrustSuccess;
                     memberEvidence[index] = new MemberCatalogEvidence(
                         catalogEntryMatches,
-                        memberTrustValid);
+                        memberTrustSucceeded);
                 }
 
                 bool catalogEntriesMatch = memberEvidence.All(
                     evidence => evidence.CatalogEntryMatches);
-                bool memberTrustValid = memberEvidence.All(
+                bool allMembersTrusted = memberEvidence.All(
                     evidence => evidence.MemberTrustValid);
                 DriverCatalogTrustDecision decision = _trustPolicy.Evaluate(
                     signerSubject ?? string.Empty,
                     kernelPolicyValid,
-                    catalogEntriesMatch && memberTrustValid);
+                    catalogEntriesMatch && allMembersTrusted);
                 return new WindowsHandleCatalogEvidence(
                     signerSubject,
                     kernelPolicyValid,
                     catalogEntriesMatch,
-                    memberTrustValid,
+                    allMembersTrusted,
                     decision.Allowed,
                     decision.Reason);
             }
