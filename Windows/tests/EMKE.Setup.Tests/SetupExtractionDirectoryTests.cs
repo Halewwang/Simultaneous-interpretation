@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text;
 using EMKE.Setup;
 
@@ -115,7 +116,7 @@ public sealed class SetupExtractionDirectoryTests
     }
 
     [TestMethod]
-    public void HardLinkSubstitutionIsRejectedAndCannotReplaceVerifiedOutput()
+    public void HardLinkSubstitutionIsRejectedBeforeItCanReplaceVerifiedOutput()
     {
         using TemporaryDirectory temporary = new();
         using SetupExtractionDirectory extraction = SetupExtractionDirectory.Create(
@@ -123,7 +124,17 @@ public sealed class SetupExtractionDirectoryTests
         string protectedFile = Path.Combine(temporary.Path, "protected.bin");
         File.WriteAllText(protectedFile, "protected");
         string outputPath = Path.Combine(extraction.RootPath, "payload.bin");
-        TestNativeFileMethods.CreateHardLink(outputPath, protectedFile);
+        try
+        {
+            TestNativeFileMethods.CreateHardLink(outputPath, protectedFile);
+        }
+        catch (Win32Exception exception)
+            when (exception.NativeErrorCode == 32)
+        {
+            Assert.IsFalse(File.Exists(outputPath));
+            Assert.AreEqual("protected", File.ReadAllText(protectedFile));
+            return;
+        }
 
         SetupExtractionResult result = extraction.CopyVerified(
             new MemoryStream(Encoding.UTF8.GetBytes("payload")),
