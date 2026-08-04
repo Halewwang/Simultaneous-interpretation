@@ -9,6 +9,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource
+      Include="../../packaging/compatibility.internal.json"
+      Link="Compatibility/compatibility.internal.json"
+      LogicalName="EMKE.Setup.compatibility.internal.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="EMKE.Setup.Tests" />
   </ItemGroup>
 
