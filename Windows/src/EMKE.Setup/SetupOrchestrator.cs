@@ -75,10 +75,170 @@ internal interface ISetupMachineChangeCoordinator
         Guid transactionId,
         CancellationToken cancellationToken);
 
+    Task<bool> CommitAsync(
+        SetupMachineChangeReceipt receipt,
+        Guid transactionId,
+        CancellationToken cancellationToken) => Task.FromResult(true);
+
     Task<bool> VerifyResumeAsync(
         SetupMachineChangeReceipt receipt,
         SetupElevationRequest request,
         CancellationToken cancellationToken);
+}
+
+internal sealed class ElevatedSetupMachineChangeCoordinator
+    : ISetupMachineChangeCoordinator, IAsyncDisposable
+{
+    private readonly ElevatedHelperLauncher _launcher;
+    private readonly ICertificatePlatform _certificates;
+    private readonly IDriverSetupApi _drivers;
+    private SetupElevationPreparedSession? _activeSession;
+    private Guid _activeTransactionId;
+
+    public ElevatedSetupMachineChangeCoordinator()
+        : this(
+            new ElevatedHelperLauncher(),
+            WindowsCertificatePlatform.Instance,
+            WindowsDriverSetupApi.Instance)
+    {
+    }
+
+    internal ElevatedSetupMachineChangeCoordinator(
+        ElevatedHelperLauncher launcher,
+        ICertificatePlatform certificates,
+        IDriverSetupApi drivers)
+    {
+        _launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
+        _certificates = certificates
+            ?? throw new ArgumentNullException(nameof(certificates));
+        _drivers = drivers ?? throw new ArgumentNullException(nameof(drivers));
+    }
+
+    public async Task<SetupMachineChangeResult> ApplyAsync(
+        SetupElevationRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_activeSession is not null)
+        {
+            return SetupMachineChangeResult.Failed("machineSessionAlreadyActive");
+        }
+        SetupElevationPreparationResult prepared = await _launcher.PrepareAsync(
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (prepared.Session is null || prepared.Receipt is null)
+        {
+            return SetupMachineChangeResult.Failed(
+                prepared.FailureCode ?? "machineChangesFailed");
+        }
+        _activeSession = prepared.Session;
+        _activeTransactionId = request.TransactionId;
+        return prepared.Outcome == SetupElevationLaunchOutcome.RebootRequired
+            ? SetupMachineChangeResult.RebootRequired(prepared.Receipt)
+            : SetupMachineChangeResult.Succeeded(prepared.Receipt);
+    }
+
+    public async Task<bool> RollbackAsync(
+        SetupMachineChangeReceipt receipt,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        if (_activeSession is null || transactionId != _activeTransactionId)
+        {
+            return false;
+        }
+        SetupElevationPreparedSession session = _activeSession;
+        ClearActive();
+        return await session.RollbackAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<bool> CommitAsync(
+        SetupMachineChangeReceipt receipt,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        if (_activeSession is null || transactionId != _activeTransactionId)
+        {
+            return true;
+        }
+        SetupElevationPreparedSession session = _activeSession;
+        ClearActive();
+        return await session.CommitAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public Task<bool> VerifyResumeAsync(
+        SetupMachineChangeReceipt receipt,
+        SetupElevationRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        InstalledCertificateIdentity[] certificates = _certificates
+            .ReadTrustedPeople()
+            .Where(certificate => string.Equals(
+                certificate.Subject,
+                "CN=EMKE Internal Test",
+                StringComparison.Ordinal)
+                && string.Equals(
+                    certificate.Sha1Thumbprint,
+                    request.AllowedCertificateThumbprint,
+                    StringComparison.Ordinal))
+            .ToArray();
+        DriverMachineState driver = _drivers.ReadState(
+            request.AllowedDriverHardwareId);
+        bool verified = certificates.Length == 1
+            && driver.Package.Present
+            && driver.Device.Present
+            && driver.Package.KernelTrustValid
+            && string.Equals(
+                driver.Package.HardwareId,
+                request.AllowedDriverHardwareId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                driver.Device.HardwareId,
+                request.AllowedDriverHardwareId,
+                StringComparison.Ordinal)
+            && driver.Package.Version == request.AllowedDriverVersion
+            && driver.Device.Version == request.AllowedDriverVersion
+            && string.Equals(
+                driver.Package.CatalogSha256,
+                request.PayloadHashes.DriverCatalogSha256,
+                StringComparison.Ordinal)
+            && string.Equals(
+                driver.Device.CatalogSha256,
+                request.PayloadHashes.DriverCatalogSha256,
+                StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(driver.Package.SignerSubject)
+            && driver.Package.SignerSubject.Contains(
+                "Microsoft Windows Hardware Compatibility Publisher",
+                StringComparison.Ordinal)
+            && driver.Package.SignerSubject.Contains(
+                "O=Microsoft Corporation",
+                StringComparison.Ordinal);
+        return Task.FromResult(verified);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_activeSession is not null)
+        {
+            SetupElevationPreparedSession session = _activeSession;
+            ClearActive();
+            await session.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private void ClearActive()
+    {
+        _activeSession = null;
+        _activeTransactionId = Guid.Empty;
+    }
 }
 
 internal enum SetupApplicationLaunchMode
@@ -385,6 +545,12 @@ internal interface ISetupResumeRecordStore
     void Write(SetupResumeRecord record);
 
     SetupResumeRecord ReadVerified(Guid transactionId);
+
+    IReadOnlyList<Guid> FindPendingTransactionIds() => [];
+
+    void Delete(Guid transactionId)
+    {
+    }
 }
 
 internal sealed class WindowsSetupResumeRecordStore : ISetupResumeRecordStore
@@ -494,6 +660,48 @@ internal sealed class WindowsSetupResumeRecordStore : ISetupResumeRecordStore
         }
         return record;
     }
+
+    public IReadOnlyList<Guid> FindPendingTransactionIds()
+    {
+        if (!Directory.Exists(_root))
+        {
+            return [];
+        }
+        List<Guid> pending = [];
+        foreach (string path in Directory.EnumerateFiles(
+            _root,
+            "*.json",
+            SearchOption.TopDirectoryOnly))
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            if (name.Length != 32
+                || !Guid.TryParseExact(name, "N", out Guid transactionId))
+            {
+                throw new InvalidDataException(
+                    "The Setup recovery directory contains an invalid record.");
+            }
+            _ = ReadVerified(transactionId);
+            pending.Add(transactionId);
+        }
+        return pending.AsReadOnly();
+    }
+
+    public void Delete(Guid transactionId)
+    {
+        if (transactionId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "The transaction ID must not be empty.",
+                nameof(transactionId));
+        }
+        string path = Path.Combine(
+            _root,
+            string.Concat(transactionId.ToString("N"), ".json"));
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+    }
 }
 
 internal sealed class SetupOrchestrator
@@ -547,6 +755,15 @@ internal sealed class SetupOrchestrator
                 request.ElevationRequest.TransactionId,
                 machine.Receipt.CreatedState,
                 request.ElevationRequest.PayloadHashes));
+            if (!await _machine.CommitAsync(
+                    machine.Receipt,
+                    request.ElevationRequest.TransactionId,
+                    cancellationToken).ConfigureAwait(false))
+            {
+                return SetupResult.Failed(
+                    state.State,
+                    "machineCommitFailed");
+            }
             return SetupResult.RebootRequired(state.State);
         }
         if (machine.Outcome != SetupMachineChangeOutcome.Succeeded
@@ -611,12 +828,17 @@ internal sealed class SetupOrchestrator
             state.AdvanceTo(SetupState.Verified);
             state.AdvanceTo(SetupState.MachineChangesStarted);
             state.AdvanceTo(SetupState.DriverReady);
-            return await CompleteUserPhaseAsync(
+            SetupResult result = await CompleteUserPhaseAsync(
                     request,
                     state,
                     receipt,
                     cancellationToken)
                 .ConfigureAwait(false);
+            if (result.Outcome == SetupOutcome.Succeeded)
+            {
+                _resumeRecords.Delete(request.ElevationRequest.TransactionId);
+            }
+            return result;
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -680,6 +902,24 @@ internal sealed class SetupOrchestrator
                     endpoints.FailureCode ?? "endpointVerificationFailed");
             }
             state.AdvanceTo(SetupState.EndpointVerified);
+
+            bool committed = await _machine.CommitAsync(
+                    machineReceipt,
+                    request.ElevationRequest.TransactionId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!committed)
+            {
+                await RollbackAsync(
+                    package.Receipt,
+                    machineReceipt,
+                    request.ElevationRequest.TransactionId,
+                    cancellationToken).ConfigureAwait(false);
+                _ = state.Cancel(resumableRebootRequired: false);
+                return SetupResult.Failed(
+                    state.State,
+                    "machineCommitFailed");
+            }
 
             await _launcher.LaunchAsync(
                     SetupApplicationLaunchMode.ControlledNoTranslationConnect,

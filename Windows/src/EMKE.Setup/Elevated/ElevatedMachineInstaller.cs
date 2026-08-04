@@ -94,6 +94,33 @@ internal sealed class ElevatedMachineInstaller : ISetupElevatedRequestHandler
         SetupElevationRequest request,
         CancellationToken cancellationToken)
     {
+        return HandleAndCommitAsync(request, cancellationToken);
+    }
+
+    private async Task<SetupElevatedHelperOutcome> HandleAndCommitAsync(
+        SetupElevationRequest request,
+        CancellationToken cancellationToken)
+    {
+        SetupElevatedPreparedChange prepared = await PrepareAsync(
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (prepared.Outcome != SetupElevatedHelperOutcome.Failed)
+        {
+            _ = await FinalizeAsync(
+                    prepared,
+                    SetupElevationFinalizationAction.Commit,
+                    request.TransactionId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        return prepared.Outcome;
+    }
+
+    public Task<SetupElevatedPreparedChange> PrepareAsync(
+        SetupElevationRequest request,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         CertificateInstallReceipt? certificateReceipt = null;
@@ -118,7 +145,7 @@ internal sealed class ElevatedMachineInstaller : ISetupElevatedRequestHandler
                     driverReceipt: null,
                     certificateReceipt,
                     request.TransactionId);
-                return Task.FromResult(SetupElevatedHelperOutcome.Failed);
+                return Task.FromResult(FailedPreparation);
             }
 
             DriverInstallContract driverContract = new(
@@ -134,17 +161,32 @@ internal sealed class ElevatedMachineInstaller : ISetupElevatedRequestHandler
                 driverContract,
                 request.TransactionId);
             driverReceipt = driver.Receipt;
+            if (driver.Outcome is DriverInstallOutcome.Succeeded
+                    or DriverInstallOutcome.RebootRequired
+                && driverReceipt is null)
+            {
+                Rollback(driverReceipt, certificateReceipt, request.TransactionId);
+                return Task.FromResult(FailedPreparation);
+            }
             if (driver.Outcome == DriverInstallOutcome.Succeeded)
             {
-                return Task.FromResult(SetupElevatedHelperOutcome.Succeeded);
+                return Task.FromResult(CreatePrepared(
+                    SetupElevatedHelperOutcome.Succeeded,
+                    request.TransactionId,
+                    certificateReceipt!,
+                    driverReceipt!));
             }
             if (driver.Outcome == DriverInstallOutcome.RebootRequired)
             {
-                return Task.FromResult(SetupElevatedHelperOutcome.RebootRequired);
+                return Task.FromResult(CreatePrepared(
+                    SetupElevatedHelperOutcome.RebootRequired,
+                    request.TransactionId,
+                    certificateReceipt!,
+                    driverReceipt!));
             }
 
             Rollback(driverReceipt, certificateReceipt, request.TransactionId);
-            return Task.FromResult(SetupElevatedHelperOutcome.Failed);
+            return Task.FromResult(FailedPreparation);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -155,43 +197,98 @@ internal sealed class ElevatedMachineInstaller : ISetupElevatedRequestHandler
         catch (Exception)
         {
             Rollback(driverReceipt, certificateReceipt, request.TransactionId);
-            return Task.FromResult(SetupElevatedHelperOutcome.Failed);
+            return Task.FromResult(FailedPreparation);
         }
+    }
+
+    public Task<bool> FinalizeAsync(
+        SetupElevatedPreparedChange prepared,
+        SetupElevationFinalizationAction action,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (prepared.State is not ElevatedMachinePreparedState state
+            || state.TransactionId != transactionId)
+        {
+            return Task.FromResult(false);
+        }
+        return Task.FromResult(action switch
+        {
+            SetupElevationFinalizationAction.Commit => true,
+            SetupElevationFinalizationAction.Rollback => Rollback(
+                state.DriverReceipt,
+                state.CertificateReceipt,
+                transactionId),
+            _ => false,
+        });
     }
 #pragma warning restore CA1031
 
+    private static SetupElevatedPreparedChange FailedPreparation { get; } = new(
+        SetupElevatedHelperOutcome.Failed,
+        new SetupMachineCreatedState(false, false, false),
+        State: null);
+
+    private static SetupElevatedPreparedChange CreatePrepared(
+        SetupElevatedHelperOutcome outcome,
+        Guid transactionId,
+        CertificateInstallReceipt certificateReceipt,
+        DriverInstallReceipt driverReceipt) => new(
+            outcome,
+            new SetupMachineCreatedState(
+                certificateReceipt.CreatedByAttempt,
+                driverReceipt.PackageCreatedByAttempt,
+                driverReceipt.DeviceCreatedByAttempt),
+            new ElevatedMachinePreparedState(
+                transactionId,
+                certificateReceipt,
+                driverReceipt));
+
 #pragma warning disable CA1031 // Each rollback must continue even if its peer fails.
-    private void Rollback(
+    private bool Rollback(
         DriverInstallReceipt? driverReceipt,
         CertificateInstallReceipt? certificateReceipt,
         Guid transactionId)
     {
+        bool succeeded = true;
         if (driverReceipt is not null)
         {
             try
             {
-                _ = _driverInstaller.Rollback(driverReceipt, transactionId);
+                succeeded &= _driverInstaller.Rollback(
+                    driverReceipt,
+                    transactionId).Succeeded;
             }
             catch (Exception)
             {
                 // The concrete installer emits the durable recovery record.
+                succeeded = false;
             }
         }
         if (certificateReceipt is not null)
         {
             try
             {
-                _ = _certificateInstaller.Rollback(
+                succeeded &= _certificateInstaller.Rollback(
                     certificateReceipt,
-                    transactionId);
+                    transactionId).Succeeded;
             }
             catch (Exception)
             {
                 // The concrete installer emits the durable recovery record.
+                succeeded = false;
             }
         }
+        return succeeded;
     }
 #pragma warning restore CA1031
+
+    private sealed record ElevatedMachinePreparedState(
+        Guid TransactionId,
+        CertificateInstallReceipt CertificateReceipt,
+        DriverInstallReceipt DriverReceipt);
 }
 
 internal sealed class WindowsElevatedMachinePayloadSource

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows10.0.19041": {
+      "emke.application": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Core": "[1.0.0, )",
+          "EMKE.Realtime": "[1.0.0, )",
+          "EMKE.Routing": "[1.0.0, )"
+        }
+      },
+      "emke.core": {
+        "type": "Project"
+      },
+      "emke.platform": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Application": "[1.0.0, )",
+          "EMKE.Core": "[1.0.0, )"
+        }
+      },
+      "emke.realtime": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Core": "[1.0.0, )"
+        }
+      },
+      "emke.routing": {
+        "type": "Project",
+        "dependencies": {
+          "EMKE.Core": "[1.0.0, )"
+        }
+      }
+    },
+    "net10.0-windows10.0.19041/win-x64": {}
+  }
+}

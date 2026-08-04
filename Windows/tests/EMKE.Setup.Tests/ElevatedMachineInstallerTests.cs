@@ -58,6 +58,38 @@ public sealed class ElevatedMachineInstallerTests
     }
 
     [TestMethod]
+    public async Task PreparedMachineChangeReportsCreatedStateAndRollsBackOnFinalization()
+    {
+        using MachinePayloadFixture payloads = new();
+        List<string> order = [];
+        FakeCertificateMachineInstaller certificate = new(
+            payloads.CertificateReceipt,
+            order);
+        FakeDriverMachineInstaller driver = new(payloads.DriverReceipt, order);
+        ElevatedMachineInstaller installer = new(
+            new FixedMachinePayloadSource(payloads.Payloads),
+            certificate,
+            driver);
+
+        SetupElevatedPreparedChange prepared = await installer.PrepareAsync(
+            payloads.Request,
+            CancellationToken.None);
+
+        Assert.AreEqual(SetupElevatedHelperOutcome.Succeeded, prepared.Outcome);
+        Assert.AreEqual(
+            new SetupMachineCreatedState(true, true, true),
+            prepared.CreatedState);
+        Assert.AreEqual(0, certificate.RollbackCalls);
+        Assert.AreEqual(0, driver.RollbackCalls);
+        Assert.IsTrue(await installer.FinalizeAsync(
+            prepared,
+            SetupElevationFinalizationAction.Rollback,
+            MachinePayloadFixture.TransactionId,
+            CancellationToken.None));
+        CollectionAssert.AreEqual(ExpectedRollbackOrder, order.ToArray());
+    }
+
+    [TestMethod]
     public async Task CertificateBlockStopsBeforeDriverMutation()
     {
         using MachinePayloadFixture payloads = new();

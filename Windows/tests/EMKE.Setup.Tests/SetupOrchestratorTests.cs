@@ -28,7 +28,7 @@ public sealed class SetupOrchestratorTests
                     "appMicrophoneRender",
                     "meetingMicrophoneCapture",
                 ]));
-        RecordingSetupApplicationLauncher launcher = new();
+        RecordingSetupApplicationLauncher launcher = new(machine);
         MemorySetupResumeRecordStore recovery = new();
         SetupOrchestrator orchestrator = new(
             machine,
@@ -46,6 +46,7 @@ public sealed class SetupOrchestratorTests
         Assert.AreEqual(SetupApplicationLaunchMode.ControlledNoTranslationConnect,
             launcher.LastMode);
         Assert.IsTrue(endpoints.VerificationCompletedBeforeLaunch);
+        Assert.IsTrue(machine.CommitCompleted);
         Assert.IsEmpty(recovery.Records);
     }
 
@@ -160,6 +161,7 @@ public sealed class SetupOrchestratorTests
         };
         MemoryPackageDeploymentApi packageApi = PackageTestData.Api();
         RecordingSetupApplicationLauncher launcher = new();
+        MemorySetupResumeRecordStore recovery = new(record);
         SetupOrchestrator orchestrator = new(
             machine,
             new PackageInstaller(packageApi, new RecordingRecoveryWriter()),
@@ -172,7 +174,7 @@ public sealed class SetupOrchestratorTests
                     "meetingMicrophoneCapture",
                 ])),
             launcher,
-            new MemorySetupResumeRecordStore(record));
+            recovery);
 
         SetupResult result = await orchestrator.ResumeAsync(
             request,
@@ -184,6 +186,7 @@ public sealed class SetupOrchestratorTests
         Assert.AreEqual(
             SetupApplicationLaunchMode.ControlledNoTranslationConnect,
             launcher.LastMode);
+        Assert.IsEmpty(recovery.Records);
     }
 
     private static SetupOrchestrationRequest Request(VerifiedSetupPayload msix)
@@ -228,6 +231,8 @@ public sealed class SetupOrchestratorTests
 internal sealed class RecordingMachineCoordinator(SetupMachineChangeResult result)
     : ISetupMachineChangeCoordinator
 {
+    public bool CommitCompleted { get; private set; }
+
     public bool RollbackCompleted { get; private set; }
 
     public bool ResumeVerificationResult { get; set; }
@@ -249,6 +254,16 @@ internal sealed class RecordingMachineCoordinator(SetupMachineChangeResult resul
     {
         cancellationToken.ThrowIfCancellationRequested();
         RollbackCompleted = true;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> CommitAsync(
+        SetupMachineChangeReceipt receipt,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CommitCompleted = true;
         return Task.FromResult(true);
     }
 
@@ -277,7 +292,8 @@ internal sealed class FixedEndpointReadinessVerifier(EndpointVerificationResult 
     }
 }
 
-internal sealed class RecordingSetupApplicationLauncher
+internal sealed class RecordingSetupApplicationLauncher(
+    RecordingMachineCoordinator? machine = null)
     : ISetupApplicationLauncher
 {
     public SetupApplicationLaunchMode? LastMode { get; private set; }
@@ -287,6 +303,11 @@ internal sealed class RecordingSetupApplicationLauncher
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (machine is not null && !machine.CommitCompleted)
+        {
+            throw new InvalidOperationException(
+                "Machine changes must be committed before launch.");
+        }
         LastMode = mode;
         return Task.CompletedTask;
     }
@@ -308,6 +329,9 @@ internal sealed class MemorySetupResumeRecordStore : ISetupResumeRecordStore
     public void Write(SetupResumeRecord record) => Records.Add(record);
 
     public SetupResumeRecord ReadVerified(Guid transactionId) => Records.Single(
+        record => record.TransactionId == transactionId);
+
+    public void Delete(Guid transactionId) => Records.RemoveAll(
         record => record.TransactionId == transactionId);
 }
 

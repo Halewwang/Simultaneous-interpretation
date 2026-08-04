@@ -1,0 +1,218 @@
+name: Windows Setup EXE
+
+on:
+  pull_request:
+    paths:
+      - "Windows/src/EMKE.Setup/**"
+      - "Windows/tests/EMKE.Setup.Tests/**"
+      - "Windows/tools/package-setup.ps1"
+      - "Windows/tools/verify-setup.ps1"
+      - "Windows/tools/tests/setup-packaging.*"
+      - ".github/workflows/windows-setup.yml"
+  push:
+    branches:
+      - main
+      - codex/evidence-setup-task5-6-exe
+    paths:
+      - "Windows/src/EMKE.Setup/**"
+      - "Windows/tests/EMKE.Setup.Tests/**"
+      - "Windows/tools/package-setup.ps1"
+      - "Windows/tools/verify-setup.ps1"
+      - "Windows/tools/tests/setup-packaging.*"
+      - ".github/workflows/windows-setup.yml"
+  workflow_dispatch:
+    inputs:
+      msix_artifact_name:
+        description: Exact verified Internal MSIX artifact name
+        required: true
+        type: string
+      msix_source_commit:
+        description: Lowercase 40-character MSIX source commit
+        required: true
+        type: string
+      msix_workflow_run:
+        description: MSIX workflow run ID
+        required: true
+        type: string
+      driver_artifact_name:
+        description: Exact Microsoft Hardware Dev Center driver artifact name
+        required: true
+        type: string
+      driver_source_commit:
+        description: Lowercase 40-character driver source commit
+        required: true
+        type: string
+      driver_workflow_run:
+        description: Driver signing workflow run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run Setup packaging contracts
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          node --test Windows/tools/tests/setup-packaging.contract.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Setup Node contracts failed." }
+          pwsh -NoProfile -File Windows/tools/tests/setup-packaging.validation.test.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Setup PowerShell validation failed." }
+
+      - name: Restore, build, and test Setup
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          dotnet restore Windows/EMKE.Windows.slnx --locked-mode
+          if ($LASTEXITCODE -ne 0) { throw "Locked restore failed." }
+          dotnet build Windows/EMKE.Windows.slnx --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+          dotnet test Windows/tests/EMKE.Setup.Tests/EMKE.Setup.Tests.csproj `
+            --configuration Release `
+            --no-build `
+            --filter "TestCategory!=WindowsSetupSignedPayload&TestCategory!=WindowsSetupUnsignedEmkeCatalog"
+          if ($LASTEXITCODE -ne 0) { throw "Setup tests failed." }
+
+  package-sign:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: build-test
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 30
+    environment: windows-setup-signing
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Download exact Internal MSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.msix_artifact_name }}
+          path: Windows/artifacts/setup-input/msix
+          run-id: ${{ inputs.msix_workflow_run }}
+          github-token: ${{ github.token }}
+
+      - name: Download exact Microsoft-signed driver artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.driver_artifact_name }}
+          path: Windows/artifacts/setup-input/driver
+          run-id: ${{ inputs.driver_workflow_run }}
+          github-token: ${{ github.token }}
+
+      - name: Reconstruct signer and package exact Setup
+        shell: pwsh
+        env:
+          WINDOWS_INTERNAL_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_BASE64 }}
+          WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          $signingRoot = Join-Path $env:RUNNER_TEMP ("emke-setup-signing-" + [Guid]::NewGuid().ToString("N"))
+          $pfxPath = Join-Path $signingRoot "setup.pfx"
+          $pfxBytes = $null
+          try {
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64)) {
+              throw "The protected Setup signing identity is unavailable."
+            }
+            [IO.Directory]::CreateDirectory($signingRoot) | Out-Null
+            $pfxBytes = [Convert]::FromBase64String($env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64)
+            [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            $msixRoot = Join-Path $PWD "Windows/artifacts/setup-input/msix"
+            $msix = Get-ChildItem -LiteralPath $msixRoot -Recurse -File -Filter "EMKE-Translation-Windows-0.2.0-internal-x64.msix"
+            $cer = Get-ChildItem -LiteralPath $msixRoot -Recurse -File -Filter "EMKE-Translation-Windows-0.2.0-internal-x64.cer"
+            if (@($msix).Count -ne 1 -or @($cer).Count -ne 1) {
+              throw "The exact MSIX artifact inventory is invalid."
+            }
+            $driverRoot = Join-Path $PWD "Windows/artifacts/setup-input/driver"
+            $driverInf = Get-ChildItem -LiteralPath $driverRoot -Recurse -File -Filter "EMKE.VirtualAudio.inf"
+            $driverSys = Get-ChildItem -LiteralPath $driverRoot -Recurse -File -Filter "EMKE.VirtualAudio.sys"
+            $driverCat = Get-ChildItem -LiteralPath $driverRoot -Recurse -File -Filter "EMKE.VirtualAudio.cat"
+            if (
+              @($driverInf).Count -ne 1 -or
+              @($driverSys).Count -ne 1 -or
+              @($driverCat).Count -ne 1 -or
+              $driverInf.DirectoryName -cne $driverSys.DirectoryName -or
+              $driverInf.DirectoryName -cne $driverCat.DirectoryName
+            ) {
+              throw "The exact Microsoft-signed driver inventory is invalid."
+            }
+            pwsh -NoProfile -File Windows/tools/package-setup.ps1 `
+              -MsixPath $msix.FullName `
+              -CertificatePath $cer.FullName `
+              -DriverDirectory $driverInf.DirectoryName `
+              -CandidateRoot (Join-Path $PWD "Windows/artifacts/windows-0.2.0-candidate") `
+              -PfxPath $pfxPath `
+              -PasswordEnvironmentVariable WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD `
+              -SetupSourceCommit "${{ github.sha }}" `
+              -SetupWorkflowRun "${{ github.run_id }}" `
+              -SetupSignerSubject "CN=EMKE Internal Test" `
+              -MsixSourceCommit "${{ inputs.msix_source_commit }}" `
+              -MsixWorkflowRun "${{ inputs.msix_workflow_run }}" `
+              -MsixSignerSubject "CN=EMKE Internal Test" `
+              -DriverSourceCommit "${{ inputs.driver_source_commit }}" `
+              -DriverWorkflowRun "${{ inputs.driver_workflow_run }}" `
+              -DriverSignerSubject "CN=Microsoft Windows Hardware Compatibility Publisher, O=Microsoft Corporation"
+            if ($LASTEXITCODE -ne 0) { throw "Setup packaging failed." }
+          } finally {
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_BASE64 = $null
+            $env:WINDOWS_INTERNAL_SIGNING_PFX_PASSWORD = $null
+            if ($null -ne $pfxBytes) { [Array]::Clear($pfxBytes, 0, $pfxBytes.Length) }
+            if (Test-Path -LiteralPath $signingRoot) {
+              Remove-Item -LiteralPath $signingRoot -Recurse -Force
+            }
+          }
+
+      - name: Independently verify exact Setup
+        shell: pwsh
+        run: |
+          $setup = Join-Path $PWD "Windows/artifacts/windows-0.2.0-candidate/EMKE-Translation-Setup-0.2.0-internal-x64.exe"
+          pwsh -NoProfile -File Windows/tools/verify-setup.ps1 -SetupPath $setup
+          if ($LASTEXITCODE -ne 0) { throw "Independent Setup verification failed." }
+
+      - name: Upload verified Setup candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: emke-translation-setup-0.2.0-internal-x64-${{ github.sha }}
+          path: Windows/artifacts/windows-0.2.0-candidate
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

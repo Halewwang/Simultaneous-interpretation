@@ -237,11 +237,19 @@ internal sealed class SetupPayloadVerificationAttempt : IDisposable
 {
     private readonly SetupExtractionDirectory _extractionDirectory;
 
-    public SetupPayloadVerificationAttempt(SetupExtractionDirectory extractionDirectory)
+    public SetupPayloadVerificationAttempt(
+        SetupExtractionDirectory extractionDirectory,
+        IReadOnlyList<VerifiedSetupPayload> payloads)
     {
         _extractionDirectory = extractionDirectory
             ?? throw new ArgumentNullException(nameof(extractionDirectory));
+        ArgumentNullException.ThrowIfNull(payloads);
+        Payloads = Array.AsReadOnly(payloads.ToArray());
     }
+
+    public string RootPath => _extractionDirectory.RootPath;
+
+    public IReadOnlyList<VerifiedSetupPayload> Payloads { get; }
 
     public SetupCleanupOutcome LastCleanupOutcome { get; private set; } =
         SetupCleanupOutcome.NotAttempted;
@@ -390,7 +398,9 @@ internal sealed class SetupPayloadVerifier
             SetupPayloadVerificationAttempt? attempt = null;
             try
             {
-                attempt = new SetupPayloadVerificationAttempt(extraction);
+                attempt = new SetupPayloadVerificationAttempt(
+                    extraction,
+                    verified.AsReadOnly());
                 SetupPayloadVerificationResult result =
                     SetupPayloadVerificationResult.VerifiedAttempt(attempt);
                 extraction = null;

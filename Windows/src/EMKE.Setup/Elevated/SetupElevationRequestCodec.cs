@@ -394,7 +394,7 @@ internal static class SetupElevationRequestCodec
 
 internal static class SetupElevationResultCodec
 {
-    private const int CanonicalLength = 64;
+    private const int CanonicalLength = 68;
     private const int MacLength = 32;
     private static readonly byte[] Magic = "EMKERES1"u8.ToArray();
 
@@ -421,6 +421,9 @@ internal static class SetupElevationResultCodec
         BinaryPrimitives.WriteUInt32LittleEndian(
             canonical.AsSpan(60, sizeof(uint)),
             checked((uint)result.Outcome));
+        canonical[64] = result.CertificateCreated ? (byte)1 : (byte)0;
+        canonical[65] = result.DriverPackageCreated ? (byte)1 : (byte)0;
+        canonical[66] = result.DriverDeviceCreated ? (byte)1 : (byte)0;
 
         byte[] mac = HMACSHA256.HashData(key, canonical);
         try
@@ -475,6 +478,13 @@ internal static class SetupElevationResultCodec
         string nonce = Convert.ToHexStringLower(canonical.Slice(28, 32));
         uint rawOutcome = BinaryPrimitives.ReadUInt32LittleEndian(
             canonical.Slice(60, sizeof(uint)));
+        if (canonical[64] > 1
+            || canonical[65] > 1
+            || canonical[66] > 1
+            || canonical[67] != 0)
+        {
+            throw new SetupElevationProtocolException("invalidResultCreatedState");
+        }
         if (transactionId != expectedTransactionId)
         {
             throw new SetupElevationProtocolException("resultTransactionMismatch");
@@ -490,7 +500,10 @@ internal static class SetupElevationResultCodec
         return new SetupElevatedHelperResult(
             transactionId,
             nonce,
-            (SetupElevatedHelperOutcome)rawOutcome);
+            (SetupElevatedHelperOutcome)rawOutcome,
+            certificateCreated: canonical[64] == 1,
+            driverPackageCreated: canonical[65] == 1,
+            driverDeviceCreated: canonical[66] == 1);
     }
 
     private static void RequireKey(ReadOnlySpan<byte> key)
@@ -501,5 +514,114 @@ internal static class SetupElevationResultCodec
                 "The elevation MAC key must contain exactly 256 bits.",
                 nameof(key));
         }
+    }
+}
+
+internal static class SetupElevationFinalizationCodec
+{
+    private const int CanonicalLength = 68;
+    private const int MacLength = 32;
+    private static readonly byte[] Magic = "EMKEFIN1"u8.ToArray();
+
+    public static byte[] EncodeAuthenticated(
+        Guid transactionId,
+        string nonce,
+        SetupElevationFinalizationAction action,
+        bool succeeded,
+        ReadOnlySpan<byte> key)
+    {
+        if (transactionId == Guid.Empty
+            || nonce.Length != 64
+            || !Enum.IsDefined(action)
+            || key.Length != MacLength)
+        {
+            throw new ArgumentException("The elevation finalization is invalid.");
+        }
+        byte[] canonical = new byte[CanonicalLength];
+        Magic.CopyTo(canonical, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            canonical.AsSpan(8, sizeof(uint)),
+            SetupElevationRequest.CurrentVersion);
+        if (!transactionId.TryWriteBytes(
+                canonical.AsSpan(12, 16),
+                bigEndian: true,
+                out int written)
+            || written != 16)
+        {
+            throw new InvalidOperationException(
+                "The finalization transaction ID was not encoded.");
+        }
+        Convert.FromHexString(nonce).CopyTo(canonical, 28);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            canonical.AsSpan(60, sizeof(uint)),
+            checked((uint)action));
+        canonical[64] = succeeded ? (byte)1 : (byte)0;
+        byte[] mac = HMACSHA256.HashData(key, canonical);
+        try
+        {
+            byte[] authenticated = new byte[CanonicalLength + MacLength];
+            canonical.CopyTo(authenticated, 0);
+            mac.CopyTo(authenticated, CanonicalLength);
+            return authenticated;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(mac);
+        }
+    }
+
+    public static (SetupElevationFinalizationAction Action, bool Succeeded)
+        DecodeAuthenticated(
+            ReadOnlySpan<byte> authenticated,
+            ReadOnlySpan<byte> key,
+            Guid expectedTransactionId,
+            string expectedNonce)
+    {
+        if (key.Length != MacLength
+            || authenticated.Length != CanonicalLength + MacLength)
+        {
+            throw new SetupElevationProtocolException(
+                "finalizationAuthenticationFailed");
+        }
+        ReadOnlySpan<byte> canonical = authenticated[..CanonicalLength];
+        byte[] expectedMac = HMACSHA256.HashData(key, canonical);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(
+                    expectedMac,
+                    authenticated[CanonicalLength..]))
+            {
+                throw new SetupElevationProtocolException(
+                    "finalizationAuthenticationFailed");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(expectedMac);
+        }
+        if (!canonical[..Magic.Length].SequenceEqual(Magic)
+            || BinaryPrimitives.ReadUInt32LittleEndian(
+                canonical.Slice(8, sizeof(uint)))
+                != SetupElevationRequest.CurrentVersion
+            || new Guid(canonical.Slice(12, 16), bigEndian: true)
+                != expectedTransactionId
+            || !string.Equals(
+                Convert.ToHexStringLower(canonical.Slice(28, 32)),
+                expectedNonce,
+                StringComparison.Ordinal)
+            || canonical[64] > 1
+            || canonical[65] != 0
+            || canonical[66] != 0
+            || canonical[67] != 0)
+        {
+            throw new SetupElevationProtocolException("invalidFinalization");
+        }
+        uint rawAction = BinaryPrimitives.ReadUInt32LittleEndian(
+            canonical.Slice(60, sizeof(uint)));
+        if (!Enum.IsDefined((SetupElevationFinalizationAction)rawAction))
+        {
+            throw new SetupElevationProtocolException("invalidFinalizationAction");
+        }
+        return ((SetupElevationFinalizationAction)rawAction, canonical[64] == 1);
     }
 }

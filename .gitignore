@@ -1,4 +1,5 @@
 .worktrees/
+Windows/artifacts/
 .build/
 .swiftpm/
 .DS_Store

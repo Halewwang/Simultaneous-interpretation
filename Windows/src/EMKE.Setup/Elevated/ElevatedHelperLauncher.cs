@@ -119,6 +119,10 @@ internal interface IOneShotElevationChannel : IAsyncDisposable
         ReadOnlyMemory<byte> key,
         ReadOnlyMemory<byte> authenticatedRequest,
         CancellationToken cancellationToken);
+
+    Task<byte[]> FinalizeAsync(
+        ReadOnlyMemory<byte> authenticatedFinalization,
+        CancellationToken cancellationToken);
 }
 
 internal interface IOneShotElevationChannelFactory
@@ -161,6 +165,12 @@ internal interface IOneShotElevationClientChannel : IAsyncDisposable
     Task SendResultAsync(
         ReadOnlyMemory<byte> authenticatedResult,
         CancellationToken cancellationToken);
+
+    Task<byte[]> ReceiveFinalizationAsync(CancellationToken cancellationToken);
+
+    Task SendFinalizationResultAsync(
+        ReadOnlyMemory<byte> authenticatedResult,
+        CancellationToken cancellationToken);
 }
 
 internal interface IOneShotElevationClientChannelFactory
@@ -173,7 +183,25 @@ internal interface ISetupElevatedRequestHandler
     Task<SetupElevatedHelperOutcome> HandleAsync(
         SetupElevationRequest request,
         CancellationToken cancellationToken);
+
+    async Task<SetupElevatedPreparedChange> PrepareAsync(
+        SetupElevationRequest request,
+        CancellationToken cancellationToken) => new(
+            await HandleAsync(request, cancellationToken).ConfigureAwait(false),
+            new SetupMachineCreatedState(false, false, false),
+            State: null);
+
+    Task<bool> FinalizeAsync(
+        SetupElevatedPreparedChange prepared,
+        SetupElevationFinalizationAction action,
+        Guid transactionId,
+        CancellationToken cancellationToken) => Task.FromResult(true);
 }
+
+internal sealed record SetupElevatedPreparedChange(
+    SetupElevatedHelperOutcome Outcome,
+    SetupMachineCreatedState CreatedState,
+    object? State);
 
 internal interface ISetupElevationSecretSource
 {
@@ -253,6 +281,101 @@ internal sealed record SetupElevatedHelperSessionResult
     }
 }
 
+internal sealed record SetupElevationPreparationResult(
+    SetupElevationLaunchOutcome Outcome,
+    string? FailureCode,
+    SetupMachineChangeReceipt? Receipt,
+    SetupElevationPreparedSession? Session);
+
+internal sealed class SetupElevationPreparedSession : IAsyncDisposable
+{
+    private readonly IOneShotElevationChannel _channel;
+    private readonly ISetupElevatedProcess _process;
+    private readonly byte[] _key;
+    private readonly SetupElevationRequest _request;
+    private readonly TimeSpan _timeout;
+    private bool _finished;
+
+    internal SetupElevationPreparedSession(
+        IOneShotElevationChannel channel,
+        ISetupElevatedProcess process,
+        byte[] key,
+        SetupElevationRequest request,
+        TimeSpan timeout)
+    {
+        _channel = channel;
+        _process = process;
+        _key = key;
+        _request = request;
+        _timeout = timeout;
+    }
+
+    public Task<bool> CommitAsync(CancellationToken cancellationToken) =>
+        FinishAsync(SetupElevationFinalizationAction.Commit, cancellationToken);
+
+    public Task<bool> RollbackAsync(CancellationToken cancellationToken) =>
+        FinishAsync(SetupElevationFinalizationAction.Rollback, cancellationToken);
+
+    private async Task<bool> FinishAsync(
+        SetupElevationFinalizationAction action,
+        CancellationToken cancellationToken)
+    {
+        if (_finished)
+        {
+            return false;
+        }
+        _finished = true;
+        bool succeeded = false;
+        using CancellationTokenSource timeout =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_timeout);
+        try
+        {
+            byte[] message = SetupElevationFinalizationCodec.EncodeAuthenticated(
+                _request.TransactionId,
+                _request.Nonce,
+                action,
+                succeeded: false,
+                _key);
+            byte[] response = await _channel.FinalizeAsync(
+                    message,
+                    timeout.Token)
+                .ConfigureAwait(false);
+            (SetupElevationFinalizationAction responseAction, bool accepted) =
+                SetupElevationFinalizationCodec.DecodeAuthenticated(
+                    response,
+                    _key,
+                    _request.TransactionId,
+                    _request.Nonce);
+            if (responseAction != action || !accepted)
+            {
+                return false;
+            }
+            await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            succeeded = true;
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(_key);
+            if (!succeeded)
+            {
+                _process.TryTerminate();
+            }
+            await _channel.DisposeAsync().ConfigureAwait(false);
+            _process.Dispose();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_finished)
+        {
+            _ = await RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+}
+
 internal sealed class ElevatedHelperLauncher
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
@@ -305,6 +428,45 @@ internal sealed class ElevatedHelperLauncher
         SetupElevationRequest request,
         CancellationToken cancellationToken)
     {
+        SetupElevationPreparationResult prepared = await PrepareAsync(
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (prepared.Session is null)
+        {
+            return SetupElevationLaunchResult.Failed(
+                prepared.Outcome,
+                prepared.FailureCode ?? "helperRejected");
+        }
+#pragma warning disable CA2007 // The prepared session owns native resources.
+        await using SetupElevationPreparedSession session = prepared.Session;
+#pragma warning restore CA2007
+        bool committed;
+        try
+        {
+            committed = await session.CommitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (SetupElevationProtocolException)
+        {
+            committed = false;
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            committed = false;
+        }
+        return committed
+            ? SetupElevationLaunchResult.Completed(prepared.Outcome)
+            : SetupElevationLaunchResult.Failed(
+                SetupElevationLaunchOutcome.Rejected,
+                "helperCommitRejected");
+    }
+
+    public async Task<SetupElevationPreparationResult> PrepareAsync(
+        SetupElevationRequest request,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(request);
         SetupElevationRequestCodec.ValidateLifetime(
             request,
@@ -314,115 +476,126 @@ internal sealed class ElevatedHelperLauncher
         {
             throw new InvalidOperationException("The pipe-name source is invalid.");
         }
-
-#pragma warning disable CA2007 // The interface is disposed asynchronously below.
-        await using IOneShotElevationChannel channel =
+        IOneShotElevationChannel channel =
             _channelFactory.Create(pipeName, _invokingSid);
-#pragma warning restore CA2007
-        SetupExecutableIdentity currentIdentity = _imageProbe.GetCurrentIdentity();
-        ProcessStartInfo startInfo = CreateStartInfo(
-            currentIdentity.FullPath,
-            pipeName,
-            request.Nonce);
         ISetupElevatedProcess? process = null;
         byte[]? key = null;
-        bool completed = false;
+        bool transferred = false;
         try
         {
+            SetupExecutableIdentity currentIdentity = _imageProbe.GetCurrentIdentity();
             try
             {
-                process = _processStarter.Start(startInfo);
+                process = _processStarter.Start(CreateStartInfo(
+                    currentIdentity.FullPath,
+                    pipeName,
+                    request.Nonce));
             }
             catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
             {
-                return SetupElevationLaunchResult.Failed(
+                return FailedPreparation(
                     SetupElevationLaunchOutcome.UacCancelled,
                     "uacCancelled");
             }
-
             using CancellationTokenSource timeout =
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_timeout);
-            try
+            await channel.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
+            if (channel.GetClientProcessId() != process.Id)
             {
-                await channel.WaitForConnectionAsync(timeout.Token).ConfigureAwait(false);
-                if (channel.GetClientProcessId() != process.Id)
-                {
-                    return SetupElevationLaunchResult.Failed(
-                        SetupElevationLaunchOutcome.Rejected,
-                        "helperPidMismatch");
-                }
-                SetupExecutableIdentity helperIdentity =
-                    _imageProbe.GetProcessIdentity(process.Id);
-                if (helperIdentity != currentIdentity)
-                {
-                    return SetupElevationLaunchResult.Failed(
-                        SetupElevationLaunchOutcome.Rejected,
-                        "helperImageMismatch");
-                }
-
-                key = _secretSource.CreateMacKey();
-                if (key.Length != 32)
-                {
-                    throw new InvalidOperationException(
-                        "The MAC-key source did not return 256 bits.");
-                }
-                byte[] authenticatedRequest =
-                    SetupElevationRequestCodec.EncodeAuthenticated(request, key);
-                byte[] authenticatedResult = await channel.ExchangeAsync(
-                    key,
-                    authenticatedRequest,
-                    timeout.Token).ConfigureAwait(false);
-                SetupElevatedHelperResult helperResult =
-                    SetupElevationResultCodec.DecodeAuthenticated(
-                        authenticatedResult,
-                        key,
-                        request.TransactionId,
-                        request.Nonce);
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-
-                SetupElevationLaunchResult result = helperResult.Outcome switch
-                {
-                    SetupElevatedHelperOutcome.Succeeded =>
-                        SetupElevationLaunchResult.Completed(
-                            SetupElevationLaunchOutcome.Succeeded),
-                    SetupElevatedHelperOutcome.RebootRequired =>
-                        SetupElevationLaunchResult.Completed(
-                            SetupElevationLaunchOutcome.RebootRequired),
-                    _ => SetupElevationLaunchResult.Failed(
-                        SetupElevationLaunchOutcome.Rejected,
-                        "helperRejected"),
-                };
-                completed = result.Outcome is SetupElevationLaunchOutcome.Succeeded
-                    or SetupElevationLaunchOutcome.RebootRequired;
-                return result;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return SetupElevationLaunchResult.Failed(
-                    SetupElevationLaunchOutcome.TimedOut,
-                    "helperTimedOut");
-            }
-            catch (SetupElevationProtocolException exception)
-            {
-                return SetupElevationLaunchResult.Failed(
+                return FailedPreparation(
                     SetupElevationLaunchOutcome.Rejected,
-                    exception.FailureCode);
+                    "helperPidMismatch");
             }
+            if (_imageProbe.GetProcessIdentity(process.Id) != currentIdentity)
+            {
+                return FailedPreparation(
+                    SetupElevationLaunchOutcome.Rejected,
+                    "helperImageMismatch");
+            }
+            key = _secretSource.CreateMacKey();
+            if (key.Length != 32)
+            {
+                throw new InvalidOperationException(
+                    "The MAC-key source did not return 256 bits.");
+            }
+            byte[] requestBytes =
+                SetupElevationRequestCodec.EncodeAuthenticated(request, key);
+            byte[] resultBytes = await channel.ExchangeAsync(
+                    key,
+                    requestBytes,
+                    timeout.Token)
+                .ConfigureAwait(false);
+            SetupElevatedHelperResult result =
+                SetupElevationResultCodec.DecodeAuthenticated(
+                    resultBytes,
+                    key,
+                    request.TransactionId,
+                    request.Nonce);
+            if (result.Outcome == SetupElevatedHelperOutcome.Failed)
+            {
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                return FailedPreparation(
+                    SetupElevationLaunchOutcome.Rejected,
+                    "helperRejected");
+            }
+            SetupElevationLaunchOutcome outcome = result.Outcome ==
+                SetupElevatedHelperOutcome.RebootRequired
+                ? SetupElevationLaunchOutcome.RebootRequired
+                : SetupElevationLaunchOutcome.Succeeded;
+            SetupMachineChangeReceipt receipt = new(new SetupMachineCreatedState(
+                result.CertificateCreated,
+                result.DriverPackageCreated,
+                result.DriverDeviceCreated));
+#pragma warning disable CA2000 // Ownership transfers to the preparation result.
+            SetupElevationPreparedSession session = new(
+                channel,
+                process,
+                key,
+                request,
+                _timeout);
+#pragma warning restore CA2000
+            transferred = true;
+            return new SetupElevationPreparationResult(
+                outcome,
+                FailureCode: null,
+                receipt,
+                session);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return FailedPreparation(
+                SetupElevationLaunchOutcome.TimedOut,
+                "helperTimedOut");
+        }
+        catch (SetupElevationProtocolException exception)
+        {
+            return FailedPreparation(
+                SetupElevationLaunchOutcome.Rejected,
+                exception.FailureCode);
         }
         finally
         {
-            if (key is not null)
+            if (!transferred)
             {
-                CryptographicOperations.ZeroMemory(key);
-            }
-            if (!completed)
-            {
+                if (key is not null)
+                {
+                    CryptographicOperations.ZeroMemory(key);
+                }
                 process?.TryTerminate();
+                process?.Dispose();
+                await channel.DisposeAsync().ConfigureAwait(false);
             }
-            process?.Dispose();
         }
     }
+
+    private static SetupElevationPreparationResult FailedPreparation(
+        SetupElevationLaunchOutcome outcome,
+        string failureCode) => new(
+            outcome,
+            failureCode,
+            Receipt: null,
+            Session: null);
 
     private static ProcessStartInfo CreateStartInfo(
         string setupExecutable,
@@ -451,7 +624,7 @@ internal sealed class ElevatedHelperLauncher
 
 internal sealed class ElevatedHelperSession
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(15);
     private readonly IOneShotElevationClientChannelFactory _channelFactory;
     private readonly ISetupProcessImageProbe _imageProbe;
     private readonly TimeProvider _timeProvider;
@@ -487,6 +660,7 @@ internal sealed class ElevatedHelperSession
         _timeout = timeout;
     }
 
+#pragma warning disable CA1031 // A lost parent must trigger best-effort exact rollback.
     public async Task<SetupElevatedHelperSessionResult> RunAsync(
         SetupElevatedHelperArguments arguments,
         ISetupElevatedRequestHandler handler,
@@ -499,6 +673,9 @@ internal sealed class ElevatedHelperSession
             _channelFactory.Create(arguments.PipeName);
 #pragma warning restore CA2007
         byte[]? key = null;
+        SetupElevationRequest? acceptedRequest = null;
+        SetupElevatedPreparedChange? preparedChange = null;
+        bool finalizationAttempted = false;
         using CancellationTokenSource timeout =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_timeout);
@@ -523,6 +700,7 @@ internal sealed class ElevatedHelperSession
                     key,
                     _timeProvider.GetUtcNow(),
                     _replayGuard);
+            acceptedRequest = request;
             if (!string.Equals(
                     request.Nonce,
                     arguments.Nonce,
@@ -532,16 +710,56 @@ internal sealed class ElevatedHelperSession
                     "helperNonceMismatch");
             }
 
-            SetupElevatedHelperOutcome outcome = await handler.HandleAsync(
+            SetupElevatedPreparedChange prepared = await handler.PrepareAsync(
                 request,
                 timeout.Token).ConfigureAwait(false);
+            preparedChange = prepared;
             SetupElevatedHelperResult result = new(
                 request.TransactionId,
                 request.Nonce,
-                outcome);
+                prepared.Outcome,
+                prepared.CreatedState.CertificateCreated,
+                prepared.CreatedState.DriverPackageCreated,
+                prepared.CreatedState.DriverDeviceCreated);
             byte[] authenticatedResult =
                 SetupElevationResultCodec.EncodeAuthenticated(result, key);
             await channel.SendResultAsync(authenticatedResult, timeout.Token)
+                .ConfigureAwait(false);
+            if (prepared.Outcome == SetupElevatedHelperOutcome.Failed)
+            {
+                return SetupElevatedHelperSessionResult.Completed;
+            }
+            byte[] authenticatedFinalization =
+                await channel.ReceiveFinalizationAsync(timeout.Token)
+                    .ConfigureAwait(false);
+            (SetupElevationFinalizationAction action, bool requestSucceeded) =
+                SetupElevationFinalizationCodec.DecodeAuthenticated(
+                    authenticatedFinalization,
+                    key,
+                    request.TransactionId,
+                    request.Nonce);
+            if (requestSucceeded)
+            {
+                return SetupElevatedHelperSessionResult.Rejected(
+                    "invalidFinalizationRequest");
+            }
+            bool finalized = await handler.FinalizeAsync(
+                    prepared,
+                    action,
+                    request.TransactionId,
+                    timeout.Token)
+                .ConfigureAwait(false);
+            finalizationAttempted = true;
+            byte[] finalizationResult =
+                SetupElevationFinalizationCodec.EncodeAuthenticated(
+                    request.TransactionId,
+                    request.Nonce,
+                    action,
+                    finalized,
+                    key);
+            await channel.SendFinalizationResultAsync(
+                    finalizationResult,
+                    timeout.Token)
                 .ConfigureAwait(false);
             return SetupElevatedHelperSessionResult.Completed;
         }
@@ -555,12 +773,32 @@ internal sealed class ElevatedHelperSession
         }
         finally
         {
+            if (!finalizationAttempted
+                && preparedChange is not null
+                && preparedChange.Outcome != SetupElevatedHelperOutcome.Failed
+                && acceptedRequest is not null)
+            {
+                try
+                {
+                    _ = await handler.FinalizeAsync(
+                            preparedChange,
+                            SetupElevationFinalizationAction.Rollback,
+                            acceptedRequest.TransactionId,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Concrete installers persist exact recovery evidence.
+                }
+            }
             if (key is not null)
             {
                 CryptographicOperations.ZeroMemory(key);
             }
         }
     }
+#pragma warning restore CA1031
 }
 
 internal sealed class CryptographicSetupElevationSecretSource
@@ -722,6 +960,48 @@ internal sealed class WindowsOneShotElevationClientChannel(
         await _pipe.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<byte[]> ReceiveFinalizationAsync(
+        CancellationToken cancellationToken) =>
+        ReadMessageAsync("invalidFinalizationLength", cancellationToken);
+
+    public Task SendFinalizationResultAsync(
+        ReadOnlyMemory<byte> authenticatedResult,
+        CancellationToken cancellationToken) =>
+        WriteMessageAsync(authenticatedResult, cancellationToken);
+
+    private async Task<byte[]> ReadMessageAsync(
+        string failureCode,
+        CancellationToken cancellationToken)
+    {
+        byte[] length = new byte[sizeof(uint)];
+        await _pipe.ReadExactlyAsync(length, cancellationToken).ConfigureAwait(false);
+        uint unsignedLength = BinaryPrimitives.ReadUInt32LittleEndian(length);
+        if (unsignedLength is 0 or > MaximumMessageLength)
+        {
+            throw new SetupElevationProtocolException(failureCode);
+        }
+        byte[] message = new byte[checked((int)unsignedLength)];
+        await _pipe.ReadExactlyAsync(message, cancellationToken).ConfigureAwait(false);
+        return message;
+    }
+
+    private async Task WriteMessageAsync(
+        ReadOnlyMemory<byte> message,
+        CancellationToken cancellationToken)
+    {
+        if (message.Length is <= 0 or > MaximumMessageLength)
+        {
+            throw new ArgumentException("The elevation message is outside its bounds.");
+        }
+        byte[] length = new byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            length,
+            checked((uint)message.Length));
+        await _pipe.WriteAsync(length, cancellationToken).ConfigureAwait(false);
+        await _pipe.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        await _pipe.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public ValueTask DisposeAsync() => _pipe.DisposeAsync();
 
     [DllImport(
@@ -781,6 +1061,36 @@ internal sealed class WindowsOneShotElevationChannel(
         if (unsignedLength is 0 or > MaximumMessageLength)
         {
             throw new SetupElevationProtocolException("invalidResultLength");
+        }
+        byte[] result = new byte[checked((int)unsignedLength)];
+        await _pipe.ReadExactlyAsync(result, cancellationToken).ConfigureAwait(false);
+        return result;
+    }
+
+    public async Task<byte[]> FinalizeAsync(
+        ReadOnlyMemory<byte> authenticatedFinalization,
+        CancellationToken cancellationToken)
+    {
+        if (authenticatedFinalization.Length is <= 0 or > MaximumMessageLength)
+        {
+            throw new ArgumentException(
+                "The authenticated finalization is outside its bounds.",
+                nameof(authenticatedFinalization));
+        }
+        byte[] length = new byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            length,
+            checked((uint)authenticatedFinalization.Length));
+        await _pipe.WriteAsync(length, cancellationToken).ConfigureAwait(false);
+        await _pipe.WriteAsync(authenticatedFinalization, cancellationToken)
+            .ConfigureAwait(false);
+        await _pipe.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _pipe.ReadExactlyAsync(length, cancellationToken).ConfigureAwait(false);
+        uint unsignedLength = BinaryPrimitives.ReadUInt32LittleEndian(length);
+        if (unsignedLength is 0 or > MaximumMessageLength)
+        {
+            throw new SetupElevationProtocolException(
+                "invalidFinalizationResultLength");
         }
         byte[] result = new byte[checked((int)unsignedLength)];
         await _pipe.ReadExactlyAsync(result, cancellationToken).ConfigureAwait(false);

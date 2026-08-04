@@ -240,7 +240,10 @@ internal sealed record SetupElevatedHelperResult
     public SetupElevatedHelperResult(
         Guid transactionId,
         string nonce,
-        SetupElevatedHelperOutcome outcome)
+        SetupElevatedHelperOutcome outcome,
+        bool certificateCreated = false,
+        bool driverPackageCreated = false,
+        bool driverDeviceCreated = false)
     {
         if (transactionId == Guid.Empty)
         {
@@ -265,6 +268,9 @@ internal sealed record SetupElevatedHelperResult
         TransactionId = transactionId;
         Nonce = nonce;
         Outcome = outcome;
+        CertificateCreated = certificateCreated;
+        DriverPackageCreated = driverPackageCreated;
+        DriverDeviceCreated = driverDeviceCreated;
     }
 
     public Guid TransactionId { get; }
@@ -272,6 +278,18 @@ internal sealed record SetupElevatedHelperResult
     public string Nonce { get; }
 
     public SetupElevatedHelperOutcome Outcome { get; }
+
+    public bool CertificateCreated { get; }
+
+    public bool DriverPackageCreated { get; }
+
+    public bool DriverDeviceCreated { get; }
+}
+
+internal enum SetupElevationFinalizationAction
+{
+    Commit = 1,
+    Rollback = 2,
 }
 
 internal sealed class SetupElevationProtocolException : Exception

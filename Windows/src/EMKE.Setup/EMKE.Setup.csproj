@@ -8,6 +8,21 @@
     <ProjectReference Include="../EMKE.Platform/EMKE.Platform.csproj" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(SetupPayloadRoot)' != '' and '$(SetupInventoryPath)' != ''">
+    <EmbeddedResource Include="$(SetupInventoryPath)"
+      LogicalName="EMKE.Setup.setup-payload-inventory.json" />
+    <EmbeddedResource Include="$(SetupPayloadRoot)\EMKE-Translation-Windows-0.2.0-internal-x64.msix"
+      LogicalName="EMKE.Setup.Payloads.EMKE-Translation-Windows-0.2.0-internal-x64.msix" />
+    <EmbeddedResource Include="$(SetupPayloadRoot)\EMKE-Translation-Windows-0.2.0-internal-x64.cer"
+      LogicalName="EMKE.Setup.Payloads.EMKE-Translation-Windows-0.2.0-internal-x64.cer" />
+    <EmbeddedResource Include="$(SetupPayloadRoot)\EMKE.VirtualAudio.inf"
+      LogicalName="EMKE.Setup.Payloads.EMKE.VirtualAudio.inf" />
+    <EmbeddedResource Include="$(SetupPayloadRoot)\EMKE.VirtualAudio.sys"
+      LogicalName="EMKE.Setup.Payloads.EMKE.VirtualAudio.sys" />
+    <EmbeddedResource Include="$(SetupPayloadRoot)\EMKE.VirtualAudio.cat"
+      LogicalName="EMKE.Setup.Payloads.EMKE.VirtualAudio.cat" />
+  </ItemGroup>
+
   <ItemGroup>
     <EmbeddedResource
       Include="../../packaging/compatibility.internal.json"

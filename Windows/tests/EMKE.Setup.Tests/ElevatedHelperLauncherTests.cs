@@ -51,6 +51,41 @@ public sealed class ElevatedHelperLauncherTests
     }
 
     [TestMethod]
+    public async Task PreparedMachineChangesStayInOneUacSessionUntilRollback()
+    {
+        LauncherFixture fixture = new();
+        fixture.Channel.CreateResult = (key, _) =>
+            SetupElevationResultCodec.EncodeAuthenticated(
+                new SetupElevatedHelperResult(
+                    fixture.Request.TransactionId,
+                    fixture.Request.Nonce,
+                    SetupElevatedHelperOutcome.Succeeded,
+                    certificateCreated: true,
+                    driverPackageCreated: true,
+                    driverDeviceCreated: true),
+                key.Span);
+
+        SetupElevationPreparationResult prepared =
+            await fixture.Launcher.PrepareAsync(
+                fixture.Request,
+                CancellationToken.None);
+
+        Assert.IsNotNull(prepared.Session);
+        Assert.IsNotNull(prepared.Receipt);
+        Assert.AreEqual(
+            new SetupMachineCreatedState(true, true, true),
+            prepared.Receipt.CreatedState);
+        Assert.IsFalse(fixture.Channel.FinalizeCalled);
+        Assert.IsFalse(fixture.Process.WaitForExitCalled);
+
+        await using SetupElevationPreparedSession session = prepared.Session;
+        Assert.IsTrue(await session.RollbackAsync(CancellationToken.None));
+        Assert.IsTrue(fixture.Channel.FinalizeCalled);
+        Assert.IsTrue(fixture.Process.WaitForExitCalled);
+        Assert.IsTrue(fixture.SecretSource.MacKey.All(static value => value == 0));
+    }
+
+    [TestMethod]
     public async Task RequestAndMacKeyNeverEnterDiskArgumentsOrEnvironmentAndKeyIsCleared()
     {
         string absentRoot = Path.Combine(
@@ -226,6 +261,29 @@ public sealed class ElevatedHelperLauncherTests
     }
 
     [TestMethod]
+    public async Task ChangedFinalizationAcknowledgementMacIsRejectedAndTerminated()
+    {
+        LauncherFixture fixture = new();
+        Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, byte[]> original =
+            fixture.Channel.CreateFinalizationResult;
+        fixture.Channel.CreateFinalizationResult = (key, message) =>
+        {
+            byte[] result = original(key, message);
+            result[^1] ^= 0x01;
+            return result;
+        };
+
+        SetupElevationLaunchResult result = await fixture.Launcher.LaunchAsync(
+            fixture.Request,
+            CancellationToken.None);
+
+        Assert.AreEqual(SetupElevationLaunchOutcome.Rejected, result.Outcome);
+        Assert.AreEqual("helperCommitRejected", result.FailureCode);
+        Assert.IsTrue(fixture.Process.TerminateCalled);
+        Assert.IsTrue(fixture.SecretSource.MacKey.All(static value => value == 0));
+    }
+
+    [TestMethod]
     public void ChangedSwitchOrExtraArgumentIsNotAnElevatedHelperCommand()
     {
         Assert.IsFalse(SetupElevatedHelperArguments.TryParse(
@@ -356,6 +414,13 @@ public sealed class ElevatedHelperLauncherTests
             AuthenticatedRequest = SetupElevationRequestCodec.EncodeAuthenticated(
                 request,
                 key),
+            AuthenticatedFinalization =
+                SetupElevationFinalizationCodec.EncodeAuthenticated(
+                    request.TransactionId,
+                    request.Nonce,
+                    SetupElevationFinalizationAction.Commit,
+                    succeeded: false,
+                    key),
         };
         ElevatedHelperSession session = CreateHelperSession(
             client,
@@ -406,6 +471,37 @@ public sealed class ElevatedHelperLauncherTests
         Assert.IsFalse(result.Succeeded);
         Assert.AreEqual("helperNonceMismatch", result.FailureCode);
         Assert.IsFalse(handler.Called);
+        Assert.IsTrue(key.All(static value => value == 0));
+    }
+
+    [TestMethod]
+    public async Task HelperRollsBackPreparedStateWhenFinalizationIsTampered()
+    {
+        SetupElevationRequest request = CreateRequest();
+        byte[] key = Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray();
+        FakeElevationClientChannel client = new()
+        {
+            Key = key,
+            AuthenticatedRequest = SetupElevationRequestCodec.EncodeAuthenticated(
+                request,
+                key),
+            AuthenticatedFinalization = [1, 2, 3],
+        };
+        ElevatedHelperSession session = CreateHelperSession(
+            client,
+            new FakeProcessImageProbe(SetupIdentity));
+        RecordingRequestHandler handler = new();
+
+        SetupElevatedHelperSessionResult result = await session.RunAsync(
+            HelperArguments(request.Nonce),
+            handler,
+            CancellationToken.None);
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual("finalizationAuthenticationFailed", result.FailureCode);
+        Assert.AreEqual(
+            SetupElevationFinalizationAction.Rollback,
+            handler.FinalizationAction);
         Assert.IsTrue(key.All(static value => value == 0));
     }
 
@@ -470,6 +566,21 @@ public sealed class ElevatedHelperLauncherTests
                             Request.Nonce,
                             SetupElevatedHelperOutcome.Succeeded),
                         key.Span),
+                CreateFinalizationResult = (key, message) =>
+                {
+                    (SetupElevationFinalizationAction action, _) =
+                        SetupElevationFinalizationCodec.DecodeAuthenticated(
+                            message.Span,
+                            key.Span,
+                            Request.TransactionId,
+                            Request.Nonce);
+                    return SetupElevationFinalizationCodec.EncodeAuthenticated(
+                        Request.TransactionId,
+                        Request.Nonce,
+                        action,
+                        succeeded: true,
+                        key.Span);
+                },
             };
             Launcher = new ElevatedHelperLauncher(
                 ProcessStarter,
@@ -559,7 +670,16 @@ public sealed class ElevatedHelperLauncherTests
 
         public bool ExchangeCalled { get; private set; }
 
+        public bool FinalizeCalled { get; private set; }
+
         public Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, byte[]> CreateResult
+        {
+            get;
+            set;
+        } = null!;
+
+        public Func<ReadOnlyMemory<byte>, ReadOnlyMemory<byte>, byte[]>
+            CreateFinalizationResult
         {
             get;
             set;
@@ -583,6 +703,17 @@ public sealed class ElevatedHelperLauncherTests
             cancellationToken.ThrowIfCancellationRequested();
             ExchangeCalled = true;
             return Task.FromResult(CreateResult(key, authenticatedRequest));
+        }
+
+        public Task<byte[]> FinalizeAsync(
+            ReadOnlyMemory<byte> authenticatedFinalization,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FinalizeCalled = true;
+            return Task.FromResult(CreateFinalizationResult(
+                Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray(),
+                authenticatedFinalization));
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -649,6 +780,10 @@ public sealed class ElevatedHelperLauncherTests
 
         public byte[]? AuthenticatedResult { get; private set; }
 
+        public byte[] AuthenticatedFinalization { get; set; } = [];
+
+        public byte[]? AuthenticatedFinalizationResult { get; private set; }
+
         public bool ReceiveCalled { get; private set; }
 
         public Task ConnectAsync(CancellationToken cancellationToken)
@@ -678,6 +813,22 @@ public sealed class ElevatedHelperLauncherTests
             return Task.CompletedTask;
         }
 
+        public Task<byte[]> ReceiveFinalizationAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(AuthenticatedFinalization);
+        }
+
+        public Task SendFinalizationResultAsync(
+            ReadOnlyMemory<byte> authenticatedResult,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AuthenticatedFinalizationResult = authenticatedResult.ToArray();
+            return Task.CompletedTask;
+        }
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
@@ -687,6 +838,12 @@ public sealed class ElevatedHelperLauncherTests
 
         public SetupElevationRequest? Request { get; private set; }
 
+        public SetupElevationFinalizationAction? FinalizationAction
+        {
+            get;
+            private set;
+        }
+
         public Task<SetupElevatedHelperOutcome> HandleAsync(
             SetupElevationRequest request,
             CancellationToken cancellationToken)
@@ -695,6 +852,17 @@ public sealed class ElevatedHelperLauncherTests
             Called = true;
             Request = request;
             return Task.FromResult(SetupElevatedHelperOutcome.Succeeded);
+        }
+
+        public Task<bool> FinalizeAsync(
+            SetupElevatedPreparedChange prepared,
+            SetupElevationFinalizationAction action,
+            Guid transactionId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FinalizationAction = action;
+            return Task.FromResult(true);
         }
     }
 
